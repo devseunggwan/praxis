@@ -11,6 +11,14 @@ PRAXIS_HOOK_ERROR_LOG (default ~/.praxis/logs/hook-errors.jsonl, TMPDIR
 fallback); PRAXIS_HOOK_ERROR_STDERR=1 also prints a one-line note. The
 recorder never raises and never writes to stderr on its own errors.
 
+The log rotates by size (issue #1282): past `_ERROR_LOG_MAX_BYTES` the file is
+renamed to `<name>.1` and a fresh one started, keeping one predecessor. A hook
+that crashes on every tool call writes a traceback per call and, because the
+whole point of the guard is that the crash is silent, nobody notices the file
+growing — the same shape that let the telemetry ledger reach 1.7 GB before it
+got a sweep (#1078). `PRAXIS_HOOK_ERROR_LOG_MAX_BYTES` overrides the cap; 0
+disables rotation.
+
     @fail_open
     def main() -> int: ...
 """
@@ -23,7 +31,7 @@ import os
 import sys
 import time
 import traceback
-from typing import Callable, Optional
+from typing import Callable, ContextManager, Optional
 
 _LOGGER_NAME = "praxis.hook"
 
@@ -138,7 +146,7 @@ def _get_logger() -> logging.Logger:
     logger.propagate = False
     logger.addHandler(logging.NullHandler())  # never handler-less -> no lastResort->stderr
     try:
-        fh = logging.FileHandler(_error_log_path(), encoding="utf-8", delay=True)
+        fh = _make_error_log_handler(_error_log_path(), _error_log_max_bytes())
         fh.setFormatter(_JsonlFormatter())
         logger.addHandler(fh)
     except Exception:
@@ -149,6 +157,101 @@ def _get_logger() -> logging.Logger:
         logger.addHandler(sh)
     logger._praxis_configured = True  # type: ignore[attr-defined]
     return logger
+
+
+# Bytes past which the error log is rotated. Sized for the record it holds:
+# a traceback record is 1-3 KB, so the cap keeps a couple of thousand of the
+# most recent crashes — more than any diagnosis reads — while bounding a
+# crash-per-call hook at a few MB instead of a few GB.
+_ERROR_LOG_MAX_BYTES = 5 * 1024 * 1024
+_ERROR_LOG_MAX_BYTES_ENV = "PRAXIS_HOOK_ERROR_LOG_MAX_BYTES"
+
+
+def _error_log_max_bytes() -> int:
+    """Rotation cap for the error log; the env override wins, 0 disables.
+
+    A malformed or negative override falls back to the default rather than
+    disabling rotation — a typo must not silently reintroduce the unbounded
+    growth the cap exists to stop.
+    """
+    raw = os.environ.get(_ERROR_LOG_MAX_BYTES_ENV)
+    if raw is None:
+        return _ERROR_LOG_MAX_BYTES
+    try:
+        value = int(raw.strip())
+    except ValueError:
+        return _ERROR_LOG_MAX_BYTES
+    return value if value >= 0 else _ERROR_LOG_MAX_BYTES
+
+
+def _make_error_log_handler(path: str, max_bytes: int) -> logging.Handler:
+    """A size-rotating handler that is safe across hook processes and never
+    goes fail-silent.
+
+    `logging.handlers` is imported here, on the crash path only: it pulls in
+    socket, pickle and threading (~6 ms warm, ~20 ms cold), a tax every one of
+    the ~90 hook entry points would otherwise pay per invocation for a handler
+    only a crashing hook builds (issue #1167 budgets that wall-clock).
+
+    Two things the stock `RotatingFileHandler` gets wrong for this writer:
+
+    - Hooks run as parallel processes. Two of them past the cap both roll
+      over: the second one deletes the `.1` the first just saved and renames
+      the near-empty new file over it — the whole crash history gone at the
+      moment a crash-per-call bug is firing. Rotation therefore runs under
+      the state lock (`_state_lock.state_lock` on the log path) and re-checks
+      the size once it holds it: a process that finds the file already small
+      only reopens its stream.
+    - If the rename fails (file writable, directory not — reachable through
+      `PRAXIS_HOOK_ERROR_LOG`), every later emit would raise inside the
+      rollover and be swallowed by `handleError`, dropping every record
+      forever. A failed rollover falls back to appending instead.
+
+    `maxBytes=0` never rotates, so the disable value needs no second code
+    path. `backupCount=1`: the previous file is kept for the record that
+    explains the current one, nothing older.
+    """
+    import logging.handlers
+
+    class _Handler(logging.handlers.RotatingFileHandler):
+        def doRollover(self) -> None:  # noqa: N802 - logging API name
+            # Annotated up front so both arms assign one declared type: the real
+            # lock is a generator-based context manager, the fallback a
+            # nullcontext, and mypy needs the common supertype spelled out.
+            lock: Callable[..., ContextManager[bool]]
+            try:
+                from _state_lock import state_lock as lock  # type: ignore[import-not-found]
+            except Exception:  # pragma: no cover - lock unavailable: rotate unserialized
+                import contextlib
+
+                lock = lambda _p, _t=None: contextlib.nullcontext(False)  # noqa: E731
+            with lock(self.baseFilename):
+                try:
+                    if os.path.getsize(self.baseFilename) < self.maxBytes:
+                        # Another process rotated while we waited; our stream
+                        # still points at the file that became `.1`.
+                        self._reopen()
+                        return
+                except OSError:
+                    pass
+                try:
+                    super().doRollover()
+                except OSError:
+                    self._reopen()  # cannot rotate here: keep appending
+
+        def _reopen(self) -> None:
+            if self.stream:
+                try:
+                    self.stream.close()
+                except OSError:
+                    pass
+                self.stream = None
+            try:
+                self.stream = self._open()
+            except OSError:
+                self.stream = None
+
+    return _Handler(path, maxBytes=max_bytes, backupCount=1, encoding="utf-8", delay=True)
 
 
 def _error_log_path() -> str:

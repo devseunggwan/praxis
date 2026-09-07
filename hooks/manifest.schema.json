@@ -16,7 +16,7 @@
       "minLength": 1
     },
     "dispatch_groups": {
-      "description": "(event, matcher) pairs collapsed into a single dispatcher node per platform hooks.json (ADR-0002). Non-tool events (Stop, SessionStart, UserPromptSubmit) carry no matcher: OMIT the key rather than setting it null — the validator subset has no null type, and .get('matcher') yields None for an absent key anyway (issue #1199 review).",
+      "description": "(event, matcher) pairs collapsed into a single dispatcher node per platform hooks.json (ADR-0002). Non-tool events (Stop, SubagentStop, SessionStart, UserPromptSubmit) carry no matcher: OMIT the key rather than setting it null — the validator subset has no null type, and .get('matcher') yields None for an absent key anyway (issue #1199 review).",
       "type": "array",
       "minItems": 1,
       "items": {
@@ -30,7 +30,8 @@
               "UserPromptSubmit",
               "PreToolUse",
               "PostToolUse",
-              "Stop"
+              "Stop",
+              "SubagentStop"
             ]
           },
           "matcher": {
@@ -64,16 +65,21 @@
             ]
           },
           "event": {
+            "description": "Host lifecycle event. PostToolUseFailure and SubagentStop (#1337), PostToolBatch (#1368) and SubagentStart (#1369) are documented for Claude Code only — a registration on any of them carries hosts: [\"claude\"]. PostToolUseFailure, PostToolBatch and SubagentStart are per-hook events, so the dispatch_groups enum above does not list them; SubagentStop shares Stop's decision format and does have a group. PostToolBatch fires once per resolved parallel batch rather than per tool, and SubagentStart injects an agent-type independent contract, so neither carries a matcher.",
             "enum": [
               "SessionStart",
               "UserPromptSubmit",
               "PreToolUse",
               "PostToolUse",
-              "Stop"
+              "PostToolUseFailure",
+              "PostToolBatch",
+              "SubagentStart",
+              "Stop",
+              "SubagentStop"
             ]
           },
           "matcher": {
-            "description": "Tool-name regex for PreToolUse/PostToolUse registrations; omitted for non-tool events.",
+            "description": "Tool-name regex for PreToolUse/PostToolUse/PostToolUseFailure registrations, or a SessionStart source (startup|resume|clear|compact|fork — postcompact-context uses `compact`, #1339); omitted for the other non-tool events.",
             "type": "string",
             "minLength": 1
           },
@@ -99,6 +105,11 @@
             "description": "Hook timeout in seconds.",
             "type": "integer",
             "minimum": 1
+          },
+          "review_by": {
+            "description": "Sunset-review date, YYYY-MM-DD (#1300). Optional per ENTRY, required per hook NAME by check-plugin-manifests.py rule 26: the first registration carries it and multi-event siblings may omit it, mirroring `hosts`. Defaults to merge date + 90 days; a past date fails the check until the hook is re-audited (bump the date or record the verdict in docs/hook-prune-audit.md). Never copied into a platform hooks.json.",
+            "type": "string",
+            "minLength": 10
           },
           "hosts": {
             "description": "Host whitelist; absent means all hosts. Values are host_id values from manifests/platforms/*.json — extend this enum when adding a platform.",
@@ -164,6 +175,10 @@
                   "type": "string",
                   "minLength": 1
                 }
+              },
+              "observe_only": {
+                "description": "True for a hook that by design never escalates — it records and exits 0, with no advise/ask/deny path. Exempts the hook from the zero-escalation Investigate rule at sunset review (#1300; CONTRIBUTING.md → Evidence and sunset review).",
+                "type": "boolean"
               }
             }
           }

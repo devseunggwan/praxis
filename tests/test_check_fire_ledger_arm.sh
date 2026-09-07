@@ -15,7 +15,9 @@ set +e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 CHECK="$ROOT_DIR/scripts/check-plugin-manifests.py"
-TARGET="$ROOT_DIR/hooks/advisory-nudge/codex-review-route/impl.sh"
+# completion-verify is the probe target since #1304 ported codex-review-route,
+# the previous target, to Python (Rule 18 only covers impl.sh bodies).
+TARGET="$ROOT_DIR/hooks/completion-verify/completion-verify/impl.sh"
 
 PASS=0
 FAIL=0
@@ -45,7 +47,7 @@ cp "$TARGET" "$BACKUP"
 trap 'cp "$BACKUP" "$TARGET"; rm -f "$BACKUP"' EXIT
 
 # The live arm call, matched exactly as it appears in the hook.
-ARM='  praxis_fire_arm codex-review-route advisory-nudge "$SESSION_ID" ""'
+ARM='  praxis_fire_arm completion-verify completion-verify "$TELEMETRY_SESSION_ID" ""'
 
 # Replace the arm call with $1 and report the checker's exit code.
 sub_arm() {
@@ -71,16 +73,16 @@ run_case "deleted_arm_call_fails" "$(sub_arm '')" "1"
 # 3-5. Text that mentions the call without executing it must not satisfy it.
 #      Each of these passed under the original "appears anywhere" pattern.
 run_case "commented_arm_call_fails" \
-  "$(sub_arm '  # praxis_fire_arm codex-review-route advisory-nudge "$SESSION_ID" ""')" "1"
+  "$(sub_arm '  # praxis_fire_arm completion-verify completion-verify "$TELEMETRY_SESSION_ID" ""')" "1"
 run_case "echoed_arm_call_fails" \
-  "$(sub_arm '  echo "praxis_fire_arm codex-review-route advisory-nudge"')" "1"
+  "$(sub_arm '  echo "praxis_fire_arm completion-verify completion-verify"')" "1"
 run_case "assigned_arm_call_fails" \
-  "$(sub_arm "  MSG='praxis_fire_arm codex-review-route advisory-nudge'")" "1"
+  "$(sub_arm "  MSG='praxis_fire_arm completion-verify completion-verify'")" "1"
 
 # 6. A different hook's name in the call does not satisfy this hook's rule —
 #    the match is name-anchored, so a copy-paste from a sibling still fails.
 run_case "wrong_hook_name_fails" \
-  "$(sub_arm '  praxis_fire_arm completion-verify advisory-nudge "$SESSION_ID" ""')" "1"
+  "$(sub_arm '  praxis_fire_arm retrospect-mix-check completion-verify "$TELEMETRY_SESSION_ID" ""')" "1"
 
 echo "----"
 echo "PASS: $PASS / FAIL: $FAIL"

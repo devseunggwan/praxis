@@ -143,12 +143,16 @@ run_case "gh issue list — not a write (silent)" \
   "silent" "advisory" \
   '{"tool_name":"Bash","tool_input":{"command":"gh issue list --search impl.py:42"}}'
 
-run_case "MCP slack send with file:line (warn)" \
-  "warn" "advisory" \
+# The Slack/Notion MCP registrations were dropped (#1359); these hooks are
+# PreToolUse(Bash) only now, so an MCP payload falls through the `else` arm
+# and is silent. Kept as the regression pin for the removal — the payloads
+# still carry the shapes that used to warn.
+run_case "MCP slack send is out of scope (silent)" \
+  "silent" "advisory" \
   '{"tool_name":"mcp__laplace-slack__slack_send_message","tool_input":{"channel":"C1","text":"prod incident traced to handler.py:230"}}'
 
-run_case "MCP notion append nested rich_text with file:line (warn)" \
-  "warn" "advisory" \
+run_case "MCP notion append is out of scope (silent)" \
+  "silent" "advisory" \
   '{"tool_name":"mcp__laplace-notion__notion_append_blocks","tool_input":{"children":[{"paragraph":{"rich_text":[{"text":{"content":"regression introduced at dag.py:14"}}]}}]}}'
 
 # --- False-positive guards (all silent) ---------------------------------------

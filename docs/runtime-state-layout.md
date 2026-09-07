@@ -53,16 +53,20 @@ dir is not writable, and never raises.
 
 - `hook-errors.jsonl` — swallowed-exception log from the shared `@fail_open`
   guard (`PRAXIS_HOOK_ERROR_LOG` overrides). See
-  [`hooks/_lib/_hook_runtime.py`](../hooks/_lib/_hook_runtime.py).
+  [`hooks/_lib/_hook_runtime.py`](../hooks/_lib/_hook_runtime.py). Rotated by
+  size (issue #1282): past 5 MiB (`PRAXIS_HOOK_ERROR_LOG_MAX_BYTES` overrides,
+  `0` disables) the file becomes `hook-errors.jsonl.1` and a fresh one starts;
+  one predecessor is kept.
 - `stop-triggered.log` / `retrospect-mix-blocked.log` — Stop-gate block logs
   from [`completion-verify`](../hooks/completion-verify/completion-verify/spec.md)
   and [`retrospect-mix-check`](../hooks/completion-verify/retrospect-mix-check/spec.md).
-  Best-effort appends. Before #1182 these lived under an undocumented
+  Best-effort appends, rotated to `<name>.1` past 1 MiB by
+  `praxis_rotate_log` in [`hooks/_lib/_paths.sh`](../hooks/_lib/_paths.sh)
+  (issue #1282) — this directory has no TTL sweep, unlike `cache/` and
+  `telemetry/`, so each writer bounds its own file. Before #1182 these lived under an undocumented
   `~/.praxis/scope-confirm/` root; old files are not migrated and a legacy
-  `scope-confirm/` directory may linger harmlessly. Note that #1182 is a
-  relocation only: `logs/` has no sweep or rotation, so these append-only
-  files still grow without bound — bounding them is a follow-up, not
-  something the move solved.
+  `scope-confirm/` directory may linger harmlessly. #1182 was a relocation
+  only; until #1282 these append-only files grew without bound.
 
 Fire/bypass telemetry is **not** under `logs/` — it lives at
 `~/.praxis/telemetry/` (see [`bypass-telemetry.md`](bypass-telemetry.md)).
@@ -79,7 +83,6 @@ did not move them:
 | `session-intent-<sid>.json`                                        | `preflight-gate/session-intent`                                                              |
 | `retrospect-active-<sid>.json`, `retrospect-candidates-<sid>.json` | `preflight-gate/retrospect-active-marker` (read by `completion-verify/retrospect-mix-check`) |
 | `md-read-history-<sid>.json`                                       | `postuse-correction/pre-edit-md-escape-advisory`                                             |
-| `postcompact-context-<sid>.json`                                   | `advisory-nudge/postcompact-context`                                                         |
 | `jq-config-advisory-<sid>.json`                                    | `advisory-nudge/jq-config-empty-dict-advisory`                                               |
 | `path-probe-gate/`                                                 | `advisory-nudge/path-probe-gate`                                                             |
 | `pre-output-falsification-gate/`                                   | `advisory-nudge/pre-output-falsification-gate`                                               |
@@ -87,7 +90,11 @@ did not move them:
 | `bash-worktree-advisory/`                                          | `advisory-nudge/bash-worktree-existence-advisory`                                            |
 | `gh-json-<sid>/`                                                   | `preflight-gate/gh-json-validator`                                                           |
 | `worktree-prune-snapshot-<sid>.json`                               | `preflight-gate/worktree-prune-snapshot-gate`                                                |
+| `poll-loop-waiters-<sid>.json`                                     | `preflight-gate/foreground-poll-loop-guard`                                                  |
+| `approval-premise-ack-<sid>.json`                                  | `preflight-gate/approval-premise-reread-gate` (consumed on read)                              |
 | `gh-label-cache.json`                                              | `preflight-gate/gh-label-verify` (per-repo label sets, #1182 — pre-#1182 XDG location not migrated) |
+| `stop-scan-<hook>-<sid>.json`                                      | Stop gates' resumable reduction cursors (`reduce_transcript_resumable`, #1237)               |
+| `scan-<hook>-<part>-<sid>.json`                                    | Resumable scan cursors of the three commit-path scanners and `retrospect-mix-check` (#1280)  |
 
 ### Sweeping
 

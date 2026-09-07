@@ -297,34 +297,52 @@ def _format_thread(t: dict) -> str:
 
 def _format_truncation_only(pr: dict) -> str:
     return (
-        f"[pr-thread-resolve-advisory] {pr['url']} — 첫 {_THREAD_PAGE}건은 모두 resolved 이지만 "
-        f"그 뒤 페이지를 읽지 않았습니다. 미해결 스레드 없음이라고 말할 수 없습니다.\n"
-        f"  전수 확인: gh api graphql 로 reviewThreads 를 끝까지 페이지네이션하거나 PR 화면에서 직접 확인하세요.\n"
+        f"[pr-thread-resolve-advisory] {pr['url']} — the first {_THREAD_PAGE} threads are all "
+        "resolved, but the next page was not read; \"no unresolved threads\" cannot be claimed.\n"
+        f"  첫 {_THREAD_PAGE}건은 모두 resolved 이지만 "
+        "그 뒤 페이지를 읽지 않았습니다. 미해결 스레드 없음이라고 말할 수 없습니다.\n"
+        "  Full check: paginate reviewThreads to the end with gh api graphql, or read the PR page.\n"
+        "  전수 확인: gh api graphql 로 reviewThreads 를 끝까지 페이지네이션하거나 PR 화면에서 직접 확인하세요.\n"
         f"  bypass: {_BYPASS_ENV}=1\n"
     )
 
 
 def _format_advisory(pr: dict, needs: list, fyi: list, truncated: bool) -> str:
+    total = len(needs) + len(fyi)
     lines = [
-        f"[pr-thread-resolve-advisory] {pr['url']} 에 미해결 리뷰 스레드 "
-        f"{len(needs) + len(fyi)}건 (답변 필요 {len(needs)} / 참고 {len(fyi)}).",
+        f"[pr-thread-resolve-advisory] {pr['url']} has {total} unresolved review "
+        f"thread(s) ({len(needs)} need a reply / {len(fyi)} FYI).\n"
+        f"  {pr['url']} 에 미해결 리뷰 스레드 "
+        f"{total}건 (답변 필요 {len(needs)} / 참고 {len(fyi)}).",
     ]
     if needs:
-        lines.append("  답변 필요 — (blocking) 또는 등급 라벨 없음:")
+        lines.append(
+            "  Needs a reply — (blocking) or no grade label:\n"
+            "  답변 필요 — (blocking) 또는 등급 라벨 없음:"
+        )
         lines.extend(_format_thread(t) for t in needs)
     if fyi:
-        lines.append("  참고 — nitpick / note / (non-blocking), 설계상 열려 있어도 정상:")
+        lines.append(
+            "  FYI — nitpick / note / (non-blocking), fine to stay open by design:\n"
+            "  참고 — nitpick / note / (non-blocking), 설계상 열려 있어도 정상:"
+        )
         lines.extend(_format_thread(t) for t in fyi)
     if truncated:
         lines.append(
+            f"  Note: more than {_THREAD_PAGE} threads — only the first page was read; "
+            "this list is not complete.\n"
             f"  주의: 스레드가 {_THREAD_PAGE}건을 넘어 첫 페이지만 읽었습니다 — 목록이 전부가 아닙니다."
         )
     lines += [
+        "  Reply inside each fixed thread and resolve it "
+        "(a top-level comment does not attach to the finding):\n"
         "  고친 스레드는 각자의 스레드 안에 답글을 달고 resolve 하세요 "
         "(top-level 코멘트는 finding 에 붙지 않습니다):",
         "    Fixed — <short-sha> <무엇이 바뀌었는지 한 줄>",
         "    Not fixed — <이유>",
         "    False positive — <반증 프로브와 출력>",
+        "  Leave threads not yet fixed, or deferred to a follow-up issue, open — "
+        "the open thread carries that carry-over.\n"
         "  아직 안 고쳤거나 후속 이슈로 미룬 스레드는 열어 둡니다 — 열린 스레드가 그 이월을 실어 나릅니다.",
         f"  bypass: {_BYPASS_ENV}=1",
     ]

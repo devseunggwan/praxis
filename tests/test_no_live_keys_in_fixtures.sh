@@ -41,6 +41,26 @@ while IFS= read -r f; do FILES+=("$f"); done < <(find "$ROOT/tests/fixtures" -ty
 
 is_allowlisted() { printf '%s\n' "$ALLOW" | grep -qxF "$1"; }
 
+# Known-benign hits in verbatim fixtures, keyed as "<basename>:<exact token>".
+# These are NOT fabricated placeholders (that list lives in the catalog and is
+# also consumed by scan-silent-pass.sh), so they are exempted here instead. An
+# entry must name the file AND the exact 40-char window, so it can never mask a
+# real key elsewhere. Add one only with the issue that explains the text.
+#
+#   54128d0c.txt — real commit message (#736) reproduced verbatim by
+#   tests/fixtures/commit-message-paren-check/ (issue #1302); the "token" is a
+#   slash-separated run of markdownlint rule ids (MD032/MD040/...), not a key.
+BENIGN_FIXTURE_HITS=(
+  "54128d0c.txt:MD032/MD040/MD022/MD001/MD031/MD038/MD02"
+)
+is_benign_fixture_hit() {
+  local key="$1:$2" entry
+  for entry in "${BENIGN_FIXTURE_HITS[@]}"; do
+    [ "$entry" = "$key" ] && return 0
+  done
+  return 1
+}
+
 leaked=0
 for f in "${FILES[@]}"; do
   [ -f "$f" ] || continue
@@ -65,6 +85,7 @@ for f in "${FILES[@]}"; do
     fi
     [ "$has_marker" = yes ] || continue
     is_allowlisted "$hit" && continue
+    is_benign_fixture_hit "$base" "$hit" && continue
     FAIL=$((FAIL + 1)); leaked=1
     printf 'FAIL  live-key-shaped token in %s: %s\n' "$base" "$hit"
   done < <(grep -oE '[A-Za-z0-9/+]{40}' "$f" 2>/dev/null | sort -u)

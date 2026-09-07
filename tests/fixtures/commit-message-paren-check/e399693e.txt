@@ -1,0 +1,36 @@
+feat(hook): block globs that match nothing (#891)
+
+zsh 는 미매치 glob 을 만나면 확장 단계에서 명령 전체를 중단한다. `2>/dev/null`
+로 막히지 않고 명령 자체가 실행되지 않으므로, "출력 없음"과 "실행했으나 결과
+없음"이 구분되지 않는다 — 거짓 부정 결과가 사실로 읽힌다. 이 계열 4회차 재발이
+메모리 층 remediation 을 falsify 해 훅 층으로 올린다.
+
+판정은 zsh 에 위임한다. 후보 단어를 `zsh -f -c 'setopt nomatch; : <span>'` 로
+재생하고 zsh 자신이 `no matches found` 를 낼 때만 발화한다. 순수 Python 모델은
+실제 zsh 와 14케이스 중 10건이 불일치해 폐기했다 — 원인이 패턴 문법이 아니라
+셸 semantics 였다.
+
+판정 대상은 단일 simple command 로 제한한다. 통과 판정은 raw substring 이 아니라
+인용·이스케이프·주석을 마스킹한 unquoted skeleton 과 단어의 문법 위치로 한다.
+실행 셸이 zsh 가 아니거나(`$SHELL`), zsh 가 없거나, nomatch 억제 옵션이 켜져
+있거나, 프로브가 타임아웃하면 전부 통과 — 오발화 경로를 남기지 않는다.
+
+`(` 를 포함한 span 은 절대 프로브하지 않는다 — zsh glob qualifier 는 코드를
+실행할 수 있고, preflight 게이트가 검사 대상을 권한 경계 이전에 실행해선 안 된다.
+
+Closes #889
+
+Confidence: high
+Not-tested: fish 는 `$SHELL` 값으로만 검사(실제 세션 end-to-end 미확인);
+  extendedglob 전달 경로는 단위 프로브로만 검증
+Constraint: dispatcher(ADR-0002)가 exec_module 로 sys.modules 등록 없이
+  임포트해 @dataclass 사용 불가 — Word 는 __slots__ 평문 클래스
+Rejected: 순수 Python glob 모델 | 실제 zsh 와 14건 중 10건 불일치
+Rejected: 컴파운드 명령 차단 | 어느 분기가 어느 cwd 에서 실행되는지 모델링
+  불가 — 유효 명령 차단이 미탐보다 나쁘다
+Directive: `(` 포함 span 의 프로브 스킵을 제거하면 임의 코드 실행이 열린다
+Directive: 게이트가 차단하려면 실행 셸이 zsh 임이 먼저 확인돼야 한다 —
+  프로브는 실행 셸이 무엇이든 답을 주므로 프로브 결과만으로 차단하면 재발한다
+Directive: 테스트 하네스의 SHELL 고정을 제거하면 CI 는 통과 경로만 검증하고
+  초록으로 보인다 — 이 PR 은 이 계열로 CI 를 두 번 깨뜨렸다
+Scope-risk: moderate

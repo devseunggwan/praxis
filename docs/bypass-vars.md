@@ -25,6 +25,9 @@ in [`../SECURITY.md`](../SECURITY.md).
 | Variable | Hook | Effect when set |
 | ---------- | ------ | ----------------- |
 | `PRAXIS_HOOK_BYPASS_PROTECTED_PATHS` | `protected-paths-guard` | Skip the sensitive-file write guard |
+| `PRAXIS_HOOK_BYPASS_SETTINGS_PATH` | `settings-path-advisory` | Skip the Claude Code settings-file write advisory |
+| `PRAXIS_HOOK_BYPASS_PARALLEL_MUTATION` | `parallel-gated-mutation-gate` | Skip the repeated-mutation check on a resolved parallel batch. Exact value `1` after stripping — `true` / `yes` / `0` leave the gate active |
+| `PRAXIS_HOOK_BYPASS_DELEGATION_CONTEXT` | `delegation-context-inject` | Skip the subagent shared-state isolation contract injection. Exact value `1` after stripping — `true` / `yes` / `0` leave the injection active |
 | `PRAXIS_HOOK_BYPASS_DESTRUCTIVE_BASH` | `destructive-bash-guard` | Skip the destructive-command guard |
 | `PRAXIS_HOOK_BYPASS_SKILL_GATE` | `skill-gate-commands` | Skip the skill-gated-command preflight |
 | `PRAXIS_HOOK_BYPASS_WORKTREE_GATE` | `worktree-edit-gate` | Skip the worktree-edit preflight |
@@ -74,6 +77,7 @@ in [`../SECURITY.md`](../SECURITY.md).
 | Variable | Hook | Note |
 | ---------- | ------ | ------ |
 | `PRAXIS_PROTECTED_PATHS_STRICT` | `protected-paths-guard` | |
+| `PRAXIS_SETTINGS_PATH_STRICT` | `settings-path-advisory` | Exact value `1` only |
 | `PRAXIS_DESTRUCTIVE_BASH_STRICT` | `destructive-bash-guard` | |
 | `PRAXIS_PERSONAL_LEAK_STRICT` | `block-personal-asset-leak` | Exact value `1` only, unstripped — surrounding whitespace keeps it advisory |
 | `PRAXIS_PATH_PROBE_STRICT` | `path-probe-gate` | |
@@ -133,12 +137,11 @@ in [`../SECURITY.md`](../SECURITY.md).
 | `PRAXIS_STATE_DIR` | `~/.praxis/state` | shared — durable state base (strike-counter, external-write-path-existence-check, postcompact read) |
 | `PRAXIS_HOOK_ERROR_LOG` | `~/.praxis/logs/hook-errors.jsonl` | shared (`@fail_open`) |
 | `PRAXIS_HOOK_ERROR_STDERR` | unset | shared — also print swallowed-exception note to stderr |
+| `PRAXIS_HOOK_ERROR_LOG_MAX_BYTES` | `5242880` | shared (`@fail_open`) — error-log rotation cap in bytes, `0` disables (#1282) |
 | `PRAXIS_BYPASS_TELEMETRY_FILE` | `~/.praxis/telemetry/bypass-events-<date>.jsonl` | `bypass-telemetry` |
 | `PRAXIS_MEMORY_DIR` | memory store dir | `memory-hint`, `momentum-rule-retrieval-gate` |
 | `PRAXIS_GH_LABEL_CACHE_PATH` | `~/.praxis/cache/gh-label-cache.json` | `gh-label-verify` |
 | `PRAXIS_GH_LABEL_CACHE_TTL_SEC` | `300` | `gh-label-verify` |
-| `PRAXIS_POSTCOMPACT_CONTEXT_FILE` | `${TMPDIR}/praxis-postcompact-context-<sid>.json` | `postcompact-context` |
-| `PRAXIS_POSTCOMPACT_TAIL_LINES` | `100` | `postcompact-context` |
 | `PRAXIS_SESSION_INTENT_FILE` | `${TMPDIR}/praxis-session-intent-<sid>.json` | `session-intent` |
 | `PRAXIS_WORKTREE_PRUNE_SNAPSHOT_FILE` | `${TMPDIR}/praxis-worktree-prune-snapshot-<sid>.json` | `worktree-prune-snapshot-gate` |
 | `PRAXIS_MD_READ_HISTORY_FILE` | `${TMPDIR}/praxis-md-read-history-<sid>.json` | `pre-edit-md-escape-advisory` |

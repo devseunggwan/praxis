@@ -21,11 +21,10 @@ slash commands (via skills/{strike,strikes,reset-strikes})
 
 ### Why this exists
 
-Global `~/.claude/CLAUDE.md` rule violations are the load-bearing signal that the agent has
+Workflow-rule violations are the load-bearing signal that the agent has
 drifted off-spec. Counting them per session — with escalating
 consequences — converts a soft norm into a structural pressure: at 1 the
-agent receives a warning, at 2 a forced re-read of the relevant global `~/.claude/CLAUDE.md`
-section, at 3 the Stop hook hard-blocks the response until the operator
+agent receives a warning, at 2 a forced re-read of the rule that was broken, at 3 the Stop hook hard-blocks the response until the operator
 reviews and resets the counter. The reset is itself gated by a reflection
 file at count=3 so the trust restoration is a deliberate two-step act,
 not a free retry.
@@ -35,7 +34,7 @@ not a free retry.
 | Mode | Trigger | Behavior |
 | ------ | --------- | ---------- |
 | `session-start` | SessionStart hook | Reads `session_id` from stdin JSON. Writes `CLAUDE_SESSION_ID=<sid>` to `$CLAUDE_ENV_FILE` (primary) and `<STATE_DIR>/.current-session` latch (backstop). If a prior strike count > 0 exists for this session, emits `additionalContext` so Claude sees the carried state. |
-| `preprompt` | UserPromptSubmit hook | Loads count. At count=1 emits a strike-1 warning context; at count=2 emits a strike-2 review-required context with cumulative reason list and forced global `~/.claude/CLAUDE.md` re-read directive; at count≥3 stays silent (Stop hook handles the block). |
+| `preprompt` | UserPromptSubmit hook | Loads count. At count=1 emits a strike-1 warning context; at count=2 emits a strike-2 review-required context with cumulative reason list and a forced rule re-read directive; at count≥3 stays silent (Stop hook handles the block). |
 | `stop` | Stop hook | Honors `stop_hook_active=true` to avoid infinite loop. If count≥3, appends to `<STATE_DIR>/last-block.log` and emits `{"decision":"block","reason":"…"}` with the reflection requirement. |
 | `strike <reason>` | `/praxis:strike` skill | Increments count, appends reason, prints level-appropriate message (warning / review-required / blocked). Detects unexpected count values (0, non-numeric) as state corruption and surfaces a recovery message rather than mis-announcing the level. |
 | `status` | `/praxis:strikes` skill | Prints `Strikes: N/3` and the cumulative reason list. |

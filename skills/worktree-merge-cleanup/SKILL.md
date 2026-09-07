@@ -5,6 +5,7 @@ description: >
   post-merge cleanup sequence — how to run `gh pr merge --squash --delete-branch`
   from the base-branch worktree, the submodule `--force` caveat, the
   squash-ancestry stale-HEAD guard, and the no-`&&`-chain rule.
+when_to_use: >
   Triggers on "merge cleanup", "post-merge cleanup", "worktree cleanup",
   "delete-branch merge", "squash-ancestry", "pre-merge worktree", "머지 후 정리",
   "worktree 정리". Do NOT activate on "merge conflict resolution" or a plain

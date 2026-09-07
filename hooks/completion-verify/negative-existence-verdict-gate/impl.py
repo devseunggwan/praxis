@@ -166,6 +166,10 @@ def has_unenumerated_verdict(text: str) -> bool:
 
 
 _MESSAGE = (
+    f"{_PREFIX} the last assistant message surfaces a negative-existence verdict "
+    "(없습니다 / 존재하지 않 / does not exist ...) under a registered decision/gate "
+    "framing (게이트 결과 / 게이트 판정 / 판정이 나왔 / AC # / Acceptance), but the "
+    "same paragraph has no 'Enumerated:' line starting in the first column.\n"
     f"{_PREFIX} 마지막 assistant 메시지가 등록된 결정/게이트 프레이밍 "
     "(게이트 결과 / 게이트 판정 / 판정이 나왔 / AC # / Acceptance) 아래에서 부정존재 판정 "
     "(없습니다 / 존재하지 않 / does not exist ...) 을 surface 했으나, 같은 문단에 "

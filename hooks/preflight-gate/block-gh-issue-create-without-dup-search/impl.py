@@ -51,11 +51,16 @@ from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
     safe_tokenize,
     strip_prefix,
 )
-from _transcript import read_transcript_tail  # type: ignore[import-not-found]  # noqa: E402
+from _transcript import TRANSCRIPT_SCAN_LINES, TranscriptReadError, tail_lines  # type: ignore[import-not-found]  # noqa: E402
 
 
 @fail_open
 def main() -> int:
+    """Block `gh issue create` unless a duplicate search appears in the tail.
+
+    Reads the last TRANSCRIPT_SCAN_LINES lines by seeking from the end;
+    an unreadable transcript fails open, an empty one blocks.
+    """
     payload = read_payload()
     if payload is None:
         return 0
@@ -98,8 +103,16 @@ def main() -> int:
     if not transcript_path:
         return 0
 
-    tail = read_transcript_tail(transcript_path, max_lines=400, max_bytes=50 * 1024 * 1024)
-    if tail is None:
+    # Read the tail from the end (issue #1279): the former bounded reader
+    # loaded up to 50 MB into memory to keep 400 lines — 131 ms and 116 MB RSS
+    # on a 36 MB session, inside the shared Bash dispatch budget — and failed
+    # open past its bound. `tail_lines` seeks backwards, so the cost is the
+    # window itself and there is no bound to fall off. `strict` so a missing
+    # or unreadable transcript fails open here, while an empty one — a real
+    # "no search ran" — still reaches the block below.
+    try:
+        tail = "\n".join(tail_lines(transcript_path, TRANSCRIPT_SCAN_LINES, strict=True))
+    except TranscriptReadError:
         return 0
 
     search_cmds = _SEARCH_CMD_RE.findall(tail.lower())

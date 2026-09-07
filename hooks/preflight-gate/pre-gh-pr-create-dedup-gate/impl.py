@@ -315,7 +315,9 @@ def _budget_skip(exc: BudgetExhausted) -> int:
     """Report the skip and pass. Silence here would be indistinguishable from
     a dedup search that ran and found nothing."""
     sys.stderr.write(
-        f"[pre-gh-pr-create-dedup-gate] {exc} 전에 그룹 예산이 소진되어 "
+        f"[pre-gh-pr-create-dedup-gate] group budget exhausted before {exc}; "
+        "skipping the duplicate check (fail-open — not a block).\n"
+        f"  {exc} 전에 그룹 예산이 소진되어 "
         "중복 검사를 건너뜁니다 (fail-open — 차단하지 않음).\n"
     )
     return 0

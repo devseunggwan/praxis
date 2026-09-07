@@ -1,0 +1,4 @@
+# Verbatim commit-message fixtures for the paren gate (issue #1302). The test
+# compares raw bytes against `git log` output, so a CRLF checkout under
+# core.autocrlf would report false drift on Windows. Pin them to LF.
+tests/fixtures/commit-message-paren-check/*.txt text eol=lf

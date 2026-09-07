@@ -174,9 +174,45 @@ stays silent, which is the fail-open direction this repo takes for a gate.
 - **Manual shell commits.** Same acknowledged boundary as every sibling
   PreToolUse gate: only AI-authored Bash calls pass through hooks. That is the
   population that produced all three incidents.
-- **Squash-merge titles.** `gh pr merge --squash` composes its message on
-  GitHub's side. A PR title cannot hold a body line, and the `(#N)` suffix
-  GitHub appends is mid-line, so the shape this gate detects cannot arise there.
+- **Squash-merge messages.** `gh pr merge --squash` composes its message on
+  GitHub's side, and no hook sees the result. The *title* is safe for the
+  reason first recorded here — it holds no body line, and the `(#N)` suffix
+  GitHub appends is mid-line. The **body** is not: GitHub builds it by
+  concatenating the PR's commit messages as `* <message>` entries, so every
+  body line keeps the column it had in its own commit, line-initial ones
+  included.
+
+  This gate's own merge commit is the counterexample. `9ea4785a`
+  (`feat(hooks): gate parens release-please rejects (#1268)`) carries at
+  line 75 a line that opens a pseudo-scope and nests inside it, and
+  release-please rejected it — the same shape, arriving by the path this
+  section previously called impossible:
+
+  ```console
+  $ git log -1 --format='%B' 9ea4785 | sed -n '75p' | cut -c1-30
+  `\tword(a(b))`, whose leading
+  ```
+
+  The rule holds; only the reach does not. Feeding that message to this gate
+  blocks it, so what is missing is a hook at the composing surface, not a
+  detector:
+
+  ```console
+  $ git log -1 --format='%B' 9ea4785 > /tmp/sq.txt
+  $ printf '%s' '{"tool_name":"Bash","tool_input":{"command":"git commit -F /tmp/sq.txt"}}' \
+      | python3 hooks/preflight-gate/commit-message-paren-check/impl.py
+  rc=2
+    line 75: [nested] '`\tword(a(b))`, whose leading run holds whitespace, ...'
+    line 226: [nested] '`foo($(printf x))` was graded raw and read as a nested paren; git receives'
+  ```
+
+  A commit authored through this gate cannot contribute such a line, so the
+  exposure is the commits that never passed it — anything predating the gate
+  (which is how `9ea4785a` itself happened: the offending line was written in
+  the very PR that added the gate), a human's shell commit, or another tool's.
+  Closing it needs a check at `gh pr merge --squash` time, which would have to
+  read the PR's commits over the network; that is a new surface with its own
+  cost and is not part of this gate.
 - **A message reaching git by a path the tokenizer cannot resolve** — a
   variable (`git commit -m "$MSG"`), a file written later in the same chain.
   Silent pass, per the fail-open posture in `DESIGN.md`.

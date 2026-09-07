@@ -66,6 +66,11 @@ all subsequent matching commands. The mechanism is identical to
 [`block-commit-without-codex-review`](../block-commit-without-codex-review/spec.md)
 (`_scan_transcript` + `_has_skill_tool_use`).
 
+The scan streams the transcript and parses only the lines that contain the
+required skill's name — a satisfying record carries it in the tool_use's
+`skill` value — instead of loading the file and parsing every line
+(issue #1312). The 50 MB bound is counted on the bytes actually read.
+
 ## Escape hatches
 
 - **`PRAXIS_HOOK_BYPASS_SKILL_GATE`** — set to any non-empty value to bypass

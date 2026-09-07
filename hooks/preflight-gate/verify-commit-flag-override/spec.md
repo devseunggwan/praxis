@@ -54,7 +54,8 @@ The only allow path the hook actually recognizes is the env-var bypass:
   environment before invoking `git commit`. Use sparingly; the bypass
   must be justified in the commit message body or PR description.
 
-The deny message states BOTH requirements explicitly (global CLAUDE.md:
+The deny message states BOTH requirements explicitly (the *Suppression needs
+a reason and approval* rule, [`ETHOS.md` → Rules praxis carries](../../../ETHOS.md#rules-praxis-carries):
 suppression needs a stated reason AND explicit user approval, neither one
 alone is sufficient) — the bypass env var is not, on its own, a satisfying
 condition; it must be paired with a recorded reason and the user's

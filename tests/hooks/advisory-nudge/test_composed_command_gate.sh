@@ -397,6 +397,11 @@ run_case "no transcript_path — unmatched tier stays silent (silent)" \
 run_case "unreadable transcript path — silent (silent)" \
   "silent" "advisory" "$(body_payload "$B" "/tmp/does-not-exist-1117.jsonl")"
 
+# A path that exists but cannot be read as a file (a directory) is "no
+# oracle", not "ran nothing": strict tail_lines raises, the gate stays silent.
+run_case "transcript path is a directory — silent (silent)" \
+  "silent" "advisory" "$(body_payload "$B" "$(dirname "$TRANSCRIPT")")"
+
 # --- Surface variants --------------------------------------------------------
 
 MCP_PAYLOAD=$(TRANSCRIPT="$TRANSCRIPT" python3 -c '
@@ -407,8 +412,12 @@ print(json.dumps({
     "tool_input": {"text": body},
     "transcript_path": os.environ["TRANSCRIPT"],
 }))')
-run_case "MCP Slack body with assembled line (warn)" \
-  "warn" "advisory" "$MCP_PAYLOAD"
+# The Slack/Notion MCP registrations were dropped (#1359); these hooks are
+# PreToolUse(Bash) only now, so an MCP payload falls through the `else` arm
+# and is silent. Kept as the regression pin for the removal — the payloads
+# still carry the shapes that used to warn.
+run_case "MCP Slack body is out of scope (silent)" \
+  "silent" "advisory" "$MCP_PAYLOAD"
 
 run_case "non-write tool (silent)" \
   "silent" "advisory" \

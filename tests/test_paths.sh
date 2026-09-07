@@ -7,6 +7,7 @@
 #   - resolve_writable creates <home>/<subdir> and returns the file path
 #   - resolve_writable falls back to ${TMPDIR}/praxis-<file> when home is
 #     not writable, and never raises
+#   - the fire ledger follows PRAXIS_HOME in both its writers (issue #1340)
 
 set +e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -304,6 +305,79 @@ assert_eq "resolve_cache_file prefers the new path when both exist" \
   "$RACE_HOME/cache/race.json" \
   "$(PRAXIS_HOME="$RACE_HOME" TMPDIR="$RACE_TMP" python3 -c "import sys; sys.path.insert(0, '$LIB'); import _paths; print(_paths.resolve_cache_file('race.json'))")"
 rm -rf "$RACE_HOME" "$RACE_TMP"
+
+# 17. praxis_rotate_log (issue #1282): an append-only log past the cap is
+# renamed to <log>.1 (replacing the previous predecessor) and one under it is
+# left alone; a missing file is a no-op. Sourced the way the shell hooks do.
+ROT_DIR=$(mktemp -d) || { echo "FATAL: mktemp -d failed" >&2; exit 1; }
+printf 'old\n' > "$ROT_DIR/a.log.1"
+head -c 2048 /dev/zero | tr '\0' 'x' > "$ROT_DIR/a.log"
+printf 'small\n' > "$ROT_DIR/b.log"
+rot_out=$(sh -c '. "$1/_paths.sh"; praxis_rotate_log "$2/a.log" 1024; r1=$?; praxis_rotate_log "$2/b.log" 1024; r2=$?; praxis_rotate_log "$2/absent.log" 1024; r3=$?; praxis_rotate_log "$2/b.log" abc; r4=$?; echo "rc=$r1$r2$r3$r4"' _ "$LIB" "$ROT_DIR" 2>&1)
+assert_eq "praxis_rotate_log never fails and prints nothing (incl. a bad cap)" "rc=0000" "$rot_out"
+assert_eq "praxis_rotate_log moves an oversized log to .1" "yes" \
+  "$([ ! -e "$ROT_DIR/a.log" ] && [ "$(wc -c < "$ROT_DIR/a.log.1" | tr -d ' ')" = "2048" ] && echo yes || echo no)"
+assert_eq "praxis_rotate_log leaves a log under the cap alone" "small" "$(cat "$ROT_DIR/b.log")"
+assert_eq "praxis_rotate_log ignores a missing log" "yes" "$([ ! -e "$ROT_DIR/absent.log.1" ] && echo yes || echo no)"
+rm -rf "$ROT_DIR"
+
+# 18. The fire ledger follows PRAXIS_HOME in both writers (issue #1340).
+# PRIVACY.md lists PRAXIS_HOME as the override for ~/.praxis/telemetry:
+# _fire_ledger.resolve_telemetry_dir() resolves through _paths.praxis_home()
+# and record_fire.sh restates the shell rule inline (it is copied on its own
+# into probe trees and cannot source a sibling). Probed out of a copied _lib
+# with no .git two levels up — the dev-checkout branch (#934) is what sends
+# in-repo runs to <checkout>/.praxis-dev-telemetry, and would mask a
+# regression here. No PRAXIS_FIRE_TELEMETRY_FILE either: that override wins
+# over everything and is exactly what #849 used to hide this defect.
+LEDGER_ROOT=$(mktemp -d) || { echo "FATAL: mktemp -d failed" >&2; exit 1; }
+LEDGER_LIB="$LEDGER_ROOT/pkg/hooks/_lib"
+mkdir -p "$LEDGER_LIB" "$LEDGER_ROOT/home"
+cp "$LIB/_fire_ledger.py" "$LIB/_paths.py" "$LIB/_state_lock.py" "$LIB/record_fire.sh" "$LEDGER_LIB/"
+LEDGER_TODAY=$(date -u +%Y-%m-%d)
+LEDGER_FILE="$LEDGER_ROOT/relocated/telemetry/fire-events-$LEDGER_TODAY.jsonl"
+env -u PRAXIS_FIRE_TELEMETRY_FILE HOME="$LEDGER_ROOT/home" PRAXIS_HOME="$LEDGER_ROOT/relocated" \
+  python3 - "$LEDGER_LIB" << 'PYEOF'
+import sys
+sys.path.insert(0, sys.argv[1])
+import _fire_ledger
+assert _fire_ledger._checkout_root() is None, "probe tree must not read as a checkout"
+_fire_ledger.record_session_fire("py-hook", "role", "pass", "sess-1340", "")
+PYEOF
+env -u PRAXIS_FIRE_TELEMETRY_FILE HOME="$LEDGER_ROOT/home" PRAXIS_HOME="$LEDGER_ROOT/relocated" \
+  PRAXIS_LIB_DIR="$LEDGER_LIB" \
+  sh -c '. "$1/record_fire.sh"; praxis_record_fire sh-hook role pass sess-1340 ""' _ "$LEDGER_LIB"
+# The python writer counts its `pass` rather than appending it (issue #1238),
+# so it lands in a `fire-counts-*` sibling; the shell fast path still appends.
+# Both files sit in the same relocated telemetry directory, which is what this
+# case is about, so the probe reads the directory rather than one file.
+assert_eq "fire ledger: both writers land in \$PRAXIS_HOME/telemetry outside a checkout" \
+  "py-hook sh-hook" \
+  "$(python3 -c '
+import glob, json, os, sys
+hooks = []
+for path in sorted(glob.glob(os.path.join(sys.argv[1], "fire-*.jsonl"))):
+    with open(path) as handle:
+        hooks.extend(json.loads(l)["hook"] for l in handle if l.strip())
+print(" ".join(sorted(hooks)))' "$(dirname "$LEDGER_FILE")" 2>/dev/null)"
+assert_eq "fire ledger: nothing written under HOME/.praxis" "" \
+  "$(find "$LEDGER_ROOT/home" -type f 2>/dev/null)"
+# The shell writer's inline rule is a restatement of _paths.sh praxis_home(),
+# so pin the two to each other on the input they most easily diverge on: a
+# literal tilde, which the shell must expand against HOME as Python does.
+# The tilde is assembled from a variable: a quoted '~/...' word is what
+# SC2088 flags, and here the unexpanded tilde is the input under test.
+ledger_tilde='~'
+sh_tilde_dir=$(env -u PRAXIS_FIRE_TELEMETRY_FILE HOME="$LEDGER_ROOT/home" PRAXIS_HOME='~/ph-1340' \
+  PRAXIS_LIB_DIR="$LEDGER_LIB" \
+  sh -c '. "$1/record_fire.sh"; praxis_record_fire sh-hook role pass sess-1340 ""; find "$2/home" -name "fire-events-*.jsonl"' _ "$LEDGER_LIB" "$LEDGER_ROOT")
+assert_eq "record_fire.sh tilde PRAXIS_HOME matches _paths.sh praxis_home()/telemetry" \
+  "$(HOME="$LEDGER_ROOT/home" PRAXIS_HOME="$ledger_tilde/ph-1340" sh_eval 'praxis_home')/telemetry" \
+  "$(dirname "$sh_tilde_dir")"
+assert_eq "_fire_ledger tilde PRAXIS_HOME matches _paths.sh praxis_home()/telemetry" \
+  "$(HOME="$LEDGER_ROOT/home" PRAXIS_HOME="$ledger_tilde/ph-1340" sh_eval 'praxis_home')/telemetry" \
+  "$(env -u PRAXIS_FIRE_TELEMETRY_FILE HOME="$LEDGER_ROOT/home" PRAXIS_HOME='~/ph-1340' python3 -c "import sys; sys.path.insert(0, '$LEDGER_LIB'); import _fire_ledger; print(_fire_ledger.resolve_telemetry_dir())")"
+rm -rf "$LEDGER_ROOT"
 
 echo ""
 echo "Result: $PASS passed, $FAIL failed"

@@ -10,7 +10,7 @@ source before proceeding.
 
 ### Why this exists
 
-The global `~/.claude/CLAUDE.md` rule `Loaded ≠ Retrieved` instructs:
+The *Loaded ≠ Retrieved* rule ([`ETHOS.md` → Rules praxis carries](../../../ETHOS.md#rules-praxis-carries)) instructs:
 > Before using an external API enum / literal / catalog name / configuration
 > constant, retrieve a verified source (vendor docs, `SHOW CATALOGS`,
 > `--help` output) — never write a value that "looks right" based on naming

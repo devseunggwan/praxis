@@ -36,7 +36,7 @@ gate can key on it instead of on the avoidable output format.
 | `UserPromptSubmit` whose prompt starts with `/retrospect` or `/praxis:retrospect` | **SET** the marker (`source: slash`). Arms the gate even before the Skill `tool_use` record exists. |
 | `UserPromptSubmit` for any other prompt | **DECAY** the marker: spend one turn of the budget (`MARKER_TURN_BUDGET`, 2) and CLEAR at zero. |
 
-Natural-language mentions ("retrospect" / "회고" in prose) deliberately do NOT
+Natural-language mentions ("retrospect" / "회고", the Korean word, in prose) deliberately do NOT
 SET on `UserPromptSubmit` — a casual mention must not arm the gate. The
 `PreToolUse(Skill)` path covers genuine natural-language invocation, because it
 still routes through the Skill tool.

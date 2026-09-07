@@ -1,0 +1,120 @@
+refactor(codex-review-wrap): split the body into references/ and fit the description budget (#1210)
+
+* refactor(codex-review-wrap): split the body into references/ and fit the description budget
+
+85KB 단일 SKILL.md 본문을 retrospect(#687) 전례를 따라 spine +
+references/ 구조로 분할한다.
+
+- SKILL.md 는 18.3KB spine 으로 축소: frontmatter, Overview(+reference
+  map), 라운드 루프 골격(Step 5 Execution order), 단계별 한 문단 요약과
+  참조 링크만 유지
+- Step 5 상세(5a-5j)는 내용 기준 3개 파일로 이동:
+  step5-premise-verification.md(5a/5b/5c/5g),
+  step5-siblings-and-regions.md(5d/5f/5h),
+  step5-approval-and-rounds.md(5e/5i/5j)
+- Step 4a/4b 런북은 step4-run-review.md, Error Handling 표 + Limitations
+  는 appendices.md, Example Flow 는 example-flow.md 로 이동
+- 4,011자 runtime-verified-note 는 references/verification-log.md 에
+  verbatim 보존하고 frontmatter 에는 249자 요약만 남김
+- description 을 1,405자 → 917자로 압축(런타임 절단 한계 1,024자 이내),
+  트리거 키워드 12개는 전부 동일하게 보존
+- docs/skills.md 의 codex-review-wrap 행을 새 frontmatter 트리거 절에서
+  기계적으로 재유도(12개 키워드 전부 포함)
+- writing-praxis-skill 가이드에 progressive-disclosure/references/ 절과
+  description 1,024자 예산 규칙 추가; 서로 모순이던 두 예시를 수정
+  (strikes 예시는 실제 파일과 일치시키고, cmux-recover-sessions 예시는
+  명시적 schematic placeholder 로 교체)
+- 이동한 본문을 검증하던 테스트 3건은 대상 경로만 갱신(단언 내용 불변):
+  version-pins 는 step4-run-review.md 를 슬라이스, critic-probe 와
+  finding-approval 은 spine+references 연결 버퍼를 대상으로 함
+
+본문 1,305개 비공백 라인 중 1,303개가 새 파일에 verbatim 보존(헤딩
+레벨 강등 허용 후); 나머지 2개는 이동이 깨뜨린 자기참조 문구의 의도적
+수정(5f region-label 표의 "this SKILL.md itself uses ####" 문구,
+5c 의 "Invocation Model above" 위치 참조).
+
+verified: check-plugin-manifests OK, run-tests.sh ALL TESTS PASSED,
+markdownlint-cli2@0.23.2 오류 분포 old=new 35건 동일(전부 이동 텍스트의
+기존 패턴, 신규 유입 없음)
+
+Closes #1181
+
+Co-Authored-By: Claude <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01PBTDLnV7eaAqz7GGuSD5X7
+
+* fix(codex-review-wrap): review round 1 — point-of-use caveats, drop count transcriptions, constraint registry
+
+PR #1210 리뷰 라운드 1에서 지적된 5건(분할이 유입한 drift/일관성 결함)을
+수정한다.
+
+- (HIGH) 5g critic 템플릿 절에 운영상 핵심 caveat 를 point-of-use 로
+  복원: codex@openai-codex 1.0.6 에서는 생성 시점 주입이 불가하여
+  caller-side 로 게이트를 강제해야 하고, `adversarial-review --help` 는
+  실제 리뷰를 시작하므로 capability probe 로 쓰면 안 된다 — 측정 이력은
+  verification-log.md 링크로. 5g 말미의 verbatim 주입 지시문과
+  appendices 의 "invocation time 에 주입된다" limitation 행도 버전
+  조건부 서술로 갱신
+- (MED) spine 4b 요약의 `codex@openai-codex 1.0.6` 버전 핀 중복 제거 —
+  핀 테스트의 스캔 범위는 references/step4-run-review.md 뿐이므로
+  spine 은 "pinned there" 참조로 대체 (frontmatter
+  runtime-verified-note 의 버전 표기는 Rule 11 이 요구하는
+  "<cli> <version> — 관측 요약" 형식이므로 유지)
+- (MED) spine 의 "nine record shapes" 카운트 전사 제거 — 5h 가
+  금지하는 count-equality 전사이므로 비계수 참조("enumerated there,
+  not here — 5c is the SoT")로 교체; 원장 SoT 는
+  step5-premise-verification.md 5c 에 유지
+- (MED) description 1,024자 절단 한계를 RUNTIME_CONSTRAINTS.md §5 로
+  등재 — 관측 사실(1,405자 description, 트리거 절이 절단 영역)과
+  미측정 사실(1,024 수치는 documented-behavior 기반, 라이브 절단
+  관측 아님)을 구분해 명시하고 검증 방법 기술;
+  writing-praxis-skill 의 예산 규칙은 §5 인용으로 갱신
+- (LOW) retrospect 전례 서술의 참조 파일 구성 오기 수정 — "six stage
+  references" → 6개 참조 파일(스테이지 4 + appendices + report
+  template)
+
+verified: version-pins 14/14, critic-probe 26/26, finding-approval
+48/48, check-plugin-manifests OK, run-tests.sh ALL TESTS PASSED,
+markdownlint-cli2@0.23.2 신규 유입 0건(RUNTIME_CONSTRAINTS.md 의
+MD032 4건은 origin/main 기존 패턴과 동일)
+
+Co-Authored-By: Claude <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01PBTDLnV7eaAqz7GGuSD5X7
+
+* docs(skills): one description budget, triggers inside the strict bound
+
+RUNTIME_CONSTRAINTS.md §5 said 1,024 while CONTRIBUTING.md said 500, and
+neither number is measured — §5 says so itself. codex-review-wrap's trigger
+clause sat at character 687, which routes under one contract and is truncated
+away under the other, so the skill's documented keywords were live or dead
+depending on which file you believed.
+
+Compress the description prose so the trigger clause starts at 483: a
+description that clears the smaller bound routes correctly whichever bound is
+real, and no live measurement is needed to make that true. CONTRIBUTING.md now
+points at §5 instead of carrying a second number; §5 carries the operative
+500-character trigger rule and says where 500 came from.
+
+Confidence: high
+Not-tested: the real runtime budget is still unmeasured — this makes the description safe under either candidate, it does not settle which one holds
+Session-Id: c044205b-803f-48b1-acc9-aab9aa5e25e1
+
+* test(skills): check reference reachability, not just content
+
+The pinning assertions run against a buffer built by globbing
+references/*.md, so a spine link that is deleted or misspelled leaves every
+content assertion passing while a real reader can no longer reach the prose.
+Content and reachability are different questions and the glob can only answer
+the first.
+
+Check the links directly: every reference file is linked from the spine, and
+every link the spine makes resolves to a file that exists. Verified both ways
+— removing the appendices link fails the check by name; the intact tree
+passes.
+
+Confidence: high
+Not-tested: no runtime behaviour changed — test-only
+Session-Id: c044205b-803f-48b1-acc9-aab9aa5e25e1
+
+---------
+
+Co-authored-by: Claude <noreply@anthropic.com>

@@ -58,9 +58,7 @@ from pathlib import Path as _Path
 _sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
 from _external_write_body import (  # type: ignore[import-not-found]  # noqa: E402
     extract_gh_body,
-    extract_mcp_body,
     is_gh_external_write,
-    is_mcp_external_write,
 )
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
 from _payload import read_payload  # type: ignore[import-not-found]  # noqa: E402
@@ -355,10 +353,6 @@ def main() -> int:
             candidate = extract_gh_body(argv)
             if candidate is not None:
                 writes.append((candidate, _axis_a_call_level(argv)))
-    elif is_mcp_external_write(tool_name):
-        mcp_body = extract_mcp_body(tool_input)
-        if mcp_body:
-            writes.append((mcp_body, False))
     else:
         return 0
 

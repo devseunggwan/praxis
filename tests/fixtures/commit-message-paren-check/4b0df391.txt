@@ -1,0 +1,81 @@
+fix(hooks): repair red main after the argv normalization, and state the anchor `gh` prerequisite (#1212)
+
+* fix(hooks): keep a subshell cd unmodelable after the argv normalization
+
+origin/main is red: `test_cross_boundary_preflight.sh` fails 2 of 127. The
+cause is an interaction between two changes that were each green alone.
+
+#1193 taught the shared `filter_argv` to skip a lone grouping token, so
+`( cd B && gh issue create …` now yields argv `['cd', 'B']`. #1148's
+`_cd_intent` reads argv to decide whether a chdir is modelable, and that argv
+is indistinguishable from a plain `cd B` — so the segment stopped being
+opaque and started resolving against B. A subshell's directory change does
+not outlive the `)`, so this authorizes the write against a repo it may never
+run in, which is the wrong-repo approval the repo-less arm exists to prevent.
+
+`_cd_intent` now tests the UNFILTERED segment for a bare grouping token. The
+test sits after the chdir-word check, so a grouped segment that changes no
+directory is untouched and still names its resolved repo.
+
+Two rows added pinning that control direction, plus `run_case_detail_absent`
+for the assertion it needs — a gate that fires with the wrong reason is a
+regression `run_case_detail` cannot see, because a missing needle and a
+missing ask look identical to it.
+
+Verified: 127/127 in the hook suite, `./scripts/run-tests.sh` exit 0.
+Mutation — impl reverted to origin/main with the tests kept — fails exactly
+the 2 original rows; the 2 new control rows pass under it, as a control must.
+
+Refs #1193, #1148
+
+* docs(hooks): state that anchor revision requires gh
+
+The anchor convention is "one comment per PR, edited in place by comment id".
+Creating one needs only a way to post a comment; every revision is a PATCH
+against the comment id, which needs `gh`. A session whose only GitHub surface
+is the MCP server can create an anchor and then cannot revise it — comment
+bodies are add-only there, while issue and PR bodies both have update paths.
+GitHub REST exposes the PATCH, so the limit is what the host surfaces.
+
+The same absence removes the PostToolUse re-check for a second, independent
+reason: that step re-checks structure keyed on `<summary>`, and the MCP read
+path strips `<details>`/`<summary>` while keeping the inner text, so a
+well-formed anchor read back over it reports as missing every toggle.
+
+PR #1149's anchor was stale for exactly this reason. The precondition was
+nowhere in the spec or the Prerequisites table, so a session could enter a
+state where the mandated procedure was unperformable with nothing saying so.
+
+Records the precondition and what to do instead in a gh-less session: say so
+on the PR and carry the gaps in the PR body or merge commit, rather than
+posting a second anchor — a second anchor-shaped comment makes the id-recovery
+lookup in "Coupled constant" ambiguous.
+
+Options (b) a real MCP fallback convention and (c) hook-side detection stay
+open on #1211; both need their own design review, and (b) needs a survey of
+the other gh-less hosts this repo packages for.
+
+Refs #1211, #1149
+
+* docs(hooks): scope the tag-stripping note to comment bodies, not the server
+
+The previous wording said "the MCP read path strips <details>/<summary>",
+which invites the wrong conclusion — that the server mangles markup and the
+right response is to route around it.
+
+Measured: file contents come back with both tags intact. get_file_contents on
+this spec at refs/heads/main returns its own <details> and <summary> verbatim,
+matching what git holds. The same session reading a comment body through
+pull_request_read or issue_read drops both and keeps the inner text.
+
+So the boundary is content class, not markup: body text a commenter authors is
+unfolded, files a reader is meant to trust are not. That is the
+prompt-injection boundary drawn deliberately, and it matters for what comes
+next — a fallback convention has to survive the unfolding rather than try to
+recover the tags.
+
+Refs #1211
+
+---------
+
+Co-authored-by: Claude <noreply@anthropic.com>

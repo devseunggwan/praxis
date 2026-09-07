@@ -48,6 +48,8 @@ drift.
 | `hooks/preflight-gate/gh-merge-worktree-precondition/impl.py` | `git worktree list --porcelain` | Check whether a PR's head branch is checked out in another worktree before `gh pr merge --delete-branch` |
 | `hooks/preflight-gate/anchor-comment-gate/impl.py` | `git merge-base origin/<base> HEAD` | Find the PR's fork point so the coverage advisory measures against its own base |
 | `hooks/preflight-gate/anchor-comment-gate/impl.py` | `git diff --name-only <merge-base> HEAD` | List changed files to flag ones no verification-anchor table row mentions (advisory only) |
+| `hooks/advisory-nudge/codex-review-route/impl.py` | `git worktree list --porcelain` | Count active non-bare worktrees before a bare `/codex:review` so the multi-worktree advisory can redirect to `codex-review-wrap` |
+| `hooks/advisory-nudge/codex-review-route/impl.py` | `git rev-parse --abbrev-ref HEAD` | Read the current branch name to look up its PR state |
 
 ### `gh` — GitHub CLI
 
@@ -59,6 +61,7 @@ drift.
 | `hooks/preflight-gate/anchor-comment-gate/impl.py`            | `gh api /repos/{owner}/{repo}/issues/comments/{id} --jq .body`          | Read back the verification anchor that was just published, from the comment URL the command itself printed |
 | `hooks/preflight-gate/anchor-comment-gate/impl.py`            | `gh api /repos/{owner}/{repo}/issues/comments/{id} --jq .issue_url`     | Resolve which PR a comment belongs to when the post printed no URL to follow                               |
 | `hooks/preflight-gate/anchor-comment-gate/impl.py`            | `gh pr view <number> --repo <r> --json headRefOid,baseRefName --jq ...` | Resolve the PR's live head SHA (stale-anchor check) and its base branch (coverage advisory) in one call    |
+| `hooks/advisory-nudge/codex-review-route/impl.py`             | `gh pr view <branch> --json state --jq .state`                          | Warn when the current branch's PR is CLOSED or MERGED before a codex review runs against it                |
 
 ### `zsh` — glob-expansion probes
 

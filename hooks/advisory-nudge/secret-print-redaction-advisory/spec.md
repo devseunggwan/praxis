@@ -65,7 +65,7 @@ silent:
 
 | Tier | Scope | Rules applied |
 | ------ | ------- | --------------- |
-| **Live Bash command** | the command text outside heredoc bodies | var-flow + inline no-capture substitution only. A bare interactive fetch (`hubctl token fetch p --phase dev`) is **SILENT** — it is the sanctioned read-only usage (global CLAUDE.md "Read-only prod calls auto-proceed") |
+| **Live Bash command** | the command text outside heredoc bodies | var-flow + inline no-capture substitution only. A bare interactive fetch (`hubctl token fetch p --phase dev`) is **SILENT** — it is the sanctioned read-only usage (the *Read-only prod calls auto-proceed* rule, [`ETHOS.md` → Rules praxis carries](../../../ETHOS.md#rules-praxis-carries)) |
 | **Authored content** | Write `content`, Edit `new_string`, heredoc bodies inside a Bash command, echo/printf-appended quoted strings (accumulated per redirect target, so a capture appended by one `echo >>` and a sink appended by the next are linked) | var-flow + inline substitution **plus** bare no-capture fetch lines |
 
 ## Exclusions (silent — no advisory)

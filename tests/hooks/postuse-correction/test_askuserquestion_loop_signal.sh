@@ -66,22 +66,30 @@ print(json.dumps(payload))' "$tool_name" "$session_id"
 
 rich_line_count() {
   local file="$1"
-  [ -f "$file" ] || { echo 0; return; }
+  # No early return on a missing override: the rows are in the counter
+  # siblings now, and the override itself may never be created.
   # No stderr suppression / error fallback here on purpose: a json.loads()
   # or file-read failure means malformed telemetry, which must fail the
   # test loudly rather than silently masquerade as a count of 0
   # (CodeRabbit PR #743 finding).
+  # A `pass` is counted rather than appended (issue #1238), so the rich rows
+  # this hook writes live in the counter siblings and each carries a `count`.
   python3 -c "
-import json
+import glob, json, os
 n = 0
-with open('$file') as f:
-    for line in f:
-        line = line.strip()
-        if not line:
-            continue
-        r = json.loads(line)
-        if r.get('granularity') == 'rich':
-            n += 1
+paths = ['$file'] + sorted(glob.glob(os.path.join(os.path.dirname('$file'), 'fire-counts-*.jsonl')))
+for path in paths:
+    if not os.path.exists(path):
+        continue
+    with open(path) as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            r = json.loads(line)
+            if r.get('granularity') == 'rich':
+                c = r.get('count')
+                n += c if isinstance(c, int) and not isinstance(c, bool) else 1
 print(n)
 "
 }
@@ -106,7 +114,8 @@ echo "=== askuserquestion-loop-signal: always exits 0 ==="
 
 _test_exit_zero() {
   local name="$1" payload="$2"
-  local tel="$TMP_DIR/exit-zero-$RANDOM.jsonl"
+  local tel="$TMP_DIR/exit-zero-$RANDOM/ledger.jsonl"
+  mkdir -p "$(dirname "$tel")"
   local rc
   if [ -z "$payload" ]; then
     # True zero-byte stdin (CodeRabbit PR #743 finding: a `<<< ""`
@@ -134,7 +143,8 @@ _test_exit_zero "exit 0 on empty stdin" ""
 echo ""
 echo "=== askuserquestion-loop-signal: AskUserQuestion call -> 1 RICH record ==="
 
-TEL1="$TMP_DIR/test1.jsonl"
+mkdir -p "$TMP_DIR/test1"
+TEL1="$TMP_DIR/test1/ledger.jsonl"
 payload1="$(make_payload AskUserQuestion sess-1)"
 PRAXIS_FIRE_TELEMETRY_FILE="$TEL1" python3 "$HOOK" <<< "$payload1" >/dev/null 2>&1
 
@@ -151,7 +161,8 @@ fi
 echo ""
 echo "=== askuserquestion-loop-signal: non-AskUserQuestion tool -> nothing written ==="
 
-TEL2="$TMP_DIR/test2.jsonl"
+mkdir -p "$TMP_DIR/test2"
+TEL2="$TMP_DIR/test2/ledger.jsonl"
 payload2="$(make_payload Bash sess-2)"
 PRAXIS_FIRE_TELEMETRY_FILE="$TEL2" python3 "$HOOK" <<< "$payload2" >/dev/null 2>&1
 
@@ -171,7 +182,8 @@ fi
 echo ""
 echo "=== askuserquestion-loop-signal: missing session_id -> nothing written ==="
 
-TEL3="$TMP_DIR/test3.jsonl"
+mkdir -p "$TMP_DIR/test3"
+TEL3="$TMP_DIR/test3/ledger.jsonl"
 payload3="$(make_payload AskUserQuestion __omit__)"
 PRAXIS_FIRE_TELEMETRY_FILE="$TEL3" python3 "$HOOK" <<< "$payload3" >/dev/null 2>&1
 
@@ -190,7 +202,8 @@ fi
 echo ""
 echo "=== askuserquestion-loop-signal: empty session_id -> nothing written ==="
 
-TEL4="$TMP_DIR/test4.jsonl"
+mkdir -p "$TMP_DIR/test4"
+TEL4="$TMP_DIR/test4/ledger.jsonl"
 payload4="$(make_payload AskUserQuestion "")"
 PRAXIS_FIRE_TELEMETRY_FILE="$TEL4" python3 "$HOOK" <<< "$payload4" >/dev/null 2>&1
 
@@ -207,7 +220,8 @@ fi
 echo ""
 echo "=== askuserquestion-loop-signal: opt-out -> no-op ==="
 
-TEL5="$TMP_DIR/test5.jsonl"
+mkdir -p "$TMP_DIR/test5"
+TEL5="$TMP_DIR/test5/ledger.jsonl"
 payload5="$(make_payload AskUserQuestion sess-5)"
 PRAXIS_FIRE_TELEMETRY_FILE="$TEL5" PRAXIS_FIRE_TELEMETRY_DISABLE=1 \
   python3 "$HOOK" <<< "$payload5" >/dev/null 2>&1
@@ -229,7 +243,8 @@ fi
 echo ""
 echo "=== askuserquestion-loop-signal: 2 calls same session -> 2 RICH records ==="
 
-TEL9="$TMP_DIR/test9.jsonl"
+mkdir -p "$TMP_DIR/test9"
+TEL9="$TMP_DIR/test9/ledger.jsonl"
 payload9="$(make_payload AskUserQuestion sess-9)"
 PRAXIS_FIRE_TELEMETRY_FILE="$TEL9" python3 "$HOOK" <<< "$payload9" >/dev/null 2>&1
 PRAXIS_FIRE_TELEMETRY_FILE="$TEL9" python3 "$HOOK" <<< "$payload9" >/dev/null 2>&1
@@ -242,16 +257,19 @@ else
 fi
 
 same_session9=$(python3 -c "
-import json
+import glob, json, os
 sids = set()
-with open('$TEL9') as f:
-    for line in f:
-        line = line.strip()
-        if not line:
-            continue
-        r = json.loads(line)
-        if r.get('granularity') == 'rich':
-            sids.add(r.get('session_id'))
+for path in ['$TEL9'] + sorted(glob.glob(os.path.join(os.path.dirname('$TEL9'), 'fire-counts-*.jsonl'))):
+    if not os.path.exists(path):
+        continue
+    with open(path) as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            r = json.loads(line)
+            if r.get('granularity') == 'rich':
+                sids.add(r.get('session_id'))
 print('ok' if sids == {'sess-9'} else 'fail_' + str(sids))
 " 2>/dev/null)
 if [ "$same_session9" = "ok" ]; then
@@ -266,21 +284,25 @@ fi
 echo ""
 echo "=== askuserquestion-loop-signal: RICH record field shape ==="
 
-TEL10="$TMP_DIR/test10.jsonl"
+mkdir -p "$TMP_DIR/test10"
+TEL10="$TMP_DIR/test10/ledger.jsonl"
 payload10="$(make_payload AskUserQuestion sess-10)"
 PRAXIS_FIRE_TELEMETRY_FILE="$TEL10" python3 "$HOOK" <<< "$payload10" >/dev/null 2>&1
 
 result10=$(python3 -c "
-import json
+import glob, json, os
 rich = None
-with open('$TEL10') as f:
-    for line in f:
-        line = line.strip()
-        if not line:
-            continue
-        r = json.loads(line)
-        if r.get('granularity') == 'rich':
-            rich = r
+for path in ['$TEL10'] + sorted(glob.glob(os.path.join(os.path.dirname('$TEL10'), 'fire-counts-*.jsonl'))):
+    if not os.path.exists(path):
+        continue
+    with open(path) as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            r = json.loads(line)
+            if r.get('granularity') == 'rich':
+                rich = r
 required = ['timestamp', 'session_id', 'tool', 'hook', 'role', 'decision', 'granularity']
 missing = [k for k in required if rich is None or k not in rich]
 ok = (
@@ -306,19 +328,23 @@ fi
 echo ""
 echo "=== askuserquestion-loop-signal: coarse duplicate alongside RICH record ==="
 
-TEL11="$TMP_DIR/test11.jsonl"
+mkdir -p "$TMP_DIR/test11"
+TEL11="$TMP_DIR/test11/ledger.jsonl"
 payload11="$(make_payload AskUserQuestion sess-11)"
 PRAXIS_FIRE_TELEMETRY_FILE="$TEL11" python3 "$HOOK" <<< "$payload11" >/dev/null 2>&1
 
 result11=$(python3 -c "
-import json
+import glob, json, os
 gran = []
-with open('$TEL11') as f:
-    for line in f:
-        line = line.strip()
-        if not line:
-            continue
-        gran.append(json.loads(line).get('granularity'))
+for path in ['$TEL11'] + sorted(glob.glob(os.path.join(os.path.dirname('$TEL11'), 'fire-counts-*.jsonl'))):
+    if not os.path.exists(path):
+        continue
+    with open(path) as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            gran.append(json.loads(line).get('granularity'))
 print('ok' if sorted(gran) == ['coarse', 'rich'] else 'fail_' + str(gran))
 " 2>/dev/null)
 if [ "$result11" = "ok" ]; then

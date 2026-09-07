@@ -113,12 +113,21 @@ sibling worktrees that were on screen and unread become a number.
    tokenizing every Bash command of a 46MB session costs 1.8s, and all
    PreToolUse(Bash) members share one dispatch deadline, where one slow member
    starves every later one. Reading is streamed via
-   `_transcript.iter_transcript`, never materialized.
+   `_transcript.iter_transcript`, never materialized, and only lines carrying
+   the quoted name of a tool the trigger's facts read (`"Agent"` / `"Task"` /
+   `"Skill"` for `review`, `"Bash"` for `in-flight`) are parsed at all (issue
+   #1278): every fact lives in a `tool_use` block with one of those names, so
+   a line without it is rejected before `json.loads`. That matters most in
+   the session the advisory is for — one where no review ran, so nothing
+   ever settles and the scan reaches EOF on every commit.
 4. Subagent transcripts (`<session-dir>/subagents/agent-*.jsonl`) are scanned
    alongside the root one. An Agent dispatch made *inside* a Task-dispatched
    subagent is recorded only in that subagent's own JSONL, so a root-only scan
    under-reports work that actually happened — the same blindness
-   `block-commit-without-codex-review` documents for issue #730.
+   `block-commit-without-codex-review` documents for issue #730. A subagent
+   file the resumable scan has not caught up with yet keeps the advisory
+   silent (its unread tail may still settle the fact); an unreadable one is
+   skipped.
 
 The predicates key on an **absence** in the transcript rather than on the
 presence of a marker, so the advisory cannot be cleared by adopting whatever
@@ -143,7 +152,8 @@ Each returns 0 with no output, per the ETHOS fail-open invariant:
 
 - malformed payload, non-Bash tool, empty command
 - unparseable command (unbalanced quotes → `safe_tokenize` yields nothing)
-- missing, unreadable, or oversized (>50MB) transcript
+- missing or unreadable transcript, or one whose scan has not caught up yet
+  (more than 50 MB of unread bytes this call)
 - the rebase predicates when the base ref cannot be resolved or
   `HEAD..<base>` cannot be counted — a detached or unborn HEAD, no origin, git
   unavailable, or no probe budget left. An unmeasured premise produces silence,
@@ -184,6 +194,24 @@ once they are settled. On a 47.9MB transcript: `review` 0.200s, `pre-pr`
 0.000s (reads nothing), `in-flight` 0.005s. Collecting all four facts
 unconditionally cost 1.77s on the same file — every PreToolUse(Bash) member
 shares one dispatch deadline, so one slow member starves every later one.
+
+Those numbers are the settling case. When nothing settles the scan reads to
+EOF, and there the parse is the cost: 42,000 `json.loads` on a 36 MB session
+was 0.44s per commit. Parsing only the lines that name a tool the trigger's
+facts read (#1278) keeps the unsettled walk at the substring-scan floor.
+
+The walk is also resumable: each trigger keeps a cursor per transcript file
+under `~/.praxis/cache/`
+(`scan-unenforced-step-advisory-<trigger>-<file>-<session_id>.json`, swept
+with the cache TTL and spared for the live session) holding the byte offset
+of the last complete record read and the facts settled so far. The session
+the advisory exists for — one where no review ever ran, so nothing settles —
+is exactly the one that used to read to EOF on every commit; it now reads
+only the bytes appended since the previous commit. The 50 MB bound is a
+budget per call, not a ceiling on the session: a transcript past it stays
+silent for the few commits it takes to catch up, then costs its delta. A
+payload without a `session_id` scans without persistence, under the same
+budget.
 
 ### Known limitation — delegated sessions
 

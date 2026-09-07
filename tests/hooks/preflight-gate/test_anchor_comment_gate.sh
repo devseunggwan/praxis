@@ -312,7 +312,7 @@ run_case() {
       [ "$rc" -eq 0 ] && [[ "$out" == *"${expect#demoted:}"* ]] || ok=0
       ;;
     pass)
-      [ "$rc" -eq 0 ] && [[ "$out" != *"[anchor-gate] 게시된 앵커 검사 결과"* ]] || ok=0
+      [ "$rc" -eq 0 ] && [[ "$out" != *"[anchor-gate] posted-anchor check result"* ]] || ok=0
       ;;
     warn:*)
       [ "$rc" -eq 0 ] && [[ "$out" == *"${expect#warn:}"* ]] || ok=0
@@ -551,7 +551,7 @@ run_case "32 report(blocking): 게시된 앵커에 갱신 이력 토글이 없�
 # The tier is named in the report, so a reader can tell "the rule was broken"
 # from "the check never ran" without reading the message body.
 run_case "32a report: 구조 결함은 blocking 티어로 라벨링됨" \
-  "report:blocking (규약 위반" PostToolUse "$BROKEN_GH" \
+  "report:blocking (convention violation — fix it now / 규약 위반" PostToolUse "$BROKEN_GH" \
   "gh pr comment 42 --body-file anchor.md" "$FIX" Bash "$COMMENT_URL"
 
 # The opt-out returns the exit to 0. On PostToolUse that is silence rather than
@@ -688,7 +688,7 @@ run_case "41g silent: 같은 실패에 URL 이 없으면 unknown 도 내지 않�
   "$FIX" Bash "" '{"exit": 1}'
 
 run_case "41c context(unknown): 그 보고가 unknown 티어로 라벨링됨" \
-  "context:unknown (검사가 실행되지 않았습니다" PostToolUse "$OK_GH" \
+  "context:unknown (the check did not run — not a pass / 검사가 실행되지 않았습니다" PostToolUse "$OK_GH" \
   "gh pr comment 42 --body-file $FIX/ok.md > /dev/null" \
   "$FIX" Bash ""
 

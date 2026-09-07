@@ -1,0 +1,347 @@
+feat(hooks): gate parens release-please rejects (#1268)
+
+* feat(hooks): read whole commit message from argv
+
+제목만 보던 공유 파서를 본문까지 읽도록 확장합니다. 릴리스가 조용히
+커밋을 버리는 형태가 본문 줄에 살기 때문에, 제목 게이트가 쓰는 argv
+워크로는 닿지 않습니다.
+
+- git_commit_titles: argv 워크를 `_scan_commit_message_values` 로 한 번만
+  돌게 묶고, extract_git_titles 와 새 extract_git_message_texts 가 그
+  결과를 각자 읽습니다. 사본을 하나 더 만드는 것이 #594 이전 두 파서가
+  드리프트한 경로라 워크는 계속 하나입니다.
+- text_from_file: -F 파일의 전문. title_from_file 이 여기서 첫 줄을 뗍니다.
+- _hook_utils.heredoc_bodies: strip_heredoc_bodies 의 짝. 힙독 본문은
+  토크나이저가 지워버리므로 원문에서만 회수됩니다.
+
+기존 두 제목 게이트의 판정은 그대로입니다 (format 66건, length 63건,
+lib 52건 전부 통과).
+
+Confidence: high
+Not-tested: 게이트 두 개가 실제 세션에서 부르는 경로는 플러그인 캐시의
+ 이전 릴리스라, 이 변경의 런타임 동작은 워킹 트리 직접 실행으로만 확인
+Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01XRSuj7p1m6R5hzLemNS7SR
+
+* feat(hooks): gate parens release-please rejects
+
+release-please 가 쓰는 파서는 본문의 모든 줄을 `type(scope):` 헤더로
+파싱합니다. 줄 첫머리의 공백 없는 낱말이 `(` 에 붙으면 그 괄호가 scope
+로 열리고, 같은 줄에서 깨끗이 닫히지 않으면 커밋 전체가 거부됩니다.
+거부된 커밋은 건너뛰어지는데 릴리스 워크플로는 그대로 success 로 끝나서,
+CHANGELOG 항목만 조용히 사라집니다. 릴리스 2회분에서 3건이 그렇게
+빠졌고 (#1228), 다음 릴리스는 직전 태그부터 계산하므로 복구되지 않습니다.
+
+#1233 의 check-changelog-coverage 는 이 누락을 붉은불로 세우는 탐지기고,
+이 게이트는 커밋이 아직 편집 가능한 유일한 시점에서 막는 예방기입니다.
+
+판별 규칙은 실제 파서 0.4.1 에 물어서 고정했습니다. 통과 조건 네 가지 -
+괄호 없음 또는 1열, 앞부분에 공백, 앞부분에 `!` 또는 `:`, 다른 괄호보다
+먼저 닫힘 - 는 모두 측정된 PASS 이지 문법 추론이 아닙니다. 표는 spec 에
+있습니다.
+
+등급은 blocking (exit 2), PRAXIS_COMMIT_PAREN_STRICT=0 으로 advisory.
+근거는 셋입니다. 이 저장소 전체 이력 659커밋에서 오탐 0 / 미탐 0 이고,
+검사가 순수 로컬 문자열 연산이라 length-check 를 advisory 로 만든
+네트워크 호출이 없으며, 오탐 비용은 공백 하나인 반면 미탐 비용은 복구
+불가한 CHANGELOG 항목입니다. 같은 기계 소비자를 지키는 format-check 가
+blocking 인 것과 같은 자리입니다.
+
+Confidence: high
+Not-tested: 실제 세션이 부르는 것은 플러그인 캐시의 이전 릴리스이므로,
+ 릴리스 이후 런타임에서 이 훅이 실제로 발화하는지는 미확인
+Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01XRSuj7p1m6R5hzLemNS7SR
+
+* test(hooks): re-derive sibling gate count as 8
+
+The manifest entry for commit-message-paren-check took the derived sibling
+commit-gate list from 7 to 8, but the test oracle still pinned 7, the old
+per-host counts, and the fixture anchors that quote the prose surfaces
+verbatim. The expected values here are re-derived from hooks/manifest.json
+directly, not copied from the checker under test.
+
+Confidence: high
+Not-tested: nothing beyond the suite itself — the oracle is a constant list.
+Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01XRSuj7p1m6R5hzLemNS7SR
+
+* fix(hooks): strip <<- tabs from every body line
+
+bash strips leading tabs from all of a `<<-` heredoc's input lines, not only
+from the delimiter line. heredoc_bodies applied lstrip only to the terminator
+comparison and returned the raw line, so commit-message-paren-check received
+a body line the shell never produces: a real `word(a(b))` arrived as
+`\tword(a(b))`, whose leading run holds whitespace, and the whitespace clause
+skipped it.
+
+Probe, bash 3.2.57(1)-release:
+
+    $ printf 'cat <<-EOF\n\tword(a(b))\n\t\tindented\n\tEOF\n' > d3.sh
+    $ bash d3.sh | od -c
+    0000000   w o r d ( a ( b ) ) \n i n d e n t e d \n
+
+The mirror test against strip_heredoc_bodies now compares lines with leading
+tabs dropped on both sides: the property it pins is which lines are body, and
+`<<-` makes the two sides disagree on a body line's text by design.
+
+Confidence: high
+Not-tested: bash versions other than 3.2.57 (macOS system bash) — the tab rule
+is POSIX and unchanged in bash 5, but only 3.2.57 was executed here.
+
+Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01XRSuj7p1m6R5hzLemNS7SR
+
+* fix(hooks): bind heredoc reads to the source
+
+The heredoc read was scoped to a `git commit` argv that produced no readable
+message at all, which is the wrong condition in both directions.
+
+Too narrow: `git commit -m 'fix: x' -m "$(cat <<'EOF' … EOF)"` resolves the
+first `-m`, so the early return fired and the malformed body was never graded.
+Too wide: with no resolvable source, every heredoc in the command was read, so
+an unrelated `cat > notes <<'NOTE'` earlier in the chain blocked a commit whose
+own message was clean.
+
+Both shapes name their own heredoc. An unresolvable `-m` value carries the
+opener inside its token (`$(cat <<'EOF'`), and `-F -` reads stdin from a
+redirection on its own argv, so heredoc_bodies_by_delimiter plus
+heredoc_delimiters bind each source to the body it opens. A delimiter word
+reused by two heredocs identifies neither, and that source contributes nothing
+rather than guessing.
+
+Confidence: high
+Not-tested: a `-F -` fed by a process substitution or a pipe rather than a
+heredoc — it resolves to no delimiter and passes silently, same as before.
+
+Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01XRSuj7p1m6R5hzLemNS7SR
+
+* fix(hooks): accept a path-prefixed git binary
+
+_scan_commit_message_values compared argv[0] to the literal "git", so
+`/usr/bin/git commit -m 'word(a(b))'` produced no message source and every
+gate built on this walk went silent — the three commit gates that share it,
+the new paren gate included. Mirror the _is_git_binary the sibling commit
+gates already carry, which is the same path-prefix hole #1099 closed for gh.
+
+A lookalike name is still not the binary: gitk, mygit and legit all fail the
+check, and the tests pin both directions.
+
+Confidence: high
+Not-tested: a shell function or alias named git — a hook reading argv cannot
+see either, and no sibling gate covers it.
+
+Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01XRSuj7p1m6R5hzLemNS7SR
+
+* fix(hooks): inspect commits inside substitutions
+
+main walked only the top-level command starts, and safe_tokenize coalesces a
+`$( ... )` run into one token, so `MSG=$(git commit -m 'word(a(b))')` carried
+no `git` argv[0] at any level the scan reached and the gate stayed silent.
+iter_command_texts already yields the outer text plus the inner text of every
+ACTIVE substitution, which is the surface the sibling gates from #1032/#1035
+use; quoting still decides what is active, so a `$(git commit ...)` printed
+from inside single quotes is text and is not graded.
+
+Confidence: high
+Not-tested: substitutions nested deeper than MAX_SUBST_DEPTH (4) — the shared
+helper stops there and this hook inherits that bound.
+
+Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01XRSuj7p1m6R5hzLemNS7SR
+
+* fix(hooks): blank a later-line substitution
+
+Only line 0 of a multi-line `-m` value decided whether the value was
+knowable, so `-m "fix: x\n\n$(git log --oneline"` passed the rest through as
+message text. The shell replaces that line with a command's output, but the
+body gate saw raw shell text whose leading word is glued to `(` and blocked a
+message nobody can predict.
+
+Each line is now tested on its own and an unknowable one is blanked rather
+than dropped, so the line number the gate reports still points at the real
+message. The single-quote exception matches a whole quoted run by value, so it
+cannot reach a line of a multi-line run: a literal `$(...)` line inside a
+single-quoted message is blanked too. That is a false negative, which is the
+fail-open direction, and it is pinned by test.
+
+Confidence: high
+Not-tested: a message whose later line opens a backtick substitution spanning
+into the next line — the per-line test reads one line at a time.
+
+Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01XRSuj7p1m6R5hzLemNS7SR
+
+* perf(hooks): read one line for a commit title
+
+title_from_file took the first line off text_from_file's whole-file `.read()`,
+so the two pre-existing title gates paid for the entire `-F` file to answer a
+question about its first 50 characters. A `-F` path is arbitrary and both
+gates run on every `git commit` a session makes.
+
+Measured, mean of 20 calls per file, same machine:
+
+    file     BEFORE (.read())   AFTER (readline)
+    500 B           0.066 ms           0.078 ms
+    1 MB            0.718 ms           0.041 ms
+    50 MB          47.016 ms           0.023 ms
+
+The 500 B row is the cost of the change: one extra buffered read call, and it
+is noise. The body gate still needs every line and keeps calling
+text_from_file. Path resolution moved into a shared helper so the two readers
+cannot drift on where `-` and a relative path go.
+
+Confidence: high
+Not-tested: nothing behavioural — the two readers were compared on a trailing
+newline, CRLF, an empty file, an empty first line, and a non-UTF-8 file, all
+pinned by test.
+
+Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01XRSuj7p1m6R5hzLemNS7SR
+
+* ci: fetch full history for the test job
+
+The paren gate's fixtures are the real commits release-please rejected,
+read back with `git log -1 --format=%B <sha>`. actions/checkout defaults
+to a shallow clone, so those objects are absent on CI and both fixture
+tests error with exit 128 rather than asserting anything. The repo
+already uses fetch-depth:0 for gitleaks, and at 657 commits the full
+history costs little.
+
+Confidence: high
+Not-tested: verified by reading the failing CI log and the checkout
+default; the fix itself is confirmed only by the next CI run.
+
+Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01XRSuj7p1m6R5hzLemNS7SR
+
+* fix(hooks): skip a line an expansion rewrites
+
+The gate graded the source text of a message value instead of the text
+bash delivers to git, so two shapes blocked commits that are valid.
+
+A substitution was treated as unreadable only when it OPENED the line, so
+`foo($(printf x))` was graded raw and read as a nested paren; git receives
+`foo(x)`, which release-please parses. Position does not decide whether a
+line is readable, so `has_shell_expansion` does, and it covers parameter
+expansion too.
+
+An unterminated `$(` made the gate blank that one line and grade the rest
+as message text. Bash never finishes parsing such a command, so no commit
+happens at all and the following lines are the inside of an unfinished
+substitution rather than message lines. Measured:
+
+  $ bash -c 'git commit -m "fix: x\n\n$(x\n\nword(a(b))"'
+  bash: -c: line 5: syntax error: unexpected end of file
+
+A whole value that arrived as one single-quoted run is now graded verbatim
+rather than line-blanked: the shell substitutes nothing inside it, which
+also removes the false negative the by-value match used to carry.
+
+Every expectation was measured before it was asserted, by running the
+command under bash with git replaced by a recorder that prints the argv
+and the message it was handed.
+
+Confidence: high
+Not-tested: shlex has already stripped quoting from a value, so an escaped
+  `\$` cannot be told from a live one and its line is blanked — a false
+  negative, pinned by test rather than closed.
+Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01XRSuj7p1m6R5hzLemNS7SR
+
+* fix(hooks): bind a heredoc to the text bash feeds
+
+Five shapes disagreed with what the reading command actually receives.
+
+A spaced `<< EOF` puts the operator and the delimiter in separate tokens,
+and the scan applied its per-token reader to each one, so a stdin heredoc
+feeding `git commit -F -` named no delimiter and was never read.
+
+Redirections apply left to right, so `cat <<A <<B` reads B and discards A.
+Every delimiter a source opened was collected, so malformed prose in the
+discarded body blocked a commit whose real message is clean.
+
+A backtick run re-enters shell parsing inside double quotes exactly as
+`$(…)` does, so the `<<EOF` in it opens a heredoc. Reading it as string
+data let a malformed message pass unseen.
+
+An unquoted delimiter leaves the body subject to expansion, so the raw
+lines are not the delivered ones. The body is now spliced and its
+expansion-carrying lines blanked before grading. Measured:
+
+  $ bash -c 'git commit -m "$(cat <<-EOF ... `(a(b))` note ... EOF)"'
+  bash: command substitution: line 0: syntax error near unexpected token
+  {"argv": ["commit", "-m", "fix: x\n\n note"]}
+
+A backslash-newline is removed by bash, not turned into a separator, so
+splicing it to a space produced a word no longer glued to its paren — the
+one shape this gate always passes. Splicing is skipped inside a
+single-quoted run and inside heredoc bodies, where bash does not splice
+either, and where joining lines would move every line number after it.
+
+Confidence: high
+Not-tested: a delimiter word that names two heredocs still identifies
+  neither, so that source contributes no text — unchanged fail-open.
+Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01XRSuj7p1m6R5hzLemNS7SR
+
+* fix(hooks): read git's short-option cluster grammar
+
+Three branches covered a subset of one grammar, so the shapes between them
+were either invisible or invented.
+
+A cluster is leading no-value flags followed by at most one value-taking
+flag, which consumes the rest of the cluster or, when the cluster ends with
+it, the next token. The old rule required the token to END in `m`, so
+`-am"fix: x"` yielded no message source at all, and `-F` was recognised only
+detached, so `-Fmsg.txt` and `-F-` named no file. One walk now covers
+`-mvalue`, `-am value`, `-am"value"`, `-vsm`, `-Ffile`, `-F-` and `-aF -`.
+
+The whitelist that rejects `-Smike@example.com` is kept and now guards the
+whole walk: an unknown character abandons the cluster rather than scanning
+past it, so no message source is invented for a flag whose value shape this
+module does not know.
+
+Everything after `--` is a pathspec. The scan continued past it, so a path
+literally named `-m` became a message source and its neighbour could block
+a valid commit. Measured before and after:
+
+  rc=2 <- git commit -m 'fix: x' -- '-m' 'word(a(b))'   (must be rc=0)
+  rc=2 <- git commit -m 'fix: x' -m 'word(a(b))'        (control, correct)
+
+The false-positive fixes land first on purpose: widening the set of
+recognised sources before them would have exposed more commits to the
+mis-grading they close.
+
+Confidence: high
+Not-tested: `-C`, `-c`, `-t` and `-u` take values this module does not read,
+  so a cluster containing one contributes nothing rather than resolving it.
+Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01XRSuj7p1m6R5hzLemNS7SR
+
+* docs(hooks): record the measured message surface
+
+The source table listed the shapes the gate happened to handle. It now
+lists the shapes git actually accepts, with the reading each one gets:
+attached and clustered short options, the `--` pathspec separator, the
+delimiter spellings, backtick substitutions, and the three cases whose
+delivered text cannot be known and are therefore passed rather than graded.
+
+Also records that each row was measured by running the command under bash
+with git replaced by a recorder, rather than reasoned from the grammar, and
+names the third heredoc-binding failure mode: grading a body that a later
+redirection on the same source discards.
+
+`heredoc_bodies_by_delimiter` is now `heredoc_sources`, which carries the
+delimiter's quoting alongside the body.
+
+Confidence: high
+Not-tested: documentation only, no runtime behaviour.
+Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01XRSuj7p1m6R5hzLemNS7SR
+
+---------
+
+Co-authored-by: Claude Opus 5 (1M context) <noreply@anthropic.com>

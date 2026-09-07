@@ -13,15 +13,22 @@ in [`ARCHITECTURE.md`](ARCHITECTURE.md); per-hook specs live at
 Every hook ships with full spec at `hooks/<role>/<name>/spec.md` — design
 rationale, matrix of blocked vs. passed commands, response JSON, parsing
 guarantees, fail-safe paths, and test summary. The hook index lives in
-[`ARCHITECTURE.md → Hook index`](ARCHITECTURE.md#hook-index); consult the
-per-hook spec before editing.
+[`docs/hook/INDEX.md`](docs/hook/INDEX.md); consult the per-hook spec before
+editing.
 
 Design mechanisms shared by all hooks:
 
-- **Structural tokenization, not regex.** `hooks/_lib/_hook_utils.py`
+- **Structural tokenization, not regex.** `hooks/_lib/_shell_tokenize.py`
   (`safe_tokenize` → `iter_command_starts` → `strip_prefix`) is the shared
-  primitive. Per-hook `impl.py` files add it to `sys.path` via the three-
-  line preamble documented in [`CONTRIBUTING.md → Adding or modifying a hook`](CONTRIBUTING.md#adding-or-modifying-a-hook).
+  primitive; `_subst.py` walks active `$(…)` / backtick spans
+  (`iter_command_texts`), `_compound.py` classifies compound and
+  state-changing commands and owns the cascade hint, and `_roles.py` is
+  the typed `Token` API (`tokenize_with_roles`, `filter_argv`).
+  `_hook_utils.py` is a re-export shim over all four, kept so the
+  pre-#1305 `from _hook_utils import …` preamble still resolves — new code
+  imports from the defining sub-module. Per-hook `impl.py` files add
+  `hooks/_lib` to `sys.path` via the three-line preamble documented in
+  [`CONTRIBUTING.md → Adding or modifying a hook`](CONTRIBUTING.md#adding-or-modifying-a-hook).
   Quoted strings, comments, env prefixes, wrapper commands, and shell
   control-flow keywords are handled consistently across all Bash hooks.
 - **Session state via `session_id`.** Per-session memory (intent flags,
@@ -37,7 +44,8 @@ Design mechanisms shared by all hooks:
     redundant but harmless (double-wrap is a no-op).
   - **Standalone hooks** — everything invoked through its own
     `hooks/<name>.sh` wrapper (non-Bash or multi-tool matchers,
-    UserPromptSubmit/PostToolUse/Stop events, opt-in hooks) must apply
+    UserPromptSubmit/PostToolUse/PostToolUseFailure/Stop/SubagentStop
+    events, opt-in hooks) must apply
     `@fail_open` to `main()` in `impl.py` directly (argv-style mains wrap
     a zero-arg `_entry()` instead). Rule 16 in
     `scripts/check-plugin-manifests.py` enforces this invariant.
@@ -61,7 +69,8 @@ Design mechanisms shared by all hooks:
   rather than "no work".
 - **Fire-ledger instrumentation for shell hooks (issue #848).** A hook's
   engagements land in the fire ledger via `@fail_open` (standalone) or the
-  dispatcher (Bash group) — both Python-only, so the four `impl.sh` hooks
+  dispatcher (Bash group) — both Python-only, so the then-four `impl.sh`
+  hooks (three since issue #1304 ported `codex-review-route` to Python)
   recorded nothing at all while an audit reading that ledger scored the
   silence as "never fires". A shell hook sources `_lib/record_fire.sh` and
   calls `praxis_fire_arm <hook> <role> "$SESSION_ID" ""` right after it
@@ -75,12 +84,26 @@ Design mechanisms shared by all hooks:
   hook rejects (block) or asks-and-may-deny a compound command (`&&`, `||`,
   `;`, `|`, newline) containing a state-changing step (`> file`, `<<EOF >`,
   `mkdir`, `tee`, `cp`/`mv`/`rm`/`touch`, `curl -o`, `wget -O`), every hook
-  appends the shared `_hook_utils.compound_cascade_hint(command)` text to
-  its block/ask message. The advisory clarifies that bash never executed
+  appends the shared `_compound.compound_cascade_hint(command)` text
+  (re-exported by `_hook_utils`) to its block/ask message. The advisory clarifies that bash never executed
   ANY part of the rejected command — files the redirect/mkdir/download
   would have created do NOT exist on disk — so the agent should not retry
   the second half expecting the first half to have landed. Single-command
   rejections receive no suffix (no cascade to warn about).
+- **English-first emitted bodies (issues #1160, #1298).** Every body a hook
+  hands to the user — stderr advisory text, a `permissionDecisionReason`, a
+  Stop `reason`, a `systemMessage`, an `additionalContext` — starts with an
+  English line; Korean detail may follow on the next line. Issue #1160 set
+  the rule for two advisories and left the rest of the suite alone, so a
+  reader who does not read Korean saw a block with no visible cause; #1298
+  extends it to every hook. The gate is `tests/test_emit_english_lead.py`:
+  it parses every `hooks/**/impl.py` and fails on any string literal longer
+  than eight characters whose first character — after an optional
+  `[hook-name]` tag — is Hangul, skipping docstrings, regex and
+  match-vocabulary literals, and text glued to the right of `+`. Its
+  `ALLOWLIST` must stay empty; an entry needs an issue link.
+
+  Rule: *English lead line first; Korean after a newline, never before.*
 
 ## Session-state concurrency
 
@@ -124,53 +147,38 @@ the remaining three ask what losing it costs:
    contention is real, its consequence is not; a lock here buys latency on
    every tool call and nothing else.
 
-The seven consumers as of #951. Every row's Q0 verdict below is a live
-measurement, not an inference — `jq-config` in #970, the other six in #1034:
+Every consumer of `resolve_cache_file` gets a row here — a new consumer is
+classified, not reflexively locked. The first six rows were measured live
+(`jq-config` in #970, the other five in #1034); the last two were classified
+from their implementation and carry no measurement yet. A seventh measured
+row, `advisory-nudge/postcompact-context`, left the table in #1339: the hook
+moved from `UserPromptSubmit` to `SessionStart(compact)`, where the event
+fires once per compaction, so its last-injected-uuid state and the lock
+around it were deleted — the #1034 measurement of the old write
+(5/300 torn unforced, 0/300 after the fix) stays on record in
+[`docs/hook-state-concurrency-measurements.md`](docs/hook-state-concurrency-measurements.md):
 
 | Hook | State | Loss consequence | Locked |
 | --- | --- | --- | --- |
 | `postuse-correction/second-failure-advisory` | per-`(tool, signature)` counter | fires on `prior_count == 1` exactly — Q1 | yes — Q0 PASS(live), 0/100 (#1034) |
 | `postuse-correction/pre-edit-md-escape-advisory` | accumulating set of Read paths | the Edit gate warns, or denies under `PRAXIS_MD_ESCAPE_MODE=block`, for a file that was Read — Q2 | yes — Q0 PASS(live), 0/100 vs 4/100 unlocked (#1034) |
 | `advisory-nudge/jq-config-empty-dict-advisory` | dedup set of advised paths | one advisory repeats — but the pair shared one `.tmp` staging name, so the surviving file could also be unparseable, which `_load_seen` reads as empty and the session's whole dedup set restarts — Q0 | yes |
-| `advisory-nudge/postcompact-context` | last-injected compact uuid | context re-injected once — but `write_state` truncated and wrote the FINAL name, staging through nothing, so the state file was its own staging file and a sibling's shorter write published a torn one — Q0 | yes, since #1034 — 5/300 unforced before, 0/300 after |
 | `preflight-gate/worktree-prune-snapshot-gate` | single `snapshot_taken` flag, only ever set true | concurrent writers write the identical value | no — Q0 PASS(live), 0/100 (#1034) |
 | `preflight-gate/session-intent` | set-once intent flags | written only from `UserPromptSubmit`, which is serialized per session; the `PreToolUse` gate path is read-only | no — Q0 PASS(live), 0/100 (#1034) |
 | `preflight-gate/retrospect-active-marker` | marker existence | whole-file write and `unlink`, no read-modify-write to lose | no — Q0 PASS(live), 0/100 (#1034) |
+| `preflight-gate/foreground-poll-loop-guard` | per-session registry of background waiters (start time, armed flag, command display string) | one advisory does not fire — Q3; stages through a per-pid name, so Q0 does not apply | no — classified from the impl, not measured |
+| `preflight-gate/approval-premise-reread-gate` | single-use premise ack file | consumed by an atomic `os.rename` claim; no read-modify-write to lose | no — classified from the impl, not measured |
 
 ### Q0, measured (issue #1034)
 
-Issue #970 graded the other six against Q0 only far enough to see that it
-moved no other row, and recorded that as follow-up. It was an author
-assertion, so #1034 measured it: 100 concurrent pairs of the real impl per
-row against one state file, each row paired with a negative control that
-removes only the property its exemption rests on. The control is not optional. A 0 with no arm
-that can fail it does not distinguish "exempt" from "the harness never reached
-the state file" — the trap hit during #1017 verification, where a wrong state
-path made both arms read 100/100.
-
-`second-failure-advisory` and `pre-edit-md-escape-advisory` do share a staging
-name, and the exemption claimed the lock covers the staging window. It does:
-0/100 corrupt under the lock, against 4/100 for `pre-edit-md-escape-advisory`
-with the lock neutered. (`second-failure-advisory`'s neutered arm loses an
-increment rather than corrupting on this scheduling, which its own case
-asserts.) `worktree-prune-snapshot-gate`, `retrospect-active-marker` and
-`session-intent` stage through `tempfile.mkstemp`: 0/100 each, against 100/100
-with `mkstemp` forced to one shared name. Every one of those pairs was
-provably overlapped — both children reported through the post-read barrier —
-so the 0s are measurements, not misses.
-
-`postcompact-context` did not hold. Its exemption priced the *consequence*
-(one uuid, so a corrupted read costs what a lost one does) and never checked
-the *mechanism*: `write_state` truncated and wrote the final name, staging
-through nothing at all, which makes the state file its own staging file — the
-degenerate case of the shared `<path>.tmp` above. 5 of 300 unforced pairs
-published `{"last_compact_uuid_emitted": "short-uuid"}uuuu…"}`, a short write
-over a longer sibling's tail, which `read_state` answers with an empty dict.
-Q0's remedy now applies in full: `state_lock` around the read-modify-write,
-and `tempfile.mkstemp` staging under it. Re-measured after the fix, 0/300. The
-staging name is what carries that — with it in place and the lock neutered,
-200 provably overlapping pairs corrupted 0 times and split their surviving
-uuid 103/97, the lost update Q3 already prices at one re-injection.
+Every Q0 verdict in the table above is a measurement, not an inference. The
+measurement record — 100 concurrent pairs of the real impl per row, each
+paired with a negative control that removes only the property its exemption
+rests on, and the `postcompact-context` corruption it caught — lives in
+[`docs/hook-state-concurrency-measurements.md`](docs/hook-state-concurrency-measurements.md).
+The rule it established, which applies to every future row: **a 0 with no
+control arm that can fail it is not a measurement** — it cannot distinguish
+"exempt" from "the harness never reached the state file".
 
 `hooks/_lib/_state_lock.py` is the primitive: `with state_lock(path):` around
 the read *and* the write, `fcntl.flock` on a `<path>.lock` sibling. Readers
@@ -188,11 +196,12 @@ read-modify-write. Anything slower than the deadline — a subprocess, a network
 call — held inside it does not merely add latency, it disables the lock. The
 holder outlasts every sibling's acquisition deadline, each sibling proceeds
 unlocked (that is the fail-open contract, not a bug), and they all read state
-the holder has not written yet. `postcompact-context` is the worked example:
-its `build_context` shells out to `git` and `gh` under 1.5s and 3.0s timeouts,
-so it is built *before* the lock and the decision is re-taken inside it. When
-building ahead of the lock needs an unlocked pre-check to stay cheap, the
-pre-check may only skip work; the in-lock re-read is what decides.
+the holder has not written yet. `postcompact-context` was the worked example
+until #1339 removed its state: its `build_context` shelled out to `git` and
+`gh` under 1.5s and 3.0s timeouts, so it was built *before* the lock and the
+decision was re-taken inside it. The rule outlives the example: when building
+ahead of the lock needs an unlocked pre-check to stay cheap, the pre-check may
+only skip work; the in-lock re-read is what decides.
 
 `tests/test_hook_state_concurrency.py` runs every consumer above in two real
 processes against one state file. Each locked hook carries an unlocked arm
@@ -210,9 +219,20 @@ that could have failed it.
 - PreToolUse hooks run **in parallel**. Decision precedence is
   `deny > defer > ask > allow`. Order in `hooks/manifest.json` (and the
   generated platform `hooks.json`) is presentational.
-- Stop hooks run **sequentially in array order**:
-  `completion-verify` → `retrospect-mix-check` → `strike-counter stop`.
-  Each gate is independent; first `decision: block` wins, fix it and re-run.
+- Stop hooks run **sequentially in array order**. The order is fixed by
+  `scripts/check-plugin-manifests.py` Rule 4 (`expected_stop`):
+  `completion-verify` and `retrospect-mix-check` first, then the
+  completion-verify evidence gates, and `strike-counter stop` last —
+  thirteen entries at the time of writing; the manifest is the list. Since
+  issue #1281 the twelve stdin-only entries form one `(Stop)` dispatch
+  group — a single `_dispatch.sh Stop -` node runs them in that order
+  inside one process (the two `impl.sh` members as subprocesses under the
+  member deadline) — and `strike-counter stop` follows as its own node,
+  because it reads its mode from argv, which a group cannot forward. Each
+  gate is independent. Inside the group every blocking member's reason is
+  kept and merged into one `decision: block` (issue #1169), and every
+  advisory member's `systemMessage` merges the same way, riding on the block
+  object when a sibling blocks; fix what the merged reason lists and re-run.
 - PostToolUse hooks run **sequentially**; corrective `additionalContext`
   emissions are additive, not exclusive. Inside the `PostToolUse(Bash)`
   dispatch group the manifest array order is the run order, and
@@ -223,10 +243,12 @@ that could have failed it.
 
 1. Survey ≥2 sibling implementations under `hooks/<role>/` for the
    convention (state-key naming, payload field access, exit-code
-   semantics). See the `Convention Survey Before Design` rule in global
-   `~/.claude/CLAUDE.md`.
+   semantics) — the *Convention Survey Before Design* rule
+   ([`ETHOS.md` → Rules praxis carries](ETHOS.md#rules-praxis-carries)).
 2. Author `hooks/<role>/<name>/impl.py` (or `impl.sh` for body-as-sh),
-   make it executable, add the `sys.path` preamble for `_hook_utils`.
+   make it executable, add the `sys.path` preamble for `hooks/_lib` and
+   import from `_shell_tokenize` / `_subst` / `_compound` / `_roles` (the
+   `_hook_utils` shim re-exports them for hooks written before #1305).
 3. Register the hook in [`hooks/manifest.json`](hooks/manifest.json) per
    ADR-0001 §2.5 schema (`name`, `role`, `event`, `matcher`, `hosts`,
    `timeout`, `args`, `body`, `wrapper_suffix` as applicable).
@@ -236,7 +258,7 @@ that could have failed it.
    do not run this build) and all platform `hooks.json` files.
 5. Add the test at `tests/hooks/<role>/test_<name>.{sh,py}`.
 6. Create `hooks/<role>/<name>/spec.md` (template: any existing spec).
-7. Add a row to the index table in [`ARCHITECTURE.md`](ARCHITECTURE.md#hook-index).
+7. Add the hook under its role in [`docs/hook/INDEX.md`](docs/hook/INDEX.md).
 8. Run `./scripts/check-plugin-manifests.py` — confirms the
    directory↔manifest cross-check, role agreement, byte-identical
    generated artifacts, plus 5+ other invariants.

@@ -5,6 +5,13 @@ release-please's parser rejected (positives) and accepted (negative controls).
 Without the controls a green run cannot distinguish "the gate caught it" from
 "the gate always fires" — `2d558892` in particular carries depth-3 nested
 parens mid-line and parses fine.
+
+The messages are read from tests/fixtures/commit-message-paren-check/<sha>.txt,
+verbatim copies of `git log -1 --format=%B <sha>` (see the README there), not
+from the repository itself: a shallow clone has none of these commits and
+`git log` fails with exit 128 (issue #1302). One extra case re-reads the live
+history when it is present and asserts the copies have not drifted, so the
+"real commits" property survives without coupling the suite to clone depth.
 """
 from __future__ import annotations
 
@@ -16,6 +23,7 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 HOOK = REPO_ROOT / "hooks" / "preflight-gate" / "commit-message-paren-check" / "impl.py"
+FIXTURES = REPO_ROOT / "tests" / "fixtures" / "commit-message-paren-check"
 
 # Commits release-please logged as unparseable, with the line and shape its
 # error string reported (issue #1228).
@@ -27,17 +35,36 @@ REJECTED = [
     ("e399693e", 18, "unclosed"),
     ("4d83c916", 189, "nested"),
     ("54128d0c", 17, "unclosed"),
+    # 9ea4785a is this gate's OWN merge commit. GitHub composed its squash
+    # body from the PR's commit messages, so a line-initial pseudo-scope
+    # written before the gate shipped reached main by a path no hook sees —
+    # the case spec.md used to call impossible. The parser reported
+    # `unexpected token '(' at 75:10`.
+    ("9ea4785a", 75, "nested"),
 ]
 
 # Commits the same parser accepted, over the same range.
 ACCEPTED = ["ed44c51", "5fdff21", "3d6a72f", "2d558892"]
 
 
+ALL_SHAS = [sha for sha, _, _ in REJECTED] + ACCEPTED
+
+
 def _message(sha: str) -> str:
+    # Decoded from bytes so nothing translates newlines: the text is exactly
+    # what `%B` wrote, trailing newline included.
+    return (FIXTURES / f"{sha}.txt").read_bytes().decode("utf-8")
+
+
+def _git(*args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        ["git", "-C", str(REPO_ROOT), "log", "-1", "--format=%B", sha],
-        capture_output=True, text=True, check=True,
-    ).stdout
+        ["git", "-C", str(REPO_ROOT), *args], capture_output=True, text=True,
+    )
+
+
+def _live_history_available() -> bool:
+    return all(_git("cat-file", "-e", f"{sha}^{{commit}}").returncode == 0
+               for sha in ALL_SHAS)
 
 
 def _run(command: str, env: dict[str, str] | None = None) -> tuple[int, str, str]:
@@ -129,6 +156,21 @@ def test_real_rejected_commits_block(tmp_path, sha, lineno, kind):
 def test_real_accepted_commits_pass(tmp_path, sha):
     rc, out, err = _run(_commit_via_file(tmp_path, _message(sha)))
     assert (rc, out, err) == (0, "", "")
+
+
+@pytest.mark.skipif(
+    not _live_history_available(),
+    reason="not every corpus commit is reachable here (shallow clone or "
+           "missing history) — the fixture copies are graded above regardless",
+)
+@pytest.mark.parametrize("sha", ALL_SHAS)
+def test_fixture_matches_the_live_commit(sha):
+    """The fixture is only evidence while it is byte-identical to the commit
+    it claims to be. Compared whenever the history is present; skipped, not
+    failed, when it is not, so clone depth never decides the verdict."""
+    live = _git("log", "-1", "--format=%B", sha)
+    assert live.returncode == 0, live.stderr
+    assert _message(sha) == live.stdout
 
 
 # ---------------------------------------------------------------------------

@@ -136,9 +136,9 @@ _BLOCKING = "blocking"
 _ADVISORY = "advisory"
 _UNKNOWN = "unknown"
 _TIER_NOTE = {
-    _BLOCKING: "규약 위반 — 지금 고치세요",
-    _ADVISORY: "고려하세요 — 오탐일 수 있습니다",
-    _UNKNOWN: "검사가 실행되지 않았습니다 — 통과가 아닙니다",
+    _BLOCKING: "convention violation — fix it now / 규약 위반 — 지금 고치세요",
+    _ADVISORY: "consider it — may be a false positive / 고려하세요 — 오탐일 수 있습니다",
+    _UNKNOWN: "the check did not run — not a pass / 검사가 실행되지 않았습니다 — 통과가 아닙니다",
 }
 _TIER_ORDER = (_BLOCKING, _UNKNOWN, _ADVISORY)
 # The skeleton itself lives in the operator's own workflow doc, which is not
@@ -312,11 +312,15 @@ def _parse_pr_comment(argv: list[str], cwd: str, command: str) -> dict | None:
     if words[:2] != ["pr", "comment"]:
         return None
     if body is None:
-        return {"undecodable": "본문 플래그를 찾지 못함"}
+        return {"undecodable": "body flag not found / 본문 플래그를 찾지 못함"}
     return {
         "body": body,
         "edit_last": edit_last,
-        "undecodable": "본문 파일을 읽지 못함" if body == "" and body_is_file else None,
+        "undecodable": (
+            "body file unreadable / 본문 파일을 읽지 못함"
+            if body == "" and body_is_file
+            else None
+        ),
     }
 
 
@@ -348,14 +352,14 @@ def _parse_api_patch(argv: list[str], cwd: str, command: str) -> dict | None:
         raw = call.body_raw
         if expand and raw.startswith("@") and _rewritten_in_command(raw[1:], command, cwd):
             body = ""
-            undecodable = "본문 파일이 같은 명령에서 재작성됨"
+            undecodable = "body file rewritten in the same command / 본문 파일이 같은 명령에서 재작성됨"
         else:
             body = _read_body_value(raw, expand, cwd)
 
     if call.method != "PATCH" or not call.path or not _COMMENTS_PATH_RE.search(call.path):
         return None
     if body is None:
-        return {"undecodable": undecodable or "본문 필드를 찾지 못함"}
+        return {"undecodable": undecodable or "body field not found / 본문 필드를 찾지 못함"}
     return {"body": body, "edit_last": False, "undecodable": undecodable}
 
 
@@ -545,7 +549,10 @@ def _structure_findings(body: str) -> list[tuple[str, str]]:
 
     rows = [int(n) for n in _TABLE_ROW_RE.findall(_claim_table_region(body))]
     if not rows:
-        missing.append((_BLOCKING, "검증 항목 표 (번호 행이 없음)"))
+        missing.append((
+            _BLOCKING,
+            "verification item table (no numbered rows) / 검증 항목 표 (번호 행이 없음)",
+        ))
 
     summaries = _toggle_summaries(body)
     if not any(d["unverified"] in s for s in summaries):
@@ -560,11 +567,12 @@ def _structure_findings(body: str) -> list[tuple[str, str]]:
     }
     uncovered = sorted(set(rows) - evidence)
     if uncovered:
+        rows_text = ", ".join(str(n) for n in uncovered)
         missing.append((
             _BLOCKING,
-            "행별 근거 토글 — 표 행 "
-            + ", ".join(str(n) for n in uncovered)
-            + f" 에 대응하는 {d['evidence_label']} 이 없음",
+            f"per-row evidence toggle — table rows {rows_text} have no matching "
+            f"{d['evidence_label']} / 행별 근거 토글 — 표 행 {rows_text}"
+            f" 에 대응하는 {d['evidence_label']} 이 없음",
         ))
     return missing
 
@@ -624,7 +632,10 @@ def _fetch_anchor(
         deadline,
     )
     if err:
-        return None, f"게시된 코멘트 {comment_id} 조회 실패 — {err}"
+        return None, (
+            f"failed to fetch posted comment {comment_id} — {err}"
+            f" / 게시된 코멘트 {comment_id} 조회 실패"
+        )
     if not body or not _is_anchor(body):
         return None, None
     return {
@@ -788,6 +799,9 @@ def _post_tool_use(payload: dict) -> int:
         if posts:
             problems.append((
                 _UNKNOWN,
+                "the anchor was posted but the output carries no comment URL, so the "
+                "structure and SHA-freshness checks did not run at all — keep the output, "
+                "or PATCH by comment id.\n"
                 "앵커를 게시했지만 출력에 코멘트 URL 이 없어 구조·SHA 신선도 검사를 "
                 "아예 실행하지 못했습니다 — 출력을 버리지 말거나 comment id 로 PATCH 하세요.",
             ))
@@ -797,7 +811,10 @@ def _post_tool_use(payload: dict) -> int:
         tag = f"[comment {ref[4]}] " if len(refs) > 1 else ""
         post, err = _fetch_anchor(ref, deadline)
         if err:
-            problems.append((_UNKNOWN, tag + f"{err} — 게시된 앵커를 검증하지 못했습니다."))
+            problems.append((
+                _UNKNOWN,
+                tag + f"{err} — could not verify the posted anchor / 게시된 앵커를 검증하지 못했습니다.",
+            ))
             continue
         if post is None:
             continue
@@ -822,10 +839,13 @@ def _post_tool_use(payload: dict) -> int:
         cwd = payload.get("cwd") or os.getcwd()
         uncovered = list(_uncovered_files(post["body"], base, head, deadline, cwd))
         if uncovered:
+            files_text = ", ".join(uncovered)
             problems.append((
                 _ADVISORY,
-                tag + "표 행이 언급하지 않는 변경 파일: " + ", ".join(uncovered)
-                + " (파일↔주장은 1:1 이 아니므로 오탐일 수 있습니다)",
+                tag + f"changed files no table row mentions: {files_text} "
+                "(file↔claim is not 1:1, so this may be a false positive)\n"
+                f"표 행이 언급하지 않는 변경 파일: {files_text} "
+                "(파일↔주장은 1:1 이 아니므로 오탐일 수 있습니다)",
             ))
 
     return _report(problems, urls)
@@ -860,8 +880,12 @@ def _report(problems: list[tuple[str, str]], urls: list[str]) -> int:
         found = [msg for t, msg in problems if t == tier]
         if found:
             lines.append(f"  {tier} ({_TIER_NOTE[tier]}):")
-            lines += [f"    - {m}" for m in found]
-    header = "[anchor-gate] 게시된 앵커 검사 결과 — " + (", ".join(urls) or "(URL 미상)")
+            # A bilingual finding continues on its own line, indented under
+            # the bullet so the Korean detail reads as part of the same item.
+            lines += ["    - " + m.replace("\n", "\n      ") for m in found]
+    header = "[anchor-gate] posted-anchor check result / 게시된 앵커 검사 결과 — " + (
+        ", ".join(urls) or "(URL unknown / URL 미상)"
+    )
     body = header + "\n" + "\n".join(lines)
 
     if not any(tier == _BLOCKING for tier, _ in problems):
@@ -881,9 +905,9 @@ def _report(problems: list[tuple[str, str]], urls: list[str]) -> int:
 
     print(
         body
-        + "\n  코멘트를 지금 수정하세요 (`gh api --method PATCH "
+        + "\n  Fix the comment now / 코멘트를 지금 수정하세요 (`gh api --method PATCH "
           ".../issues/comments/<id> -F body=@<file>`). "
-          f"규약: {_REFERENCE}",
+          f"Convention / 규약: {_REFERENCE}",
         file=sys.stderr,
     )
     return 0 if os.environ.get(_ADVISORY_ENV, "").strip() == "1" else 2
@@ -908,7 +932,9 @@ def _pre_tool_use(payload: dict) -> int:
     # PostToolUse re-checks it against what was actually published.
     for reason in undecodable:
         print(
-            f"[anchor-gate] 코멘트 본문을 해독하지 못해 사전 검사를 건너뜀 ({reason}). "
+            "[anchor-gate] could not decode the comment body, so the pre-check was "
+            f"skipped ({reason}); an anchor is checked after it is posted instead.\n"
+            f"  코멘트 본문을 해독하지 못해 사전 검사를 건너뜀 ({reason}). "
             "앵커였다면 게시 후 검사로 넘어갑니다.",
             file=sys.stderr,
         )
@@ -934,13 +960,20 @@ def _pre_tool_use(payload: dict) -> int:
         rule_name="ANCHOR VERIFICATION COMMENT",
         why="; ".join(reasons),
         correct_path=(
+            "fix the anchor to the convention and post it again — five required fields "
+            "(SHA+rev heading / item table / unverified toggle / per-row evidence toggle "
+            "/ update history); SHA freshness is confirmed by the PostToolUse check "
+            "against the posted comment / "
             "앵커를 규약대로 고친 뒤 다시 게시하세요 — 필수 필드 5종"
             "(SHA+rev 헤딩 / 항목 표 / 미검증 토글 / 행별 근거 토글 / 갱신 이력). "
             "SHA 신선도는 게시 후 PostToolUse 검사가 실제 코멘트로 확인합니다"
         ),
         bypass_env=_BYPASS_ENV,
         reference=_REFERENCE,
-        bypass_reason_hint=f"또는 명령 끝에 `{_BYPASS_TOKEN} <사유>` 를 붙이세요",
+        bypass_reason_hint=(
+            f"or append `{_BYPASS_TOKEN} <reason>` to the command"
+            f" / 또는 명령 끝에 `{_BYPASS_TOKEN} <사유>` 를 붙이세요"
+        ),
     )
     hint = compound_cascade_hint(command)
     if hint:

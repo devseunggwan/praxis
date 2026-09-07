@@ -2,7 +2,8 @@
 # Single entry point for the full test suite.
 #
 # Runs:
-#   1. pytest   — Python unit tests under tests/
+#   1. pytest   — Python unit tests under tests/, under coverage.py when the
+#                 module is importable (floor in .coveragerc, issue #1303)
 #   2. shell    — shell tests at tests/hooks/*/test_*.sh and tests/test_*.sh
 #   3. manifest — scripts/check-plugin-manifests.py
 #   4. invariants — scripts/check-hook-token-invariants.py
@@ -14,21 +15,25 @@
 #  10. ruff     — static Python lint (mirrors the ci.yml `ruff` job)
 #  11. shellcheck — static shell lint (mirrors the ci.yml `shellcheck` job)
 #  12. markdownlint — advisory markdown lint (mirrors the ci.yml `markdownlint` job)
+#  13. mypy     — static Python type check (mirrors the ci.yml `mypy` job)
 #
-# Steps 10-12 mirror CI jobs that used to have no local equivalent, so a change
+# Steps 10-13 mirror CI jobs that used to have no local equivalent, so a change
 # could pass here and still be flagged on the PR (issue #866). Each skips with
 # an explicit SKIPPED line when its tool is absent, so a contributor without
-# the toolchain is not blocked — CI remains authoritative either way.
+# the toolchain is not blocked — CI remains authoritative either way. Step 1's
+# coverage half follows the same protocol: without the `coverage` module the
+# tests still run, plain, and the missing floor is announced as a SKIPPED line
+# rather than passed over (issue #1303).
 #
 # Step 6 is a different repo-internal script, same family as steps 3-5 (no
 # external toolchain — nothing to install), but its skip condition is not
-# like steps 10-12's: the memory directory it lints is a local, gitignored,
+# like steps 10-13's: the memory directory it lints is a local, gitignored,
 # per-user store that is structurally absent in CI or a fresh checkout,
 # always, forever (issue #942) — not a "toolchain not installed" gap a
 # contributor can close. It prints "N/A", never "SKIPPED", to keep that
 # distinction visible in the log (see its own docstring / #917 below), and
 # this call strips PRAXIS_TESTS_STRICT (`env -u`, not passed through like
-# steps 10-12) so that permanent N/A can never fail the job. Real drift
+# steps 10-13) so that permanent N/A can never fail the job. Real drift
 # (nonzero exit with violations listed) still counts as FAILED, same as
 # steps 3-5 — this is not routed through the SKIPPED_TOOLS/skip_step() path
 # at all.
@@ -43,12 +48,141 @@
 #
 # Exit code is non-zero if any step fails, or if anything was skipped under
 # PRAXIS_TESTS_STRICT=1.
+#
+# `--doctor` runs nothing: it prints one table of every external tool the
+# steps and sub-suites above need — found/missing, version, and the install
+# hint the matching SKIPPED line would print — and exits 0 (issue #1302). Use
+# it to see which SKIPPED lines a full run will emit before paying for the
+# run. Without the flag the runner behaves exactly as before.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 cd "$REPO_ROOT"
+
+# ---------------------------------------------------------------------------
+# --doctor: toolchain report (issue #1302)
+#
+# One table, every external tool the runner or one of its sub-suites needs,
+# with found/missing, the version when found, and the same install hint the
+# corresponding SKIPPED line prints. Informational only — always exits 0 — so
+# a contributor can see at a glance which SKIPPED lines a full run WILL emit
+# before spending the minutes on it. It touches nothing else in this file: the
+# dispatch below runs before the isolation preamble, so a flag-less run is
+# unchanged.
+#
+# Bash 3.2 compatible on purpose (no mapfile, no associative arrays): macOS is
+# one of the hosts this table is for.
+# ---------------------------------------------------------------------------
+
+# First line of a command's combined output, empty when it cannot run. `sed`
+# reads to EOF so the producer never sees SIGPIPE under pipefail.
+doctor_version() {
+  "$@" 2>&1 | sed -n '1p' || true
+}
+
+doctor_row() {
+  if [[ -n "$5" ]]; then
+    printf '%-18s %-8s %-26s %-46s %s\n' "$1" "$2" "$3" "$4" "$5"
+  else
+    # No trailing pad when the last cell is empty.
+    printf '%-18s %-8s %-26s %s\n' "$1" "$2" "$3" "$4"
+  fi
+}
+
+# doctor_probe <tool> <needed-by> <install-hint> <version-command...>
+# Column 5 carries the install hint only on a MISSING row, so a healthy table
+# stays narrow.
+doctor_probe() {
+  local tool="$1" needed="$2" hint="$3" ver
+  shift 3
+  if command -v "$tool" >/dev/null 2>&1; then
+    ver="$(doctor_version "$@")"
+    doctor_row "$tool" found "${ver:-?}" "$needed" ""
+  else
+    doctor_row "$tool" MISSING "-" "$needed" "$hint"
+  fi
+}
+
+# doctor_probe_pymod <label> <module> <needed-by> <install-hint> <version-expr>
+doctor_probe_pymod() {
+  local label="$1" mod="$2" needed="$3" hint="$4" expr="$5" ver
+  if python3 -c "import $mod" >/dev/null 2>&1; then
+    ver="$(doctor_version python3 -c "import $mod; print($expr)")"
+    doctor_row "$label" found "${ver:-?}" "$needed" ""
+  else
+    doctor_row "$label" MISSING "-" "$needed" "$hint"
+  fi
+}
+
+doctor() {
+  local ver
+  echo "praxis test toolchain (scripts/run-tests.sh --doctor)"
+  echo ""
+  doctor_row TOOL STATUS VERSION "NEEDED BY" "INSTALL"
+  doctor_row ------------------ -------- -------------------------- \
+    ---------------------------------------------- ----------------------------------
+  doctor_probe python3 "steps 1,3-10; most shell sub-suites" \
+    "apt install python3 / brew install python" python3 --version
+  doctor_probe_pymod pytest pytest "step 1" "pip install pytest" \
+    "'pytest ' + pytest.__version__"
+  doctor_probe_pymod coverage coverage "step 1 coverage floor" \
+    "pip install 'coverage==7.16.0'" "'coverage ' + coverage.__version__"
+  doctor_probe_pymod mypy mypy "step 13" \
+    "pip install 'mypy==1.20.0' 'types-PyYAML==6.0.12.20260815'" \
+    "'mypy ' + __import__('mypy.version').version.__version__"
+  doctor_probe_pymod PyYAML yaml "step 8 workflow-pin check" "pip install PyYAML" \
+    "'PyYAML ' + yaml.__version__"
+  doctor_probe git "step 12 diff base; sub-suite fixture repos" \
+    "apt install git / brew install git" git --version
+  doctor_probe jq "catalog, fixture-key, reaper, retrospect suites" \
+    "apt install jq / brew install jq" jq --version
+  doctor_probe zsh "test_block_unmatched_glob.sh" \
+    "apt install zsh / brew install zsh" zsh --version
+  doctor_probe tmux "test_cmux_session_*.sh sub-suites" \
+    "apt install tmux / brew install tmux" tmux -V
+  doctor_probe lsof "test_codex_broker_reaper.sh lsof sub-cases" \
+    "apt install lsof" sh -c 'lsof -v 2>&1 | sed -n "s/^ *revision: */lsof /p"'
+
+  # Steps 10-12 mirror the runner's own discovery exactly, module form and
+  # node_modules probe included, so this report and the SKIPPED lines agree.
+  if command -v ruff >/dev/null 2>&1; then
+    ver="$(doctor_version ruff --version)"
+    doctor_row ruff found "${ver:-?}" "step 10" ""
+  elif python3 -m ruff --version >/dev/null 2>&1; then
+    ver="$(doctor_version python3 -m ruff --version)"
+    doctor_row ruff found "${ver:-?} (python3 -m ruff)" "step 10" ""
+  else
+    doctor_row ruff MISSING "-" "step 10" "pip install 'ruff==0.15.8'"
+  fi
+
+  doctor_probe shellcheck "step 11" "brew install shellcheck" \
+    sh -c 'shellcheck --version 2>&1 | sed -n "s/^version: /shellcheck /p"'
+
+  if command -v markdownlint-cli2 >/dev/null 2>&1; then
+    ver="$(doctor_version markdownlint-cli2 --help)"
+    doctor_row markdownlint-cli2 found "${ver:-?}" "step 12 (advisory)" ""
+  elif command -v markdownlint >/dev/null 2>&1; then
+    ver="$(doctor_version markdownlint --version)"
+    doctor_row markdownlint-cli2 found "markdownlint ${ver:-?}" "step 12 (advisory)" ""
+  elif [[ -x node_modules/.bin/markdownlint-cli2 ]]; then
+    ver="$(doctor_version node_modules/.bin/markdownlint-cli2 --help)"
+    doctor_row markdownlint-cli2 found "${ver:-?} (node_modules)" "step 12 (advisory)" ""
+  else
+    doctor_row markdownlint-cli2 MISSING "-" "step 12 (advisory)" \
+      "npm i -g markdownlint-cli2@0.23.2"
+  fi
+
+  echo ""
+  echo "MISSING rows become SKIPPED lines in a full run (a failure under PRAXIS_TESTS_STRICT=1)."
+  echo "This report is informational and always exits 0."
+}
+
+if [[ "${1-}" == "--doctor" ]]; then
+  doctor || true
+  exit 0
+fi
 
 # Run against a throwaway PRAXIS_HOME (#903). Hooks now resolve their runtime
 # files through it, so without this the suite would write into — and let
@@ -58,16 +192,18 @@ PRAXIS_HOME="$(mktemp -d)" || { echo "FATAL: mktemp -d failed" >&2; exit 1; }
 export PRAXIS_HOME
 trap 'rm -rf "$PRAXIS_HOME"' EXIT
 
-# Same isolation, for the fire-ledger (#849). resolve_path() in
-# hooks/_lib/_fire_ledger.py does NOT fall under PRAXIS_HOME — it defaults to
-# Path.home()/.praxis/telemetry regardless, so PRAXIS_HOME alone leaves it
-# writing into the developer's real ledger. Most tests/hooks/*/test_*.sh files
-# invoke an instrumented impl.sh/impl.py directly and never set
-# PRAXIS_FIRE_TELEMETRY_FILE themselves (only a handful do, e.g.
-# tests/hooks/_lib/test_record_fire.sh) — mirrors the pytest-side fix in
-# tests/conftest.py: an inline `PRAXIS_FIRE_TELEMETRY_FILE=... command`
-# prefix on a specific call still wins over this exported default.
-export PRAXIS_FIRE_TELEMETRY_FILE="$PRAXIS_HOME/fire-events-test.jsonl"
+# The fire ledger needs no export of its own any more. #849 added a suite-wide
+# PRAXIS_FIRE_TELEMETRY_FILE here because resolve_path() in
+# hooks/_lib/_fire_ledger.py ignored PRAXIS_HOME and defaulted to
+# ~/.praxis/telemetry regardless; since #1340 the ledger honours PRAXIS_HOME
+# (its default is $PRAXIS_HOME/telemetry), and since #934 a hook run out of a
+# development checkout writes to <checkout>/.praxis-dev-telemetry before
+# either. The throwaway PRAXIS_HOME above therefore covers the ledger too, for
+# the instrumented impl.sh/impl.py files most tests/hooks/*/test_*.sh invoke
+# directly (mirrors tests/conftest.py, whose per-test override remains for
+# tests that assert on ledger CONTENT). A test that exercises the default
+# resolution itself must still take PRAXIS_HOME out of its own environment —
+# see tests/hooks/_lib/test_record_fire.sh.
 
 # Third isolation, and the one that breaks the pattern of the two above (#1003).
 # CLAUDE_CONFIG_DIR relocates Claude Code's config root, and resolve_memory_dir()
@@ -94,8 +230,33 @@ skip_step() {
 # 1. pytest
 # ---------------------------------------------------------------------------
 echo "=== pytest ==="
-if ! python3 -m pytest tests/ -q; then
-  FAILED=1
+# Coverage floor (issue #1303). When coverage.py is importable, pytest runs
+# under `coverage run` and `coverage report` enforces the `fail_under` set in
+# .coveragerc (exit 2 below the floor — counted as a step failure). Only the
+# Python that pytest imports in-process is measured; impl.py executions driven
+# from the shell suites in step 2 are subprocesses and stay uncounted until
+# the follow-up half of #1303. Without the module the tests still run, plain,
+# and the absent floor goes through skip_step() like steps 10-13 so strict
+# mode (CI) fails on it instead of quietly measuring nothing.
+#
+# The data file lands under the throwaway PRAXIS_HOME unless the caller has
+# already chosen a COVERAGE_FILE — ci.yml does, so the report can be re-read
+# into the job summary after this script's EXIT trap has swept the temp dir.
+if python3 -c 'import coverage' 2>/dev/null; then
+  export COVERAGE_FILE="${COVERAGE_FILE:-$PRAXIS_HOME/.coverage}"
+  if ! python3 -m coverage run -m pytest tests/ -q; then
+    FAILED=1
+  fi
+  echo ""
+  echo "=== coverage report (floor: .coveragerc fail_under) ==="
+  if ! python3 -m coverage report; then
+    FAILED=1
+  fi
+else
+  if ! python3 -m pytest tests/ -q; then
+    FAILED=1
+  fi
+  skip_step coverage "pip install 'coverage==7.16.0'"
 fi
 
 # ---------------------------------------------------------------------------
@@ -110,7 +271,7 @@ SHELL_FAILED=0
 #     PRAXIS_SUBSKIP: <tool> <file>
 # and exits 0. run_sh() tees stdout so the live stream is preserved, then scans
 # the capture and folds each announced tool into SKIPPED_TOOLS — the same
-# accounting as the top-level steps 10-12, so PRAXIS_TESTS_STRICT=1 fails the
+# accounting as the top-level steps 10-13, so PRAXIS_TESTS_STRICT=1 fails the
 # run on them too. Before this, "SKIP jq unavailable; exit 0" inside a file
 # was indistinguishable from a pass and strict mode never saw it.
 SUBSKIP_MARKER="PRAXIS_SUBSKIP:"
@@ -198,7 +359,7 @@ fi
 echo ""
 echo "=== memory frontmatter lint ==="
 # PRAXIS_TESTS_STRICT is deliberately NOT propagated to this one call: unlike
-# steps 10-12 (a tool a contributor could install), the memory dir this checks
+# steps 10-13 (a tool a contributor could install), the memory dir this checks
 # is a local, gitignored, per-user store that structurally never exists in
 # CI or a fresh checkout — treating its absence as a strict-mode failure
 # would fail every CI run forever, not flag a fixable gap. The script prints
@@ -206,7 +367,7 @@ echo "=== memory frontmatter lint ==="
 # scrolling SKIPPED line lost its signal value once contributors stopped
 # reading it, and a condition that can never be fixed would sit there as
 # permanent unresolvable noise if it wore the same "SKIPPED" label as steps
-# 10-12's genuinely-fixable tool-absence skips. An N/A here is always benign;
+# 10-13's genuinely-fixable tool-absence skips. An N/A here is always benign;
 # only actual detected drift (exit 1 with violations listed) fails this step.
 # The script's own PRAXIS_TESTS_STRICT support still works for direct
 # standalone invocation (see its tests / docstring).
@@ -373,22 +534,60 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# 13. mypy (mirrors ci.yml `mypy` job — blocking there, blocking here)
+#
+# Scope and flags come from mypy.ini (hooks/_lib + scripts, issue #1301), so
+# the invocation carries no arguments and cannot drift from CI's. Version
+# parity: ci.yml pins `mypy==1.20.0` and `types-PyYAML==6.0.12.20260815`, the
+# stub package for scripts/check-workflow-pins.py's PyYAML import. An
+# installed mypy without that stub is not a skip — mypy reports the import as
+# untyped and the step FAILS, with mypy's own install hint on the line. Bump
+# both pins alongside the workflow.
+#
+# `python3 -m mypy` is probed BEFORE a bare `mypy` on PATH — the reverse of
+# step 10's order — because mypy resolves stub packages from the interpreter
+# it runs under. A `mypy` launcher installed for a different Python (a
+# pipx/user-site shim) does not see the types-PyYAML installed next to
+# python3 and fails on the yaml import while CI, which spells it
+# `python3 -m mypy`, passes. The module form is CI's exact invocation; the
+# bare binary is only the fallback for a mypy that is not importable from
+# python3 at all.
+# ---------------------------------------------------------------------------
+echo ""
+echo "=== mypy ==="
+if python3 -m mypy --version >/dev/null 2>&1; then
+  MYPY=(python3 -m mypy)
+elif command -v mypy >/dev/null 2>&1; then
+  MYPY=(mypy)
+else
+  MYPY=()
+fi
+
+if [[ ${#MYPY[@]} -eq 0 ]]; then
+  skip_step mypy "pip install 'mypy==1.20.0' 'types-PyYAML==6.0.12.20260815'"
+elif ! "${MYPY[@]}"; then
+  FAILED=1
+fi
+
+# ---------------------------------------------------------------------------
 echo ""
 if [[ $FAILED -ne 0 ]]; then
   echo "TEST SUITE FAILED" >&2
   exit 1
 fi
 
-# Scope note: this counts the three tool steps this script owns (10-12) plus
+# Scope note: this counts the four tool steps this script owns (10-13), the
+# coverage half of step 1 (same missing-module shape, #1303), plus
 # any tool a shell sub-suite announced via the PRAXIS_SUBSKIP marker before
 # exiting 0 (#1170) — a whole file that silently skipped on a missing tool is
-# a missing-toolchain gap exactly like steps 10-12. Step 6 has its own N/A line
+# a missing-toolchain gap exactly like steps 10-13. Step 6 has its own N/A line
 # (deliberately not "SKIPPED") and is excluded from this tally on purpose — it
 # is never a missing-toolchain skip. Per-gate platform skips inside a running
-# sub-suite — e.g. the Darwin-only gate in tests/test_codex_broker_reaper.sh —
-# still announce themselves only in their own summary and are not aggregated
-# here; conflating them would make a portable-by-design skip look like a
-# missing toolchain.
+# sub-suite — e.g. the Darwin-only "no cwd source" sub-case in
+# tests/test_codex_broker_reaper.sh, unreachable where /proc exists — still
+# announce themselves only in their own summary and are not aggregated here;
+# conflating them would make a portable-by-design skip look like a missing
+# toolchain.
 if [[ ${#SKIPPED_TOOLS[@]} -eq 0 ]]; then
   echo "ALL TESTS PASSED"
   exit 0

@@ -5,10 +5,16 @@ description: >
   pre-ask probe, grading every open finding by its blocking decoration, carrying
   the anchor's `Unverified` gaps into a follow-up, and the six-part briefing that
   ends in an explicit approve-ask.
+when_to_use: >
   Triggers on "merge briefing", "pre-merge briefing", "머지 브리핑",
   "머지해도 되나", "approve merge", "pre-ask probe", "merge approval".
   Do NOT activate on post-merge cleanup (use `worktree-merge-cleanup`) or on
   "merge conflict resolution".
+allowed-tools:
+  - Grep
+  - Bash(gh pr checks *)
+  - Bash(gh pr view *)
+  - Bash(gh api graphql *)
 verified-against-runtime: true
 runtime-verified-at: 2026-08-13
 runtime-verified-note: "gh 2.97.0 — `gh pr view --json mergeable,mergeStateStatus,headRefOid,reviews,comments` and the paginated `reviewThreads` GraphQL both returned live rows (thread query positive-controlled on a PR with 3 known threads); `GH_DEBUG=api` showed that same `pr view` sends `comments(first: 100)` / `reviews(first: 100)` with no cursor variable."
@@ -25,10 +31,10 @@ open", and the surface where blocking findings actually live — inline review
 threads — is the one a natural-looking `gh pr view --json comments,reviews`
 call silently omits.
 
-This skill is the on-demand home for that procedure. The always-loaded rule set
-(`~/.claude/CLAUDE.md` → PART VII `Merge Approval`) keeps the gate; the shape of
-the report lives in `ai-dotfiles/docs/git-pr-workflow.md#pre-merge-report-template`;
-the steps below are how you get from "the PR looks done" to a question the user
+This skill is the on-demand home for that procedure. The *Pre-Merge Reporting*
+rule ([`ETHOS.md` → Rules praxis carries](../../ETHOS.md#rules-praxis-carries))
+keeps the gate; the six-part list in Step 4 below is the report's shape; the
+steps below are how you get from "the PR looks done" to a question the user
 can answer in one word.
 
 **Core principle:** the briefing is a claim about the PR's state, so every line
@@ -198,8 +204,8 @@ as "머지 후 실전송으로 확인" dies with the PR unless something outlive
 
 ### Step 4: Compose the six-part briefing
 
-Six parts, in this order (shape owned by
-`ai-dotfiles/docs/git-pr-workflow.md#pre-merge-report-template`):
+Six parts, in this order (this list is the canonical shape; it was originally
+derived from the author's dotfiles PR-workflow template):
 
 1. **What changed** — scope (files, logical changes), not the issue title again
 2. **What was verified** — real output, with the command cited

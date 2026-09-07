@@ -30,16 +30,28 @@ every hook event; exactly these lanes are aggregated:
     - any hook -> block (top-level `{"decision": "block", "reason": ...}` JSON
       at exit 0) -> ONE merged block: every blocking member's reason is kept,
       blank-line joined, each attributed to its hook name
+  Stop advisory lane (issue #1281):
+    - any hook -> top-level `{"systemMessage": ...}` at exit 0 -> the messages
+      merge into ONE `systemMessage`, blank-line joined and attributed like
+      the block reasons; it rides on the block object when a sibling blocks
+      (`systemMessage` is a field common to every hook event, so the host
+      reads both from the one JSON object it accepts)
   additionalContext lane (issue #874, any event, event-name-checked):
     - non-decision `hookSpecificOutput.additionalContext` objects merge into
       ONE `hookSpecificOutput` object
   - else -> allow (silent pass; no JSON written)
 
   stderr from every hook (advisory nudges AND deny/block reasons) is always
-  preserved and forwarded. NOT implemented: Stop `{"systemMessage": ...}`
-  advisory merging — a grouped member's systemMessage is dropped by the
-  context-merge path, one reason Stop is not yet listed in the manifest's
-  dispatch groups.
+  preserved and forwarded.
+
+Shell members (issue #1281). A member whose manifest `body` is `impl.sh` has
+no Python `main()` to import, so `run_one` runs it as a subprocess: the payload
+on stdin, the member deadline as the subprocess timeout, and the same
+`(exit, stdout, stderr)` triple back into the lanes above. The child's own
+fire-ledger arming (`_lib/record_fire.sh`) is switched off through
+`PRAXIS_FIRE_TELEMETRY_DISABLE` so the group records it exactly once, the way
+it records every Python member. A timed-out or unstartable shell member fails
+open with a stderr note, mirroring `fail_open` for a raising Python member.
 
 Fail-open invariant (ETHOS.md): every `main()` runs through `_hook_runtime.fail_open`,
 and the dispatcher's own `main()` swallows exceptions to 0 — a crash here must
@@ -50,6 +62,8 @@ from __future__ import annotations
 import importlib.util
 import io
 import json
+import os
+import subprocess
 import sys
 import time
 import traceback
@@ -74,6 +88,15 @@ from _hook_runtime import (  # type: ignore[import-not-found]  # noqa: E402
 
 _ASK_MARKER = '"permissionDecision": "ask"'
 _DENY_MARKER = '"permissionDecision": "deny"'
+
+# Events whose members carry a decision as a top-level `{"decision": "block"}`
+# / `{"systemMessage": ...}` JSON at exit 0 rather than in a
+# `hookSpecificOutput` (`_hook_io.emit_stop_block` / `emit_stop_advisory`).
+# SubagentStop "use[s] the same decision control format as Stop hooks"
+# (hooks reference, read 2026-09-06), so the Stop aggregation lane below
+# covers it verbatim — issue #1337. Kept in sync with
+# `_fire_ledger.STOP_LANE_EVENTS`, which gates the matching ledger branch.
+STOP_LANE_EVENTS = ("Stop", "SubagentStop")
 
 # Skip-record marker — kept in sync with _fire_ledger._SKIP_MARKER so a
 # budget-skipped member is classified as decision "skip" (not "advise").
@@ -115,7 +138,7 @@ _DEFAULT_GROUP_BUDGET_SEC = 15.0
 
 
 def _iter_group_entries(
-    event: str, matcher: str, host: Optional[str]
+    event: str, matcher: Optional[str], host: Optional[str]
 ) -> Iterator[tuple[dict, dict]]:
     """Yield `(hook, entry)` manifest pairs matching (event, matcher, host).
 
@@ -137,28 +160,27 @@ def _iter_group_entries(
             continue
         if hook.get("event") != event or hook.get("matcher") != matcher:
             continue
-        name = hook.get("name")
-        role = hook.get("role")
         # Members are invoked with stdin only (see run_one). A manifest hook
         # that declares "args" (the per-process runtime forwards those as
         # sys.argv) is NOT supported in a dispatch group — the dispatcher's own
         # main() consumes sys.argv for (event, matcher), so the member would
-        # silently run with its args dropped. Fail OPEN (exclude, never block)
-        # but NOT fail-silent: report loudly, mirroring how run_one forwards
-        # import-failure tracebacks (issue #1169).
+        # silently run with its args dropped. It is excluded here, and the
+        # build keeps it as its own standalone node beside the dispatcher
+        # node (`build-plugin-manifests.filter_hooks_for_host`, issue #1199),
+        # so the hook still runs — check Rule 14 fails the build if that node
+        # is missing. The exclusion used to be reported on stderr on every
+        # dispatch (issue #1169); with the standalone node guaranteed it is
+        # the designed arrangement, not a fault, and under the Stop group the
+        # line would have reached the user on every turn (issue #1281).
+        # (`body: impl.sh` members are fine: run_one runs them as a
+        # subprocess, stdin-only like every other member — issue #1281.)
         if hook.get("args"):
-            sys.stderr.write(
-                f"[dispatch] {role}/{name}: manifest entry declares "
-                f"args={hook.get('args')!r}, which dispatch groups cannot "
-                "forward (members are invoked with stdin only) — member "
-                "excluded from the group (fail-open)\n"
-            )
             continue
         yield hook, hook
 
 
 def load_group(
-    event: str, matcher: str, host: Optional[str] = None
+    event: str, matcher: Optional[str], host: Optional[str] = None
 ) -> tuple[list[tuple[str, str, Path]], float, dict[tuple[str, str], float]]:
     """Read the manifest ONCE; return `(members, budget_sec, member_timeouts)`.
 
@@ -182,6 +204,18 @@ def load_group(
     for hook, entry in _iter_group_entries(event, matcher, host):
         role = hook.get("role")
         name = hook.get("name")
+        # A member's impl path is `<role>/<name>/...`, so both must be strings.
+        # The manifest checker rejects an entry without them, but this is the
+        # runtime side: one malformed entry must not take the whole group down
+        # (a raise here fails main() open with nothing on stderr, hiding every
+        # other member). Exclude it loudly instead, mirroring the args case.
+        if not isinstance(role, str) or not isinstance(name, str):
+            sys.stderr.write(
+                f"[dispatch] manifest entry {hook.get('role')!r}/"
+                f"{hook.get('name')!r} lacks a string role/name — member "
+                "excluded from the group (fail-open)\n"
+            )
+            continue
         # `or` (not `.get(key, default)`): an explicit "body": null in a future
         # manifest entry has the key present, so `.get` would return None and
         # `Path / None` would raise. `or` treats both absent and null as default.
@@ -196,7 +230,7 @@ def load_group(
 
 
 def group_members(
-    event: str, matcher: str, host: Optional[str] = None
+    event: str, matcher: Optional[str], host: Optional[str] = None
 ) -> list[tuple[str, str, Path]]:
     """Return `(role, name, impl_path)` for manifest entries matching (event, matcher).
 
@@ -223,6 +257,69 @@ def _load_main(role: str, name: str, impl: Path) -> Optional[Callable[[], int]]:
     return cast("Callable[[], int]", fn) if callable(fn) else None
 
 
+def is_shell_member(impl: Path) -> bool:
+    """True for a `body: impl.sh` member — run as a subprocess, never imported."""
+    return impl.suffix == ".sh"
+
+
+def run_shell_member(
+    role: str,
+    name: str,
+    impl: Path,
+    payload_raw: str,
+    deadline: Optional[float] = None,
+) -> tuple[int, str, str]:
+    """Run a shell member as a subprocess. Returns `(exit, stdout, stderr)`.
+
+    The impl is exec'd directly (not via `sh`) so its own `#!/bin/bash`
+    shebang is honored, exactly as the generated per-hook wrapper did. The
+    timeout is the member deadline the dispatcher publishes (issue #1167), so
+    a shell member is deadline-clamped by construction — it needs no budget
+    API of its own — and a direct/test call without a deadline is capped at
+    the default group budget rather than left unbounded.
+
+    Fail-open, both halves: a missing or non-executable impl passes silently
+    (the launcher's `[ -f "$IMPL" ] || exit 0` contract, issue #1053), and a
+    timeout or spawn failure passes with a stderr note, mirroring what
+    `fail_open` does for a raising Python member — never a block nobody
+    decided, never a silent disappearance.
+
+    `PRAXIS_FIRE_TELEMETRY_DISABLE=1` in the child's environment switches off
+    the impl's own `record_fire.sh` arming: the group records this member's
+    fire from the returned triple (`_record_fires`), the same rich record the
+    shell writer would have produced, and a second record per fire would
+    double-count it in the audit that reads the ledger (issue #848).
+    """
+    if not impl.is_file():
+        return 0, "", ""
+    timeout = (
+        _DEFAULT_GROUP_BUDGET_SEC
+        if deadline is None
+        else max(0.0, deadline - time.monotonic())
+    )
+    env = dict(os.environ)
+    env["PRAXIS_FIRE_TELEMETRY_DISABLE"] = "1"
+    try:
+        proc = subprocess.run(
+            [str(impl)],
+            input=payload_raw,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            env=env,
+        )
+    except subprocess.TimeoutExpired:
+        return (
+            0,
+            "",
+            f"[dispatch] {role}/{name}: shell member exceeded its "
+            f"{timeout:.1f}s deadline; killed (fail-open)\n",
+        )
+    except (OSError, ValueError, subprocess.SubprocessError) as exc:
+        return 0, "", f"[dispatch] {role}/{name}: shell member failed to start: {exc} (fail-open)\n"
+    return proc.returncode, proc.stdout, proc.stderr
+
+
 def run_one(
     role: str,
     name: str,
@@ -231,6 +328,10 @@ def run_one(
     deadline: Optional[float] = None,
 ) -> tuple[int, str, str]:
     """Run a single member's `main()` in-process. Returns `(exit, stdout, stderr)`.
+
+    A `body: impl.sh` member has no `main()` to import and is delegated to
+    `run_shell_member` (a subprocess under the same deadline) — the triple it
+    returns feeds the same lanes.
 
     `sys.stdin` is re-pointed at a fresh copy of the payload so the unmodified
     impl.py reads it as if it were the only process. `main()` is wrapped in
@@ -247,6 +348,8 @@ def run_one(
     that ignores it is still bounded by the host's node timeout. None
     (direct/test calls) publishes no deadline.
     """
+    if is_shell_member(impl):
+        return run_shell_member(role, name, impl, payload_raw, deadline)
     if deadline is not None:
         set_member_deadline(deadline)
     try:
@@ -331,9 +434,38 @@ def _record_fires(members, results, payload_raw: str, event: str) -> None:
 
 
 def run_group(
-    event: str, matcher: str, payload_raw: str, host: Optional[str] = None
+    event: str, matcher: Optional[str], payload_raw: str, host: Optional[str] = None
 ) -> int:
-    """Run the whole (event, matcher) group; emit one decision; return its exit code."""
+    """Run the whole (event, matcher) group; emit one decision; return its exit code.
+
+    The transcript turn memo (issue #1281) is enabled for exactly this call:
+    members that read the current turn share one parse, and the memo is
+    dropped on the way out so nothing outlives the group run. Observe-only and
+    fail-open, like the fire telemetry — a missing `_transcript` cannot break
+    the dispatcher.
+    """
+    try:
+        import _transcript  # type: ignore[import-not-found]
+    except Exception:
+        _transcript = None  # type: ignore[assignment]
+    if _transcript is not None:
+        try:
+            _transcript.enable_turn_memo()
+        except Exception:
+            pass
+    try:
+        return _run_group(event, matcher, payload_raw, host)
+    finally:
+        if _transcript is not None:
+            try:
+                _transcript.disable_turn_memo()
+            except Exception:
+                pass
+
+
+def _run_group(
+    event: str, matcher: Optional[str], payload_raw: str, host: Optional[str] = None
+) -> int:
     # Mark this process as the dispatcher so the fail_open-level coarse recorder
     # (issue #710 coverage expansion) skips the Bash-group members run below —
     # they are recorded richly by _record_fires. Avoids double-counting.
@@ -375,7 +507,7 @@ def run_group(
     # to prevent. Exit-2 stays event-agnostic: an exit code cannot be faked by
     # quoted text.
     is_pretooluse = event == "PreToolUse"
-    is_stop = event == "Stop"
+    is_stop = event in STOP_LANE_EVENTS
     deadline = time.monotonic() + max(
         budget - _GROUP_BUDGET_MARGIN_SEC, _MEMBER_SKIP_FLOOR_SEC
     )
@@ -469,29 +601,33 @@ def run_group(
     # PreToolUse (issue #1199 review): `{"decision": "block"}` means Stop's
     # block, and re-emitting it as this group's answer on another event
     # answers a question that event never asked.
+    #
+    # The Stop advisory lane (issue #1281) rides alongside: a member's
+    # top-level `systemMessage` (`_hook_io.emit_stop_advisory`) is a field
+    # common to every hook event, so it merges into the SAME object as the
+    # block when a sibling blocks, and stands alone otherwise. Without this
+    # lane a grouped advisory fell through to the context merge below, which
+    # forwards only `hookSpecificOutput`, and was dropped — the reason Stop
+    # stayed outside the dispatch groups.
     blocks: list[tuple[str, str]] = []
+    messages: list[tuple[str, str]] = []
     if is_stop:
         for (_role, name, _impl), (rc, so, _se) in zip(members, results):
             if rc != 0 or not so:
                 continue
-            reason = _stop_block_reason(so)
+            reason, message = _stop_output(so)
             if reason is not None:
                 blocks.append((name, reason))
-    if blocks:
-        chunks: list[str] = []
-        for name, reason in blocks:
-            tag = f"[praxis:{name}]"
-            if not reason:
-                # Malformed reason (missing / non-string) still blocks — the
-                # attribution tag alone is the reason, with no trailing space.
-                chunks.append(tag)
-            elif tag in reason:
-                chunks.append(reason)
-            else:
-                chunks.append(f"{tag} {reason}")
-        sys.stdout.write(
-            json.dumps({"decision": "block", "reason": "\n\n".join(chunks)}) + "\n"
-        )
+            if message is not None:
+                messages.append((name, message))
+    if blocks or messages:
+        stop_out: dict = {}
+        if blocks:
+            stop_out["decision"] = "block"
+            stop_out["reason"] = "\n\n".join(_attributed(blocks))
+        if messages:
+            stop_out["systemMessage"] = "\n\n".join(_attributed(messages))
+        sys.stdout.write(json.dumps(stop_out) + "\n")
         return 0
 
     # Issue #874: a member may emit a NON-decision `hookSpecificOutput` at exit 0 —
@@ -517,34 +653,67 @@ def run_group(
     return 0
 
 
-def _stop_block_reason(stdout: str) -> Optional[str]:
-    """Return the reason if `stdout` is a Stop-lane block object, else None.
+def _attributed(items: list[tuple[str, str]]) -> list[str]:
+    """Prefix each `(hook, text)` with `[praxis:<hook>]` unless it already carries it.
+
+    Shared by the Stop block and advisory lanes so a merged reason and a merged
+    systemMessage attribute their parts the same way deny reasons do. A
+    malformed (empty) text still yields the bare tag, with no trailing space:
+    the entry must not vanish just because its body is missing.
+    """
+    out: list[str] = []
+    for name, text in items:
+        tag = f"[praxis:{name}]"
+        if not text:
+            out.append(tag)
+        elif tag in text:
+            out.append(text)
+        else:
+            out.append(f"{tag} {text}")
+    return out
+
+
+def _stop_output(stdout: str) -> tuple[Optional[str], Optional[str]]:
+    """Parse a Stop member's stdout into `(block_reason, system_message)`.
 
     A blocking Stop member writes exactly `{"decision": "block", "reason": ...}`
-    (see `_hook_io.format_stop_block` and the shell siblings' `jq -n` form).
-    The shape is recognized by PARSING the JSON — never by substring matching —
+    (see `_hook_io.format_stop_block` and the shell siblings' `jq -n` form); an
+    advisory one writes `{"systemMessage": ...}` (`format_stop_advisory`). Both
+    shapes are recognized by PARSING the JSON — never by substring matching —
     so a member whose output merely *mentions* `decision` (prose, a context
     string) cannot fake a block. Both the python `json.dump` single-line form
     and jq's pretty-printed multi-line form parse identically here.
 
     A parsed block with a missing/non-string `reason` still blocks (empty
     reason): dropping it because its reason field is malformed would be the
-    exact silent-swallow this lane exists to prevent. Fail-open only for
-    outputs that are not a block at all (unparseable, or a different shape).
+    exact silent-swallow this lane exists to prevent. A `systemMessage` is
+    forwarded only when it is a non-empty string — there is nothing to show
+    otherwise. Fail-open (`(None, None)`) only for outputs that are neither
+    (unparseable, or a different shape).
     """
     # No substring pre-filter: `{"\\u0064ecision": "block"}` is valid JSON for
     # the same object, and a literal probe drops it before the parse that is
     # supposed to be the authority here (issue #1199 review).
     if not stdout:
-        return None
+        return None, None
     try:
         obj = json.loads(stdout)
     except ValueError:
-        return None
-    if not isinstance(obj, dict) or obj.get("decision") != "block":
-        return None
-    reason = obj.get("reason")
-    return reason if isinstance(reason, str) else ""
+        return None, None
+    if not isinstance(obj, dict):
+        return None, None
+    reason: Optional[str] = None
+    if obj.get("decision") == "block":
+        raw_reason = obj.get("reason")
+        reason = raw_reason if isinstance(raw_reason, str) else ""
+    raw_message = obj.get("systemMessage")
+    message = raw_message if isinstance(raw_message, str) and raw_message else None
+    return reason, message
+
+
+def _stop_block_reason(stdout: str) -> Optional[str]:
+    """Return the reason if `stdout` is a Stop-lane block object, else None."""
+    return _stop_output(stdout)[0]
 
 
 def _merge_additional_context(payloads: list[str], event: str) -> str:

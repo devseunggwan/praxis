@@ -8,8 +8,9 @@ Previously these JSONL transcript readers were re-implemented per hook:
     merge-state-claim-gate (Stop hooks)
   - _read_last_user_message duplicated across block-ask-end-option,
     block-manufactured-action-menu (PreToolUse AskUserQuestion gates)
-  - bounded readers (_read_transcript_tail, _load_transcript_objs) in
-    block-gh-issue-create-without-dup-search, block-sciomc-finding-commit
+  - bounded whole-file readers (_read_transcript_tail, _load_transcript_objs)
+    in block-gh-issue-create-without-dup-search, block-sciomc-finding-commit —
+    both since retired for the backward `tail_lines` reader (#1240, #1279)
   - _TRANSCRIPT_SCAN_LINES = 400 re-declared in external-write-falsify-check,
     pre-output-falsification-gate
 
@@ -37,12 +38,15 @@ last-user-message extraction both skip them.
 Public API:
   TRANSCRIPT_SCAN_LINES                                  — default tail window
   load_transcript(path)                                  -> list[dict]
-  iter_transcript(path)                                  -> Iterator[dict]
-  load_transcript_objs(path, max_bytes)                  -> list | None
-  read_transcript_tail(path, max_lines, max_bytes)       -> str | None
+  iter_transcript(path, needle=None)                     -> Iterator[dict]  (needle: str | tuple, any-of)
+  iter_transcript_bounded(path, max_bytes, needle=None)  -> Iterator[dict]
+  json_needle(value)                                     -> bytes | None
   load_recent_events(path, min_events, max_bytes)        -> list[dict]
   load_current_turn(path, max_bytes)                     -> list[dict]
   get_current_turn(events)                               -> list[dict]
+  resolve_stop_transcript(payload)                       -> (path, is_agent)
+  load_stop_turn(payload, max_bytes)                     -> list[dict]
+  stop_last_assistant_text(payload, turn)                -> str
   extract_last_assistant_text(turn)                      -> str
   has_tool_in_turn(turn, tool_name)                      -> bool
   read_last_user_message(transcript_path)                -> str | None
@@ -54,8 +58,10 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 from collections import deque
+from typing import cast
 from pathlib import Path
 
 # Default tail window (in JSONL lines) for substring scans over the recent
@@ -88,7 +94,7 @@ def load_transcript(path: str) -> list[dict]:
     return events
 
 
-def iter_transcript(path: str):
+def iter_transcript(path: str, needle: str | tuple[str, ...] | None = None):
     """Yield each event dict in `path`, one line at a time. Fail-open.
 
     Same parse contract as `load_transcript` (non-JSON and non-dict lines are
@@ -96,13 +102,32 @@ def iter_transcript(path: str):
     whole transcript in memory. For a consumer that genuinely must see the
     whole session but can reduce as it goes — a 224MB session materialized as
     a list cost 741MB of RSS per Stop hook (issue #1076).
+
+    `needle` is a literal every record the caller can use must contain, or a
+    tuple of them (any-of), so a line without one is rejected before
+    `json.loads` (issue #1278). The substring test runs in C; the parse is
+    what a whole-session walk actually pays for (42,000 parses cost 440 ms on
+    a 36 MB session). It is a necessary condition only: the caller still
+    checks the parsed record, so a needle that appears in unrelated text costs
+    a parse, never a wrong answer.
+
+    Write the needle as the exact JSON token, delimiting quotes included —
+    `'"tool_use"'`, not `'tool_use'`: the bare form also matches
+    `"tool_use_id"` on every tool_result line, the largest lines in a
+    session, and the filter stops filtering. Keep it to characters the
+    encoder leaves alone inside a string value (no backslash, inner quote,
+    control character, or non-ASCII under `ensure_ascii`), or it will miss
+    records that do match.
     """
+    needles = (needle,) if isinstance(needle, str) else needle
     try:
         f = open(path, encoding="utf-8", errors="replace")
     except OSError:
         return
     with f:
         for line in f:
+            if needles is not None and not any(n in line for n in needles):
+                continue
             line = line.strip()
             if not line:
                 continue
@@ -114,49 +139,13 @@ def iter_transcript(path: str):
                 yield obj
 
 
-def load_transcript_objs(path: str, max_bytes: int) -> list | None:
-    """Bounded loader returning raw parsed objects (dicts and non-dicts).
-
-    Returns None when the file is missing, unreadable, or larger than
-    `max_bytes` — callers treat None as "cannot scan, fail open".
-    Non-JSON lines are skipped, scanning continues.
-
-    The bound is enforced on the bytes actually read (not a stat()
-    pre-check): a live session can append to the transcript between a
-    stat and the read, which would defeat the contract.
-    """
-    text = _read_bounded_text(path, max_bytes)
-    if text is None:
-        return None
-    objs: list = []
-    for line in text.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            objs.append(json.loads(line))
-        except (json.JSONDecodeError, ValueError):
-            continue  # skip non-JSON lines, keep scanning
-    return objs
-
-
-def read_transcript_tail(path: str, max_lines: int, max_bytes: int) -> str | None:
-    """Return the last `max_lines` lines of the transcript as raw text.
-
-    Returns None when the file is missing, unreadable, or larger than
-    `max_bytes` — callers treat None as "cannot scan, fail open".
-    The bound is enforced on the bytes actually read (see
-    `load_transcript_objs`).
-    """
-    text = _read_bounded_text(path, max_bytes)
-    if text is None:
-        return None
-    lines = text.strip().split("\n")
-    return "\n".join(lines[-max_lines:])
-
-
 def _read_bounded_text(path: str, max_bytes: int) -> str | None:
-    """Read at most `max_bytes` bytes; None when missing or over the bound."""
+    """Read at most `max_bytes` bytes; None when missing or over the bound.
+
+    The bound is enforced on the bytes actually read (not a stat() pre-check):
+    a live session can append to the transcript between a stat and the read,
+    which would defeat the contract.
+    """
     try:
         p = Path(path)
         if not p.is_file():
@@ -252,13 +241,22 @@ def _iter_lines_backwards(path: str, max_bytes: int):
         return pos == 0
 
 
-def tail_lines(path: str, max_lines: int, max_bytes: int | None = None) -> list[str]:
+def tail_lines(
+    path: str, max_lines: int, max_bytes: int | None = None, *, strict: bool = False
+) -> list[str]:
     """The last `max_lines` lines of `path`, in file order, decoded leniently.
 
     Reads from the end (see `_iter_lines_backwards`) so a hook that only
     matches against the recent tail never loads a 200 MB transcript into
     memory (issue #1240). `[]` when the file is missing or unreadable — the
     same fail-open value the former `readlines()` callers used.
+
+    `strict=True` raises `TranscriptReadError` instead of returning `[]` for
+    a missing or unreadable file, for the caller that must act on "read it
+    all, found nothing" and fail open on "could not read" — the two answers
+    `[]` folds together (issue #1279). It is one open: a probe-then-read
+    leaves a window in which a file that passed the probe is gone by the
+    read, and the gate then blocks on an emptiness it never saw.
 
     Unbounded by default: the callers' contract is "the last N lines", and a
     byte cap that stopped short would hand them a shorter window that looks
@@ -282,6 +280,8 @@ def tail_lines(path: str, max_lines: int, max_bytes: int | None = None) -> list[
             if len(out) >= max_lines:
                 break
     except TranscriptReadError:
+        if strict:
+            raise
         return []
     out.reverse()
     return out
@@ -291,6 +291,8 @@ def load_recent_events(
     path: str,
     min_events: int = 0,
     max_bytes: int = CURRENT_TURN_SCAN_MAX_BYTES,
+    *,
+    drop_sidechain: bool = False,
 ) -> list[dict]:
     """Tail of the transcript, read backwards, containing the current turn.
 
@@ -315,6 +317,15 @@ def load_recent_events(
     not a superset. A gate handed that would miss evidence that is present and
     block on it, so the honest answer is the same empty fail-open this returns
     for an unreadable file.
+
+    `drop_sidechain` removes each event's `isSidechain` marker as it is
+    parsed. It is for a SubagentStop `agent_transcript_path` and nothing else
+    (`load_stop_turn` is the only caller that sets it): every event in a
+    per-agent transcript belongs to that agent, so the marker — which exists
+    to keep a subagent's events out of the MAIN transcript's turn — would make
+    `is_turn_boundary` and every downstream helper that filters on it answer
+    "nothing here" for a file that is entirely the subagent's. Default False
+    leaves the main-transcript reading of every existing caller untouched.
     """
     tail: deque[dict] = deque()
     try:
@@ -322,6 +333,8 @@ def load_recent_events(
             obj = _parse_line(raw)
             if obj is None:
                 continue
+            if drop_sidechain:
+                obj.pop("isSidechain", None)
             tail.appendleft(obj)
             if is_turn_boundary(obj) and len(tail) >= min_events:
                 return list(tail)
@@ -336,6 +349,31 @@ def load_recent_events(
     return list(tail) if size <= max_bytes else []
 
 
+# Process-local memo for `load_current_turn` (issue #1281). None = disabled,
+# which is the standalone state: one hook process makes one call, so there is
+# nothing to share and no staleness to reason about. The dispatcher enables it
+# for the span of one group run — eight Stop members read the same transcript
+# tail, and under one process the second through eighth parse would only
+# repeat the first — and disables it again on the way out, so a test that
+# drives several groups through one interpreter never sees a previous run's
+# entry. The key carries the file's size and mtime so a transcript appended
+# between two members (the host writes it only between turns, but a memo must
+# not rely on that) re-reads instead of answering from the stale tail.
+_TURN_MEMO: dict[tuple, list[dict]] | None = None
+
+
+def enable_turn_memo() -> None:
+    """Start memoizing `load_current_turn` results in this process (dispatcher)."""
+    global _TURN_MEMO
+    _TURN_MEMO = {}
+
+
+def disable_turn_memo() -> None:
+    """Drop the memo and return `load_current_turn` to its standalone behavior."""
+    global _TURN_MEMO
+    _TURN_MEMO = None
+
+
 def load_current_turn(
     path: str, max_bytes: int = CURRENT_TURN_SCAN_MAX_BYTES
 ) -> list[dict]:
@@ -344,8 +382,26 @@ def load_current_turn(
     Same result as `get_current_turn(load_transcript(path))` without parsing
     the whole transcript — see `load_recent_events` for the bound and for what
     the two capped terminations return.
+
+    Under the dispatcher's memo (`enable_turn_memo`) a repeat call for the same
+    `(path, max_bytes)` on an unchanged file answers from the first parse. The
+    list handed back is a fresh copy each time, so one member's `.pop()` or
+    `.append()` cannot leak into a sibling's view of the turn.
     """
-    return get_current_turn(load_recent_events(path, max_bytes=max_bytes))
+    memo = _TURN_MEMO
+    if memo is None:
+        return get_current_turn(load_recent_events(path, max_bytes=max_bytes))
+    try:
+        st = os.stat(path)
+        key: tuple | None = (path, max_bytes, st.st_size, st.st_mtime_ns)
+    except OSError:
+        key = None
+    if key is not None and key in memo:
+        return list(memo[key])
+    turn = get_current_turn(load_recent_events(path, max_bytes=max_bytes))
+    if key is not None:
+        memo[key] = turn
+    return list(turn)
 
 
 def _parse_line(raw: bytes) -> dict | None:
@@ -361,6 +417,98 @@ def _parse_line(raw: bytes) -> dict | None:
     except (json.JSONDecodeError, ValueError):
         return None
     return obj if isinstance(obj, dict) else None
+
+
+class TranscriptTooLarge(TranscriptReadError):
+    """`iter_transcript_bounded` stopped because `path` is past its byte bound.
+
+    A subclass of `TranscriptReadError` so a caller that only wants "could not
+    scan" catches one class; a caller that must tell the two apart catches
+    this one first.
+    """
+
+
+def json_needle(value: str) -> bytes | None:
+    """`value` exactly as JSON encodes it as a string value — quotes included —
+    or None when the encoding would rewrite it.
+
+    The needle a bounded scan rejects lines on must be a *necessary*
+    condition: every record that can satisfy the caller carries it. Two
+    things break that. Dropping the quotes makes `praxis:x` match prose that
+    merely mentions the skill, costing a parse per mention. Encoding with
+    `ensure_ascii=False` makes a non-ASCII name match only a writer that
+    emits raw UTF-8, while a writer that escapes it (`json.dumps` default)
+    would slip every real record past the filter — a fail-closed miss. So
+    the probe is built with the default encoder, and a value it escapes at
+    all answers None: the caller then parses every line.
+    """
+    encoded = json.dumps(value)
+    if encoded != f'"{value}"':
+        return None
+    return encoded.encode("ascii")
+
+
+def _line_has(raw: bytes, needle) -> bool:
+    if needle is None:
+        return True
+    if isinstance(needle, (bytes, bytearray)):
+        return needle in raw
+    return any(n in raw for n in needle)
+
+
+def iter_transcript_bounded(path: str, max_bytes: int, needle=None):
+    """Yield each event dict of `path` whose raw line carries `needle`, reading
+    at most `max_bytes` (issues #1277, #1312).
+
+    One reader for every gate that scans a whole session under a size cap —
+    three hooks carried byte-identical copies of this loop and the copies had
+    already diverged (one lost its read-error guard, one its NUL-path guard)
+    by the time the bounded-`readline` fix had to be applied to each by hand.
+
+    `needle` is bytes, a tuple of bytes (any-of), or None. A line without it
+    is rejected before `json.loads`; the test runs in C and is what a
+    whole-session walk otherwise pays for. Build it with `json_needle` when it
+    is a JSON string value, or use a bare literal when it must also match
+    non-JSON text (a slash command inside a message).
+
+    Raises `TranscriptReadError` when the file is missing, not a regular
+    file, or fails to read — a FIFO at the path would otherwise block
+    `open()` for the caller's whole budget — and `TranscriptTooLarge` when the
+    file is past `max_bytes` at open (`fstat`, an O(1) early-out: a session
+    only grows) or grows past it while being read. Each read is capped at
+    the budget left, so one oversized line is refused before it is
+    allocated. Callers map both to their fail-open value; nothing here
+    decides for them.
+    """
+    try:
+        if not Path(path).is_file():
+            raise TranscriptReadError(path)
+        fh = open(path, "rb")
+    except TranscriptReadError:
+        raise
+    except (OSError, ValueError) as exc:
+        raise TranscriptReadError(path) from exc
+    with fh:
+        try:
+            if os.fstat(fh.fileno()).st_size > max_bytes:
+                raise TranscriptTooLarge(path)
+            consumed = 0
+            while True:
+                raw = fh.readline(max_bytes - consumed + 1)
+                if not raw:
+                    return
+                consumed += len(raw)
+                if consumed > max_bytes:
+                    raise TranscriptTooLarge(path)
+                if not _line_has(raw, needle):
+                    continue
+                obj = _parse_line(raw)
+                if obj is not None:
+                    yield obj
+        except TranscriptReadError:
+            raise
+        except OSError as exc:
+            raise TranscriptReadError(path) from exc
 
 
 def is_turn_boundary(ev: dict) -> bool:
@@ -435,6 +583,102 @@ def has_tool_in_turn(turn: list[dict], tool_name: str) -> bool:
                         and block.get("name") == tool_name:
                     return True
     return False
+
+
+# --------------------------------------------------------------------------- #
+# Stop / SubagentStop payload readers (issue #1337 item 2)
+# --------------------------------------------------------------------------- #
+#
+# SubagentStop fires when a subagent finishes and uses the same decision
+# format as Stop, so the completion gates can grade a subagent's final turn
+# the way they grade the main one. Its payload carries TWO transcripts:
+# `transcript_path` is the main session's, `agent_transcript_path` is the
+# subagent's own, "stored in a nested subagents/ folder" (hooks reference,
+# read 2026-09-06). A gate that keeps reading `transcript_path` on
+# SubagentStop grades the parent's turn against the subagent's claim — the
+# defect these two helpers exist to prevent.
+
+
+def resolve_stop_transcript(payload: dict) -> tuple[str, bool]:
+    """Return `(path, is_agent)` for a Stop / SubagentStop payload.
+
+    A payload that is about a subagent — `hook_event_name` says SubagentStop,
+    or it carries an `agent_transcript_path` — resolves to that agent
+    transcript **or to nothing**. It never falls back to `transcript_path`.
+
+    The fallback is what the earlier draft of this function did, and it
+    reintroduced the exact defect the SubagentStop registration exists to
+    remove (CodeRabbit on #1358). With an unflushed agent transcript the gates
+    read the PARENT's turn while `stop_last_assistant_text` takes the
+    SUBAGENT's `last_assistant_message`: a subagent that ran nothing and
+    merely repeated a number from the parent's output ("9 tests passed. All
+    done.") satisfied `completion-verify`'s evidence and paste checks against
+    evidence it never produced. Grading one conversation's claim with another
+    conversation's evidence is worse than not grading it, so the unreadable
+    case returns "" and every caller's "no path → pass" check fires.
+
+    A plain Stop payload carries neither signal and resolves to
+    `transcript_path` as before.
+    """
+    if not isinstance(payload, dict):
+        return "", False
+    agent_path = payload.get("agent_transcript_path")
+    has_agent_path = isinstance(agent_path, str) and bool(agent_path)
+    is_subagent = (
+        payload.get("hook_event_name") == "SubagentStop" or has_agent_path
+    )
+    if is_subagent:
+        if has_agent_path and os.path.isfile(cast(str, agent_path)):
+            return cast(str, agent_path), True
+        return "", True
+    main_path = payload.get("transcript_path")
+    return (main_path if isinstance(main_path, str) else ""), False
+
+
+def load_stop_turn(
+    payload: dict, max_bytes: int = CURRENT_TURN_SCAN_MAX_BYTES
+) -> list[dict]:
+    """Current turn for a Stop / SubagentStop payload — `[]` when unreadable.
+
+    On a main-session transcript this is exactly `load_current_turn`, memo and
+    all. On a subagent's own transcript the sidechain markers are dropped as
+    the tail is parsed (`load_recent_events(drop_sidechain=True)`); see that
+    function for why the marker cannot survive into a per-agent file's turn.
+    The memo is deliberately not used on the agent path: it keys on
+    `(path, max_bytes)` alone, and the two readings of one path must never
+    answer each other.
+    """
+    path, is_agent = resolve_stop_transcript(payload)
+    if not path or not os.path.isfile(path):
+        return []
+    if not is_agent:
+        return load_current_turn(path, max_bytes)
+    return get_current_turn(
+        load_recent_events(path, max_bytes=max_bytes, drop_sidechain=True)
+    )
+
+
+def stop_last_assistant_text(payload: dict, turn: list[dict]) -> str:
+    """Final assistant text for a Stop / SubagentStop payload.
+
+    Prefers the payload's `last_assistant_message`. The transcript "is written
+    asynchronously and may lag the in-memory conversation, so it may not yet
+    include the current turn's most recent messages when a hook fires. Hooks
+    that need the final assistant text of the current turn should use
+    `last_assistant_message` on Stop and SubagentStop instead of reading the
+    transcript" (hooks reference, read 2026-09-06). Falls back to the turn's
+    own last assistant message when the field is absent or not a string —
+    every payload from a host that predates the field.
+
+    `turn` is still the caller's gate: a caller passes the turn it already
+    loaded and returns early on an empty one, so a payload-supplied claim can
+    never be graded against evidence that was never read.
+    """
+    if isinstance(payload, dict):
+        text = payload.get("last_assistant_message")
+        if isinstance(text, str) and text.strip():
+            return text
+    return extract_last_assistant_text(turn)
 
 
 def read_last_user_message(transcript_path: str) -> str | None:
@@ -582,12 +826,20 @@ REJECTION_DENIAL_KIND = "user-rejected"
 REJECTION_PHRASE = "doesn't want to proceed"
 _DENIAL_KIND_MARKER = '"toolDenialKind"'
 _TOOL_USE_MARKER = '"tool_use"'
+# The same literals as bytes, for the pre-parse probes over raw lines.
+_DENIAL_KIND_MARKER_B = _DENIAL_KIND_MARKER.encode("ascii")
+REJECTION_PHRASE_B = REJECTION_PHRASE.encode("ascii")
+_TOOL_USE_MARKER_B = _TOOL_USE_MARKER.encode("ascii")
 
 # Bounds. The rejection scan reads the WHOLE file (not a tail): a rejection is a
 # standing NO for the rest of the session, so a tail window would expire it
 # after N lines of unrelated work. The byte bound is what keeps that affordable,
 # and both passes pre-filter on a cheap substring before any json.loads, so the
-# common line is never parsed.
+# common line is never parsed. Both passes STREAM the file (issue #1280): the
+# earlier shape read the bound's worth into one string and then split it into
+# a list — two copies of up to 20 MB, plus the parsed records — on every
+# destructive command that reached the gate. Streaming keeps the peak at one
+# line plus the handful of records that matched.
 REJECTION_SCAN_MAX_BYTES = 20 * 1024 * 1024
 # Most recent N rejections. A gate only needs the standing refusals, and the
 # resolution pass costs one substring probe per needle per candidate line.
@@ -597,26 +849,145 @@ REJECTION_SCAN_MAX_RECORDS = 20
 REJECTION_TEXT_MAX_CHARS = 20000
 
 
+# How many recent `tool_use` blocks a rejection can still be resolved against.
+# A rejection is the tool_result of the user turn right after the assistant
+# turn that carried the tool_use, so the distance between the two is the
+# number of parallel tool calls in that one turn — rarely above ten. The ring
+# is state, so it is persisted with the cursor: a rejection read in one call
+# still resolves against a tool_use read in an earlier one.
+REJECTION_RECENT_TOOL_USES = 32
+# A stored tool_input larger than this (serialized) is kept as text only: the
+# ring travels through the cursor file on every call, and a Write body would
+# otherwise be rewritten to disk on every destructive command.
+_REJECTION_INPUT_MAX_CHARS = REJECTION_TEXT_MAX_CHARS
+
+
+def _rejection_state() -> dict:
+    """The empty reducer state: rejections found so far and the tool_use ring."""
+    return {"rejections": [], "recent": []}
+
+
+def _note_tool_uses(state: dict, ev: dict) -> None:
+    """Append the assistant record's tool_use blocks to the recent ring."""
+    msg = ev.get("message")
+    if not isinstance(msg, dict) or msg.get("role") != "assistant":
+        return
+    content = msg.get("content")
+    if not isinstance(content, list):
+        return
+    uuid = ev.get("uuid")
+    recent = state["recent"]
+    for block in content:
+        if not isinstance(block, dict) or block.get("type") != "tool_use":
+            continue
+        block_id = block.get("id")
+        if not isinstance(block_id, str) or not block_id:
+            continue
+        name = block.get("name")
+        tool_input = block.get("input")
+        if not isinstance(tool_input, dict):
+            tool_input = {}
+        text = _flatten_strings(tool_input)
+        try:
+            small = len(json.dumps(tool_input)) <= _REJECTION_INPUT_MAX_CHARS
+        except (TypeError, ValueError):
+            small = False
+        recent.append({
+            "id": block_id,
+            "uuid": uuid if isinstance(uuid, str) else "",
+            "name": name if isinstance(name, str) else "",
+            "input": tool_input if small else {},
+            "text": text,
+        })
+    if len(recent) > REJECTION_RECENT_TOOL_USES:
+        del recent[: len(recent) - REJECTION_RECENT_TOOL_USES]
+
+
+def _note_rejection(state: dict, ev: dict, max_records: int) -> None:
+    """Append the record's rejection, resolved against the recent ring."""
+    if ev.get("toolDenialKind") != REJECTION_DENIAL_KIND:
+        return
+    block = _rejected_tool_result(ev)
+    if block is None:
+        return
+    tool_use_id = block.get("tool_use_id")
+    if not isinstance(tool_use_id, str) or not tool_use_id:
+        return
+    source_uuid = ev.get("sourceToolAssistantUUID")
+    source_uuid = source_uuid if isinstance(source_uuid, str) else ""
+    timestamp = ev.get("timestamp")
+    entry = {
+        "tool_use_id": tool_use_id,
+        "tool_name": "",
+        "tool_input": {},
+        "text": "",
+        "source_uuid": source_uuid,
+        "timestamp": timestamp if isinstance(timestamp, str) else "",
+    }
+    # Newest first: a replayed / resumed transcript can repeat a tool_use id,
+    # and when the rejection names its source record only that record may
+    # attribute the refusal (the uuid cross-check the two-pass scan had).
+    for use in reversed(state["recent"]):
+        if use["id"] != tool_use_id:
+            continue
+        if source_uuid and use["uuid"] != source_uuid:
+            continue
+        entry["tool_name"] = use["name"]
+        entry["tool_input"] = use["input"]
+        entry["text"] = use["text"]
+        break
+    rejections = state["rejections"]
+    rejections.append(entry)
+    if max_records > 0 and len(rejections) > max_records:
+        del rejections[: len(rejections) - max_records]
+
+
+def _reduce_rejection_event(state: dict, ev: dict, max_records: int) -> None:
+    """Route one record: assistant records feed the tool_use ring, the rest
+    are tested as rejections. `message` is guarded like every other reader
+    here — a record whose `message` is a string must not abort the scan."""
+    msg = ev.get("message")
+    role = msg.get("role") if isinstance(msg, dict) else None
+    if ev.get("type") == "assistant" or role == "assistant":
+        _note_tool_uses(state, ev)
+        return
+    _note_rejection(state, ev, max_records)
+
+
+_REJECTION_NEEDLES = (_TOOL_USE_MARKER_B, _DENIAL_KIND_MARKER_B)
+
+
 def scan_user_rejections(
     path: str,
     max_bytes: int = REJECTION_SCAN_MAX_BYTES,
     max_records: int = REJECTION_SCAN_MAX_RECORDS,
+    cursor_path: str | None = None,
 ) -> list[dict] | None:
     """Return structurally-recorded user tool rejections, oldest → newest.
 
     Each entry:
       tool_use_id  — the rejected tool_use block's id
       tool_name    — resolved originating tool ("" when unresolvable)
-      tool_input   — resolved tool_use input dict ({} when unresolvable)
+      tool_input   — resolved tool_use input dict ({} when unresolvable, and
+                     {} when the input serializes past the text bound — the
+                     `text` is still carried)
       text         — every string leaf of `tool_input`, newline-joined and
                      bounded; the identifier/keyword surface both consumers read
       source_uuid  — `sourceToolAssistantUUID` ("" when absent)
       timestamp    — record timestamp ("" when absent)
 
-    Returns None when the scan could not run because the file is past
+    One forward pass through `scan_transcript_resumable`: an assistant record
+    parks its `tool_use` blocks in a bounded ring, a rejection record resolves
+    against the ring. Only lines carrying the `tool_use` or `toolDenialKind`
+    literal are parsed. With `cursor_path` (see `scan_cursor_path`) the pass
+    resumes where the previous call stopped, so the byte bound is a budget
+    per call rather than a ceiling on the session: a transcript past it is
+    indeterminate for the calls it takes to catch up, then costs its delta.
+
+    Returns None when the scan did not reach the end of the file within
     `max_bytes` — INDETERMINATE, not "no rejections" (issue #1231). Folding
-    that into [] made the two indistinguishable at exactly the wrong place: the
-    bound is hit by long sessions, and a long session is where standing
+    that into [] made the two indistinguishable at exactly the wrong place:
+    the bound is hit by long sessions, and a long session is where standing
     refusals accumulate, so the answer went silent precisely where it carried
     the most. Every consumer decides for itself which way to fail on None.
 
@@ -632,48 +1003,27 @@ def scan_user_rejections(
     rejection happened either way, and a consumer that needs the tool identity
     filters on `tool_name` itself.
     """
-    text = _read_bounded_text(path, max_bytes)
-    if text is None:
+    try:
+        state, complete = scan_transcript_resumable(
+            path,
+            cursor_path,
+            _rejection_state,
+            lambda st, ev: _reduce_rejection_event(st, ev, max_records),
+            needle=_REJECTION_NEEDLES,
+            max_bytes=max_bytes,
+        )
+    except TranscriptReadError:
+        # Unreadable: still [] — unless the file is provably past the bound,
+        # where the honest answer stays the indeterminate one a readable
+        # oversized file gives (#1231): a long session the hook cannot open
+        # is exactly where standing refusals have had time to accumulate.
         return None if _is_over_byte_bound(path, max_bytes) else []
-    lines = text.splitlines()
-
-    rejections: list[dict] = []
-    for line in lines:
-        # Cheap structural pre-filter: both markers are literal, so a line
-        # missing either cannot be a rejection record.
-        if _DENIAL_KIND_MARKER not in line or REJECTION_PHRASE not in line:
-            continue
-        try:
-            ev = json.loads(line)
-        except (json.JSONDecodeError, ValueError):
-            continue
-        if not isinstance(ev, dict):
-            continue
-        if ev.get("toolDenialKind") != REJECTION_DENIAL_KIND:
-            continue
-        block = _rejected_tool_result(ev)
-        if block is None:
-            continue
-        tool_use_id = block.get("tool_use_id")
-        if not isinstance(tool_use_id, str) or not tool_use_id:
-            continue
-        source_uuid = ev.get("sourceToolAssistantUUID")
-        timestamp = ev.get("timestamp")
-        rejections.append({
-            "tool_use_id": tool_use_id,
-            "tool_name": "",
-            "tool_input": {},
-            "text": "",
-            "source_uuid": source_uuid if isinstance(source_uuid, str) else "",
-            "timestamp": timestamp if isinstance(timestamp, str) else "",
-        })
-
-    if not rejections:
-        return []
+    if not complete:
+        return None  # not caught up this call — indeterminate (#1231)
+    rejections = state["rejections"]
     if max_records > 0:
         rejections = rejections[-max_records:]
-    _resolve_rejected_tool_uses(lines, rejections)
-    return rejections
+    return [dict(r) for r in rejections]
 
 
 def _rejected_tool_result(ev: dict) -> dict | None:
@@ -700,55 +1050,6 @@ def _rejected_tool_result(ev: dict) -> dict | None:
     return None
 
 
-def _resolve_rejected_tool_uses(lines: list[str], rejections: list[dict]) -> None:
-    """Fill `tool_name` / `tool_input` / `text` in place from the uuid index.
-
-    The originating assistant record is located by `sourceToolAssistantUUID`
-    against the record's own `uuid`; the `tool_use` block inside it is then
-    picked by `tool_use_id`. A rejection that carries no `sourceToolAssistantUUID`
-    falls back to the `tool_use_id` alone, which is unique per tool call.
-    """
-    by_id: dict[str, dict] = {}
-    for rec in rejections:
-        by_id.setdefault(rec["tool_use_id"], rec)
-    needles = set(by_id)
-    needles.update(r["source_uuid"] for r in rejections if r["source_uuid"])
-
-    for line in lines:
-        if _TOOL_USE_MARKER not in line:
-            continue
-        if not any(n in line for n in needles):
-            continue
-        try:
-            ev = json.loads(line)
-        except (json.JSONDecodeError, ValueError):
-            continue
-        if not isinstance(ev, dict):
-            continue
-        msg = ev.get("message")
-        if not isinstance(msg, dict) or msg.get("role") != "assistant":
-            continue
-        content = msg.get("content")
-        if not isinstance(content, list):
-            continue
-        for block in content:
-            if not isinstance(block, dict) or block.get("type") != "tool_use":
-                continue
-            rec = by_id.get(block.get("id"))
-            if rec is None or rec["tool_name"]:
-                continue
-            # uuid cross-check when the rejection named its source record: a
-            # replayed / resumed transcript can repeat a tool_use id, and the
-            # wrong record would attribute the refusal to the wrong tool.
-            if rec["source_uuid"] and ev.get("uuid") != rec["source_uuid"]:
-                continue
-            name = block.get("name")
-            tool_input = block.get("input")
-            rec["tool_name"] = name if isinstance(name, str) else ""
-            rec["tool_input"] = tool_input if isinstance(tool_input, dict) else {}
-            rec["text"] = _flatten_strings(rec["tool_input"])
-
-
 def _flatten_strings(value, limit: int = REJECTION_TEXT_MAX_CHARS) -> str:
     """Newline-join every string leaf of `value`, bounded at `limit` chars.
 
@@ -759,11 +1060,11 @@ def _flatten_strings(value, limit: int = REJECTION_TEXT_MAX_CHARS) -> str:
     """
     parts: list[str] = []
     total = 0
-    stack = [value]
+    stack: deque = deque([value])
     while stack:
         if total >= limit:
             break
-        item = stack.pop(0)
+        item = stack.popleft()
         if isinstance(item, str):
             parts.append(item)
             total += len(item)
@@ -792,8 +1093,12 @@ def _cursor_matches(cursor: dict, st: os.stat_result, fh) -> bool:
     """True when `cursor` still describes the open transcript `fh` (stat `st`).
 
     The offset is trusted only when the file is the same inode, has not
-    shrunk, and the byte before the offset is a newline — a truncate-and-
-    rewrite to a longer file would otherwise resume mid-record. Identity comes
+    shrunk, and the bytes just before the offset are the ones the cursor
+    sampled when it was saved (a cursor from before the sample only proves
+    a newline there) — a truncate-and-rewrite to a longer file would
+    otherwise resume mid-record, and one whose new content happens to break
+    a line at the old offset would resume past records it never read.
+    Identity comes
     from the handle that is about to be scanned, never from a fresh stat of
     the path: a transcript replaced in between would otherwise pair the new
     inode with an offset and state derived from the old one.
@@ -808,13 +1113,25 @@ def _cursor_matches(cursor: dict, st: os.stat_result, fh) -> bool:
     if offset == 0:
         return True
     try:
-        fh.seek(offset - 1)
-        return fh.read(1) == b"\n"
-    except OSError:
+        tail = cursor.get("tail")
+        if tail is None:
+            # A pre-fingerprint cursor: the newline before the offset is the
+            # only boundary evidence there is.
+            fh.seek(offset - 1)
+            return fh.read(1) == b"\n"
+        if not isinstance(tail, str):
+            return False
+        want = bytes.fromhex(tail)
+        if not want:
+            return False
+        fh.seek(offset - len(want))
+        return fh.read(len(want)) == want
+    except (OSError, ValueError):
         return False
 
 
 def _load_cursor(cursor_path: str) -> dict | None:
+    """The saved cursor as a dict, or None when absent, unreadable or not a dict."""
     try:
         with open(cursor_path, encoding="utf-8") as fh:
             cursor = json.load(fh)
@@ -825,14 +1142,24 @@ def _load_cursor(cursor_path: str) -> dict | None:
     return cursor
 
 
-def _save_cursor(cursor_path: str, st: os.stat_result, offset: int, state: dict) -> None:
-    """Atomic write; a failed save costs one full re-scan, never a wrong one."""
+_CURSOR_TAIL_BYTES = 32
+
+
+def _save_cursor(
+    cursor_path: str, st: os.stat_result, offset: int, state: dict, tail: bytes = b""
+) -> None:
+    """Atomic write; a failed save costs one full re-scan, never a wrong one.
+
+    `tail` is the sample of bytes ending at `offset` that `_cursor_matches`
+    re-reads before trusting the offset.
+    """
     try:
         payload = {
             "version": _CURSOR_VERSION,
             "offset": offset,
             "ino": st.st_ino,
             "dev": st.st_dev,
+            "tail": tail.hex(),
             "state": state,
         }
         tmp = f"{cursor_path}.{os.getpid()}.tmp"
@@ -857,6 +1184,177 @@ def stop_scan_cursor_path(hook: str, session_id) -> str | None:
     return resolve_cache_file(f"stop-scan-{hook}-{session_id}.json", session_id)
 
 
+def scan_cursor_path(hook: str, session_id, part: str = "root") -> str | None:
+    """Cache path for one resumable scan cursor of `hook`, or None when the
+    payload carries no session (the caller then scans without persistence).
+
+    `part` names the file the cursor follows when a hook scans more than one
+    — the root transcript and each subagent's — or the trigger it scans for
+    when two triggers of one hook must not share a cursor. It sits *before*
+    the session id in the name (`scan-<hook>-<part>-<session_id>.json`) so
+    the cache sweep's boundary match on the session token still holds and
+    the live session's cursors survive the sweep (`_paths.prune_stale`).
+    """
+    if not isinstance(session_id, str) or not session_id:
+        return None
+    if not isinstance(part, str) or not part:
+        return None
+    safe_part = re.sub(r"[^A-Za-z0-9_.-]", "_", part)
+    from _paths import resolve_cache_file  # type: ignore[import-not-found]
+
+    return resolve_cache_file(f"scan-{hook}-{safe_part}-{session_id}.json", session_id)
+
+
+def scan_transcript_resumable(
+    path: str,
+    cursor_path: str | None,
+    new_state,
+    reduce_event,
+    *,
+    needle=None,
+    max_bytes: int | None = None,
+    stop_when=None,
+    encode=None,
+    decode=None,
+):
+    """Fold the events of `path` into a reducer state, resuming from the
+    offset saved at `cursor_path`, reading at most `max_bytes` new bytes per
+    call. Returns `(state, complete)`.
+
+    One scanner for every hook that needs a fact about the whole session and
+    used to pay for it either on every call (a 214 MB transcript re-parsed
+    from byte 0 on every Stop, issue #1237) or by giving up past a fixed byte
+    cap (the 50 MB / 20 MB bounds of issues #1277, #1278, #1280 — past which
+    the gate is silent or asks forever, in exactly the long sessions it was
+    written for). Both are the same defect: the answer is a small reduction
+    over an append-only file, so it is persisted beside a byte offset and
+    only the bytes appended since the last call are read.
+
+    `new_state()` builds the empty state; `reduce_event(state, ev)` folds one
+    event dict in place. The state crosses a JSON file, so pass
+    `encode(state) -> jsonable` / `decode(jsonable) -> state` when it holds
+    anything JSON cannot carry. `needle` (bytes, a tuple of bytes, or None)
+    rejects a raw line before `json.loads` when it lacks the literal — build
+    it with `json_needle`. `stop_when(state)` ends the walk as soon as the
+    state has nothing left to learn; a state that satisfies it on resume is
+    returned without reading the file body at all.
+
+    `complete` is True when every complete line was folded (EOF, or
+    `stop_when` said so) and False when `max_bytes` cut the walk short. In
+    the second case the offset saved is the last complete line consumed, so
+    the next call continues instead of restarting: a session that once was
+    "too large to scan" now catches up over a few calls and then costs only
+    its delta. Each read is capped at the budget left, so one oversized line
+    is refused before it is allocated; such a line is never consumed and
+    the call reports `complete=False` on it (a gate should not page a
+    record larger than its whole budget, and the caller's fail-open answer
+    is the honest one).
+
+    Only complete lines advance the offset: a record still being written
+    when the hook fires is re-read next time. The cursor is trusted only
+    while it still describes the file (`_cursor_matches`): same inode, not
+    shrunk, and a newline right before the offset.
+
+    Raises `TranscriptReadError` when `path` is missing, not a regular file
+    (a FIFO would block `open()` for the whole budget), or fails to read;
+    the caller maps that to its own fail-open value. A cursor that cannot be
+    saved costs one re-scan next time, never a wrong answer.
+    """
+    cursor = _load_cursor(cursor_path) if cursor_path else None
+
+    def resumed():
+        """The state the cursor carried, decoded; None when there is none."""
+        if cursor is None:
+            return None
+        try:
+            return decode(cursor["state"]) if decode else cursor["state"]
+        except (KeyError, TypeError, ValueError, AttributeError):
+            return None  # a stale shape costs one full re-scan
+
+    try:
+        if not Path(path).is_file():
+            raise TranscriptReadError(path)
+        fh = open(path, "rb")
+    except TranscriptReadError:
+        raise
+    except (OSError, ValueError) as exc:
+        raise TranscriptReadError(path) from exc
+    with fh:
+        try:
+            st = os.fstat(fh.fileno())
+        except OSError as exc:
+            raise TranscriptReadError(path) from exc
+        # The offset is only ever read off a cursor that produced a state, so
+        # both are bound in one branch: a resumed state without its cursor
+        # cannot exist, and the shape says so rather than relying on it.
+        offset = 0
+        state = None
+        if cursor is not None and _cursor_matches(cursor, st, fh):
+            state = resumed()
+            if state is not None:
+                offset = cursor["offset"]
+        if state is None:
+            state = new_state()
+        if stop_when is not None and stop_when(state):
+            return state, True  # nothing left to learn; the cursor stands
+        complete = True
+        consumed = 0
+        try:
+            fh.seek(offset)
+            while True:
+                limit = -1 if max_bytes is None else max_bytes - consumed + 1
+                raw = fh.readline(limit)
+                if not raw:
+                    break
+                if not raw.endswith(b"\n"):
+                    if max_bytes is not None and len(raw) >= limit:
+                        complete = False  # this line alone is past the budget left
+                        break
+                    # The trailing record has no newline yet. A JSONL writer
+                    # emits the object and its newline in one write, so a
+                    # fragment that parses is a complete record whose newline
+                    # is all that is missing (or a fixture written without
+                    # one): fold it and step over it. One that does not parse
+                    # is still being written and is re-read once complete.
+                    obj = _parse_line(raw) if _line_has(raw, needle) else None
+                    if obj is not None or _parse_line(raw) is not None:
+                        offset += len(raw)
+                        if obj is not None:
+                            reduce_event(state, obj)
+                    break
+                consumed += len(raw)
+                if max_bytes is not None and consumed > max_bytes:
+                    complete = False
+                    break  # the line that crossed the budget waits for the next call
+                offset += len(raw)
+                if _line_has(raw, needle):
+                    obj = _parse_line(raw)
+                    if obj is not None:
+                        reduce_event(state, obj)
+                        if stop_when is not None and stop_when(state):
+                            break
+                if max_bytes is not None and consumed >= max_bytes:
+                    # Budget spent exactly at a line end: complete only if
+                    # nothing follows, so a caller is not told "not caught
+                    # up" about a file it has in fact finished.
+                    complete = not fh.peek(1)
+                    break
+        except TranscriptReadError:
+            raise
+        except OSError as exc:
+            raise TranscriptReadError(path) from exc
+        tail = b""
+        if cursor_path and offset:
+            try:
+                fh.seek(max(0, offset - _CURSOR_TAIL_BYTES))
+                tail = fh.read(offset - max(0, offset - _CURSOR_TAIL_BYTES))
+            except OSError:
+                cursor_path = None  # cannot fingerprint: do not persist a blind offset
+    if cursor_path:
+        _save_cursor(cursor_path, st, offset, encode(state) if encode else state, tail)
+    return state, complete
+
+
 def reduce_transcript_resumable(
     path: str,
     cursor_path: str | None,
@@ -868,54 +1366,24 @@ def reduce_transcript_resumable(
     """Fold every event of `path` into a reducer state, resuming from the
     offset saved at `cursor_path` when it still describes the file.
 
-    `new_state()` builds the empty state; `reduce_event(state, ev)` folds one
-    event dict in place. The state is what the next Stop starts from, so it
-    crosses a JSON file: pass `encode(state) -> jsonable` and
-    `decode(jsonable) -> state` when it holds sets or tuples, else it must
-    already be JSON-native.
-
-    Only complete lines advance the offset: a record still being written when
-    the Stop fires is re-read next time instead of being skipped. `cursor_path`
-    None disables persistence (the full-scan path a session-less payload
-    takes). Fail-open: an unreadable transcript yields the resumed or empty
-    state, never an exception.
+    The Stop gates' entry point (issue #1237): `scan_transcript_resumable`
+    with no needle, no budget and no early stop, and fail-open — an
+    unreadable transcript yields the resumed or empty state, never an
+    exception. `cursor_path` None disables persistence (the full-scan path a
+    session-less payload takes).
     """
-    cursor = _load_cursor(cursor_path) if cursor_path else None
-
-    def resumed():
-        if cursor is None:
-            return None
-        try:
-            return decode(cursor["state"]) if decode else cursor["state"]
-        except (KeyError, TypeError, ValueError, AttributeError):
-            return None  # a stale shape costs one full re-scan
-
     try:
-        fh = open(path, "rb")
-    except OSError:
-        return resumed() or new_state()  # unreadable: what the last Stop knew
-    with fh:
-        try:
-            st = os.fstat(fh.fileno())
-        except OSError:
-            return resumed() or new_state()
-        state = resumed() if cursor is not None and _cursor_matches(cursor, st, fh) else None
-        if state is None:
-            offset = 0
-            state = new_state()
-        else:
-            offset = cursor["offset"]
-        fh.seek(offset)
-        while True:
-            raw = fh.readline()
-            if not raw:
-                break
-            if not raw.endswith(b"\n"):
-                break
-            offset += len(raw)
-            obj = _parse_line(raw)
-            if obj is not None:
-                reduce_event(state, obj)
-    if cursor_path:
-        _save_cursor(cursor_path, st, offset, encode(state) if encode else state)
-    return state
+        state, _complete = scan_transcript_resumable(
+            path, cursor_path, new_state, reduce_event, encode=encode, decode=decode
+        )
+        return state
+    except TranscriptReadError:
+        cursor = _load_cursor(cursor_path) if cursor_path else None
+        if cursor is not None:
+            try:
+                resumed = decode(cursor["state"]) if decode else cursor["state"]
+                if resumed is not None:
+                    return resumed  # unreadable: what the last Stop knew
+            except (KeyError, TypeError, ValueError, AttributeError):
+                pass
+        return new_state()

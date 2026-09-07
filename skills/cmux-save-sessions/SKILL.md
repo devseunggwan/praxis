@@ -3,6 +3,7 @@ name: cmux-save-sessions
 description: >
   Save cmux session list as a JSON snapshot. Current session excluded by default.
   Supports save and list commands.
+when_to_use: >
   Triggers on "save sessions", "session save", "session snapshot", "cmux save", "list snapshots", "snapshot list".
 verified-against-runtime: true
 runtime-verified-at: 2026-06-16
@@ -19,7 +20,7 @@ Snapshots are used for session recovery, history recording, sharing, and as inpu
 > **Role separation**:
 > - `cmux-save-sessions`: Capture current state as JSON (save)
 > - `cmux-resume-sessions`: Restore workspaces from JSON snapshot (restore)
-> - `cmux-recover-sessions`: Post-crash/power-loss recovery from tmux sessions (emergency)
+> - `cmux-recover-sessions`: Post-crash/power-loss recovery from the `.jsonl` files Claude Code persists (emergency)
 > - `cmux-session-manager`: Real-time status + cleanup (daily)
 
 ## The Iron Law
@@ -48,9 +49,14 @@ The session running this script (the manager session) is excluded by default —
 1. User requests "save sessions", "session save", etc.
 2. Execute:
 ```bash
-bash "$(dirname "${0}")/cmux-save-sessions"
+bash "${CLAUDE_PLUGIN_ROOT:?praxis plugin root not set — run via the installed plugin or export CLAUDE_PLUGIN_ROOT}/skills/cmux-save-sessions/cmux-save-sessions"
 ```
 3. Show output to the user
+
+If `CLAUDE_PLUGIN_ROOT` is unset the `:?` guard aborts with `praxis plugin root
+not set`; resolve it from the installed-plugins manifest
+(`jq -r '.plugins["praxis@praxis"][0].installPath // empty' "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/plugins/installed_plugins.json"`),
+export it, and re-run — do not fall back to a relative path.
 4. **Post-save close prompt** — ask via `AskUserQuestion`:
 
 > "N sessions saved. Would you like to close the saved sessions?"

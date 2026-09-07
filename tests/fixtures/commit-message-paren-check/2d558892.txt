@@ -1,0 +1,127 @@
+ci: fail the release run on a dropped commit (#1233)
+
+* ci: add release changelog-coverage guard
+
+release-please skips a commit whose message its parser rejects and the run
+still ends green, so the entry is silently missing from the release. The guard
+checks the outcome rather than the parser: every commit since the last release
+tag whose type is non-hidden in release-please-config.json must have an entry
+on the pending release branch's CHANGELOG, matched by full sha or by its (#N).
+
+A new check rather than a widening of the #750 guard because that guard was
+deleted in #753 on the premise that release-please makes an undercount
+structurally impossible — the premise #1228 refutes.
+
+Confidence: high
+Not-tested: the CI wiring (separate commit); this covers the script alone
+Refs #1228
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01WAtX5ReBAaEABiQrZCvbgN
+
+* ci: fail the release run on a dropped commit
+
+Wires check-changelog-coverage.py into release-please.yml as the step after
+the action, with a full-history checkout so it can enumerate the release range
+and fetch the release branch the action has just pushed. A parse failure now
+turns the main run red instead of being buried in a completed/success log.
+
+Confidence: medium
+Not-tested: not yet run on main — the guard itself is exercised against the
+three real dropped commits and a clean release as a control
+Refs #1228
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01WAtX5ReBAaEABiQrZCvbgN
+
+* docs: record the changelog-coverage guard
+
+Says what turns the guard red, how to find the offending commit in the log,
+and that a dropped entry is not recovered by the next release.
+
+Confidence: high
+Refs #1228
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01WAtX5ReBAaEABiQrZCvbgN
+
+* fix(ci): match the entry's own PR link, not any #N
+
+A bare `#N` scan counted an unrelated entry's trailing `closes [#N](...)` as
+coverage, so a dropped commit could read as present. Three such references sit
+in the pending v7.14.0 release alone. Coverage now needs the `([#N](` link
+release-please writes for the entry's own PR, or the full commit sha.
+
+Re-measured on real data after the change: v7.13.0 still reports exactly
+#1210 and #1212, v7.11.0..v7.12.0 still 33 of 33 covered.
+
+Confidence: high
+Refs #1228
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01WAtX5ReBAaEABiQrZCvbgN
+
+* fix(ci): honour the exit-code contract on a bad fixture
+
+An unreadable --commits-file/--changelog-file raised OSError, so the script
+exited 1 with a traceback — the code that means "a commit has no entry". Both
+reads now report the path and return 2, the documented usage-error code. They
+do not fail open: a fixture path the operator named is a mistake, not a limit
+on what the guard can see.
+
+Confidence: high
+Refs #1228
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01WAtX5ReBAaEABiQrZCvbgN
+
+* fix(ci): fail open when origin cannot be reached
+
+`git fetch || true` made a transport or auth failure indistinguishable from an
+absent release branch, so a network blip turned the main run red instead of
+skipping. `git ls-remote --exit-code` separates them: exit 2 is a genuinely
+absent branch (the guard's own verdict), anything else means the step could
+not look and skips with a warning.
+
+Verified live against origin: present 0, absent 2, unreachable host 128.
+
+Confidence: high
+Not-tested: the unreachable path in a real Actions run
+Refs #1228
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01WAtX5ReBAaEABiQrZCvbgN
+
+* docs: correct the guard's remediation step
+
+Rewording the message on a follow-up commit does not clear the guard: main is
+never rewritten, so the rejected commit stays in the release range and the new
+one carries a different sha and PR number. The working remediation is to add
+the missing entry to the pending release PR's CHANGELOG by hand, which is the
+hand-edit the hybrid flow already allows.
+
+Confidence: high
+Refs #1228
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01WAtX5ReBAaEABiQrZCvbgN
+
+* test: drop a tag dependence from the exit-2 case
+
+The --changelog-file case passed no --commits-file, so it entered the git path
+first. CI's checkout for the test job carries no tags, the guard failed open
+with exit 0 before ever reading the file, and the assertion tripped there and
+not locally. Both cases now pass --commits-file, so neither reaches git.
+
+Reproduced against a tagless repo: the old form exits 0 ("tag v7.13.0 not
+found"), the new form exits 2.
+
+Confidence: high
+Refs #1228
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01WAtX5ReBAaEABiQrZCvbgN
+
+---------
+
+Co-authored-by: Claude Opus 5 <noreply@anthropic.com>

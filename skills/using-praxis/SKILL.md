@@ -3,7 +3,9 @@ name: using-praxis
 description: >
   Onboarding entry point for new praxis users — introduces the 4 skill
   categories, maps common scenarios to the right skill, and explains the
-  hook system. Triggers on "praxis 처음", "praxis 사용법", "어떤 skill 부터",
+  hook system.
+when_to_use: >
+  Triggers on "praxis 처음", "praxis 사용법", "어떤 skill 부터",
   "praxis intro", "praxis getting started".
 ---
 
@@ -63,7 +65,7 @@ Recover, save, and orchestrate Claude Code sessions.
 | Situation                                                              | Skill to call                                               |
 | ---------------------------------------------------------------------- | ----------------------------------------------------------- |
 | "Claude Code sessions died after a crash or power-off"                 | `cmux-recover-sessions` (cmux) or `recover-sessions` (tmux) |
-| "I want to record that a global `~/.claude/CLAUDE.md` rule was broken" | `strike`                                                    |
+| "I want to record that a workflow rule was broken"                     | `strike`                                                    |
 | "There are too many Codex review comments — where to start?"           | `codex-review-wrap`                                         |
 | "Is this PR ready to merge? What's still open on it?"                  | `merge-briefing`                                            |
 | "The PR merged — remove the worktree and branch safely"                | `worktree-merge-cleanup`                                    |
@@ -74,7 +76,8 @@ Recover, save, and orchestrate Claude Code sessions.
 
 ## Hook System
 
-Praxis ships hooks that enforce global `~/.claude/CLAUDE.md` rules structurally at the tool
+Praxis ships hooks that enforce workflow rules ([`ETHOS.md` → Rules praxis
+carries](../../ETHOS.md#rules-praxis-carries)) structurally at the tool
 level (PreToolUse / PostToolUse / Stop / UserPromptSubmit). They fail-open
 on infrastructure errors — Claude Code never breaks, but violating patterns
 are blocked or warned before they land.
@@ -86,7 +89,7 @@ to per-hook specs at `hooks/<role>/<name>/spec.md`.
 
 | Tier               | What works                                               | What you need                           |
 | ------------------ | -------------------------------------------------------- | --------------------------------------- |
-| **Standalone**     | recover-sessions, strike / strikes / reset-strikes, debt | `gh` CLI, `jq`; `debt` needs only `git` |
+| **Standalone**     | recover-sessions, strike / strikes / reset-strikes, debt | `gh` CLI, `jq`; `recover-sessions` also needs `tmux`; `debt` needs only `git` |
 | **Enhanced**       | + retrospect, codex-review-wrap                          | + oh-my-claudecode                      |
 | **Full**           | + all cmux-* skills                                      | + cmux                                  |
 | **Multi-provider** | + codex/gemini routing in cmux-delegate                  | + codex-cli, gemini-cli                 |

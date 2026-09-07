@@ -4,6 +4,60 @@ Praxis is a personal toolbox — contributions are primarily self-directed, but
 the conventions below keep the repo coherent across sessions and prevent the
 class of drift bugs that have cost the most debugging time.
 
+## Local development
+
+### Clone and CLI symlinks
+
+The CLI tools shipped by skills (e.g. `cmux-recover-sessions`,
+`claude-recover`, `cmux-save-sessions`) are symlinked from `~/.local/bin` into
+whichever clone ran `scripts/install.sh`, so a patch reaches the version that
+runs at the shell only if it lands in that clone. Keep one development clone
+per machine; a second clone silently leaves the links pointing at stale code.
+
+After every `git pull` or worktree operation, run `./scripts/verify-symlinks.sh`
+to confirm all `~/.local/bin` entries still resolve to this clone.
+
+### CLI tools (not skills)
+
+These are shell wrappers installed via `scripts/install.sh` into `~/.local/bin`.
+They are not AI skills — they have no `SKILL.md` and cannot be invoked as `/praxis:*`.
+
+| Binary          | Source                               | Purpose                                                                                                                                                     |
+| --------------- | ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `bypass-review` | `skills/bypass-review/bypass-review` | Review bypass-telemetry event logs written by the bypass-telemetry hook — aggregate and inspect JSONL records (no `SKILL.md`; not invocable as `/praxis:*`) |
+
+### Install / refresh CLI symlinks
+
+```bash
+# From inside this clone:
+./scripts/install.sh
+```
+
+Idempotent. Existing valid links are left alone; missing or drifted ones
+are corrected. Re-run after pulls or after adding a new CLI script.
+
+### Verify symlinks point at this clone
+
+```bash
+./scripts/verify-symlinks.sh
+```
+
+Exits non-zero on drift, so it can be wired into CI or a SessionStart hook
+to catch "patch landed in the wrong clone" before it bites a future session.
+
+### Keeping `AGENTS.md` small
+
+`AGENTS.md` (`CLAUDE.md` is a symlink to it) is loaded into every session, so
+every word there costs context on every turn.
+[`tests/test_agents_md_budget.py`](tests/test_agents_md_budget.py) caps it at
+1,000 whitespace-split words (Python `str.split()` — `wc -w` in the C locale
+skips tokens made only of non-ASCII characters such as `—` and `→`, so it
+reads low). Content only a contributor needs — setup, tooling,
+procedures that are never executed in-session — belongs in this file; leave a
+one-line pointer in `AGENTS.md`, and keep its Skills tables, compatibility-tier
+table, and Issue & PR conventions intact, since `check-plugin-manifests.py`
+Rule 13 normalizes those against `README.md` and `using-praxis` (issue #1306).
+
 ## Writing a spec
 
 A *feature spec* states what a change must satisfy, before the change exists.
@@ -36,16 +90,25 @@ follow the step-by-step guide at
 ```
 skills/<skill-name>/
   SKILL.md          # spec — frontmatter + prose steps
+  references/       # optional — long procedure text split out of SKILL.md
+  <helper>          # optional — a shell/python helper the steps invoke
 ```
 
-The `name` and `description` fields in the SKILL.md frontmatter are surfaced by
-the Claude Code plugin runtime, which truncates the description past a bounded
-budget. [`RUNTIME_CONSTRAINTS.md` §5](RUNTIME_CONSTRAINTS.md) owns that budget
-and records what is and is not measured; do not restate a number here, because
-two numbers in two files is how a description ends up satisfying one contract
-and failing the other. The operative rule while the limit is unmeasured: keep
-the `Triggers on "..."` clause inside the first 500 characters, so routing
-survives whichever bound turns out to be real.
+`references/*.md` count as part of the spec for every check below: a step
+moved there still needs the runtime verification metadata, and the
+`description` budget is measured on `SKILL.md` alone.
+
+The `name`, `description`, and `when_to_use` fields in the SKILL.md frontmatter
+are surfaced by the Claude Code plugin runtime, which truncates the listing past
+a bounded budget. [`RUNTIME_CONSTRAINTS.md` §5](RUNTIME_CONSTRAINTS.md) owns
+that budget and records what is and is not measured; do not restate a number
+here, because two numbers in two files is how a description ends up satisfying
+one contract and failing the other. The operative rule while the limit is
+unmeasured: `description` says only what the skill does, and the
+`Triggers on "..."` clause lives in `when_to_use` (issue #1331), so trimming
+description prose never touches a trigger phrase. `docs/skills.md` mirrors the
+phrases from `when_to_use` — `check-plugin-manifests.py` Rule 13e fails on any
+drift between the two.
 
 ### Skill spec drift prevention
 
@@ -105,18 +168,23 @@ refactors and is visible to `git blame`.
 Read [`RUNTIME_CONSTRAINTS.md`](RUNTIME_CONSTRAINTS.md) before writing a new
 spec. It lists fixed Claude Code limits that every skill must work within:
 
-| Constraint | Short form |
-| ------------ | ------------ |
-| `AskUserQuestion.options` max 4 items | Truncate dynamic lists to 3 + cancel |
-| `Skill(...)` cannot invoke `disable-model-invocation: true` skills | Use the underlying binary directly |
-| `Bash` cwd resets between calls | Chain with `&&` or use absolute paths |
+| § | Constraint | Short form |
+| --- | ------------ | ------------ |
+| 1 | `AskUserQuestion.options` max 4 items | Truncate dynamic lists to 3 + cancel |
+| 1a | `AskUserQuestion.questions` max 4 items | Batch into consecutive calls of ≤ 4 |
+| 2 | `Skill(...)` cannot invoke `disable-model-invocation: true` skills | Use the underlying binary directly |
+| 3 | `Agent(subagent_type=...)` cannot invoke a skill | Always `Skill(skill="praxis:<name>")` |
+| 4 | `Bash` cwd resets between calls | Chain with `&&` or use absolute paths |
+| 5 | Skill `description` truncated past ~1,024 chars | Triggers live in `when_to_use`, not the description tail |
 
-#### Pre-commit hook (planned)
+#### Enforcement
 
-A pre-commit hook that validates `verified-against-runtime: true` + commit body
-note for `skills/*/SKILL.md` changes is planned as a follow-up to Issue #208.
-It is not yet enforced — the frontmatter + commit body convention above is the
-current gate.
+The frontmatter half is enforced: `scripts/check-plugin-manifests.py` Rule 11
+detects a runtime-sensitive skill (external CLI, `AskUserQuestion`,
+`Skill(...)`, or a helper executable) and fails when any of the three fields
+is missing, a template placeholder, or malformed. It runs locally through
+`scripts/run-tests.sh` and in CI. The commit-body `verified:` line is a
+convention only — nothing checks it.
 
 ### Skill surface freeze (`EXPECTED_SKILLS`)
 
@@ -144,8 +212,8 @@ and the canonical registry is `hooks/manifest.json` (not `hooks.json`).
 
 1. Survey ≥ 2 sibling implementations under `hooks/<role>/` for established
    conventions (state-key naming, payload field access, exit-code semantics)
-   before writing your spec. See **Convention Survey Before Design** in
-   global `~/.claude/CLAUDE.md`.
+   before writing your spec — the *Convention Survey Before Design* rule
+   ([`ETHOS.md` → Rules praxis carries](ETHOS.md#rules-praxis-carries)).
 2. Author the hook in its own per-hook directory:
    - Impl: `hooks/<role>/<name>/impl.py` (or `impl.sh` for body-as-sh hooks).
    - Make it executable: `chmod +x hooks/<role>/<name>/impl.py`.
@@ -154,12 +222,20 @@ and the canonical registry is `hooks/manifest.json` (not `hooks.json`).
      import sys as _sys
      from pathlib import Path as _Path
      _sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
-     from _hook_utils import ...
+     from _shell_tokenize import ...
      ```
+     Import from the module that defines the name — `_shell_tokenize`
+     (`safe_tokenize`, `iter_command_starts`, `strip_prefix`), `_subst`
+     (`iter_command_texts`), `_compound` (`compound_cascade_hint`), or
+     `_roles` (`tokenize_with_roles`). `_hook_utils` re-exports all four
+     for the hooks written before issue #1305 split it; do not route new
+     imports through it.
 3. Register the hook in [`hooks/manifest.json`](hooks/manifest.json) (one
    entry per `(event, matcher)` group). The entry must include `name`, `role`,
-   `event`, and `timeout`; add `matcher`, `hosts`, `args`, `body`, and
-   `wrapper_suffix` as needed. See ADR-0001 §2.5 for the schema.
+   `event`, and `timeout`, and the first registration of the name must carry
+   `review_by` (see [Evidence and sunset review](#evidence-and-sunset-review));
+   add `matcher`, `hosts`, `args`, `body`, and `wrapper_suffix` as needed. See
+   ADR-0001 §2.5 for the schema.
 4. Run `./scripts/build-plugin-manifests.py` — this generates the runtime
    wrapper at `hooks/<name>{suffix}.sh` (tracked; the build re-emits it
    on every run, and commits must include the new wrapper because
@@ -172,7 +248,10 @@ and the canonical registry is `hooks/manifest.json` (not `hooks.json`).
      the wrapper IS the impl invocation surface).
 6. Create `hooks/<role>/<name>/spec.md` (template: any existing spec). Include a
    `Supported hosts:` line matching the `hosts` array in `manifest.json`.
-7. Add a row to the hook index table in [`ARCHITECTURE.md`](ARCHITECTURE.md#hook-index).
+7. Add the hook under its role in [`docs/hook/INDEX.md`](docs/hook/INDEX.md).
+   The generated [Hook Operating Matrix](docs/hook-operating-matrix.md)
+   picks it up from the manifest on the next build; nothing is added to
+   `ARCHITECTURE.md`.
 8. Run `./scripts/check-plugin-manifests.py` — it verifies the
    directory↔manifest cross-check, role↔dirname agreement, impl existence,
    Stop ordering, byte-equivalent generated artifacts, and 5+ more
@@ -180,6 +259,43 @@ and the canonical registry is `hooks/manifest.json` (not `hooks.json`).
 9. Canary the change — see
    [Verifying a hook change at runtime](#verifying-a-hook-change-at-runtime-canary)
    below. A green test suite does not tell you what the runtime is executing.
+
+### Evidence and sunset review
+
+The roster only grows: [`docs/hook-prune-audit.md`](docs/hook-prune-audit.md)
+found zero drops on a 30-day ledger and says it cannot rank hooks by value.
+Three rules keep that growth honest (issue #1300):
+
+1. **Recurrence evidence as numbers.** An issue proposing a new hook states
+   what it fires on as counts, not adjectives: the transcript grep count, the
+   number of sessions, and the window scanned. Copy the format of issue
+   #1271's `빈도` section — the scope (`~/.claude*/projects/*/*.jsonl`), the
+   count at each narrowing step with its percentage, verbatim samples — and
+   say plainly when the real-world failure count is zero, as #1271 does.
+2. **`review_by` = merge date + 90 days.** Every hook name carries a
+   `review_by` date in `hooks/manifest.json` (first registration, step 3
+   above). Rule 26 of `check-plugin-manifests.py` fails CI once that date
+   passes. Re-audit the hook against the fire ledger, then either bump the
+   date or record the verdict in `docs/hook-prune-audit.md` — never bump
+   without the audit.
+3. **Zero escalations means Investigate.** At review, a hook that records
+   rich fire-ledger rows but has zero `advise` / `ask` / `deny` fires goes
+   onto the audit's Investigate list — unless its manifest `mode` sets
+   `observe_only: true`, which marks a hook whose zero escalations are its
+   specification (`askuserquestion-loop-signal`), not a signal about it.
+
+### Host-aware filtering
+
+Hooks support host-aware filtering via an optional `hosts` field on each hook
+entry in `hooks/manifest.json`. When `hosts` is absent the hook is included for
+all platforms (default). When present it must be an array of host identifiers
+(`"claude"`, `"codex"`, etc.) — the hook is written only to the platform whose
+`host_id` in `manifests/platforms/<name>.json` appears in that list. The build
+script (`scripts/build-plugin-manifests.py`) reads this field and writes a
+platform-specific `hooks.json` for each platform under its plugin directory.
+Each per-hook `spec.md` carries a `Supported hosts:` line that documents the
+classification; `scripts/check-plugin-manifests.py` verifies that every hook
+entry has a corresponding spec file.
 
 ### Verifying a hook change at runtime (canary)
 
@@ -189,8 +305,9 @@ under `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/plugins/cache/praxis/praxis/<version>
 given — and a merged change is not live until
 `release → plugin update → session reload` completes.
 
-Both hops were measured on 2026-07-28 (issue #841). They are not comparable in
-size, so quote the window along with the number — an unqualified median invites
+Both hops were measured once, on 2026-07-28 (issue #841); the figures below
+are that snapshot, not a live metric. They are not comparable in size, so
+quote the window along with the number — an unqualified median invites
 the reader to apply a 14-day figure to a 7-week history:
 
 | Hop | Window | Result |
@@ -272,7 +389,7 @@ verification of the change.
 #### Canary probes
 
 Use these to confirm a hook is wired and discriminating, without performing any
-mutation. Each is a real probe used during the 2026-07-22 release-lag incident.
+mutation. Each has been used on a real release-lag investigation.
 
 1. **Fire-ledger probe** — confirm the hook fired at all, and with which
    decision. `@fail_open` hooks append JSONL records to
@@ -357,6 +474,33 @@ after a `reset` or `checkout`. If you must audit from the tree itself, fetch and
 check out the PR branch first (`git fetch origin <branch> && git checkout
 <branch>`) instead of assuming the current tree reflects it.
 
+### Anchor revision without `gh`
+
+`gh` is also a prerequisite of the verification-anchor convention, and for
+revision specifically. Creating an anchor needs only a way to post a comment;
+editing one in place is a `PATCH` against its comment id, which a session whose
+only GitHub surface is the MCP server cannot issue when that server exposes no
+comment `update` — comment bodies are add-only there, while issue and PR bodies
+are not. Enumerating `github/github-mcp-server` (version unknown, 2026-09-04)
+found that absence upstream rather than in one deployment, so it does not
+resolve by waiting; it is one measurement of one server, so confirm `update` is
+absent from the **active** session's tool list before applying any of this. The
+same surface strips `<details>` / `<summary>` on the comment **read** path as
+well, which leaves the gate's PostToolUse structure re-check with no substitute
+there at all.
+
+Past rev 1 the anchor rule is therefore unsatisfiable in such a session. The
+procedure: post rev 1 in full, grade the re-check `unknown`, say in the PR body
+which SHA the anchor is stamped at and that the host cannot update it, refresh
+that body on every later push that would have been a revision (or stop pushing
+until the anchor can be revised), and carry the delta there or into the merge
+commit — never a comment of its own, and never a second anchor, which makes id
+recovery ambiguous. Steps in
+[`anchor-comment-gate/spec.md` → Procedure for a gh-less session](hooks/preflight-gate/anchor-comment-gate/spec.md#procedure-for-a-gh-less-session),
+the precondition in
+[the section holding it](hooks/preflight-gate/anchor-comment-gate/spec.md#prerequisite--gh-for-revision-specifically).
+Issue #1211.
+
 ## Packaging
 
 **Do not edit generated files directly.** The following are generated outputs:
@@ -374,9 +518,8 @@ To regenerate after changing `manifests/*.json` or `VERSION`:
 ```
 
 `check-plugin-manifests.py` also verifies (a) every hook in
-`hooks/manifest.json` appears in both `docs/hook/INDEX.md` and the
-`ARCHITECTURE.md` hook index table, and (b) each hook spec's
-`Supported hosts:` line agrees with the `hosts` array in
+`hooks/manifest.json` appears in `docs/hook/INDEX.md`, and (b) each hook
+spec's `Supported hosts:` line agrees with the `hosts` array in
 `hooks/manifest.json` (`all` = no `hosts` field; explicit list = exact set
 match).
 
@@ -491,14 +634,37 @@ bash scripts/run-tests.sh
 This is the single entry point. It runs pytest, all shell-based hook tests,
 `scripts/check-plugin-manifests.py`, `scripts/check-hook-token-invariants.py`,
 `scripts/check-sibling-commit-gates.py`, `scripts/check-omc-name-drift.py`,
-`ruff check`, and `shellcheck` under one
+`ruff check`, `mypy`, and `shellcheck` under one
 exit code gate, plus an advisory
 markdownlint pass over the markdown files your branch changed.
 
-All three static checks — `ruff`, `shellcheck`, and `markdownlint` — skip with
+All four static checks — `ruff`, `mypy`, `shellcheck`, and `markdownlint` — skip with
 an explicit `SKIPPED:` line when the tool is not installed, so a missing
 toolchain does not block you. The corresponding CI job still runs either way,
 so install them if you want local parity.
+
+`bash scripts/run-tests.sh --doctor` tells you up front which of those
+`SKIPPED:` lines a run on your machine will produce. It prints one table of
+every external tool the runner or a sub-suite needs (`python3`, `pytest`,
+`coverage`, `mypy`, `PyYAML`, `git`, `jq`, `zsh`, `tmux`, `lsof`, `ruff`,
+`shellcheck`, `markdownlint-cli2`) with found/missing, the version when found, and the same
+install hint the `SKIPPED:` line would carry. It runs no tests and always
+exits 0.
+
+The pytest step also measures statement coverage (issue #1303). When the
+`coverage` module is importable (`pip install 'coverage==7.16.0'`, the version
+CI pins), pytest runs under `coverage run` with the configuration in
+`.coveragerc`: sources are `hooks/` and `scripts/`, and `coverage report`
+fails the step when the TOTAL drops below `fail_under` — 50%, one point under
+the 51% measured when the floor was introduced, so the check catches a real
+regression rather than rounding noise. To raise it, run the pytest step, read
+the new TOTAL, and set `fail_under` to that minus one in the same PR as the
+tests that earned it. Only the Python that pytest imports in-process is
+counted: `impl.py` executions driven from the shell suites are subprocesses
+and are not yet measured, which is the deferred half of #1303. Without the
+module the tests still run, plain, and the step prints `SKIPPED: coverage`
+under the same strict-mode protocol as the static checks. CI appends the
+per-file table to the job summary.
 
 The markdownlint pass normally covers only the markdown your branch changed,
 measured against `origin/main`. When `origin/main` is not available — a shallow
@@ -508,11 +674,11 @@ markdown file, which surfaces the repo's existing backlog. It stays advisory in
 both modes and never fails the run.
 
 CI invokes this runner from the `test` job in `.github/workflows/ci.yml`. It is
-not the whole of CI: `ci.yml` additionally runs `ruff`, `shellcheck`,
+not the whole of CI: `ci.yml` additionally runs `ruff`, `mypy`, `shellcheck`,
 `markdownlint`, `actionlint`, `gitleaks`, and `link-check` as separate jobs,
 and CodeQL's `analyze` job runs from its own `.github/workflows/codeql.yml`.
-Those jobs are authoritative. The runner mirrors `ruff`, `shellcheck`, and
-`markdownlint` so they surface before you open a PR; the rest stay CI-only
+Those jobs are authoritative. The runner mirrors `ruff`, `mypy`, `shellcheck`,
+and `markdownlint` so they surface before you open a PR; the rest stay CI-only
 because they depend on network access, tokens, or a full-history scan.
 
 New hooks must ship with a test under `tests/hooks/<role>/`:

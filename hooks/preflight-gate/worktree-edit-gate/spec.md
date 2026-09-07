@@ -32,7 +32,7 @@ main/dev/prod.
 
 ## Why this exists
 
-The global `~/.claude/CLAUDE.md` rule "Issue-Driven Worktree Workflow (MANDATORY)"
+The *Issue-Driven Worktree Workflow* rule ([`ETHOS.md` → Rules praxis carries](../../../ETHOS.md#rules-praxis-carries))
 requires every code change to live in a dedicated issue + branch + worktree.
 Existing hooks (`pre-edit-protected-branch-guard`) guard against dirty-tree
 or PR-workflow signal situations. This hook adds a complementary gate:

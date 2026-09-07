@@ -5,6 +5,88 @@ All notable changes to praxis are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.16.0](https://github.com/devseunggwan/praxis/compare/v7.15.0...v7.16.0) (2026-09-07)
+
+
+### Added
+
+* **hooks:** add review_by sunset date per hook ([#1315](https://github.com/devseunggwan/praxis/issues/1315)) ([526b64b](https://github.com/devseunggwan/praxis/commit/526b64b0ec969b505ba82753df4cb71b3bd68d37)), closes [#1300](https://github.com/devseunggwan/praxis/issues/1300)
+* **hooks:** advise on settings-file writes ([#1356](https://github.com/devseunggwan/praxis/issues/1356)) ([4faa57d](https://github.com/devseunggwan/praxis/commit/4faa57d220bcb6ba282eb422bc61b14cac561284)), closes [#1337](https://github.com/devseunggwan/praxis/issues/1337)
+* **hooks:** fire second-failure on tool failure ([4c1454e](https://github.com/devseunggwan/praxis/commit/4c1454ec2b65b5ba61fb014f7f613b2c36156a8a)), closes [#1337](https://github.com/devseunggwan/praxis/issues/1337) [#1337](https://github.com/devseunggwan/praxis/issues/1337)
+* **hooks:** gate repeated mutations in one batch ([#1372](https://github.com/devseunggwan/praxis/issues/1372)) ([5910d92](https://github.com/devseunggwan/praxis/commit/5910d9257239899eab7ca109ba5caa6d7b0a7903))
+* **hooks:** grade a subagent's final turn too ([#1358](https://github.com/devseunggwan/praxis/issues/1358)) ([4dd443a](https://github.com/devseunggwan/praxis/commit/4dd443a0a7d6730c2c596e662670c765e64d429f)), closes [#1337](https://github.com/devseunggwan/praxis/issues/1337)
+* **hooks:** inject isolation contract on spawn ([#1374](https://github.com/devseunggwan/praxis/issues/1374)) ([1b86824](https://github.com/devseunggwan/praxis/commit/1b8682455fdbf120fb029c544486dac959aae8cb))
+* **hooks:** port codex-review-route to python ([#1317](https://github.com/devseunggwan/praxis/issues/1317)) ([dddbc44](https://github.com/devseunggwan/praxis/commit/dddbc44d3709bc8831bb90b916b2d988da2931de)), closes [#1304](https://github.com/devseunggwan/praxis/issues/1304)
+* **hooks:** resume transcript scans from a cursor ([a979558](https://github.com/devseunggwan/praxis/commit/a979558af0c5efe2b4ea16428bcc0f5cbfdb1533))
+* **skills:** adopt when_to_use and runtime fields ([#1345](https://github.com/devseunggwan/praxis/issues/1345)) ([120f8fc](https://github.com/devseunggwan/praxis/commit/120f8fc66c0b7acea75b9702dcb6a6bb9e54ca0f)), closes [#1331](https://github.com/devseunggwan/praxis/issues/1331)
+
+
+### Fixed
+
+* **hooks:** advise on masked exit gating a mutation ([#1274](https://github.com/devseunggwan/praxis/issues/1274)) ([98a237b](https://github.com/devseunggwan/praxis/commit/98a237be2b4c5206adb242b53453676a2c0910ea))
+* **hooks:** fail open on an unreadable provenance tail ([c72e891](https://github.com/devseunggwan/praxis/commit/c72e89160f70caf440ec86299c055f8b4df758c1)), closes [#1279](https://github.com/devseunggwan/praxis/issues/1279)
+* **hooks:** lead emitted bodies with english ([#1316](https://github.com/devseunggwan/praxis/issues/1316)) ([7f9dd0d](https://github.com/devseunggwan/praxis/commit/7f9dd0def0d6c3cac214ff04c51ec32957203123)), closes [#1298](https://github.com/devseunggwan/praxis/issues/1298)
+* **hooks:** rotate the logs that had no retention ([bfaab75](https://github.com/devseunggwan/praxis/commit/bfaab75bf7434780dc75f4be5856956162f1ef33)), closes [#1282](https://github.com/devseunggwan/praxis/issues/1282)
+* **hooks:** scratch skip is for absolute tmp paths ([#1363](https://github.com/devseunggwan/praxis/issues/1363)) ([2029b4b](https://github.com/devseunggwan/praxis/commit/2029b4b98dad48ef9b0f4eb90132bd5bc014b97f)), closes [#1362](https://github.com/devseunggwan/praxis/issues/1362) [#713](https://github.com/devseunggwan/praxis/issues/713)
+* **paths:** honour PRAXIS_HOME for telemetry dir ([34d4dc5](https://github.com/devseunggwan/praxis/commit/34d4dc5258ddc7cca42b7d27c6cb5cd920d119b6)), closes [#1340](https://github.com/devseunggwan/praxis/issues/1340)
+* **skills:** plugin-root paths, omc prereq, install ([#1327](https://github.com/devseunggwan/praxis/issues/1327)) ([87e9e3c](https://github.com/devseunggwan/praxis/commit/87e9e3c884f99f227d10651e391ca141fa83426d)), closes [#1289](https://github.com/devseunggwan/praxis/issues/1289) [#1290](https://github.com/devseunggwan/praxis/issues/1290) [#1291](https://github.com/devseunggwan/praxis/issues/1291)
+* **skills:** resolve recover tools via skill dir ([#1346](https://github.com/devseunggwan/praxis/issues/1346)) ([c8a4b1e](https://github.com/devseunggwan/praxis/commit/c8a4b1e20ae017628dec89e4ba09eda029f9f262)), closes [#1333](https://github.com/devseunggwan/praxis/issues/1333)
+
+
+### Changed
+
+* add a pinned mypy job and runner step ([#1321](https://github.com/devseunggwan/praxis/issues/1321)) ([cde0dfc](https://github.com/devseunggwan/praxis/commit/cde0dfcb066b1bb0a2774bed7b03d3918137673d)), closes [#1301](https://github.com/devseunggwan/praxis/issues/1301)
+* add reading paths and shrink agents.md ([#1318](https://github.com/devseunggwan/praxis/issues/1318)) ([b175132](https://github.com/devseunggwan/praxis/commit/b175132cdad7bc157eea96125d06d52f057a25e5)), closes [#1306](https://github.com/devseunggwan/praxis/issues/1306)
+* **audit:** drop the removal narrative ([a1b6de9](https://github.com/devseunggwan/praxis/commit/a1b6de96c8c340137aae1735719121f74546cf3e)), closes [#713](https://github.com/devseunggwan/praxis/issues/713)
+* gate pytest on a coverage floor ([#1320](https://github.com/devseunggwan/praxis/issues/1320)) ([de3cdbb](https://github.com/devseunggwan/praxis/commit/de3cdbbded9c2f3ac4e1b0abfd8f2ffe1e72dc8f)), closes [#1303](https://github.com/devseunggwan/praxis/issues/1303)
+* give cited rules an in-repo home ([#1328](https://github.com/devseunggwan/praxis/issues/1328)) ([b51cdcc](https://github.com/devseunggwan/praxis/commit/b51cdcc0cf61188a3fadbde3536abcb0820bbd9d)), closes [#1293](https://github.com/devseunggwan/praxis/issues/1293) [#1294](https://github.com/devseunggwan/praxis/issues/1294) [#1295](https://github.com/devseunggwan/praxis/issues/1295)
+* **hooks:** count pass fires instead of writing rows ([#1367](https://github.com/devseunggwan/praxis/issues/1367)) ([2392e8d](https://github.com/devseunggwan/praxis/commit/2392e8d82ca0d612dcfacf1bdb908a7158d7bffe))
+* **hooks:** drop the slack/notion mcp matcher ([#1360](https://github.com/devseunggwan/praxis/issues/1360)) ([2c0e05b](https://github.com/devseunggwan/praxis/commit/2c0e05b21fa9b9947a277066fd7ffccf81085ffa)), closes [#713](https://github.com/devseunggwan/praxis/issues/713)
+* **hooks:** parse only tool_use lines in advisory ([4ac09e0](https://github.com/devseunggwan/praxis/commit/4ac09e0f56d645a8c08e56715cac9f4b492fe4a6)), closes [#1278](https://github.com/devseunggwan/praxis/issues/1278)
+* **hooks:** postcompact via SessionStart ([59c38a3](https://github.com/devseunggwan/praxis/commit/59c38a313abe223fd07e59747a333510418946bf)), closes [#1339](https://github.com/devseunggwan/praxis/issues/1339)
+* **hooks:** re-argue commit ADVISE on reversibility ([#1273](https://github.com/devseunggwan/praxis/issues/1273)) ([b75dbcf](https://github.com/devseunggwan/praxis/commit/b75dbcf70701dae5d2c69232a85684c4ffaa6dba))
+* **hooks:** read the issue-dedup tail by seeking ([ce6ae6b](https://github.com/devseunggwan/praxis/commit/ce6ae6b104247113a9a6c10278f2b324246a857c)), closes [#1279](https://github.com/devseunggwan/praxis/issues/1279)
+* **hooks:** retire stale hook refs and adr status ([#1324](https://github.com/devseunggwan/praxis/issues/1324)) ([618ef40](https://github.com/devseunggwan/praxis/commit/618ef40f9e776456e826d567a6014210dbfa4b80)), closes [#1292](https://github.com/devseunggwan/praxis/issues/1292)
+* **hooks:** retract the squash-merge exemption ([#1275](https://github.com/devseunggwan/praxis/issues/1275)) ([73a2ca2](https://github.com/devseunggwan/praxis/commit/73a2ca22b559eb5cc06d71ab3365c034b8bfc4d7))
+* **hooks:** run the Stop hooks in one process ([#1344](https://github.com/devseunggwan/praxis/issues/1344)) ([c05f1a9](https://github.com/devseunggwan/praxis/commit/c05f1a9b3ee279320fddbe086716a1b1400c2a01)), closes [#1281](https://github.com/devseunggwan/praxis/issues/1281)
+* **hooks:** split _hook_utils behind a shim ([#1322](https://github.com/devseunggwan/praxis/issues/1322)) ([79d7423](https://github.com/devseunggwan/praxis/commit/79d7423515d66228145d62033ccdb836397bae44)), closes [#1305](https://github.com/devseunggwan/praxis/issues/1305)
+* **hooks:** stream the codex-review commit scan ([621067b](https://github.com/devseunggwan/praxis/commit/621067bcdeb1e11aeb441757925b8bea08f73300)), closes [#1277](https://github.com/devseunggwan/praxis/issues/1277)
+* **hooks:** stream the rejection scan passes ([1a3ea71](https://github.com/devseunggwan/praxis/commit/1a3ea713988749264ab96eaad6e4352268b91a7c)), closes [#1280](https://github.com/devseunggwan/praxis/issues/1280)
+* **hooks:** stream two more commit-path scans ([5277c9b](https://github.com/devseunggwan/praxis/commit/5277c9b996857eb34e2498143595bbd0aee42380)), closes [#1312](https://github.com/devseunggwan/praxis/issues/1312)
+* put general rules ahead of incident narratives ([#1329](https://github.com/devseunggwan/praxis/issues/1329)) ([bcd5b52](https://github.com/devseunggwan/praxis/commit/bcd5b52e26885ed081aed9da0bd4eb2cf4d4dae5)), closes [#1296](https://github.com/devseunggwan/praxis/issues/1296) [#1299](https://github.com/devseunggwan/praxis/issues/1299)
+* **readme:** list hooks inert without a component ([9860bb7](https://github.com/devseunggwan/praxis/commit/9860bb7b9c0eefa9428b724b41e843a765c50cc3)), closes [#1332](https://github.com/devseunggwan/praxis/issues/1332)
+* run markdownlint without the docker build ([#1353](https://github.com/devseunggwan/praxis/issues/1353)) ([de91959](https://github.com/devseunggwan/praxis/commit/de9195988f1ef921c8e6de04d919d1aad1e7278a)), closes [#1350](https://github.com/devseunggwan/praxis/issues/1350) [#1351](https://github.com/devseunggwan/praxis/issues/1351) [#1352](https://github.com/devseunggwan/praxis/issues/1352)
+* **runtime-constraints:** re-verify bash cwd reset ([#1326](https://github.com/devseunggwan/praxis/issues/1326)) ([7484487](https://github.com/devseunggwan/praxis/commit/748448704f7a20c6faea6e198d43786571c3eec3)), closes [#1286](https://github.com/devseunggwan/praxis/issues/1286)
+* **runtime:** record hook payload divergences ([#1373](https://github.com/devseunggwan/praxis/issues/1373)) ([c4dbc06](https://github.com/devseunggwan/praxis/commit/c4dbc06e39ecec8cfc913af82d99da9268704620))
+* sync runtime descriptions with the manifest ([#1323](https://github.com/devseunggwan/praxis/issues/1323)) ([6be39c6](https://github.com/devseunggwan/praxis/commit/6be39c67d197b1d44337a0c4b8b6e6706720c388)), closes [#1284](https://github.com/devseunggwan/praxis/issues/1284) [#1285](https://github.com/devseunggwan/praxis/issues/1285) [#1287](https://github.com/devseunggwan/praxis/issues/1287) [#1288](https://github.com/devseunggwan/praxis/issues/1288) [#1299](https://github.com/devseunggwan/praxis/issues/1299)
+* translate korean prose in english docs ([#1325](https://github.com/devseunggwan/praxis/issues/1325)) ([f96f605](https://github.com/devseunggwan/praxis/commit/f96f6050b89cf98fb5c7848a4853d728b9e3f144)), closes [#1297](https://github.com/devseunggwan/praxis/issues/1297)
+
+## [7.15.0](https://github.com/devseunggwan/praxis/compare/v7.14.0...v7.15.0) (2026-09-05)
+
+
+### Added
+
+* **cmux:** idleness oracle for orphan pane triage ([#1255](https://github.com/devseunggwan/praxis/issues/1255)) ([e825d2f](https://github.com/devseunggwan/praxis/commit/e825d2f6b5ca77c685d382eae09cd3a7a63cea24))
+* **hook:** extend rejected-mutation-reconsent to the dispatch surface ([#1262](https://github.com/devseunggwan/praxis/issues/1262)) ([30e95f0](https://github.com/devseunggwan/praxis/commit/30e95f0cb4b1218fdd60669b910849c7c406617e))
+* **hooks:** advise on unenforced mandatory steps ([#1263](https://github.com/devseunggwan/praxis/issues/1263)) ([d1e3e33](https://github.com/devseunggwan/praxis/commit/d1e3e333654cf066fed2082ada5594a002e7504c))
+* **hooks:** gate composed $ command lines ([96c0f98](https://github.com/devseunggwan/praxis/commit/96c0f98b59243c7c5c11e165723628c2800273a0))
+* **hooks:** gate parens release-please rejects ([#1268](https://github.com/devseunggwan/praxis/issues/1268)) ([9ea4785](https://github.com/devseunggwan/praxis/commit/9ea4785ab3ca9ef0bb1f42fac3782e2b9c381730))
+
+
+### Fixed
+
+* **cmux-delegate:** drop $&lt;digit&gt; from the skill body ([#1269](https://github.com/devseunggwan/praxis/issues/1269)) ([a825eae](https://github.com/devseunggwan/praxis/commit/a825eae8417069c266ec1e16f6b20f3cce0686b6))
+* **hooks:** classify string-shaped failed payload ([#1270](https://github.com/devseunggwan/praxis/issues/1270)) ([1cb7ca6](https://github.com/devseunggwan/praxis/commit/1cb7ca6e1a2cb2944b972d36312a5fcc8fef9b7e))
+* **hooks:** cut the marker window at the last merge that ran ([#1264](https://github.com/devseunggwan/praxis/issues/1264)) ([b8785bb](https://github.com/devseunggwan/praxis/commit/b8785bbd757ec0aae62f9f33fbc57a11fa94ab99))
+* **hooks:** declare the two undeclared advisory strict knobs ([#1260](https://github.com/devseunggwan/praxis/issues/1260)) ([b291ffd](https://github.com/devseunggwan/praxis/commit/b291ffdbd8ce032db47a12edf0cf16acd72b28fe))
+* **hooks:** detect gh api comment writes ([#1267](https://github.com/devseunggwan/praxis/issues/1267)) ([e923b7d](https://github.com/devseunggwan/praxis/commit/e923b7de3f0b98822243c1bed053036612d3129b))
+* **hooks:** resolve gate-4 visibility in the hook ([#1272](https://github.com/devseunggwan/praxis/issues/1272)) ([9a75c74](https://github.com/devseunggwan/praxis/commit/9a75c748fdea91829c8f3f108c7284e18ac64667))
+
+
+### Changed
+
+* **hooks:** state the anchor gh prerequisite ([#1266](https://github.com/devseunggwan/praxis/issues/1266)) ([36e8580](https://github.com/devseunggwan/praxis/commit/36e8580497d25bda32b763025f490c21f0b9706d))
+
 ## [7.14.0](https://github.com/devseunggwan/praxis/compare/v7.13.0...v7.14.0) (2026-09-03)
 
 

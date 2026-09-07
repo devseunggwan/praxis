@@ -1,0 +1,140 @@
+refactor(hooks): extract shared _lib helpers (#1232)
+
+* refactor(hooks): extract read_bash_payload into _lib
+
+89개 impl.py가 손으로 복제해온 stdin 프리앰블(json.load + tool_name
+필터 + command 추출)을 hooks/_lib/_payload.py의 read_bash_payload() /
+read_payload() 헬퍼 하나로 통합한다 (issue #1178 Part 1).
+
+문제:
+- 예외 절이 3가지로 표류 (77x `except Exception`, 10x
+  `(JSONDecodeError, ValueError)`, 2x +OSError) — 결과는 전부 동일한
+  fail-open(return 0)인데 복사본마다 다르게 적혀 있었다.
+- 46개 사이트가 null-UNSAFE `payload.get("tool_input", {}).get(...)`
+  패턴 사용 — 명시적 `"tool_input": null` 입력에서 AttributeError가
+  발생, @fail_open이 삼키지만 게이트가 조용히 무장해제되고 에러
+  로그에 트레이스백 노이즈가 쌓였다.
+
+변경:
+- _payload.read_payload(tool_names=None): 파싱 실패 / 비-dict /
+  필터 불일치 → None (호출부는 None → return 0 번역).
+- _payload.read_bash_payload() → (payload, command) | None:
+  command는 항상 str — `(payload.get("tool_input") or {})` 널 안전
+  추출, 비-str 값은 ""로 강등.
+- 89개 impl.py 프리앰블 전부 이관. sys.path insert 줄은 유지(임포트
+  경로), json/필터/추출 줄만 헬퍼로 대체. 각 훅의 다운스트림 동작
+  (자체 빈-command 검사, 다른 payload 필드 사용, 우회 env 순서)은
+  그대로 보존.
+- 헬퍼가 흡수하지 못한 잔여 null-UNSAFE 접근도
+  `(payload.get("tool_input") or {}).get(...)` 형태로 정정.
+- 61개 파일에서 이제 미사용이 된 `import json` 제거 (ruff F401).
+- tests/hooks/_lib/test_payload.py 추가 (null tool_input, malformed
+  JSON, 비-Bash 도구, command 누락/비-str, 필터 매트릭스).
+
+Co-Authored-By: Claude <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01PBTDLnV7eaAqz7GGuSD5X7
+
+* refactor(hooks): extract _lib/_git.py
+
+8개 훅이 각자 들고 있던 읽기 전용 git 서브프로세스 래퍼(그중 2개는
+바이트 동일 복사본)와 3곳에 복제된 origin URL owner/repo 정규식을
+hooks/_lib/_git.py 하나로 통합한다 (issue #1178 Part 2).
+
+변경:
+- _git.run_git(args, timeout=5, cwd=None) → str | None: exit 0이면
+  원본 stdout, 그 외(비-0 종료, git 부재, 타임아웃, 잘못된 cwd,
+  NUL 인자)는 None. rc==0 + 빈 stdout("")과 실패(None)를 구분해
+  `check-ignore -q` 류 호출부가 `is not None`으로 rc==0을 판정한다.
+- _git.repo_root(cwd), _git.origin_slug(cwd) 파생 헬퍼.
+- 이관된 8개 사이트: pre-edit-protected-branch-guard(_run_git),
+  worktree-edit-gate(_run_git+_get_remote_slug),
+  anchor-comment-gate(_git, 데드라인 인지 timeout 유지),
+  gh-merge-worktree-precondition(_run의 git 호출부; gh 호출부는
+  로컬 러너 유지), postcompact-context(_git_branch; gh 호출부 유지),
+  block-personal-asset-leak(_git_output, 2s 타임아웃 유지),
+  pre-commit-staged-file-enumeration(_git),
+  external-write-path-existence-check(_git_toplevel).
+- origin 정규식 3곳 통합: worktree-edit-gate,
+  pre-gh-pr-create-dedup-gate(2s 타임아웃 유지)는 기존과 동일
+  (host-anchored) 동작. gh-label-verify는 기존 정규식이 host 비고정
+  (gitlab/자체 호스트 origin도 매칭)이어서 strict 변형 채택으로
+  동작이 의도적으로 좁아짐 — 비-GitHub origin은 이제 fail-open
+  (검증 생략)이며 잘못된 호스트의 슬러그로 라벨을 검증하지 않는다
+  (issue #1178에 명시된 교정).
+- tests/hooks/_lib/test_git.py 추가 (origin_slug URL 매트릭스:
+  github ssh/https/.git/트레일링 슬래시 허용, gitlab 거부; run_git
+  성공/실패/빈 stdout 구분/NUL 인자; repo_root 안/밖).
+
+Co-Authored-By: Claude <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01PBTDLnV7eaAqz7GGuSD5X7
+
+* fix(hooks): budget-aware git spawn in _memory_dir
+
+`_main_worktree_path` spawned `git rev-parse --git-common-dir` on a fixed
+5s timeout. momentum-rule-retrieval-gate reaches it from inside the Bash
+dispatch group, where a spawn that cannot shrink can outlive the group
+deadline and get the whole dispatcher killed by the host (#1167).
+
+Delegating to the shared `run_git` fixes it and removes the duplicated
+rc/stdout handling. The tests stub `run_git` instead of patching the
+global `subprocess.run` attribute, which also stops that patch leaking
+process-wide.
+
+Confidence: high
+Not-tested: no live run under an actually-exhausted group budget; the
+clamp itself is covered by _git.py's own tests.
+Refs #1178
+
+Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01WAtX5ReBAaEABiQrZCvbgN
+
+* test(hooks): follow members into _lib in the budget invariant
+
+test_every_subprocess_member_is_budget_aware scanned impl.py only. After
+the _git.py extraction the spawn for six hooks lives in hooks/_lib, so a
+file-scoped scan would report a clean group while the subprocess merely
+changed address.
+
+The scan now walks each member's transitive hooks/_lib import closure,
+with a positive control asserting the closure reaches _git.py — an empty
+offender list has to mean "no fixed timeouts", not "the closure stopped
+following imports".
+
+Confidence: high
+Refs #1178
+
+Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01WAtX5ReBAaEABiQrZCvbgN
+
+* fix(hooks): anchor the whole origin URL, not the tail
+
+_ORIGIN_SLUG_RE matched `github.com` anywhere in the origin URL, so
+`https://notgithub.com/evil/repo` resolved to `evil/repo` — the host
+label ends at `notgithub.com`, and the slug then reaches `gh --repo` in
+the label and dedup gates.
+
+The pattern now anchors the whole URL and requires the host to be exactly
+github.com, keeping the scp-like, https, ssh and userinfo forms.
+
+Confidence: high
+Refs #1178
+
+Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01WAtX5ReBAaEABiQrZCvbgN
+
+* fix(hooks): non-dict tool_input yields an empty command
+
+`(payload.get("tool_input") or {}).get("command")` covers only the falsy
+non-dicts. A truthy string or list still reached `.get` and raised
+AttributeError, so the caller fell into its fail-open path and the gate
+went silently quiet — the failure this helper exists to end.
+
+Confidence: high
+Refs #1178
+
+Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01WAtX5ReBAaEABiQrZCvbgN
+
+---------
+
+Co-authored-by: Claude <noreply@anthropic.com>

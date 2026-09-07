@@ -1,11 +1,21 @@
 ---
 name: retrospect
 description: >
-  Session retrospect — analyze current Claude Code session against global `~/.claude/CLAUDE.md` rules,
+  Session retrospect — analyze the current Claude Code session against the rules it ran under (project and global `CLAUDE.md`),
   identify friction patterns and root causes, propose context-appropriate improvement
   actions, then execute after user approval.
+when_to_use: >
   Triggers on "retrospect", "what went wrong", "session review",
   "session improvement", "what was the issue", "improve".
+allowed-tools:
+  - Read
+  - Grep
+  - Glob
+  - Bash(git remote *)
+  - Bash(git rev-parse *)
+  - Bash(gh repo view *)
+  - Bash(gh issue view *)
+  - Bash(gh pr view *)
 verified-against-runtime: true
 runtime-verified-at: 2026-07-13
 runtime-verified-note: "tests/test_retrospect_falsify_recommended.sh + test_retrospect_routing.sh + retrospect hook suites, plus audit-distribution-gates.py differential verification (issue #774): 6/6 script-vs-Stop-hook verdict agreement on mirrored gate classes, and a live violation→fix→clean loop on real session-friction drafts."
@@ -25,6 +35,10 @@ Symptom-level fixes miss the underlying pattern.
 **Delegates to:** `oh-my-claudecode:tracer` agent (causal pattern analysis),
 `oh-my-claudecode:analyst` agent (pattern clustering) — invoked via
 `Agent(subagent_type="oh-my-claudecode:...")`
+
+**Prerequisites:** `oh-my-claudecode` must be installed. The tracer and
+analyst calls in Stage 2 have no fallback, which is why this skill sits in
+the Enhanced tier of the compatibility table (`using-praxis`), not Standalone.
 
 **Reference map:**
 
@@ -419,6 +433,7 @@ Full tables and stage-by-stage failure handling are in
 | ------- | --------- | -------- |
 | Stage 1.5 | MEMORY.md index inaccessible | skip hygiene with the documented trail line; continue to Stage 2 |
 | Stage 2 | transcript unreachable | emit the documented `*_skipped` trail line and continue with the allowed fallback |
+| Stage 2 | `Agent type not found: oh-my-claudecode:tracer` (or `:analyst`) — omc not installed | stop and report the missing prerequisite; do not substitute an inline analysis for the mandatory tracer/analyst pass |
 | Stage 3 | Pre-Output Falsification Gate triggered but premise cannot be falsified | drop ranking, surface the option unranked, and ask with open premise |
 | Stage 3 | finding lacks Stage 2 caveats line despite required caveats | block Stage 3 emission and return to Stage 2 / 2.5 |
 | Stage 4 | artifact write fails | report the failure; do not silently drop the action |

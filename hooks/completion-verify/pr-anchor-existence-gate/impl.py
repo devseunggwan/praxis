@@ -590,14 +590,19 @@ def _has_confirmed_edit(state: _ScanState, after_create: int) -> bool:
 
 def _build_message(unanchored: list[str], blocking: bool) -> str:
     verb = "차단" if blocking else "안내"
+    verb_en = "blocking" if blocking else "advisory"
+    prs = ", ".join("#" + n for n in unanchored)
     return (
-        f"{_PREFIX} 이번 세션에서 PR {', '.join('#' + n for n in unanchored)} 을(를) "
+        f"{_PREFIX} PR {prs} was created in this session, but no verification anchor "
+        "comment (`gh pr comment` / `gh api ... issues/comments`) has been posted on "
+        f"it yet ({verb_en}).\n"
+        f"{_PREFIX} 이번 세션에서 PR {prs} 을(를) "
         "생성했지만, 그 PR 에 대한 검증 앵커 코멘트(`gh pr comment` / `gh api ... "
-        "issues/comments`)가 아직 게시되지 않았습니다 ({verb}).\n".format(verb=verb)
-        + f"{_PREFIX} Rule: Post-PR Empirical Verification 앵커를 남기세요. 요구하는 "
+        f"issues/comments`)가 아직 게시되지 않았습니다 ({verb}).\n"
+        f"{_PREFIX} Rule: Post-PR Empirical Verification 앵커를 남기세요. 요구하는 "
         "것은 존재이지 PASS 가 아닙니다 — 환경 불통/자격증명 부재로 검증이 막혔다면 "
         "`BLOCKED` 행을 담은 앵커도 유효합니다.\n"
-        f"{_PREFIX} 드래프트 PR 은 이 게이트 대상이 아닙니다.\n"
+        f"{_PREFIX} Draft PRs are outside this gate / 드래프트 PR 은 이 게이트 대상이 아닙니다.\n"
         f"{_PREFIX} 항상 advisory 로: {_ADVISORY_ENV}=1 | bypass: {_BYPASS_ENV}=1\n"
     )
 

@@ -161,14 +161,35 @@ fi
 # matches brokers by the broker fixture's path, so an owner sharing that path
 # would be scanned as a broker itself.
 #
-# The reaper's idle gate reads mtime through BSD `stat -f %m`, which is Darwin
-# syntax, so this gate is skipped elsewhere (the CI runner is Ubuntu).
-if [ "$(uname -s)" != "Darwin" ]; then
-  skip "gate 3 owner-death behavior (needs Darwin: reaper's idle gate uses BSD 'stat -f %m')"
-else
+# The reaper's idle gate reads mtime through a portable mtime() — BSD `stat -f`,
+# then GNU `stat -c`, then python3 (issue #1302) — so this gate runs on Linux
+# too, CI included. Only the "#926 constraint 3" sub-case below stays
+# platform-gated, for a reason of its own (see its comment).
 
 TMPROOT="${TMPDIR:-/tmp}"; TMPROOT="${TMPROOT%/}"
 TMPD="$(mktemp -d "$TMPROOT/px919.XXXXXX")" || { echo "FATAL: mktemp -d failed" >&2; exit 1; }
+
+# The idle gate reads mtime through the reaper's portable mtime() — BSD
+# `stat -f`, then GNU `stat -c`, then python3 (issue #1302). Probe the same
+# chain once here: when none of them yields a value, the reaper substitutes
+# `now`, the stale-idle path never fires, and gates 3 and 5b would fail for a
+# reason that belongs to the host, not the reaper. They skip with that reason
+# instead, so a failure in those gates always means reap behavior regressed.
+mtime_probe() {
+  local f="$TMPD/.mtime-probe" m
+  : > "$f" || return 1
+  m="$(stat -f %m "$f" 2>/dev/null)" || m=""
+  case "$m" in ''|*[!0-9]*) m="$(stat -c %Y "$f" 2>/dev/null)" || m="" ;; esac
+  case "$m" in ''|*[!0-9]*)
+    m="$(python3 -c 'import os, sys; print(int(os.stat(sys.argv[1]).st_mtime))' "$f" 2>/dev/null)" || m="" ;;
+  esac
+  rm -f "$f"
+  case "$m" in ''|*[!0-9]*) return 1 ;; esac
+  return 0
+}
+MTIME_OK=false
+mtime_probe && MTIME_OK=true
+NO_MTIME_REASON="no mtime provider on this host: BSD stat -f, GNU stat -c and python3 all failed, so the reaper's idle gate would read every broker log as fresh"
 FIXTURE="$TMPD/broker-fixture.sh"
 OWNER_FIXTURE="$TMPD/owner-fixture.sh"
 REAPER_COPY="$TMPD/reaper-copy.sh"
@@ -278,6 +299,8 @@ write_state() {
 
 if ! grep -q "^BROKER_PATTERN='$FIXTURE'$" "$REAPER_COPY"; then
   fail "#919: could not isolate BROKER_PATTERN in the reaper copy (refusing to run against real brokers)"
+elif [ "$MTIME_OK" != true ]; then
+  skip "gate 3 owner-death behavior ($NO_MTIME_REASON)"
 else
   for w in alive subdir noowner wsgone nojobs nostate piddup pidgone ambig ambgone sib; do
     mkdir -p "$TMPD/ws-$w"
@@ -363,9 +386,18 @@ else
     # lsof. Only lsof lives in that directory among the binaries the reaper
     # needs (ps, pgrep, jq, stat, date, mktemp, shasum, sed, awk), so removing
     # it does not disable the rest of the run.
+    #
+    # Darwin-only, and NOT because of stat (that split is gone, #1302): on
+    # Linux cwd_pairs() falls back to /proc/<pid>/cwd once lsof is gone, so
+    # the snapshot is still populated and the NOOWNER broker is correctly read
+    # as unowned — the "no cwd source" premise cannot be staged here without
+    # hiding /proc, which the reaper does not let a caller do. The assertion
+    # is right; only its precondition is unreachable on this platform.
     LSOF_BIN="$(command -v lsof || true)"
     if [ -z "$LSOF_BIN" ]; then
       skip "#926 constraint 3 no-cwd-source KEEP (lsof not installed — nothing to remove)"
+    elif [ "$(uname -s)" = "Linux" ] && [ -r /proc/self/cwd ]; then
+      skip "#926 constraint 3 no-cwd-source KEEP (Linux: the reaper falls back to /proc/<pid>/cwd, so removing lsof leaves a cwd source)"
     else
       LSOF_DIR="$(dirname "$LSOF_BIN")"
       NOLSOF_PATH="$(printf '%s' "$PATH" | tr ':' '\n' | grep -vxF "$LSOF_DIR" | paste -sd: -)"
@@ -536,8 +568,6 @@ COUNTLSOF
     esac
   fi
 fi
-
-fi   # Darwin gate
 
 # --- Gate 4: #921 GC sessionDir ownership (behavior) -------------------------
 # The GC pass deletes a sessionDir on one signal: the broker.json naming it
@@ -724,11 +754,8 @@ fi
 
 # --- 5b: the reap pass resolves an owner recorded in a sibling config dir ----
 # Signal C (workspaceRoot deleted) is used deliberately: it needs no cwd
-# snapshot, so this case does not depend on lsof. The idle gate reads BSD
-# `stat -f %m`, so the reap half is Darwin-only like gate 3.
-if [ "$(uname -s)" != "Darwin" ]; then
-  skip "gate 5b sibling-config reap decision (needs Darwin: reaper's idle gate uses BSD 'stat -f %m')"
-else
+# snapshot, so this case does not depend on lsof. The idle gate's mtime() is
+# portable (#1302), so this runs everywhere gate 5 does.
 
 FIXTURE5="$TMPD5/broker-fixture.sh"
 REAPER5="$TMPD5/reaper-copy.sh"
@@ -766,6 +793,8 @@ done
 
 if [ "$broker5_ready" != true ]; then
   fail "#1056: gate 5b fixture broker did not come up"
+elif [ "$MTIME_OK" != true ]; then
+  skip "gate 5b sibling-config reap decision ($NO_MTIME_REASON)"
 else
   DRY5_OUT="$(TMPDIR="$TMPD5" CLAUDE_CONFIG_DIR="$CONFIG5A" bash "$REAPER5" --reap --max-age 5 --dry-run 2>&1)"
   case "$DRY5_OUT" in
@@ -777,8 +806,6 @@ else
       fail "#1056: expected WOULD REAP for pid=$BROKER5_PID, got: $DRY5_OUT" ;;
   esac
 fi
-
-fi   # Darwin gate (5b)
 
 fi   # jq gate (gate 5)
 

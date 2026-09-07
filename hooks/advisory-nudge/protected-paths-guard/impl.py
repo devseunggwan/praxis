@@ -53,6 +53,10 @@ import sys
 from pathlib import Path, PurePosixPath
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "_lib"))
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
+from _path_scope import (  # type: ignore[import-not-found]  # noqa: E402
+    contains_fragment,
+    under_absolute_prefix,
+)
 from _payload import read_payload  # type: ignore[import-not-found]  # noqa: E402
 
 TARGET_TOOLS = frozenset({"Edit", "Write", "NotebookEdit"})
@@ -190,10 +194,17 @@ def _is_self_edit(path: str) -> bool:
 
 
 def _is_planning_artifact(path: str) -> bool:
-    norm = "/" + path.replace("\\", "/").lstrip("/")
-    if any(norm.startswith(p) for p in _PLANNING_TMP_PREFIXES):
+    """True for a scratch or planning path the advisory does not apply to.
+
+    Scratch is an **absolute** path under `/tmp/` or `/private/tmp/` after
+    lexical normalization: a relative `tmp/.env` is a project path, and
+    `/tmp/../repo/.env` resolves outside `/tmp/` (#1362). The planning
+    fragments match anywhere in the path, relative paths included, because a
+    fragment names a directory rather than a root.
+    """
+    if under_absolute_prefix(path, _PLANNING_TMP_PREFIXES):
         return True
-    return any(frag in norm for frag in _PLANNING_FRAGMENTS)
+    return contains_fragment(path, _PLANNING_FRAGMENTS)
 
 
 def _is_test_fixture(components: tuple[str, ...]) -> bool:

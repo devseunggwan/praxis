@@ -3,10 +3,21 @@
 Supported hosts: all
 
 `hooks/advisory-nudge/pipefail-advisory/impl.py` nudges the agent to add
-`set -o pipefail` (or drop the pipe) when a mutating `git`/`gh` command's
-output is piped into `tail`, `head`, or `grep` — without `pipefail`, the
-pipeline's exit code is the LAST command's exit code, so the mutating
-command's failure is masked.
+`set -o pipefail` (or drop the pipe) when a pipeline's exit code is masked
+by `tail`, `head`, or `grep` — without `pipefail`, a pipeline's exit code
+is the LAST command's, so an upstream failure disappears.
+
+It carries **two predicates** over that one mechanism:
+
+1. **The mutating command is the piped one** (issue #788) — `git commit …
+   | tail`. Its own failure is masked.
+2. **A non-mutating piped segment gates an irreversible one across `&&`**
+   (issue #1271) — `git switch main 2>&1 | tail -1 && gh pr merge …`. The
+   `&&` fires on a precondition that was never actually checked.
+
+The second exists because neither this hook's original predicate nor
+`inspection-chain-advisory` reaches that shape; see
+[Second predicate](#second-predicate--masked-exit-code-gating-an-irreversible-command-issue-1271).
 
 ## Why this exists (issue #788)
 
@@ -28,10 +39,11 @@ structural backstop until this hook. Per issue #788's 3-generation
 threshold, gen-2 promoted this from a memory-layer reminder to a
 PreToolUse advisory.
 
-## Trigger criteria
+## Trigger criteria — predicate 1 (the mutating command is the piped one)
 
 The advisory fires when **both** are true, within a single `|`-connected
-pipe chain:
+pipe chain. Predicate 2's criteria are in
+[its own section](#second-predicate--masked-exit-code-gating-an-irreversible-command-issue-1271).
 
 1. **Any non-last segment** in the chain is a mutating `git`/`gh`
    invocation:
@@ -55,9 +67,10 @@ pipe chain:
   mutating enum is silent).
 - **Non-truncating sink**: `git commit -m x | cat` — `cat` does not
   reproduce the truncate-then-hide-exit-code shape this hook targets.
-- **`&&`/`;`/`||`/`&` chains**: a different defect class, already
-  covered by `inspection-chain-advisory` (`&&`-scoped) and out of scope
-  here (pipe-scoped only).
+- **`;`/`||`/`&` chains**: a masked exit code there gates nothing — the
+  next command runs (or does not) regardless — so there is no
+  precondition to have been skipped. `&&` is the exception and is
+  covered by the second predicate below.
 - **Quoted-string literal**: a pipe character inside a quoted argument
   (e.g. `gh issue create --body "example: git commit -m x | tail -3"`)
   tokenizes as a single token, not a `|` separator — never reaches
@@ -191,12 +204,97 @@ already clean and needs no stripping.
 | `git status \| grep modified` | **SILENT** — `status` is read-only |
 | `gh pr list \| head -5` | **SILENT** — `list` is read-only |
 | `git commit -m x \| cat` | **SILENT** — `cat` does not truncate |
-| `git commit -m x && git push` | **SILENT** — `&&`, not a pipe |
+| `git commit -m x && git push` | **SILENT** — nothing on the left of `&&` is piped, so no exit code is masked |
+| `git switch main 2>&1 \| tail -1 && gh pr merge 1264` | **ADVISORY** — predicate 2: masked exit gates an irreversible merge |
+| `cd /repo && git switch main 2>&1 \| tail -1 && gh pr merge 4964` | **ADVISORY** — predicate 2 across a 3-unit `&&` run |
+| `git log --oneline \| head -1 && git push origin main` | **ADVISORY** — predicate 2: `head` sink, `git push` gated |
+| `gh pr view 1 --json state \| grep OPEN && gh workflow run ci.yml` | **ADVISORY** — predicate 2: `grep` sink, remote run gated |
+| `git status --porcelain \| tail -1 && git commit -m x` | **SILENT** — `git commit` is recoverable; predicate 2 is scoped to irreversible targets |
+| `git switch main 2>&1 \| tail -1 ; gh pr merge 1264` | **SILENT** — `;` gates nothing |
+| `gh pr merge 1264 && git log \| tail -1` | **SILENT** — the masked pipeline follows the mutation |
 | `gh issue create --body "example: git commit -m x \| tail -3"` | **SILENT** — quoted-string literal, not a live pipe |
 | `BODY=$(cat <<'EOF'` / heredoc body containing `git commit -m x \| tail -3` / `EOF` / `gh issue create --body "$BODY"` | **SILENT** — heredoc body line excluded from chain-building |
 | `cat <<EOF` / `git commit \| tail` / `EOF not-end` / `git push \| tail -1` / `EOF` | **SILENT** — `EOF not-end` does not prematurely close the heredoc (line-anchored end-marker check) |
 
+## Second predicate — masked exit code gating an irreversible command (issue #1271)
+
+### The gap
+
+```text
+git switch main 2>&1 | tail -1 && gh pr merge 1264 --squash --delete-branch
+```
+
+The left of `&&` is a pipeline, so its exit status is `tail`'s, not `git
+switch`'s. The branch switch can fail and the merge still goes out.
+
+Two hooks were each silent, both correctly by their own spec:
+
+| Hook | Fires when | On this command |
+| ------ | ------------ | ----------------- |
+| `pipefail-advisory` (predicate 1) | the MUTATING command is itself piped | the piped command is `git switch`, which is not in the mutating enum; the merge is outside the pipe |
+| `inspection-chain-advisory` | EVERY segment of the `&&` chain is read-only | the merge is state-changing, so the chain is mixed and the hook is silent by spec |
+
+Predicate 1 explicitly hands `&&` to `inspection-chain-advisory`, and
+that hook is silent on mixed chains — so the handover does not close. The
+missing predicate is one sentence: *does a segment whose exit code is
+masked sit on the left of `&&` from an irreversible command?*
+
+### Trigger criteria
+
+Within one maximal run of units joined by `&&`, in order:
+
+1. Some unit is a **pipeline whose last segment is `tail`/`head`/`grep`**
+   — its exit code is masked.
+2. A **later** unit in the same run is **irreversible**.
+
+### What counts as irreversible
+
+Mirrors `side-effect-scan`'s ASK tier, not this hook's own mutating enum,
+and the difference is the point: the ground for firing is that the gated
+command **cannot be taken back**.
+
+| Command | Irreversible? |
+| --------- | --------------- |
+| `git push` | yes — publishes to a ref others read |
+| `gh pr merge`, `gh pr create` | yes |
+| `gh workflow run` | yes — triggers a remote run |
+| `gh api` with `-X`/`--method` in `{POST, PATCH, PUT, DELETE}` | yes — a REST write |
+| `git commit`, `git merge`, `git rebase`, `git cherry-pick`, `git revert` | **no** — local to this checkout's `.git`, recoverable from the same shell (`git reset --hard ORIG_HEAD` / `HEAD@{1}`) |
+
+So `git status --porcelain | tail -1 && git commit -m x` is silent. A
+masked precondition in front of a recoverable command is not worth a
+nudge, and firing there is what would make this predicate noise.
+
+### Exclusions
+
+| Command | Why silent |
+| --------- | ------------ |
+| `git switch main 2>&1 \| tail -1 ; gh pr merge 1` | `;` does not gate — the merge runs either way |
+| `git switch main && gh pr merge 1` | no pipe on the left, so no masking |
+| `git switch main 2>&1 \| cat && gh pr merge 1` | `cat` does not truncate |
+| `gh pr merge 1 && git log \| tail -1` | the masked pipeline is AFTER the mutation, so it gates nothing |
+| heredoc body holding the pattern as example text | same heredoc skip as predicate 1 |
+
+A substitution body is scanned with this predicate too, because it is a
+command list of its own: in `OUT="$(git switch main 2>&1 | tail -1 && gh
+pr merge 1264)"` the `&&` gates the merge exactly as it would outside the
+substitution, so the inner tokens get the same three steps the outer
+command does — fd-dup merge, predicate 1, predicate 2.
+
+What stays out of scope is the substitution's **own** exit code: it does
+not propagate to an enclosing `&&` the way a plain command's does, so
+`$(... | tail -1) && gh pr merge 1` carries no gating relation for this
+predicate to find. The two cases were conflated until a codex review round
+on issue #1271 separated them, and the earlier wording excluded both —
+which read as a decision about the first rather than an omission.
+
+`&&` gates the whole pipeline on its right, so the irreversible command is
+looked for in every segment of the gated unit, not only the first:
+`... | tail -1 && echo x | gh pr merge 1264` advises.
+
 ## Response format
+
+Predicate 1:
 
 ```text
 stderr: "[pipefail-advisory] mutating command piped without `set -o pipefail`
@@ -205,6 +303,21 @@ stderr: "[pipefail-advisory] mutating command piped without `set -o pipefail`
         <body>"
 exit 0
 ```
+
+Predicate 2:
+
+```text
+stderr: "[pipefail-advisory] masked exit code gates an irreversible command
+        Masked segment: <bin1> | <bin2> | ...
+        Gated by `&&`: <desc>
+        <body>"
+exit 0
+```
+
+The two share the `[pipefail-advisory]` marker, so the **headline** is
+what tells them apart — the test suite asserts on the headline rather
+than the marker for exactly that reason. Predicate 1 is evaluated first;
+at most one advisory is emitted per command.
 
 Advisory-only: the hook **never blocks**. By default it emits no JSON at
 all; `PRAXIS_PIPEFAIL_ADVISORY_CONTEXT=1` adds a second copy of the same
@@ -289,7 +402,7 @@ Two design constraints the experiment inherits from the audit:
 
 | Hook | Scope | Overlap |
 | ------ | ------- | --------- |
-| `inspection-chain-advisory` | `&&`-chained inspection-only commands | None — disjoint separator scope (`&&` vs `\|`) and disjoint command class (read-only vs mutating) |
+| `inspection-chain-advisory` | `&&`-chained inspection-only commands | Adjacent, not overlapping — it fires when EVERY `&&` segment is read-only; predicate 2 fires only when one is irreversible. A chain mixing the two reached neither hook until issue #1271, which is the gap predicate 2 closes |
 | `side-effect-scan` | gates (asks) on mutation CLIs before execution | None — this hook fires on a different axis (pipe-masked exit code, not the mutation itself) and never blocks |
 | `bash-worktree-existence-advisory` | `cd`/`pushd` target existence | Shares the heredoc-body-skip pattern (independently implemented as a plain-argv walk here vs this hook's Token-typed walk there — not extracted to `_lib` per DRY's 3rd-occurrence threshold) |
 
@@ -302,6 +415,8 @@ cost dominates:
 | ------ | ----------- |
 | Sink other than `tail`/`head`/`grep` (e.g. `awk`, `sed`, `cut`) | Silent — the enum is scoped to the three sinks named in issue #788's two observed generations |
 | Mutating command from a CLI other than `git`/`gh` (e.g. `kubectl apply \| tail`, `npm publish \| tail`) | Silent — the mutating enum mirrors `side-effect-scan`'s git/gh categories only |
+| `kubectl apply` / `wrapper-commit` CLIs as predicate 2's **gated** command (e.g. `kubectl config current-context \| tail -1 && kubectl apply -f x.yaml`) | Silent — both sit in `side-effect-scan`'s ASK tier and are genuinely irreversible, but this hook has no detector for either binary. Adding one means a second command enum here, duplicating `side-effect-scan`'s; the shape is recorded rather than worked around locally |
+| `set -o pipefail` already in effect for predicate 2's masked unit | Not detected — same as the row below; the advice is redundant, not wrong |
 | `set -o pipefail` already present earlier in the same compound command | Not detected — the hook does not scan for a preceding `set -o pipefail;` and will still advise (false-positive nudge, not a functional issue since the advice is redundant but harmless) |
 | Multi-line inline heredoc embedded inside a single quoted argument (`--body "$(cat <<'EOF' ... EOF)"` all on the `--body` line) | `safe_tokenize` drops that physical line's tokens entirely on `ValueError` (documented in `safe_tokenize`'s own docstring) — the recommended `BODY=$(cat <<'EOF' ... EOF)` + `--body "$BODY"` two-step form (used in this repo's own test payloads) is the form this hook's heredoc skip is verified against |
 | Heredoc opener that is itself a live mutating pipeline (`gh issue create --body-file - <<EOF \| tail -3`) | Silent (false negative) — the opener segment is dropped entirely once a heredoc-open marker is detected, and the physical-line boundary between the opener's own `\|`-continuation and the heredoc body's first line is not distinguishable after `safe_tokenize` flattens both into the same synthetic-`;`-separated stream. Fixing this correctly requires tracking physical-line provenance through tokenization — out of scope for issue #788; codex review round (2026-07-15) flagged this as [P2] but the compound pattern (heredoc used simultaneously as stdin *and* the command's stdout piped) is rare relative to the gen-1/gen-2 motivating cases, all of which lack heredoc input entirely |
@@ -326,7 +441,13 @@ grouping-prefix recovery (2026-07-16 codex review round 4),
 pipe-then-newline continuation/quoted-substitution-embedded-pipeline
 recovery (2026-07-16 codex review round 5), sibling-substitutions-in-one-
 token/gh-api-mutating-method recovery (2026-07-16 codex review round 6);
-silent on read-only commands piped, non-truncating sinks, `&&`/`;`/`\|\|`/`&`
+predicate 2's `&&`-gating cases with a per-element silent counterpart for
+each (issue #1271: `;` instead of `&&`, a recoverable gated command, no
+pipe on the left, a non-truncating sink, the masked pipeline placed after
+the mutation, and the pattern inside a heredoc body) plus two cases
+pinning that predicate 1 keeps its own headline rather than being
+shadowed;
+silent on read-only commands piped, non-truncating sinks, `;`/`\|\|`/`&`
 separators, quoted-pipe literals, heredoc body false positives (incl.
 the EOF-not-end premature-close guard), single commands,
 gh api default-method (GET) calls, and

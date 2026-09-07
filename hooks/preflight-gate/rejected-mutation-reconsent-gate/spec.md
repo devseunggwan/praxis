@@ -201,10 +201,21 @@ gates*).
 
 ### Over the byte bound: ask (issue #1231)
 
-`scan_user_rejections` answers `None` when the transcript is larger than
-`REJECTION_SCAN_MAX_BYTES` (20 MiB) — the scan did not run, which is not the
-same fact as "no rejection". Condition 2 becomes **unanswerable**, and this gate
-resolves that to **ask**.
+`scan_user_rejections` answers `None` when it did not reach the end of the
+transcript within `REJECTION_SCAN_MAX_BYTES` (20 MiB) of new bytes this call —
+the scan did not finish, which is not the same fact as "no rejection".
+Condition 2 becomes **unanswerable**, and this gate resolves that to **ask**.
+
+The scan is resumable: a cursor under `~/.praxis/cache/`
+(`scan-rejected-mutation-reconsent-gate-root-<session_id>.json`, swept with
+the cache TTL and spared for the live session) holds the byte offset of the
+last complete record read, the rejections found so far and the recent
+`tool_use` blocks they resolve against, so each call reads only the bytes
+appended since the previous one. The bound is therefore a budget per call
+rather than a ceiling on the session: a transcript past it asks for the few
+destructive commands it takes to catch up — the cursor advances by one budget
+each time — and then costs its delta. A payload without a `session_id` scans
+without persistence, under the same budget.
 
 Fail-closed here rather than open, for one reason: the blindness is not evenly
 distributed. The bound is reached only by long sessions, and a long session is
@@ -230,8 +241,9 @@ a file past the bound is direct evidence that one does.
    `AskUserQuestion` records were found (so the scanner is alive), and **0 of
    them name any closed-list identifier**, so no rejection→dispatch pair from
    the incident — or resembling it — is reachable. Issue #1007's closing comment
-   had already recorded the same fact ("현재 근거는 일화 1건이고 그 전사도
-   없다"). The suite therefore pins the behaviour on **synthetic fixtures built
+   had already recorded the same fact ("the only evidence is one anecdote,
+   and there is no transcript of it" — original: "현재 근거는 일화 1건이고 그
+   전사도 없다"). The suite therefore pins the behaviour on **synthetic fixtures built
    from the incident's reported shape**, both directions against the same
    transcript. That is mechanism reproduction, not verification against the
    real artifact, and it is stated here rather than implied.
@@ -242,11 +254,16 @@ a file past the bound is direct evidence that one does.
    dataset, or filesystem path is not matched. Adding a class is additive; each
    one needs a normalization rule of its own, and guessing normalization is how
    a literal-identifier gate turns into a fuzzy one.
-4. **The scan is bounded** at 20 MB of transcript and the 20 most recent
-   rejections (`_transcript.REJECTION_SCAN_MAX_BYTES` /
-   `REJECTION_SCAN_MAX_RECORDS`). Beyond either bound the gate degrades to
-   silence, never to a block. Measured cost on a real 1.9 MB / 659-event
-   transcript: **0.015 s**, against the hook's 5 s budget.
+4. **The scan is bounded** at 20 MB of new transcript per call and the 20
+   most recent rejections (`_transcript.REJECTION_SCAN_MAX_BYTES` /
+   `REJECTION_SCAN_MAX_RECORDS`), and a rejection resolves only against the
+   32 most recent `tool_use` blocks (`REJECTION_RECENT_TOOL_USES`) — the
+   distance between a call and its refusal is the number of parallel calls
+   in that one turn, so an older one is unresolvable and reported with an
+   empty `tool_name`. Beyond the byte budget the gate asks (see above);
+   beyond the record bound it degrades to silence, never to a block.
+   Measured cost on a real 1.9 MB / 659-event transcript: **0.015 s**,
+   against the hook's 5 s budget.
 
 ### Compound cascade advisory (issue #229)
 

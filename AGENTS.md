@@ -2,61 +2,40 @@
 
 Workflow rules from CLAUDE.md turned into hooks and skills that actually fire.
 
-Each skill is an orchestrator with pluggable steps. External integrations (issue tracker, PR tool, code review) are routed via the project's CLAUDE.md — no hardcoded dependencies.
+Skills are orchestrators with pluggable steps; external integrations (issue tracker, PR tool, code review) route via the project's CLAUDE.md, never hardcoded.
 
 ## Documentation map
 
-| File                                                               | Purpose                                                                                                                                                                |
-| ------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [`ETHOS.md`](ETHOS.md)                                             | Why praxis exists — values and principles that gate every skill, hook, and manifest; includes [Autonomy vs Convention](ETHOS.md#autonomy-vs-convention) boundary table |
-| [`DESIGN.md`](DESIGN.md)                                           | How hooks are built — structural-tokenization, session_id keying, compound-bash-cascade, ordering, and add-a-new-hook flow                                             |
-| [`ARCHITECTURE.md`](ARCHITECTURE.md)                               | Skill ↔ hook ↔ manifest dependency graph — provider routing, hook index, multi-platform packaging                                                                      |
-| [`RUNTIME_CONSTRAINTS.md`](RUNTIME_CONSTRAINTS.md)                 | Fixed Claude Code runtime limits every skill must respect                                                                                                              |
-| [`CONTRIBUTING.md`](CONTRIBUTING.md)                               | Skill and hook contribution conventions, live-runtime verification gate                                                                                                |
-| [`docs/spec-store.md`](docs/spec-store.md)                         | Feature-spec convention — design docs at `~/.praxis/docs/specs/NNNN-slug.md` (outside any checkout, `PRAXIS_HOME`-relocated), when one is required and when skipped    |
-| [`docs/hook-prune-audit.md`](docs/hook-prune-audit.md)             | Evidence-based keep/merge/drop verdict per hook, scored from the fire-rate ledger (issue #713)                                                                         |
-| [`docs/retrospect-prune-audit.md`](docs/retrospect-prune-audit.md) | Same lens on the retrospect skill's gates/fences/stages, scored from retrospective transcript mining (issue #776)                                                      |
+| File                                                               | Purpose                                                                                                                                                 |
+| ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`ETHOS.md`](ETHOS.md)                                             | Why praxis exists — the values that gate every skill, hook, and manifest; [Autonomy vs Convention](ETHOS.md#autonomy-vs-convention) boundary table      |
+| [`DESIGN.md`](DESIGN.md)                                           | How hooks are built — structural-tokenization, session_id keying, compound-bash-cascade, ordering, and add-a-new-hook flow                              |
+| [`ARCHITECTURE.md`](ARCHITECTURE.md)                               | Skill/hook/manifest dependency graph — provider routing, hook index, multi-platform packaging                                                           |
+| [`RUNTIME_CONSTRAINTS.md`](RUNTIME_CONSTRAINTS.md)                 | Fixed Claude Code runtime limits every skill must respect                                                                                               |
+| [`CONTRIBUTING.md`](CONTRIBUTING.md)                               | Skill/hook contribution conventions, live-runtime verification gate, local development setup                                                            |
+| [`docs/spec-store.md`](docs/spec-store.md)                         | Feature-spec convention — specs at `~/.praxis/docs/specs/NNNN-slug.md` (`PRAXIS_HOME`-relocated, outside any checkout); when one is required or skipped |
+| [`docs/hook-prune-audit.md`](docs/hook-prune-audit.md)             | Keep/merge/drop verdict per hook, scored from the fire-rate ledger (issue #713)                                                                         |
+| [`docs/retrospect-prune-audit.md`](docs/retrospect-prune-audit.md) | Same lens on retrospect's gates/fences/stages, scored from retrospective transcript mining (issue #776)                                                 |
 
 ## Prerequisites
 
 | Tier               | What works                                               | Dependencies                            |
 | ------------------ | -------------------------------------------------------- | --------------------------------------- |
-| **Standalone**     | recover-sessions, strike / strikes / reset-strikes, debt | `gh` CLI, `jq`; `debt` needs only `git` |
+| **Standalone**     | recover-sessions, strike / strikes / reset-strikes, debt | `gh` CLI, `jq`; `recover-sessions` also needs `tmux`; `debt` needs only `git` |
 | **Enhanced**       | + retrospect, codex-review-wrap                          | + oh-my-claudecode                      |
 | **Full**           | + all cmux-* skills                                      | + cmux                                  |
 | **Multi-provider** | + codex/gemini routing in cmux-delegate                  | + codex-cli, gemini-cli                 |
 
-> **`gh` is also a prerequisite of the verification-anchor convention**, and
-> for revision specifically. Creating an anchor needs only a way to post a
-> comment; editing one in place is a `PATCH` against its comment id, which a
-> session whose only GitHub surface is the MCP server cannot issue when that
-> server exposes no comment `update` — comment bodies are add-only there, while
-> issue and PR bodies are not. Enumerating `github/github-mcp-server` (version
-> unknown, 2026-09-04) found that absence upstream rather than in one
-> deployment, so it does not resolve by waiting; it is one measurement of one
-> server, so confirm `update` is absent from the **active** session's tool list
-> before applying any of this. The same surface strips `<details>` /
-> `<summary>` on the comment **read** path as well, which leaves the gate's
-> PostToolUse structure re-check with no substitute there at all.
->
-> Past rev 1 the anchor rule is therefore unsatisfiable in such a session. The
-> procedure: post rev 1 in full, grade the re-check `unknown`, say in the PR
-> body which SHA the anchor is stamped at and that the host cannot update it,
-> refresh that body on every later push that would have been a revision (or
-> stop pushing until the anchor can be revised), and carry the delta there or
-> into the merge commit — never a comment of its own, and never a second
-> anchor, which makes id recovery ambiguous. Steps in
-> [`anchor-comment-gate/spec.md` → Procedure for a gh-less session](hooks/preflight-gate/anchor-comment-gate/spec.md#procedure-for-a-gh-less-session),
-> the precondition in
-> [the section holding it](hooks/preflight-gate/anchor-comment-gate/spec.md#prerequisite--gh-for-revision-specifically).
-> Issue #1211.
+> `gh` is also a prerequisite of the verification-anchor convention — an anchor
+> can be posted without it, but not revised past rev 1. MCP-only procedure:
+> [`CONTRIBUTING.md` → Anchor revision without `gh`](CONTRIBUTING.md#anchor-revision-without-gh)
+> (issue #1211).
 
 ## Skills (18)
 
-> **Invocation**: praxis entries are *skills*, not subagents. Always call them
+> **Invocation**: praxis entries are *skills*, not subagents. Call them
 > via `Skill(skill="praxis:<name>")` — `Agent(subagent_type="praxis:<name>")`
-> returns `Agent type not found`. See [RUNTIME_CONSTRAINTS.md §3](RUNTIME_CONSTRAINTS.md)
-> for the full rationale and Agent-vs-Skill mapping table.
+> returns `Agent type not found` (rationale: [RUNTIME_CONSTRAINTS.md §3](RUNTIME_CONSTRAINTS.md)).
 
 ### Discovery
 
@@ -81,9 +60,9 @@ Each skill is an orchestrator with pluggable steps. External integrations (issue
 
 | Skill           | Purpose                                                                                                               |
 | --------------- | --------------------------------------------------------------------------------------------------------------------- |
-| `strike`        | Declare a rule violation — session-scoped counter, escalating signal (1진 warning → 2진 review → 3진 Stop-hook block) |
+| `strike`        | Declare a rule violation — session-scoped counter, escalating signal (warning → review → Stop-hook block at strike 3) |
 | `strikes`       | Show current strike count + recorded violation reasons for the active session                                         |
-| `reset-strikes` | Reset the session strike counter to 0 after a 3진 block (required to unblock responses)                               |
+| `reset-strikes` | Reset the strike counter after a strike-3 block (required to unblock responses)                         |
 
 ### Session Management
 
@@ -98,83 +77,33 @@ Each skill is an orchestrator with pluggable steps. External integrations (issue
 
 ## Hooks
 
-Praxis ships a PreToolUse / PostToolUse / Stop / UserPromptSubmit hook suite
-that structurally enforces the rules captured in [`ETHOS.md`](ETHOS.md).
-See [`DESIGN.md`](DESIGN.md) for the shared design contracts (structural
-tokenization, fail-open, session_id keying, compound-bash cascade) and
-[`ARCHITECTURE.md → Hook index`](ARCHITECTURE.md#hook-index) for the full
-list. Per-hook specs live at [`hooks/<role>/<name>/spec.md`](hooks/); the
-[`docs/hook/INDEX.md`](docs/hook/INDEX.md) index links to them.
-
-Hooks support host-aware filtering via an optional `hosts` field on each hook
-entry in `hooks/manifest.json`. When `hosts` is absent the hook is included for
-all platforms (default). When present it must be an array of host identifiers
-(`"claude"`, `"codex"`, etc.) — the hook is written only to the platform whose
-`host_id` in `manifests/platforms/<name>.json` appears in that list. The build
-script (`scripts/build-plugin-manifests.py`) reads this field and writes a
-platform-specific `hooks.json` for each platform under its plugin directory.
-Each per-hook `spec.md` carries a `Supported hosts:` line that documents the
-classification; `scripts/check-plugin-manifests.py` verifies that every hook
-entry has a corresponding spec file.
+Praxis ships a PreToolUse/PostToolUse/PostToolUseFailure/Stop/SubagentStop/UserPromptSubmit/SessionStart hook suite
+that structurally enforces the rules in [`ETHOS.md`](ETHOS.md);
+[`DESIGN.md`](DESIGN.md) holds the shared contracts. Per-hook specs live at
+[`hooks/<role>/<name>/spec.md`](hooks/), indexed by
+[`docs/hook/INDEX.md`](docs/hook/INDEX.md); the generated
+[`docs/hook-operating-matrix.md`](docs/hook-operating-matrix.md) lists events,
+hosts, and strict/bypass knobs per hook. Host-aware filtering (`hosts`):
+[`CONTRIBUTING.md` → Host-aware filtering](CONTRIBUTING.md#host-aware-filtering).
 
 ## Provider Routing
 
-Skills that dispatch external CLI workers (`cmux-delegate`) can route tasks
-to multiple AI providers via a unified `--model` flag using
-`<provider>:<model>` notation. Bare names (`opus`, `sonnet`, `haiku`) always
-resolve to Claude — full backward compatibility. See
-[`ARCHITECTURE.md → Provider Routing`](ARCHITECTURE.md#provider-routing) for
-the CLI spec, model notation, task-type routing matrix, fallback policy, and
-resolution algorithm.
+`cmux-delegate` routes external CLI workers via `--model <provider>:<model>`;
+bare names (`opus`, `sonnet`, `haiku`) always resolve to Claude. Details:
+[`ARCHITECTURE.md → Provider Routing`](ARCHITECTURE.md#provider-routing).
 
 ## Multi-Platform Packaging
 
 Runtime source (`skills/`, `hooks/`, `scripts/`) is shared; per-platform
-manifests (Claude, Codex, Cursor) are generated from
-canonical metadata. See
-[`ARCHITECTURE.md → Multi-Platform Packaging`](ARCHITECTURE.md#multi-platform-packaging)
-for the source files, generated outputs, and add-a-new-platform flow.
+manifests (Claude, Codex, Cursor) are generated from canonical metadata.
+Details:
+[`ARCHITECTURE.md → Multi-Platform Packaging`](ARCHITECTURE.md#multi-platform-packaging).
 
 ## Local Development
 
-### Canonical clone path
-
-This repository should live at **`~/projects/praxis`**. The CLI tools shipped
-by skills (e.g. `cmux-recover-sessions`, `claude-recover`, `cmux-save-sessions`)
-are symlinked from `~/.local/bin` into this clone, so patches you commit here
-land in the version that actually runs at the shell. Keeping a
-second clone under a legacy name risks `~/.local/bin` symlinks pointing at stale
-code — a real failure mode previously hit during recover-sessions debugging.
-
-After every `git pull` or worktree operation, run `./scripts/verify-symlinks.sh` to confirm all `~/.local/bin` entries still resolve to this clone.
-
-### CLI tools (not skills)
-
-These are shell wrappers installed via `scripts/install.sh` into `~/.local/bin`.
-They are not AI skills — they have no `SKILL.md` and cannot be invoked as `/praxis:*`.
-
-| Binary          | Source                               | Purpose                                                                                                                                                     |
-| --------------- | ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `bypass-review` | `skills/bypass-review/bypass-review` | Review bypass-telemetry event logs written by the bypass-telemetry hook — aggregate and inspect JSONL records (no `SKILL.md`; not invocable as `/praxis:*`) |
-
-### Install / refresh CLI symlinks
-
-```bash
-# From inside this clone:
-./scripts/install.sh
-```
-
-Idempotent. Existing valid links are left alone; missing or drifted ones
-are corrected. Re-run after pulls or after adding a new CLI script.
-
-### Verify symlinks point at this clone
-
-```bash
-./scripts/verify-symlinks.sh
-```
-
-Exits non-zero on drift, so it can be wired into CI or a SessionStart hook
-to catch "patch landed in the wrong clone" before it bites a future session.
+Clone path, `~/.local/bin` symlink install/verify, CLI-tools table
+(`bypass-review`):
+[`CONTRIBUTING.md` → Local development](CONTRIBUTING.md#local-development).
 
 ## Issue & PR Conventions
 
@@ -195,7 +124,7 @@ to catch "patch landed in the wrong clone" before it bites a future session.
   **instead of** `Closes #N`. GitHub's `Closes` keyword auto-closes the issue
   on merge regardless of deferred items inside the issue body, orphaning their
   tracking thread.
-- **Full-scope PR**: `Closes #N` per global CLAUDE.md (Issue & PR Rules).
+- **Full-scope PR**: `Closes #N` — GitHub auto-closes the issue on merge.
 - **Agent prompts that delegate PR authorship**: do not hardcode `Closes #N` —
   instruct the agent to choose `Closes` vs `Refs` based on whether the PR
   addresses the issue's full scope.

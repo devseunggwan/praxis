@@ -1,0 +1,105 @@
+fix(hooks): route scope-confirm logs and gh-label cache into documented roots (#1205)
+
+* fix(hooks): route scope-confirm logs and gh-label cache into documented roots
+
+scope-confirm 로그와 gh-label 캐시가 문서화된 PRAXIS_HOME 루트 밖에
+쓰이던 문제를 수정한다 (issue #1182).
+
+1. scope-confirm 로그: completion-verify와 retrospect-mix-check가
+   `praxis_resolve_writable scope-confirm ...`으로 문서화되지 않은
+   네 번째 루트(~/.praxis/scope-confirm/)를 만들고 있었다. prune_stale이
+   쓸지 않아 영원히 append-only로 자라는 위치였다. 진단 파일의
+   문서화된 홈인 logs/ 루트로 재라우팅한다 — 파일명은 그대로
+   stop-triggered.log / retrospect-mix-blocked.log. best-effort 쓰기
+   시맨틱(`|| true`, 종료 상태 불변)은 #604 그대로 유지.
+
+2. gh-label-verify 캐시: `<XDG_CACHE_HOME|~/.cache>/claude-praxis/
+   gh-label-cache.json`은 resolve_cache_file을 우회하는 유일한 캐시
+   경로였다(다른 9개 호출부와 달리 PRAXIS_HOME 재배치와 TTL 스윕에서
+   제외). `_paths.resolve_cache_file("gh-label-cache.json")`로 전환해
+   ~/.praxis/cache/ 아래로 옮기고 prune_stale 스윕 대상에 포함시킨다.
+   PRAXIS_GH_LABEL_CACHE_PATH 오버라이드는 그대로 유지.
+
+마이그레이션 결정: 구 파일은 옮기지 않는다. scope-confirm 로그는
+진단용 append 로그라 이전 가치가 없고, gh-label 캐시 엔트리는 기본
+300초 만에 만료되어 재fetch 한 번이면 복구된다. 남은 legacy
+~/.praxis/scope-confirm/ 디렉터리와 XDG 캐시 파일은 무해하게 방치됨을
+각 spec.md에 명시했다.
+
+문서: 두 훅 spec.md의 상태 경로 갱신, gh-label-verify spec의 캐시 절
+갱신, docs/runtime-state-layout.md에서 scope-confirm 루트 행 제거
+(루트 수 7→5 표기 정정) 및 logs/·cache/ 항목 추가,
+docs/bypass-vars.md의 PRAXIS_GH_LABEL_CACHE_PATH 기본값 갱신,
+_paths.sh 헤더 예시와 _paths.py 레이아웃 주석 갱신.
+hooks/manifest.json의 mode.state_paths는 env 변수명 목록이라 변경
+불필요 — check-plugin-manifests.py 통과 확인.
+
+Closes #1182
+
+Co-Authored-By: Claude <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01PBTDLnV7eaAqz7GGuSD5X7
+
+* fix(hooks): review round 1 — session-keyed prune, TMPDIR adoption hardening, doc accuracy
+
+PR #1205 코드리뷰 6건 반영.
+
+1. (HIGH) gh-label-verify가 캐시 해석 시 session_id를 넘기지 않던 문제
+   수정 — resolve 경유 prune_stale 스윕이 호출 세션의 살아있는
+   세션 키 마커(retrospect-active-<sid>.json 등, mtime이 갱신되지 않아
+   TTL 초과 시 삭제 → Stop 게이트 무음 해제, #920/#666 불변식)를 지울
+   수 있었다. 훅 페이로드의 session_id를 파싱해 스윕 제외 키로 전달.
+
+2. (HIGH) resolve_cache_file의 legacy-TMPDIR adoption 경로가 새로
+   유입되던 문제 제거 — 미리 심어둔 world-writable
+   ${TMPDIR}/praxis-gh-label-cache.json이 신뢰 캐시로 승격될 수 있었다.
+   adoption이 없는 resolve_writable("cache", ...)로 전환(이 파일은
+   TMPDIR에 산 적이 없어 입양할 것도 없음). 신선도 검사도
+   `0 <= now - fetched_at < ttl`로 강화해 미래 fetched_at이 영구 유효로
+   읽히는 것을 차단.
+
+3. (MED) docs/runtime-state-layout.md에 #1182가 재배치일 뿐임을 명시 —
+   logs/에는 스윕·로테이션이 없어 append-only 증가 문제 자체는
+   후속 과제로 남는다.
+
+4. (LOW) bypass 텔레메트리가 logs/에 있다는 낡은 서술 수정 —
+   실제 위치는 ~/.praxis/telemetry/ (_paths.py 주석 +
+   runtime-state-layout.md Logs 절).
+
+5. (LOW) 캐시 테이블 도입부 "모두 ${TMPDIR}에 있었다" 서술 정정 —
+   gh-label 캐시는 #1182 전까지 XDG 캐시에 있었다.
+
+6. (MED) 기본 라우팅 테스트 추가 — PRAXIS_GH_LABEL_CACHE_PATH 미설정 +
+   PRAXIS_HOME 픽스처에서 캐시가 $PRAXIS_HOME/cache/에 생성되고 XDG
+   위치는 비어 있으며 poisoned TMPDIR 파일이 입양되지 않음을 검증.
+   미래 fetched_at 거부(fail-open) 케이스도 추가. 34→36 케이스.
+
+Co-Authored-By: Claude <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01PBTDLnV7eaAqz7GGuSD5X7
+
+* test(hooks): make the future-fetched_at case discriminate
+
+The case asserted rc=0 with an empty stderr while `gh` was absent, which
+the pre-change implementation satisfies identically — both fail open when the
+rejected entry cannot be refetched, so it pinned the fail-open contract rather
+than the staleness check it was named for.
+
+Poison a cache at PRAXIS_GH_LABEL_CACHE_PATH instead: both implementations
+honour that override, so the timestamp logic is the only difference. With the
+mock `gh` present and its acme/repo list omitting `nope`, rejecting the entry
+forces a refetch and the gate blocks (rc=2, BLOCKED:); trusting it passes
+silently. Verified both ways against origin/main's impl.py.
+
+PRAXIS_HOME routing is deliberately NOT the poisoning vector here — that
+routing is what this PR adds, so a cache poisoned there is invisible to the
+old implementation and it blocks for an unrelated reason.
+
+The gh-absent assertion is kept as a separate companion case, relabelled for
+what it actually pins.
+
+Confidence: high
+Not-tested: no runtime behaviour changed — test-only
+Session-Id: c044205b-803f-48b1-acc9-aab9aa5e25e1
+
+---------
+
+Co-authored-by: Claude <noreply@anthropic.com>

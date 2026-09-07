@@ -15,11 +15,13 @@ below.
   and the skills as independent plugins. Extending praxis at the kernel level
   means adding one hook directory plus one manifest entry
   ([`CONTRIBUTING.md`](CONTRIBUTING.md) walks the full checklist); the kernel
-  only executes, isolates, and aggregates. Counts live in the
-  [Hook index](#hook-index) and [`AGENTS.md`](AGENTS.md), not here.
+  only executes, isolates, and aggregates. Counts live in
+  [`README.md` → Hooks](README.md#hooks) and the generated
+  [Hook Operating Matrix](docs/hook-operating-matrix.md), not here.
 - **Interceptor chain, most-restrictive-wins.** Hooks intercept the host's
-  lifecycle (PreToolUse → PostToolUse → Stop, plus UserPromptSubmit and
-  SessionStart). Unlike a classic chain-of-responsibility, every member runs
+  lifecycle (PreToolUse → PostToolUse / PostToolUseFailure → Stop /
+  SubagentStop, plus UserPromptSubmit and SessionStart). Unlike a classic
+  chain-of-responsibility, every member runs
   and decisions aggregate `deny > ask > allow`
   ([§Single-process dispatch](#single-process-dispatch-adr-0002)), with each
   member fail-open isolated.
@@ -27,7 +29,8 @@ below.
   `scripts/`) knows nothing about platforms; per-platform artifacts are
   build-time adapters generated from `manifests/`
   ([§Multi-Platform Packaging](#multi-platform-packaging)). Adding a platform
-  is one manifest file plus one build run.
+  is one manifest file, one entry in the schema's `hosts` enum, and one
+  build run.
 - **Declared state + drift gate.** Generated artifacts are committed, and
   `scripts/check-plugin-manifests.py` invariants enforce manifest ↔ output
   parity in CI — the same reconciliation model infrastructure-as-code uses.
@@ -143,107 +146,20 @@ else:
 
 ## Hook index
 
-> See [docs/hook/INDEX.md](docs/hook/INDEX.md) for the categorized index (preflight-gate / advisory-nudge / postuse-correction / completion-verify).
-> See [docs/hook-operating-matrix.md](docs/hook-operating-matrix.md) for the generated operating matrix with roles, events, host filters, and strict/bypass knobs.
+The per-hook list is not maintained here. Two documents carry it:
 
-| Hook | Event | Purpose | Spec |
-| ------ | ------- | --------- | ------ |
-| `block-gh-state-all` | PreToolUse | Hard-block invalid `gh search ... --state all` flag combo | [hooks/preflight-gate/block-gh-state-all/spec.md](hooks/preflight-gate/block-gh-state-all/spec.md) |
-| `approval-premise-reread-gate` | PreToolUse | Ask before an irreversible production call whose approval premise may have dissolved since it was granted — fires on a mutating Bash/MCP call carrying a production phase marker, and is satisfied by a `# approval-premise:ack <premise re-read>` attestation rather than a bypass token (issue #1043) | [hooks/preflight-gate/approval-premise-reread-gate/spec.md](hooks/preflight-gate/approval-premise-reread-gate/spec.md) |
-| `block-unmatched-glob` | PreToolUse | Hard-block a command whose unquoted glob matches nothing — zsh aborts it before it runs, so the empty result reads as a false negative | [hooks/preflight-gate/block-unmatched-glob/spec.md](hooks/preflight-gate/block-unmatched-glob/spec.md) |
-| `gh-flag-verify` | PreToolUse | Block `gh <subcmd>` calls with flags not in the subcommand's accepted set | [hooks/preflight-gate/gh-flag-verify/spec.md](hooks/preflight-gate/gh-flag-verify/spec.md) |
-| `gh-json-validator` | PreToolUse | Block `gh <subcmd> --json <fields>` calls whose field names are not in the subcommand's valid JSON projection (issue #391) | [hooks/preflight-gate/gh-json-validator/spec.md](hooks/preflight-gate/gh-json-validator/spec.md) |
-| `gh-label-verify` | PreToolUse | Block `gh (issue\|pr) (create\|edit)` calls whose `--label` values are absent from the target repo's label set (issue #385) | [hooks/preflight-gate/gh-label-verify/spec.md](hooks/preflight-gate/gh-label-verify/spec.md) |
-| `foreground-poll-loop-guard` | PreToolUse | Block foreground Bash poll-loops (`for/while/until … sleep`) that would hit the 120s ceiling (Exit 143); redirects to native async-wait primitives (issue #745) | [hooks/preflight-gate/foreground-poll-loop-guard/spec.md](hooks/preflight-gate/foreground-poll-loop-guard/spec.md) |
-| `cli-flag-incompat-advisory` | PreToolUse | Advisory nudge for known mode-incompatible flag combos in other CLIs (`git merge-tree --name-only` 3-arg form, `kubectl --use-protocol-buffers`) — issue #248 | [hooks/advisory-nudge/cli-flag-incompat-advisory/spec.md](hooks/advisory-nudge/cli-flag-incompat-advisory/spec.md) |
-| `inspection-chain-advisory` | PreToolUse | Advisory nudge when 2+ inspection-only commands are chained with `&&` (non-match exit silently drops downstream probes) — issue #469 | [hooks/advisory-nudge/inspection-chain-advisory/spec.md](hooks/advisory-nudge/inspection-chain-advisory/spec.md) |
-| `pipefail-advisory` | PreToolUse | Advisory nudge when a mutating `git`/`gh` command is piped into `tail`/`head`/`grep` without `set -o pipefail` (non-zero exit masked by the sink's own exit 0) — issue #788. `PRAXIS_PIPEFAIL_ADVISORY_CONTEXT=1` adds the issue-#874 ADVISE-channel arm (`hookSpecificOutput.additionalContext` alongside the stderr line) | [hooks/advisory-nudge/pipefail-advisory/spec.md](hooks/advisory-nudge/pipefail-advisory/spec.md) |
-| `fallback-negative-warn` | PreToolUse | Advisory nudge when a suppressed-stderr `\|\|` fallback prints negative-verdict vocabulary — command failure and true-negative collapse into the same string — issue #893 | [hooks/advisory-nudge/fallback-negative-warn/spec.md](hooks/advisory-nudge/fallback-negative-warn/spec.md) |
-| `comment-yap-advisory` | PreToolUse | Advisory nudge on a Write/Edit whose authored text carries a long **and unanchored** comment run ("yap") — a ≥12-line preamble over a ≤3-line declaration, or a ≥25-line run below 1 anchor per 10 lines (2-signal AND gate; anchored blocks, license/generated headers, commented-out code, unmapped extensions and docstrings-under-D1 stay silent) — issue #1141 | [hooks/advisory-nudge/comment-yap-advisory/spec.md](hooks/advisory-nudge/comment-yap-advisory/spec.md) |
-| `secret-print-redaction-advisory` | PreToolUse | Advisory nudge when a live Bash command or an agent-authored script both fetches a secret and routes the value to stdout unmasked (2-signal AND gate; masked/digest output and bare interactive fetches silent) — issue #827 | [hooks/advisory-nudge/secret-print-redaction-advisory/spec.md](hooks/advisory-nudge/secret-print-redaction-advisory/spec.md) |
-| `destructive-bash-guard` | PreToolUse | Advisory (or strict-mode `ask`) before destructive bash (`rm -rf`, `sudo`/`doas`, `dd`, `mkfs`, `chmod -R 777`, block-device redirects, `git clean -f`/`reset --hard`, `find -delete`, `truncate -s 0`, `shred`, fork bomb) — issue #463 | [hooks/advisory-nudge/destructive-bash-guard/spec.md](hooks/advisory-nudge/destructive-bash-guard/spec.md) |
-| `protected-paths-guard` | PreToolUse | Advisory (or strict-mode block) on Edit/Write/NotebookEdit calls targeting sensitive files (`.env`, private keys, `.ssh/`, `credentials`, `.netrc`, `.npmrc`) — issue #464 | [hooks/advisory-nudge/protected-paths-guard/spec.md](hooks/advisory-nudge/protected-paths-guard/spec.md) |
-| `block-ask-end-option` | PreToolUse | Block `AskUserQuestion` options carrying end-option markers when the most recent user message has no stop signal (strict default; advisory opt-out via `PRAXIS_ASK_END_ADVISORY=1`) | [hooks/preflight-gate/block-ask-end-option/spec.md](hooks/preflight-gate/block-ask-end-option/spec.md) |
-| `side-effect-scan` | PreToolUse | Tiered gate on commands with collateral side effects. **ask**: `git push`, `gh pr merge/create`, `gh workflow run`, `kubectl apply/delete/replace/patch`, and the `wrapper-commit` category. **advise** (stderr, no prompt — issue #874): `git commit/merge/rebase/cherry-pick/revert`, local-only, reversible, and already gated by sibling commit hooks. A mixed match stays an ask and names every matched category | [hooks/preflight-gate/side-effect-scan/spec.md](hooks/preflight-gate/side-effect-scan/spec.md) |
-| `memory-hint` | PreToolUse | Surface hookable memory entries by keyword at decision-construction time (advisory, never blocks) | [hooks/advisory-nudge/memory-hint/spec.md](hooks/advisory-nudge/memory-hint/spec.md) |
-| `codex-review-route` | UserPromptSubmit | Warn when `/codex:review` runs in a multi-worktree repo (cwd mismatch risk) | [hooks/advisory-nudge/codex-review-route/spec.md](hooks/advisory-nudge/codex-review-route/spec.md) |
-| `postcompact-context` | UserPromptSubmit | Inject session_id / cwd / branch / active PR / strike state as `additionalContext` on the first prompt after a Claude Code compaction (transcript JSONL `isCompactSummary: true` scan, per-uuid dedup) — issue #472 | [hooks/advisory-nudge/postcompact-context/spec.md](hooks/advisory-nudge/postcompact-context/spec.md) |
-| `builtin-task-postuse` | PostToolUse | Correct upstream "agent spawn" false positives on `TaskCreate` / `TaskUpdate` / etc. | [hooks/postuse-correction/builtin-task-postuse/spec.md](hooks/postuse-correction/builtin-task-postuse/spec.md) |
-| `completion-verify` | Stop | Block "done / 완료" claims without same-turn Bash verification evidence pasted into the message | [hooks/completion-verify/completion-verify/spec.md](hooks/completion-verify/completion-verify/spec.md) |
-| `retrospect-mix-check` | Stop | Block retrospect Stage 3 outputs that default `tool` / `workflow` / `spec-gap` findings to memory-only | [hooks/completion-verify/retrospect-mix-check/spec.md](hooks/completion-verify/retrospect-mix-check/spec.md) |
-| `completion-signal-gate` | Stop | Advisory nudge when completion-signal phrase (EN/KR) appears without an evidence-block in the same turn; also flags cross-plugin slash commands in wrong repo context (issue #392) | [hooks/completion-verify/completion-signal-gate/spec.md](hooks/completion-verify/completion-signal-gate/spec.md) |
-| `readonly-verify-deferral-gate` | Stop | Advisory when the last turn offers a read-only verification (EN/KR) instead of running it — three-signal AND (read intent ∧ deferral ∧ ¬mutation) with a read-already-run suppressor; project-agnostic, extensible via `PRAXIS_READONLY_VERIFY_SIGNALS` (issue #641) | [hooks/completion-verify/readonly-verify-deferral-gate/spec.md](hooks/completion-verify/readonly-verify-deferral-gate/spec.md) |
-| `merge-state-claim-gate` | Stop | Advisory when the final message asserts a completed merge/PR/issue/worktree state (EN/KR) with no fresh `gh pr\|issue` or GitHub-MCP state query in the recent transcript (issue #503); applied-on-branch claims require reachability evidence — merge-base/baseRefName (issue #656) | [hooks/completion-verify/merge-state-claim-gate/spec.md](hooks/completion-verify/merge-state-claim-gate/spec.md) |
-| `runtime-state-claim-gate` | Stop | Advisory when the final message asserts a runtime/execution state — "X is running in Y" / "로컬은 건드리지 않습니다" (EN/KR) — with no probe tool_use in the current turn; remote/isolation launch modes fall back silently, so location claims need observation, not launch success (issue #809) | [hooks/completion-verify/runtime-state-claim-gate/spec.md](hooks/completion-verify/runtime-state-claim-gate/spec.md) |
-| `artifact-verdict-evidence-gate` | Stop | Advisory (default) when the final message surfaces a positive-polarity artifact verdict (삭제 후보/중복/통합 대상/duplicate/superseded) as a candidate list or table without an adjacent `Verdict-evidence:` line; presence-only enforcement, block-promote via `PRAXIS_ARTIFACT_VERDICT_STRICT` (issue #862) | [hooks/completion-verify/artifact-verdict-evidence-gate/spec.md](hooks/completion-verify/artifact-verdict-evidence-gate/spec.md) |
-| `negative-existence-verdict-gate` | Stop | Block (default) when the final message surfaces a negative-existence verdict (없습니다/존재하지 않/does not exist) under a registered decision/gate framing (게이트 결과/게이트 판정/판정이 나왔/AC #/Acceptance) without a same-paragraph `Enumerated:` line; presence-only enforcement, advisory-demote via `PRAXIS_NEGATIVE_EXISTENCE_ADVISORY` (issue #804) | [hooks/completion-verify/negative-existence-verdict-gate/spec.md](hooks/completion-verify/negative-existence-verdict-gate/spec.md) |
-| `pr-report-destination-gate` | Stop | Advisory (non-blocking) when a session wrote a review/verification local `.md` (scratch dir or report-named) for a PR it worked on (`gh pr view/create/diff/checks` or a `/pull/N` URL) but never posted a successful `gh pr comment`/`gh pr review` there; per-PR correlation survives multi-PR sessions, GET `gh api` and failed posts (is_error) excluded (issue #832) | [hooks/completion-verify/pr-report-destination-gate/spec.md](hooks/completion-verify/pr-report-destination-gate/spec.md) |
-| `pr-claim-mutation-gate` | Stop | Block (default) when the final message pairs a PR/review subject with a processed-claim verb (처리했/반영했/resolved/applied) and the current turn contains no **successful** PR-surface mutation (`git push`, `gh pr comment/review`, write-method `gh api` on a comments/reviews/threads endpoint, `resolveReviewThread`, a write-verb GitHub MCP tool); read-only listings, `--dry-run`/`--help` rehearsals, echoed command text and `is_error` results all fail to clear it; advisory-demote via `PRAXIS_PR_CLAIM_ADVISORY` (issue #868) | [hooks/completion-verify/pr-claim-mutation-gate/spec.md](hooks/completion-verify/pr-claim-mutation-gate/spec.md) |
-| `pr-anchor-existence-gate` | Stop | Whole-session scan: advisory on the 1st Stop, block on the 2nd+ when a successful non-draft `gh pr create` this session received no verification-anchor post (`gh pr comment` / write-method `gh api` on `issues\|pulls/<N>/comments`); existence only, not the anchor's shape/freshness (that stays `anchor-comment-gate`'s job); force-advisory via `PRAXIS_PR_ANCHOR_ADVISORY`, bypass via `PRAXIS_PR_ANCHOR_BYPASS` (issue #1113) | [hooks/completion-verify/pr-anchor-existence-gate/spec.md](hooks/completion-verify/pr-anchor-existence-gate/spec.md) |
-| `proposal-premise-gate` | Stop | Advisory (non-blocking) when the final message surfaces a prose proposal block whose premises are code-checkable (file/symbol/flag existence) and no probe ran in the current turn; prose proposals never reach a PreToolUse surface, so the Stop lane is the only place this can fire; bypass via `PRAXIS_PROPOSAL_PREMISE_BYPASS` (issue #846) | [hooks/completion-verify/proposal-premise-gate/spec.md](hooks/completion-verify/proposal-premise-gate/spec.md) |
-| `external-write-falsify-check` (opt-in) | PreToolUse | Warn before posting hypothesis-stage text to PR / issue / Slack / Notion; also detects author-exempt unverified identifiers in mapping tables and code blocks (issue #183) and applied-on-branch claims without a reachability probe (issue #656) | [hooks/advisory-nudge/external-write-falsify-check/spec.md](hooks/advisory-nudge/external-write-falsify-check/spec.md) |
-| `commit-title-length-check` | PreToolUse | Ask when `git commit` title exceeds 50 chars (configurable via `CLAUDE_COMMIT_TITLE_MAX`) | [hooks/preflight-gate/commit-title-length-check/spec.md](hooks/preflight-gate/commit-title-length-check/spec.md) |
-| `commit-title-format-check` | PreToolUse | Block `git commit`, `gh pr create`, `gh issue create` when title does not match Conventional Commits format; advisory mode via `PRAXIS_COMMIT_TITLE_FORMAT_STRICT=0` | [hooks/preflight-gate/commit-title-format-check/spec.md](hooks/preflight-gate/commit-title-format-check/spec.md) |
-| `commit-message-paren-check` | PreToolUse | Block `git commit` when a message line opens a pseudo-scope release-please's parser cannot close — the commit is skipped and loses its CHANGELOG entry while the release run still reports success; advisory mode via `PRAXIS_COMMIT_PAREN_STRICT=0` | [hooks/preflight-gate/commit-message-paren-check/spec.md](hooks/preflight-gate/commit-message-paren-check/spec.md) |
-| `branch-name-check` | PreToolUse | Block branch creation (`git checkout -b`, `git switch -c`, `git worktree add -b`) when the new branch name does not match `PRAXIS_BRANCH_NAME_REGEX`; whitelist via `PRAXIS_BRANCH_NAME_WHITELIST`; advisory mode via `PRAXIS_BRANCH_NAME_STRICT=0` (issue #434) | [hooks/preflight-gate/branch-name-check/spec.md](hooks/preflight-gate/branch-name-check/spec.md) |
-| `pre-merge-approval-gate` | PreToolUse | Surface per-PR approval prompt for `gh pr merge` in direct sessions (background agents pass) | [hooks/preflight-gate/pre-merge-approval-gate/spec.md](hooks/preflight-gate/pre-merge-approval-gate/spec.md) |
-| `fan-out-scope-gate` | PreToolUse | Surface an approval prompt from the 2nd delegation target (`Agent` call / cmux workspace creation) in one turn | [hooks/preflight-gate/fan-out-scope-gate/spec.md](hooks/preflight-gate/fan-out-scope-gate/spec.md) |
-| `gh-merge-worktree-precondition` | PreToolUse | Block `gh pr merge --delete-branch`/`-d` when the PR's live head branch (via `gh pr view`) is still checked out in another `git worktree`; bypass via `PRAXIS_HOOK_BYPASS_MERGE_WORKTREE_GATE` (issue #798) | [hooks/preflight-gate/gh-merge-worktree-precondition/spec.md](hooks/preflight-gate/gh-merge-worktree-precondition/spec.md) |
-| `anchor-comment-gate` | PreToolUse + PostToolUse | Two-phase guard for the PR verification anchor (`gh pr comment` / `gh api PATCH` whose body opens with `### 검증`). **PreToolUse** decides structure — the five required fields and `--edit-last` — from the body text alone, with no network, and blocks; a body it cannot decode warns rather than passing silently. **PostToolUse** takes the comment URL the command printed, reads the published body back through the API, and re-checks structure plus SHA freshness. Every finding carries a tier: `blocking` exits 2, while `advisory` and `unknown` are written to `hookSpecificOutput.additionalContext` at exit 0 — both reach the model, but exit 2 is recorded as a block by the fire ledger, so only a real violation may take it. A failed post (`tool_response.exit` / `isError` / `interrupted`) is not checked at all. `PRAXIS_ANCHOR_GATE_ADVISORY=1` demotes the blocking branch too. Splitting the phases this way retired the unbounded shell-parsing surface that six review rounds could not close. Bypass via `PRAXIS_HOOK_BYPASS_ANCHOR_GATE` or a `# anchor-gate: <reason>` token (issue #947) | [hooks/preflight-gate/anchor-comment-gate/spec.md](hooks/preflight-gate/anchor-comment-gate/spec.md) |
-| `worktree-prune-snapshot-gate` | PreToolUse | Block a bare `git worktree prune` (no `--dry-run`/`-n`) when the session has not run `git worktree list --porcelain` into a snapshot file; prune is repository-wide and drops every missing-directory registration, so the snapshot is the only thing that later distinguishes "already gone" from "I removed it"; bypass via `PRAXIS_HOOK_BYPASS_WORKTREE_PRUNE_SNAPSHOT` (issue #870) | [hooks/preflight-gate/worktree-prune-snapshot-gate/spec.md](hooks/preflight-gate/worktree-prune-snapshot-gate/spec.md) |
-| `pr-state-refetch-gate` | PreToolUse | Re-fetch live `gh pr view` state before a PR-number + merge-intent `AskUserQuestion`; warn (or strict-mode block) when the PR is already MERGED/CLOSED — issue #719 | [hooks/preflight-gate/pr-state-refetch-gate/spec.md](hooks/preflight-gate/pr-state-refetch-gate/spec.md) |
-| `cross-boundary-preflight` | PreToolUse | Block heredoc body in `gh pr/issue create`; ask with four-point checklist on cross-repo `--repo` writes | [hooks/preflight-gate/cross-boundary-preflight/spec.md](hooks/preflight-gate/cross-boundary-preflight/spec.md) |
-| `rejected-mutation-reconsent-gate` | PreToolUse | Ask again before a Bash mutation **or a worker dispatch** whose target (`s3://`/`gs://` prefix, SQL table) the user already refused in a rejected `AskUserQuestion`; structural rejection only, literal shared identifier only (issues #1007, #1035) | [hooks/preflight-gate/rejected-mutation-reconsent-gate/spec.md](hooks/preflight-gate/rejected-mutation-reconsent-gate/spec.md) |
-| `session-intent` | UserPromptSubmit + PreToolUse | Gate read-intent → mutation-pivot session drift on `gh` mutating commands | [hooks/preflight-gate/session-intent/spec.md](hooks/preflight-gate/session-intent/spec.md) |
-| `retrospect-active-marker` | PreToolUse(Skill) + UserPromptSubmit | Record a session-scoped retrospect-active marker so the Stop gate detects Stage-3 fence omission (#666) | [hooks/preflight-gate/retrospect-active-marker/spec.md](hooks/preflight-gate/retrospect-active-marker/spec.md) |
-| `pre-edit-protected-branch-guard` | PreToolUse | Block Edit/Write/NotebookEdit on protected branches (main/dev/prod/master) when dirty and target not already in dirty diff, or when clean tree and recent commits show `(#NNN)` PR-workflow signal (issue #231) | [hooks/preflight-gate/pre-edit-protected-branch-guard/spec.md](hooks/preflight-gate/pre-edit-protected-branch-guard/spec.md) |
-| `worktree-edit-gate` | PreToolUse | Block Edit/Write on source files when the repo HEAD is on a base branch — opt-in via `PRAXIS_WORKTREE_ENFORCED_REPOS`; default no-op; blocks Edit AND Write (issue #437) | [hooks/preflight-gate/worktree-edit-gate/spec.md](hooks/preflight-gate/worktree-edit-gate/spec.md) |
-| `write-decision-consistency-gate` | PreToolUse | Block a Write/Edit whose Decisions block also states a constraint (out-of-scope / by-design), unless a column-0 `Consistency:` line states they do not contradict (issue #905) | [hooks/preflight-gate/write-decision-consistency-gate/spec.md](hooks/preflight-gate/write-decision-consistency-gate/spec.md) |
-| `pre-edit-md-escape-advisory` | PreToolUse(Edit) + PostToolUse(Read) | Advisory nudge when Edit on a `.md` file carries escape-sensitive tokens (`\|`, `\[`, `\]`, HTML entities) without a recorded Read in this session — Obsidian wikilink / HTML entity format mis-recall (issue #230) | [hooks/postuse-correction/pre-edit-md-escape-advisory/spec.md](hooks/postuse-correction/pre-edit-md-escape-advisory/spec.md) |
-| `external-api-literal-trigger` | PreToolUse | Advisory nudge when ALL_CAPS enum candidates or 3-part SQL identifiers are written without prior retrieval verification (issue #202) | [hooks/advisory-nudge/external-api-literal-trigger/spec.md](hooks/advisory-nudge/external-api-literal-trigger/spec.md) |
-| `block-manufactured-action-menu` | PreToolUse | Warn (advisory) or block (strict) when AskUserQuestion surfaces a manufactured menu — question-form ("shall we proceed?") or affirmative-form ("그대로 진행" / "execute now") — after the user already issued a command-intent signal (issue #377) | [hooks/preflight-gate/block-manufactured-action-menu/spec.md](hooks/preflight-gate/block-manufactured-action-menu/spec.md) |
-| `output-block-falsify-advisory` | PreToolUse | Advisory nudge to run output-block falsification gate before surfacing `(Recommended)` options or bulk-action commands; `Bash` also emits `ask` when an irreversible verb co-occurs with a shared-surface token in one command segment (issue #221, #1010) | [hooks/advisory-nudge/output-block-falsify-advisory/spec.md](hooks/advisory-nudge/output-block-falsify-advisory/spec.md) |
-| `source-citation-probe-gate` | PreToolUse | Advisory when an external-write body cites source facts (file:line, inline-code call syntax, test-semantics claims) with no read-probe in the recent transcript and no in-body `Probe:` / `[verified]` basis (issue #830) | [hooks/advisory-nudge/source-citation-probe-gate/spec.md](hooks/advisory-nudge/source-citation-probe-gate/spec.md) |
-| `composed-command-gate` | PreToolUse | Advisory when an external-write body's fenced blocks carry `$` command lines with no counterpart among this session's Bash calls — the shape where the output is genuine and only the command line above it was composed (issue #1117) | [hooks/advisory-nudge/composed-command-gate/spec.md](hooks/advisory-nudge/composed-command-gate/spec.md) |
-| `caller-probe-gate` | PreToolUse | Advisory when an external-write body asserts a code defect while citing code, with no call-site search in the recent transcript and no in-body `Caller-probe:` basis; a Read of the cited file deliberately does not clear (issue #906) | [hooks/advisory-nudge/caller-probe-gate/spec.md](hooks/advisory-nudge/caller-probe-gate/spec.md) |
-| `unenforced-step-advisory` | PreToolUse | Advisory naming the MANDATORY workflow step that has no gate of its own, at the action that precedes it — code-reviewer dispatch before a content commit, pre-PR / pre-merge rebase (only when the branch is behind its base), open-PR enumeration before a worktree or cmux dispatch; keyed on transcript absence, never blocks in default mode (issue #1064) | [hooks/advisory-nudge/unenforced-step-advisory/spec.md](hooks/advisory-nudge/unenforced-step-advisory/spec.md) |
-| `count-assertion-verify` | PreToolUse | Advisory nudge when `grep -c` with alternation (`\|` BRE or ` \| ` ERE/PCRE) is run without per-arm verification; prevents citing inflated alternation counts (issue #277) | [hooks/advisory-nudge/count-assertion-verify/spec.md](hooks/advisory-nudge/count-assertion-verify/spec.md) |
-| `pre-gh-pr-create-dedup-gate` | PreToolUse | Run `gh pr list --search` against the resolved target repo before `gh pr create`; surface artifact unconditionally to stderr, hard-block on repo-resolution / gh-call failure (issue #234) | [hooks/preflight-gate/pre-gh-pr-create-dedup-gate/spec.md](hooks/preflight-gate/pre-gh-pr-create-dedup-gate/spec.md) |
-| `advisory-wrapper-signature-verify` | PreToolUse | Advisory nudge to verify wrapped function signatures before writing wrapper/client code with delegation patterns (issue #235) | [hooks/advisory-nudge/advisory-wrapper-signature-verify/spec.md](hooks/advisory-nudge/advisory-wrapper-signature-verify/spec.md) |
-| `block-pr-without-caller-evidence` | PreToolUse | Block `gh pr create` / `gh pr new` unless the effective PR body contains a `Caller chain verified:` line (closes stdin / missing-file / TOCTOU bypasses; issue #158; deny when `PRAXIS_PR_EVIDENCE_STRICT` is set, advisory on shipped defaults — #1186) | [hooks/preflight-gate/block-pr-without-caller-evidence/spec.md](hooks/preflight-gate/block-pr-without-caller-evidence/spec.md) |
-| `block-pr-without-precommit-evidence` | PreToolUse | Block `gh pr create` / `gh pr new` unless the effective PR body contains one of three pre-commit marker lines (`Pre-commit verified:` / `Pre-commit: verified by CI (...)` / `Pre-commit: n/a (...)`); `--repo` does NOT bypass (issue #406; deny when `PRAXIS_PR_EVIDENCE_STRICT` is set, advisory on shipped defaults — #1186) | [hooks/preflight-gate/block-pr-without-precommit-evidence/spec.md](hooks/preflight-gate/block-pr-without-precommit-evidence/spec.md) |
-| `verify-commit-flag-override` | PreToolUse | Deny `git commit` invocations that override hooks / signing / hook path / template (`--no-verify`, `--no-gpg-sign`, `-S`, `-c commit.gpgsign=`, `-c core.hooksPath=`, `-c commit.template=`) without env verification; opt-out via `PRAXIS_SKIP_COMMIT_FLAG_CHECK=1` (issue #184) | [hooks/preflight-gate/verify-commit-flag-override/spec.md](hooks/preflight-gate/verify-commit-flag-override/spec.md) |
-| `block-commit-without-codex-review` | PreToolUse | Block content `git commit` when `praxis:codex-review-wrap` has not been invoked this session (Skill tool_use or slash command); escape via `[skip-codex-review]` token or `CLAUDE_HOOK_BYPASS_CODEX_REVIEW_GATE=1`; claude-host only (issue #425) (deny when codex is on PATH or `PRAXIS_CODEX_REVIEW_STRICT` set, advisory otherwise — #1187) | [hooks/preflight-gate/block-commit-without-codex-review/spec.md](hooks/preflight-gate/block-commit-without-codex-review/spec.md) |
-| `block-rename-sweep-survivors` | PreToolUse | Block `git commit` when staged diff contains ≥3 identical 1:1 identifier renames and the old token still exists in the tracked tree; escape via `# [rename-sweep-exempt]` marker or `PRAXIS_SKIP_RENAME_SWEEP_CHECK=1`; claude-host only (issue #556) | [hooks/preflight-gate/block-rename-sweep-survivors/spec.md](hooks/preflight-gate/block-rename-sweep-survivors/spec.md) |
-| `block-gh-issue-create-without-dup-search` | PreToolUse | Block `gh issue create` when no prior `gh search issues` / `issue list` overlaps the new issue's title keywords; escape via `[dup-checked]` token, personal-repo carve-out, or `CLAUDE_HOOK_BYPASS_DUP_GATE=1` (issue #374) | [hooks/preflight-gate/block-gh-issue-create-without-dup-search/spec.md](hooks/preflight-gate/block-gh-issue-create-without-dup-search/spec.md) |
-| `block-child-repo-issue-create` | PreToolUse | Block `gh issue create` on hub-mediated org child repos when `PRAXIS_HUB_MEDIATED_ORGS` is configured; NO-OP by default; bypass via `PRAXIS_HOOK_BYPASS_HUB_ENFORCE` (issue #436) | [hooks/preflight-gate/block-child-repo-issue-create/spec.md](hooks/preflight-gate/block-child-repo-issue-create/spec.md) |
-| `skill-gate-commands` | PreToolUse | Block configured external-mutation commands (`gh pr create`, `gh pr merge`, `git push origin`) when required skill not invoked this session; NO-OP by default; opt-in via `PRAXIS_SKILL_GATED_COMMANDS`; bypass via `PRAXIS_HOOK_BYPASS_SKILL_GATE` (issue #438) | [hooks/preflight-gate/skill-gate-commands/spec.md](hooks/preflight-gate/skill-gate-commands/spec.md) |
-| `strike-counter` | SessionStart + UserPromptSubmit + Stop | Session-scoped three-strike discipline — emits 1/2-strike reminder context, hard-blocks at 3, requires non-empty reflection file before reset; state under `${PRAXIS_STATE_DIR:-$HOME/.claude/state/praxis}/strikes/` (issue #126) | [hooks/completion-verify/strike-counter/spec.md](hooks/completion-verify/strike-counter/spec.md) |
-| `second-failure-advisory` | PostToolUse | Advisory on a repeated `(tool_name, signature)` failure pattern's second occurrence in the same session to reduce unbounded retry loops | [hooks/postuse-correction/second-failure-advisory/spec.md](hooks/postuse-correction/second-failure-advisory/spec.md) |
-| `external-write-path-existence-check` | PreToolUse | Advisory nudge when a `gh issue/pr` body file (via `--body-file`) contains markdown links referencing repo paths that do not exist on disk (phase 1: markdown links; phase 2 deferred: inline-code tokens; issue #324) | [hooks/advisory-nudge/external-write-path-existence-check/spec.md](hooks/advisory-nudge/external-write-path-existence-check/spec.md) |
-| `block-personal-asset-leak` | PreToolUse | Advisory nudge (opt-in strict: block via `PRAXIS_PERSONAL_LEAK_STRICT=1`) on two personal-asset marker classes: (1) absolute home-dotfiles path (`/Users/<name>/.claude/...`, `/home/<name>/.config/...`) in a `gh issue/pr` write body — always active; (2) personal-repo reference (`<owner>/<repo>(#N)?`) toward a non-personal target, on `gh` bodies AND Write/Edit content — opt-in via `PRAXIS_PERSONAL_REPO_OWNERS`, target-discriminated by `--repo`/origin owner with gitignored-path exemption; tilde `~/` form and `/projects/` worktree paths excluded; semantic surfacing out of scope (issues #563, #658) | [hooks/advisory-nudge/block-personal-asset-leak/spec.md](hooks/advisory-nudge/block-personal-asset-leak/spec.md) |
-| `path-probe-gate` | PreToolUse | Advisory nudge (opt-in strict: deny) when Write/Edit/NotebookEdit targets a nested worktree path whose immediate parent directory has not been enumerated this session — structural enforcement of the One-Probe-Before-Action Gate rule for the Write surface (issue #386) | [hooks/advisory-nudge/path-probe-gate/spec.md](hooks/advisory-nudge/path-probe-gate/spec.md) |
-| `exclusion-probe-gate` | PreToolUse | Advisory nudge (opt-in strict: deny via `PRAXIS_EXCLUSION_PROBE_STRICT=1`) when Write/Edit content embeds a self-authored **exclusion directive** (Axis A: `do NOT add`, `deliberately excluded/omitted/skipped`, KO `의도적 제외`/`추가하지 말 것`/`포함하지 않음`) co-occurring within ±3 lines with an **uncited verification claim** (Axis B: `verified/confirmed/checked … via/with/by`, KO `확인함`/`검증됨`/`대조 완료`) and no `Probe:` citation nearby — structural backstop for the Author-exempt verification trap (Information Accuracy Layer 2). Directive-alone passes; normative-doc paths (`CLAUDE.md`/`AGENTS.md`/`SKILL.md`/`spec.md`), test/fixture paths, fenced/inline-code/blockquote regions, and negated claims excluded. Write/Edit content only; Bash heredoc/`gh --body` deferred (issue #807) | [hooks/advisory-nudge/exclusion-probe-gate/spec.md](hooks/advisory-nudge/exclusion-probe-gate/spec.md) |
-| `jq-config-empty-dict-advisory` | PreToolUse | Advisory nudge when `jq` reads a config file (settings.json, hooks.json, ~/.claude/*.json, ~/.codex/*.json) that is empty or invalid JSON (issue #323) | [hooks/advisory-nudge/jq-config-empty-dict-advisory/spec.md](hooks/advisory-nudge/jq-config-empty-dict-advisory/spec.md) |
-| `bash-worktree-existence-advisory` | PreToolUse | Advisory nudge when `cd <path>` targets a path that does not exist on disk (issue #322) | [hooks/advisory-nudge/bash-worktree-existence-advisory/spec.md](hooks/advisory-nudge/bash-worktree-existence-advisory/spec.md) |
-| `cwd-relative-exec-advisory` | PreToolUse | Soft `ask` when a Bash command executes a relative path (`./`/`../`/bare `dir/file`, or a relative `--body-file`/`-F` value) with no preceding `cd`/`pushd` in the same command while `git worktree list` reports 2+ worktrees; the inverse of `bash-worktree-existence-advisory`, which catches a `cd` to a missing path (issue #852) | [hooks/advisory-nudge/cwd-relative-exec-advisory/spec.md](hooks/advisory-nudge/cwd-relative-exec-advisory/spec.md) |
-| `pytest-direct-exec-advisory` | PreToolUse | Advisory (stderr, never blocks) when `python`/`python3` directly executes a pytest-shaped file; recommends module execution so pytest collects the suite instead of silently running zero tests (issue #909) | [hooks/advisory-nudge/pytest-direct-exec-advisory/spec.md](hooks/advisory-nudge/pytest-direct-exec-advisory/spec.md) |
-| `long-foreground-call-advisory` | PreToolUse | Advisory (stderr, never blocks) when a foreground Bash call declares an explicit `timeout` above the 180000ms status-briefing threshold — the only call class that can outlast it; a call with no timeout returns at the 120s default and is exempt (issue #991) | [hooks/advisory-nudge/long-foreground-call-advisory/spec.md](hooks/advisory-nudge/long-foreground-call-advisory/spec.md) |
-| `perf-multiplier-evidence-advisory` | PreToolUse | Advisory (stderr, never blocks) when a performance multiplier notation or a lever verdict appears in the body of a `gh issue\|pr create/comment` with no adjacent controlled-timing artifact — proxy/arithmetic estimates carried to a near-deliverable surface (issue #850) | [hooks/advisory-nudge/perf-multiplier-evidence-advisory/spec.md](hooks/advisory-nudge/perf-multiplier-evidence-advisory/spec.md) |
-| `n1-quantitative-claim-advisory` | PreToolUse | Advisory (stderr, never blocks) on two claim families in the body of a `gh issue\|pr create/comment`: a sample-dependent quantitative claim — a percentile / central-tendency figure, or a `PASS`-attached measurement — with no sample size above 1 stated anywhere in that body, and a verdict-attached count carrying none of its three run-condition fields (the command, what it collected, where it ran) (issue #949) | [hooks/advisory-nudge/n1-quantitative-claim-advisory/spec.md](hooks/advisory-nudge/n1-quantitative-claim-advisory/spec.md) |
-| `pre-commit-staged-file-enumeration` | PreToolUse | Advisory nudge before `git commit` listing staged file additions not created via Write/Edit/MultiEdit/NotebookEdit this session — heredoc / `> file` / external-script output caught before it rides into the commit (issue #784) | [hooks/advisory-nudge/pre-commit-staged-file-enumeration/spec.md](hooks/advisory-nudge/pre-commit-staged-file-enumeration/spec.md) |
-| `commit-decomposition-advisory` | PreToolUse | Advisory nudge before `git commit` when the message itself says the change is more than one commit — 3+ body bullets, or a title type the body disagrees with; names the commit axis only, never the issue axis (issue #971) | [hooks/advisory-nudge/commit-decomposition-advisory/spec.md](hooks/advisory-nudge/commit-decomposition-advisory/spec.md) |
-| `model-routing-advisory` | PreToolUse | Advisory nudge when a Bash delegation's `--model` names a bare Claude tier (`haiku`/`sonnet`/`opus`) mismatching the tier implied by task keywords (`find → haiku`, `implement → sonnet`, `architect/security → opus`) — the [Provider Routing](#provider-routing) complexity→model phase only; silent for `codex:`/`gemini:`/full model IDs. Full routing tree lives in this hook's spec; a companion ai-dotfiles change removes the always-loaded `Skill & Agent Routing` + `Model Routing Rules` blocks (issue #786) | [hooks/advisory-nudge/model-routing-advisory/spec.md](hooks/advisory-nudge/model-routing-advisory/spec.md) |
-| `push-remote-ref-verify` | PostToolUse | Advisory after `git push` when the remote branch tip did not advance to the pushed SHA — guards the rotating-endpoint silent-divergence failure (issue #539) | [hooks/advisory-nudge/push-remote-ref-verify/spec.md](hooks/advisory-nudge/push-remote-ref-verify/spec.md) |
-| `pr-thread-resolve-advisory` | PostToolUse | Advisory after `git push` listing the open PR's unresolved review threads (`reviewThreads` GraphQL — the inline surface `gh pr view` omits), graded into needs-a-reply and for-reference so an open-thread count is not read as a blocker count (issue #1039) | [hooks/advisory-nudge/pr-thread-resolve-advisory/spec.md](hooks/advisory-nudge/pr-thread-resolve-advisory/spec.md) |
-| `version-bump-evidence-check` | PreToolUse | Advisory nudge (opt-in strict) when `gh issue/pr` body describes an external version bump with no changelog URL, Fetched: line, or cross-reference matrix (issue #327) | [hooks/advisory-nudge/version-bump-evidence-check/spec.md](hooks/advisory-nudge/version-bump-evidence-check/spec.md) |
-| `momentum-rule-retrieval-gate` | PreToolUse | Advisory nudge at high-momentum action points (`gh pr merge`, `cmux new-workspace`, `git push --force`) — surfaces relevant CLAUDE.md rules + memory entries to prevent "Loaded ≠ Retrieved" failures (issue #326) | [hooks/advisory-nudge/momentum-rule-retrieval-gate/spec.md](hooks/advisory-nudge/momentum-rule-retrieval-gate/spec.md) |
-| `bulk-write-memory-checkpoint` | PreToolUse | Advisory nudge when bulk-writing to SOT-flagged paths (vault/, wiki/, .claude/, skills/, AGENTS.md/CLAUDE.md companions) — reminds to checkpoint memory before the write loop to prevent "Loaded ≠ Retrieved" failures (issue #443) | [hooks/advisory-nudge/bulk-write-memory-checkpoint/spec.md](hooks/advisory-nudge/bulk-write-memory-checkpoint/spec.md) |
-| `pre-output-falsification-gate` | PreToolUse | Two advisory lanes: (Lane A) on `AskUserQuestion`, nudge when an evaluative / `(Recommended)` option is surfaced under recent negative transcript evidence without a disconfirming-probe phrase in the question body; (Lane B / B-i) on `Bash`, nudge when a read-only status command (status/get/list) repeats ≥3× in a session (issue #487) | [hooks/advisory-nudge/pre-output-falsification-gate/spec.md](hooks/advisory-nudge/pre-output-falsification-gate/spec.md) |
-| `merge-menu-review-options-advisory` | PreToolUse | Advisory (opt-in strict via `PRAXIS_MERGE_MENU_REVIEW_STRICT=1`) on `AskUserQuestion` when a merge-decision menu (an option label names a merge/squash action) offers no review/debate option — nudges the agent to re-author the menu with codex-review-wrap / code-reviewer / critic levers before the merge gate (issue #560) | [hooks/advisory-nudge/merge-menu-review-options-advisory/spec.md](hooks/advisory-nudge/merge-menu-review-options-advisory/spec.md) |
-| `menu-mutation-tier-advisory` | PreToolUse | Advisory (opt-in strict via `PRAXIS_MENU_MUTATION_TIER_STRICT=1`) on `AskUserQuestion` when a question keeps two or more candidates after abandonment options are dropped, at least one carries a mutation signal, and none carries a non-mutating one (preview / dev / sandbox / dry-run / review / `보고만`) — the menu then asks "how much", never "whether". An option that merely declines to act (`다음 정기 실행에 맡김`) is classified as abandonment: it neither suppresses the advisory nor counts as a candidate. A `Safe-tier-unavailable: <reason>` line at column 0 of the question body suppresses it for that question (issue #963) | [hooks/advisory-nudge/menu-mutation-tier-advisory/spec.md](hooks/advisory-nudge/menu-mutation-tier-advisory/spec.md) |
-| `bypass-telemetry` | PostToolUse(Bash) | Observe-only: log bypass-env usage (`CLAUDE_HOOK_BYPASS_*` / `PRAXIS_*BYPASS*`) to daily JSONL (`~/.praxis/telemetry/bypass-events-YYYY-MM-DD.jsonl`) — never blocks (issue #441 Phase 1; Phase 2 review CLI + Phase 3 HTTP deferred) | [hooks/postuse-correction/bypass-telemetry/spec.md](hooks/postuse-correction/bypass-telemetry/spec.md) |
-| `askuserquestion-loop-signal` | PostToolUse(AskUserQuestion) | Observe-only: append one fire-ledger record per `AskUserQuestion` call — coarse per-session call-count proxy for the "re-clarification loop" outcome-proxy signal (issue #740, issue #737 signal 2 of 3), never blocks | [hooks/postuse-correction/askuserquestion-loop-signal/spec.md](hooks/postuse-correction/askuserquestion-loop-signal/spec.md) |
+- [`docs/hook/INDEX.md`](docs/hook/INDEX.md) — the hand-maintained index,
+  grouped by role (`preflight-gate` / `advisory-nudge` / `postuse-correction`
+  / `completion-verify`), linking each hook to its `hooks/<role>/<name>/spec.md`.
+  `scripts/check-plugin-manifests.py` (Rule 7) fails when a manifest hook is
+  missing from it.
+- [`docs/hook-operating-matrix.md`](docs/hook-operating-matrix.md) — the
+  operating surface generated from `hooks/manifest.json` by
+  `scripts/build-plugin-manifests.py`: role, events, host filter, strict /
+  bypass knobs, and the external commands each hook may run.
+
+The spec is the source of truth for what a hook blocks, passes, and how it
+fails open; the matrix is the source of truth for how it is registered.
 
 ### Single-process dispatch (ADR-0002)
 
@@ -254,15 +170,19 @@ interpreter startup, not hook logic. ADR-0002 collapses that group into **one**
 python3 process.
 
 - **Declaration.** `hooks/manifest.json` carries a `dispatch_groups` array of
-  `{event, matcher}` pairs. Five groups are collapsed today: `(PreToolUse,
+  `{event, matcher}` pairs. Six groups are collapsed today: `(PreToolUse,
   Bash)` — the hooks whose manifest `matcher` is exactly `Bash` (count asserted
   by `tests/hooks/_lib/test_dispatch.py::test_group_members_count_and_roles` —
   keep in sync when adding/removing an exact-`Bash` hook) — plus, since #1168,
   `(PreToolUse, Edit|Write)`, `(PreToolUse, Edit|NotebookEdit|Write)`, and
   `(PreToolUse, Bash|Edit|Write)` (secret-print-redaction-advisory,
-  block-personal-asset-leak, external-api-literal-trigger), and since #1239
+  block-personal-asset-leak, external-api-literal-trigger), since #1239
   `(PostToolUse, Bash)` (anchor-comment-gate, push-remote-ref-verify,
-  pr-thread-resolve-advisory, bypass-telemetry). A hook that fires on `Bash`
+  pr-thread-resolve-advisory, bypass-telemetry), and since #1281 `(Stop)` —
+  the matcher-less group of the twelve stdin-only Stop gates, declared as
+  `{"event": "Stop"}` and rendered with the `-` matcher sentinel;
+  `strike-counter stop` stays a standalone node beside it because it reads
+  its mode from argv (the #1199 `args` rule). A hook that fires on `Bash`
   and on other tools registers its `Bash` leg as a separate exact-`Bash`
   entry so it joins the group, and keeps its other matcher as its own
   standalone node (fan-out-scope-gate `Agent`, memory-hint
@@ -296,14 +216,23 @@ python3 process.
   run `main()` — re-points `sys.stdin` at a fresh copy of the payload per member,
   and runs each member's `main()` through the existing `_hook_runtime.fail_open`
   decorator. Member `impl.py` files are unmodified; the dispatcher adapts around
-  them.
+  them. A `body: impl.sh` member (the Stop group's completion-verify and
+  retrospect-mix-check) has no `main()` to import: `run_one` execs it as a
+  subprocess with the payload on stdin and the member deadline as its timeout,
+  with the child's own `record_fire.sh` arming switched off so the group's
+  ledger record is the only one (#1281). Members that read the current turn
+  share one transcript parse per group run (`_transcript.enable_turn_memo`).
 - **Aggregation (most-restrictive wins).** Decisions are classified
   role-agnostically by exit code / `permissionDecision` marker: any member
   `deny` (exit 2 or `"permissionDecision": "deny"`) → propagate `deny`; else any
   `ask` → propagate `ask`; else allow. Every member's stderr (advisory nudges and
   deny reasons alike) is always forwarded. Role-agnostic detection is deliberate —
   some `advisory-nudge` hooks emit `ask`/`deny` under strict modes, so a role-gated
-  split would silently drop their gate decisions.
+  split would silently drop their gate decisions. On `Stop`, blocking is carried
+  by a top-level `{"decision": "block"}` JSON instead of the exit code: every
+  blocking member's reason is merged into one block (#1169), and every advisory
+  member's top-level `systemMessage` is merged the same way and rides on the
+  block object when a sibling blocks (#1281).
 - **Fail-open** ([`ETHOS.md`](ETHOS.md)). Each member runs under `fail_open`, and
   the dispatcher's own `main()` swallows exceptions to a `0` (allow), so a crash
   in one `impl.py` cannot block the tool call or abort the other members —
@@ -353,6 +282,30 @@ Platform manifests support two optional top-level fields:
 - `excluded_hooks` — hook script names (without `.sh`) to omit when generating
   `filtered-hooks` outputs. Also serves as compatibility documentation.
 - `excluded_skills` — reserved for future per-platform skill filtering.
+
+### Why `plugin.json` declares no `dependencies`
+
+Claude Code plugins can list other plugins in a `plugin.json` `dependencies`
+array (`name@marketplace`, with `~` / `^` / `>=` / `=` version ranges). praxis
+does not, by decision (#1332, plugin-dependencies reference read 2026-09-06):
+
+- A declared dependency is installed with the plugin and, when it is missing
+  or disabled, the dependent plugin is switched off with
+  `dependency-unsatisfied`. There is no optional-dependency form — nothing
+  that says "more features when present, still works when absent".
+- Removing a plugin that another enabled plugin depends on fails outright, so
+  declaring oh-my-claudecode would block a user from uninstalling it.
+- Cross-marketplace dependencies need the root marketplace's
+  `allowCrossMarketplaceDependenciesOn`, which praxis does not control on the
+  user's side.
+
+The Standalone tier (`recover-sessions`, the strike skills, `debt`) must work
+with none of oh-my-claudecode, cmux, or the codex plugin installed, so a hard
+dependency would break the tier model. What praxis carries instead is
+declarative: the per-hook `requires` field in `hooks/manifest.json` (#1158),
+mirrored by each spec's `Requires:` line (check Rule 20) and by the README's
+[Hook dependencies](README.md#hook-dependencies) table (check Rule 27). Runtime
+behaviour is unchanged either way — the affected hooks already fail open.
 
 Generated (committed) outputs:
 
@@ -428,5 +381,10 @@ above.
 `VERSION`) and re-run the build script. Run `./scripts/check-plugin-manifests.py`
 before committing if you touched any packaging surface.
 
-Adding a new platform = one file at `manifests/platforms/<name>.json` + one
-build run. No skill, hook, or existing-platform changes required.
+Adding a new platform = one file at `manifests/platforms/<name>.json`, its
+`host_id` added to the `hosts` enum in `hooks/manifest.schema.json`
+(`tests/test_check_manifest_schema.py` asserts the enum equals the platform
+set, so a missing entry fails CI), and one build run. No skill, hook, or
+existing-platform changes required. Hooks without a `hosts` field ship to
+every platform automatically; a hook with an explicit `hosts` list stays off
+the new host until that list (and its `Supported hosts:` line) names it.

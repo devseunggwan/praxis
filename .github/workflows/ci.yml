@@ -43,6 +43,29 @@ jobs:
       - run: python3 -m pip install "ruff==0.15.8"
       - run: ruff check .
 
+  mypy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.x"
+          cache: pip
+          cache-dependency-path: .github/workflows/ci.yml
+      # Pinned so a future mypy release can't tighten inference and turn CI
+      # red without an explicit bump — the ruff pin's reasoning. types-PyYAML
+      # is the stub package for scripts/check-workflow-pins.py's PyYAML import
+      # (the one third-party import in scope); it is pinned on the same ground,
+      # and stubs alone are enough — mypy never imports the runtime package.
+      # Scope and flags live in mypy.ini, so the invocation carries no
+      # arguments and scripts/run-tests.sh step 13 cannot drift from it.
+      # Bump the two pins here and in run-tests.sh together.
+      - run: python3 -m pip install "mypy==1.20.0" "types-PyYAML==6.0.12.20260815"
+      - run: python3 -m mypy
+
   shellcheck:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -100,9 +123,16 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
-      # fetch-depth:0 — the paren gate's fixtures are the real commits
-      # release-please rejected, read back with `git log -1 <sha>`. A shallow
-      # checkout has none of them and the suite errors with exit 128.
+      # fetch-depth:0 — what needs it is run-tests.sh's markdownlint step: it
+      # diffs against `git merge-base HEAD origin/main` to lint only the
+      # markdown the PR changed. A depth-1 PR checkout has no origin/main, so
+      # the step falls back to linting every tracked markdown file and buries
+      # the log in the repo's known backlog; still advisory, but no longer a
+      # useful signal. Nothing else in this job reads history: the paren gate's
+      # corpus used to be read back with `git log -1 <sha>` (exit 128 on a
+      # shallow clone) and now ships as text fixtures under
+      # tests/fixtures/commit-message-paren-check/, whose live-compare case
+      # skips itself when the commits are absent (issue #1302).
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
@@ -116,7 +146,19 @@ jobs:
       # step cannot disagree with the blocking one. PyYAML is what
       # scripts/check-workflow-pins.py parses workflows with; pinned for the
       # same reason, since a parser change moves what the canary can see.
-      - run: python3 -m pip install pytest "ruff==0.15.8" "PyYAML==6.0.3"
+      # coverage is pinned on the same ground as ruff (issue #1303): the pytest
+      # step of run-tests.sh gates on the `fail_under` floor in .coveragerc, and
+      # a coverage.py release can move what counts as a statement — the
+      # measured total shifting under a fixed floor is exactly the silent
+      # red-without-a-bump the ruff pin exists to prevent. run-tests.sh's skip
+      # hint names the same version; bump both together.
+      # mypy and its types-PyYAML stub are pinned to the `mypy` job's versions
+      # on the ruff ground: run-tests.sh step 13 is the local-parity mirror,
+      # and under PRAXIS_TESTS_STRICT an absent mypy would fail this job as a
+      # skip rather than run the check.
+      - run: |
+          python3 -m pip install pytest "ruff==0.15.8" "PyYAML==6.0.3" \
+            "coverage==7.16.0" "mypy==1.20.0" "types-PyYAML==6.0.12.20260815"
       # zsh is not preinstalled on ubuntu-24.04. block-unmatched-glob delegates
       # its verdict to a real zsh, so without it that hook's suite has nothing to
       # assert against and silently degrades to fail-open coverage.
@@ -151,9 +193,21 @@ jobs:
       # run silently stopped checking something rather than accommodating a
       # contributor's machine. markdownlint stays advisory — strict gates on a
       # step being skipped, not on its findings.
+      # COVERAGE_FILE is pinned to the workspace so the data file outlives the
+      # runner's throwaway PRAXIS_HOME (its default location, swept by an EXIT
+      # trap) and the summary step below can re-read it. .coverage is
+      # gitignored; the runner never pushes, so nothing here can commit it.
       - run: bash scripts/run-tests.sh
         env:
           PRAXIS_TESTS_STRICT: "1"
+          COVERAGE_FILE: ${{ github.workspace }}/.coverage
+      # Per-file coverage table on the job summary (issue #1303). The floor
+      # already gated inside run-tests.sh; this step only renders the same
+      # data, so it inherits the pass. coverage 7.16.0 supports
+      # --format=markdown (verified against `coverage report --help`).
+      - run: python3 -m coverage report --format=markdown >> "$GITHUB_STEP_SUMMARY"
+        env:
+          COVERAGE_FILE: ${{ github.workspace }}/.coverage
 
   link-check:
     runs-on: ubuntu-24.04
@@ -210,15 +264,46 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # Rule config lives in .markdownlint.yaml (counts derived under the
-      # version this action bundles — see that file's header).
-      - uses: reviewdog/action-markdownlint@6f0e0e8703a9e840ffefa37a2775832c51c1c640 # v0.28.0
+      # reviewdog/action-markdownlint is a Docker container action built from
+      # its Dockerfile at job time (node:24-bullseye-slim plus apt-get). On
+      # 2026-09-06 a Debian bullseye-security mirror 404 inside that build
+      # failed the job on every open PR, release-please's included, before
+      # any input was read, so its `fail_level: none` never applied and each
+      # commit status went red for a check that gates nothing. The steps
+      # below run the same two-phase pipeline the action's entrypoint runs,
+      # with the markdownlint-cli and reviewdog versions its v0.28.0 image
+      # bundles, and no image build. Rule config still lives in
+      # .markdownlint.yaml (counts derived under this markdownlint-cli
+      # version — see that file's header).
+      - uses: reviewdog/action-setup@d8a7baabd7f3e8544ee4dbde3ee41d0011c3a93f # v1.5.0
         with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          reporter: github-pr-review
-          # Only flag lines the PR changed; the repo's large existing backlog
-          # stays untouched.
-          filter_mode: added
-          # Advisory rollout: warnings only, never fails the check.
-          level: warning
-          fail_level: none
+          reviewdog_version: v0.21.0
+      - run: npm install -g markdownlint-cli@0.49.1
+      - name: markdownlint findings and fix suggestions
+        env:
+          REVIEWDOG_GITHUB_API_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Phase 1: findings on lines the PR changed only; the repo's large
+          # existing backlog stays untouched. Advisory rollout: warnings only,
+          # never fails the check.
+          markdownlint . 2>&1 | reviewdog \
+            -efm="%f:%l:%c %m" \
+            -efm="%f:%l %m" \
+            -name="markdownlint" \
+            -reporter=github-pr-review \
+            -filter-mode=added \
+            -level=warning \
+            -fail-level=none
+          # Phase 2: the same suggestion comments the action posts under
+          # github-pr-review, from markdownlint --fix as a diff.
+          markdownlint --fix . 2>&1 || true
+          fix_diff="$(mktemp)"
+          git diff > "$fix_diff"
+          git checkout -- .
+          reviewdog \
+            -f=diff \
+            -f.diff.strip=1 \
+            -name="markdownlint-fix" \
+            -reporter=github-pr-review \
+            -filter-mode=diff_context \
+            -level=warning < "$fix_diff"

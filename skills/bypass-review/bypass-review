@@ -2,16 +2,17 @@
 """bypass-review — Review CLI for praxis bypass-telemetry events.
 
 Reads the local JSONL logs written by the bypass-telemetry PostToolUse hook
-(~/.praxis/telemetry/bypass-events-YYYY-MM-DD.jsonl) and aggregates them for
+(~/.praxis/telemetry/bypass-events-YYYY-MM-DD.jsonl, under $PRAXIS_HOME/telemetry
+when PRAXIS_HOME relocates the tree — issue #1340) and aggregates them for
 human review.
 
 Phase 2 of issue #456 (Phase 1 = hook that writes the log; Phase 3 = HTTP
 forwarding, deferred).
 Issue #689: per-hook aggregation view + tool-error co-occurrence.
-Issue #710 (remaining scope): fire-rate mode gains advise_ignored_rate,
-bypass_count (joined against bypass-events), and a best-effort outcome-proxy
-section (strike / external-write-revert / re-clarification-loop /
-rework-commit signals — see OUTCOME PROXY LIMITATIONS below).
+Issue #710 (remaining scope): fire-rate mode gains bypass_count (joined
+against bypass-events) and a best-effort outcome-proxy section (strike /
+external-write-revert / re-clarification-loop / rework-commit signals — see
+OUTCOME PROXY LIMITATIONS below).
 
 Usage:
   bypass-review [OPTIONS]
@@ -19,7 +20,8 @@ Usage:
 Options:
   -d, --days N           Query the last N days (default: 7)
   --dir PATH             Override the telemetry directory
-                         (default: ~/.praxis/telemetry)
+                         (default: $PRAXIS_HOME/telemetry, or
+                         ~/.praxis/telemetry when PRAXIS_HOME is unset)
   --errors-only          Show only events where tool_result_status = "error"
   --per-hook FAMILY      Show detailed breakdown for one hook/rule family only
                          (e.g. --per-hook SCIOMC_GATE).  Family names are
@@ -89,6 +91,18 @@ issue #741, fire-rate mode):
       window are indistinguishable by timestamp alone, and a commit with no
       session active within the window is silently excluded (counted
       toward no session) rather than guessed.
+    - Issue #1238 made this fallback COARSER, and only this fallback. A
+      `pass` is no longer one row per fire but a counted run carrying its two
+      endpoints, so a session that fired steadily for hours now offers the
+      matcher two timestamps for that hook instead of hundreds. Replaying
+      2026-09-04's real ledger through the new writer moved 6 correlated
+      commits from 5 sessions onto 3 — the same commits, re-attributed,
+      because "nearest timestamp" now resolves against a sparser index. The
+      trailer path is exact and unaffected, and it is the reason this is
+      acceptable: a commit carrying `Session-Id:` never reaches the
+      heuristic. Every other figure in the report — fires, per-decision
+      counts, sessions, last-seen, bypass attribution, revert and
+      re-clarification signals — replayed byte-identical.
 
 Output sections:
   1. Summary — total events + date window
@@ -131,6 +145,97 @@ from pathlib import Path
 
 
 # ---------------------------------------------------------------------------
+# Runtime roots — hooks/_lib/_paths when it can be loaded, else its rule
+# ---------------------------------------------------------------------------
+
+_PATHS_UNLOADED = object()
+_PATHS_MODULE: object = _PATHS_UNLOADED
+
+
+def _load_praxis_paths():
+    """`hooks/_lib/_paths` from the checkout this CLI lives in, or None.
+
+    `__file__` is a ~/.local/bin symlink; `os.path.realpath` follows it to
+    `skills/bypass-review/bypass-review`, whose `parents[2]` is the repo root
+    (the same anchor `default_manifest_path` uses). `_paths` imports its
+    sibling `_state_lock` by bare name, so `_lib` is on `sys.path` for the
+    duration of the import and off again after. The module is loaded under a
+    private name rather than `import _paths`, so a `_paths` a test harness
+    already holds in `sys.modules` is neither reused nor displaced. Every
+    failure returns None: the callers fall back to the inline rule, so the CLI
+    never fails to start over a resolver it could not load.
+    """
+    try:
+        lib = Path(os.path.realpath(__file__)).parents[2] / "hooks" / "_lib"
+        src = lib / "_paths.py"
+        if not src.is_file():
+            return None
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("_bypass_review_paths", str(src))
+        if spec is None or spec.loader is None:
+            return None
+        mod = importlib.util.module_from_spec(spec)
+        sys.path.insert(0, str(lib))
+        try:
+            spec.loader.exec_module(mod)
+        finally:
+            try:
+                sys.path.remove(str(lib))
+            except ValueError:
+                pass
+        return mod
+    except Exception:
+        return None
+
+
+def _praxis_paths():
+    """Memoised `_load_praxis_paths()` — one import attempt per process."""
+    global _PATHS_MODULE
+    if _PATHS_MODULE is _PATHS_UNLOADED:
+        _PATHS_MODULE = _load_praxis_paths()
+    return _PATHS_MODULE
+
+
+def default_praxis_home() -> Path:
+    """`PRAXIS_HOME` (tilde-expanded), else `~/.praxis` (issue #1340).
+
+    `_paths.praxis_home()` when the resolver loads; otherwise the same
+    one-line rule restated, so an import failure changes nothing a user can
+    observe. With PRAXIS_HOME unset both branches give `Path.home()/.praxis`.
+    """
+    paths = _praxis_paths()
+    if paths is not None:
+        try:
+            return Path(paths.praxis_home())
+        except Exception:
+            pass
+    return Path(os.path.expanduser(os.environ.get("PRAXIS_HOME") or "~/.praxis"))
+
+
+def default_telemetry_dir() -> Path:
+    """Where the writers put the ledgers when nothing overrides them.
+
+    `<praxis home>/telemetry` — `_fire_ledger.resolve_telemetry_dir()` minus
+    its development-checkout branch, which is a writer-side diversion for a
+    hook running out of a checkout and not where a reader looks by default
+    (`--dir <checkout>/.praxis-dev-telemetry` reads such a ledger).
+    """
+    return default_praxis_home() / "telemetry"
+
+
+def default_legacy_strike_state_dir() -> Path:
+    """The pre-#527 `~/.claude/state/praxis/strikes` — `_paths.legacy_state_dir()`
+    when the resolver loads, else the literal it returns."""
+    paths = _praxis_paths()
+    if paths is not None:
+        try:
+            return Path(paths.legacy_state_dir()) / "strikes"
+        except Exception:
+            pass
+    return Path(os.path.expanduser("~/.claude/state/praxis/strikes"))
+
+
+# ---------------------------------------------------------------------------
 # JSONL field names — cited verbatim from
 # hooks/postuse-correction/bypass-telemetry/impl.py lines 250-257
 # ---------------------------------------------------------------------------
@@ -155,6 +260,8 @@ F_FIRE_HOOK = "hook"
 F_FIRE_ROLE = "role"
 F_FIRE_DECISION = "decision"
 F_FIRE_GRANULARITY = "granularity"
+F_FIRE_COUNT = "count"          # issue #1238: a folded run of `pass` fires
+F_FIRE_FIRST = "first_timestamp"  # issue #1238: the other end of that run
 
 _FIRE_DECISIONS = ("block", "ask", "advise", "pass")
 
@@ -257,7 +364,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         dest="telemetry_dir",
         default=None,
         metavar="PATH",
-        help="Override telemetry directory (default: ~/.praxis/telemetry)",
+        help="Override telemetry directory (default: $PRAXIS_HOME/telemetry, "
+             "or ~/.praxis/telemetry when PRAXIS_HOME is unset)",
     )
     parser.add_argument(
         "--errors-only",
@@ -322,7 +430,7 @@ def _dated_files(telemetry_dir: Path, family: str, date_str: str) -> list[Path]:
         if not p.is_file():
             continue
         tail = p.name[len(base):]
-        if not re.fullmatch(r"(\.[0-9a-f]+)?\.jsonl(\.gz)?", tail):
+        if not re.fullmatch(r"(\.[0-9A-Za-z_-]+)?\.jsonl(\.gz)?", tail):
             continue
         if tail.endswith(".jsonl") and tail != ".jsonl":
             archive = p.with_name(p.name + ".gz")
@@ -886,14 +994,34 @@ def load_fire_events(
     """
     events: list[dict] = []
     for date_str in date_range(days):
-        for path in _dated_files(telemetry_dir, "fire-events", date_str):
-            for record in _iter_jsonl_records(path):
-                if not include_test_sessions and is_test_session(
-                    str(record.get(FIELD_SESSION_ID) or "")
-                ):
-                    continue
-                events.append(record)
+        for family in ("fire-events", "fire-counts"):
+            for path in _dated_files(telemetry_dir, family, date_str):
+                for record in _iter_jsonl_records(path):
+                    if not include_test_sessions and is_test_session(
+                        str(record.get(FIELD_SESSION_ID) or "")
+                    ):
+                        continue
+                    events.append(record)
     return events
+
+
+def fire_count(event: dict) -> int:
+    """How many fires one record stands for.
+
+    Every record used to stand for exactly one fire. Since issue #1238 a
+    `pass` is not written as a row at all — it is added to a per-session
+    counter file whose records carry a `count`, so the same hook passing 120
+    times in a session arrives here as one record. A record with no `count`
+    (every non-pass row, and every archive written before #1238) is one fire,
+    which is what keeps the old files summing correctly.
+
+    A malformed or negative `count` reads as one rather than aborting: this
+    is a report, and one mis-summed hook must not empty the whole table.
+    """
+    value = event.get(F_FIRE_COUNT)
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return 1
+    return value
 
 
 def aggregate_fires(events: list[dict]) -> dict[str, dict]:
@@ -920,15 +1048,16 @@ def aggregate_fires(events: list[dict]) -> dict[str, dict]:
             "sessions": set(), "last_seen": "", "coarse": False, "rich": False,
         })
         decision = ev.get(F_FIRE_DECISION)
+        fires = fire_count(ev)
         if decision == FIRE_DECISION_SKIP:
-            row["skip"] += 1
+            row["skip"] += fires
             ts = ev.get(F_FIRE_TIMESTAMP)
             if isinstance(ts, str) and ts > row["last_seen"]:
                 row["last_seen"] = ts
             continue  # not a fire — the member never ran
-        row["fires"] += 1
+        row["fires"] += fires
         if decision in _FIRE_DECISIONS:
-            row[decision] += 1
+            row[decision] += fires
         gran = ev.get(F_FIRE_GRANULARITY)
         if gran == "coarse":
             row["coarse"] = True
@@ -941,81 +1070,6 @@ def aggregate_fires(events: list[dict]) -> dict[str, dict]:
         if isinstance(ts, str) and ts > row["last_seen"]:
             row["last_seen"] = ts
     return by_hook
-
-
-# ---------------------------------------------------------------------------
-# advise_ignored_rate (issue #710 remaining scope)
-#
-# Definition: for hook H, an "advise" fire in session S is a candidate. Its
-# outcome is the NEXT fire-event for that SAME hook in that SAME session
-# (fire-events only carry hook/session/tool/decision/timestamp — there is no
-# tool_input/command field to diff literal content against, so "did the next
-# tool call change" is approximated by "did this hook's own next evaluation
-# recur identically"). Only a next decision of "advise" again counts as
-# ignored — the same condition fired again unchanged, i.e. the user's next
-# tool call did not address what was flagged. A next decision of "pass"
-# means the hook no longer flags anything (the call changed enough to
-# satisfy it — heeded, NOT ignored). A next decision of block/ask means the
-# hook's own verdict escalated (also NOT "unchanged" — a different outcome).
-# Advise fires with no subsequent same-hook fire in the session are
-# right-censored (outcome unobservable) and excluded from the "observed"
-# denominator, not silently counted either way.
-# ---------------------------------------------------------------------------
-
-def compute_advise_ignored(
-    fire_events: list[dict], full_rich_hooks: set[str] | None = None
-) -> dict[str, dict]:
-    """Return dict[hook] -> {advise_fires, observed, ignored, rate}.
-
-    `rate` is `ignored / observed`, or None when `observed == 0`.
-
-    `full_rich_hooks` scopes the calculation to hooks whose ENTIRE decision
-    stream (including silent `pass`) is recorded at rich granularity — the
-    PreToolUse(Bash) dispatch group (see `bash_group_roster`). The "next
-    decision == pass ⇒ heeded" inference at the core of this metric is only
-    sound when passes are observable in the rich stream. Single-event-rich
-    Stop hooks (issue #847: they call `record_session_fire` only when they
-    escalate; a silent pass stays a coarse, session_id-less record) would
-    otherwise show a run of `advise, advise, …` with the intervening heeded
-    passes invisible, mis-scoring them as ignored=100%. When `None` (roster
-    unreadable), fall back to the unscoped legacy behavior.
-    """
-    by_session_hook: dict[tuple[str, str], list[dict]] = {}
-    for ev in fire_events:
-        hook = ev.get(F_FIRE_HOOK)
-        sid = ev.get(F_FIRE_SESSION)
-        if not (isinstance(hook, str) and hook and isinstance(sid, str) and sid):
-            continue
-        if ev.get(F_FIRE_DECISION) == FIRE_DECISION_SKIP:
-            # issue #1167: a budget-skip means the hook never EVALUATED the
-            # call, so it is not an outcome. Left in the stream it would sit
-            # between an advise and its real next evaluation and be read as
-            # "did not recur ⇒ heeded" — mis-scoring the advisory.
-            continue
-        if full_rich_hooks is not None and hook not in full_rich_hooks:
-            continue  # partial rich stream — pass is not observable, skip
-        by_session_hook.setdefault((sid, hook), []).append(ev)
-
-    result: dict[str, dict] = {}
-    for (_sid, hook), evs in by_session_hook.items():
-        evs.sort(key=lambda e: e.get(F_FIRE_TIMESTAMP) or "")
-        row = result.setdefault(
-            hook, {"advise_fires": 0, "observed": 0, "ignored": 0}
-        )
-        for i, ev in enumerate(evs):
-            if ev.get(F_FIRE_DECISION) != "advise":
-                continue
-            row["advise_fires"] += 1
-            nxt = evs[i + 1] if i + 1 < len(evs) else None
-            if nxt is None:
-                continue  # right-censored: no later same-hook fire to compare
-            row["observed"] += 1
-            if nxt.get(F_FIRE_DECISION) == "advise":
-                row["ignored"] += 1  # same condition recurred unchanged
-
-    for row in result.values():
-        row["rate"] = (row["ignored"] / row["observed"]) if row["observed"] else None
-    return result
 
 
 # ---------------------------------------------------------------------------
@@ -1204,18 +1258,16 @@ def default_strike_state_dir() -> Path:
     strike state is strike-counter/impl.sh, and that sources the SHELL
     resolver — so the shell one is what this reader has to agree with, whatever
     _paths.py does. tests/test_bypass_review.sh asserts parity against
-    _paths.sh for exactly that reason. This CLI is installed as a ~/.local/bin
-    symlink and runs outside the hook import context, so per the #981
-    convention the skill layer replicates the semantics rather than importing
-    a resolver.
+    _paths.sh for exactly that reason.
 
-    The two resolvers disagree on one input, and it decides the code below:
-    `praxis_home` expands a leading `~` in both (_paths.sh does it with an
-    explicit `case`, _paths.py with expanduser), but `praxis_state_dir` expands
-    the PRAXIS_STATE_DIR override only in Python — the shell keeps the literal
-    tilde and merely strips a trailing slash. A reader that expanduser'd that
-    override would resolve somewhere the writer never wrote. Hence: expand
-    PRAXIS_HOME, leave PRAXIS_STATE_DIR alone.
+    The PRAXIS_STATE_DIR override is the input that decides the code below,
+    and it stays inline: the shell keeps a literal tilde and merely strips one
+    trailing slash, and a reader that expanduser'd it would resolve somewhere
+    the writer never wrote (#1215 later made _paths.py agree, but the shell
+    remains the oracle). The praxis home under it comes from
+    `default_praxis_home()` — `_paths.praxis_home()` when that resolver loads
+    from the checkout this CLI is symlinked into, else the same rule inline
+    (#1340) — which expands a leading `~` exactly as _paths.sh does.
 
     Also mirrored: the pre-#527 legacy location. strike-counter/impl.sh
     migrates ~/.claude/state/praxis/strikes only when it WRITES, so a report
@@ -1235,9 +1287,8 @@ def default_strike_state_dir() -> Path:
         # with `/` for the same reason: Path("") / "strikes" is also relative.
         base = override[:-1] if override.endswith("/") else override
         return Path(f"{base}/strikes")
-    home = os.path.expanduser(os.environ.get("PRAXIS_HOME") or "~/.praxis")
-    state_dir = Path(home) / "state" / "strikes"
-    legacy = Path(os.path.expanduser("~/.claude/state/praxis/strikes"))
+    state_dir = default_praxis_home() / "state" / "strikes"
+    legacy = default_legacy_strike_state_dir()
     if not state_dir.is_dir() and legacy.is_dir():
         return legacy
     return state_dir
@@ -1280,7 +1331,7 @@ def compute_external_write_revert_counts(fire_events: list[dict]) -> dict[str, i
         sid = ev.get(F_FIRE_SESSION)
         if not isinstance(sid, str) or not sid:
             continue
-        counts[sid] = counts.get(sid, 0) + 1
+        counts[sid] = counts.get(sid, 0) + fire_count(ev)
     return counts
 
 
@@ -1307,7 +1358,7 @@ def compute_reclarification_loop_counts(fire_events: list[dict]) -> dict[str, in
         sid = ev.get(F_FIRE_SESSION)
         if not isinstance(sid, str) or not sid:
             continue
-        counts[sid] = counts.get(sid, 0) + 1
+        counts[sid] = counts.get(sid, 0) + fire_count(ev)
     return counts
 
 
@@ -1433,12 +1484,23 @@ def load_git_commits(repo_path: Path, days: int) -> list[dict]:
 
 
 def _session_timestamp_index(fire_events: list[dict]) -> dict[str, list[datetime]]:
+    """Per session, the fire-event timestamps that mark it as active.
+
+    A folded `pass` record (issue #1238) contributes BOTH of its endpoints,
+    since it stands for a run of fires rather than one. That is all the
+    density the fold leaves: the timestamps between the endpoints are gone,
+    which is why the correlation below is a fallback and the `Session-Id:`
+    trailer is the primary path.
+    """
     out: dict[str, list[datetime]] = {}
     for ev in fire_events:
         sid = ev.get(F_FIRE_SESSION)
-        ts = _parse_fire_ts(ev.get(F_FIRE_TIMESTAMP))
-        if isinstance(sid, str) and sid and ts:
-            out.setdefault(sid, []).append(ts)
+        if not (isinstance(sid, str) and sid):
+            continue
+        for field in (F_FIRE_TIMESTAMP, F_FIRE_FIRST):
+            ts = _parse_fire_ts(ev.get(field))
+            if ts:
+                out.setdefault(sid, []).append(ts)
     return out
 
 
@@ -1643,41 +1705,6 @@ def bash_group_roster(manifest_path: Path) -> set[str] | None:
         return None
 
 
-def _render_advise_ignored_section(lines: list[str], advise_ignored: dict[str, dict]) -> None:
-    lines.append(_render_header("Advise-Ignored Detail (issue #710)"))
-    rows = {h: r for h, r in advise_ignored.items() if r["advise_fires"] > 0}
-    if not rows:
-        lines.append("  (no advise-decision fires in this window)")
-        return
-    col = 34
-    lines.append(
-        f"  {'Hook':<{col}}  {'Advise':>6}  {'Observed':>8}  {'Ignored':>7}  {'Rate':>5}"
-    )
-    lines.append(
-        f"  {'─' * col}  {'─' * 6}  {'─' * 8}  {'─' * 7}  {'─' * 5}"
-    )
-    for hook in sorted(rows, key=lambda h: rows[h]["advise_fires"], reverse=True):
-        r = rows[hook]
-        rate = f"{100 * r['rate']:.0f}%" if r["rate"] is not None else "n/a"
-        lines.append(
-            f"  {hook:<{col}}  {r['advise_fires']:>6}  {r['observed']:>8}  "
-            f"{r['ignored']:>7}  {rate:>5}"
-        )
-    lines.append("")
-    lines.append(
-        "  Observed = advise fires that had a LATER same-hook fire in the same\n"
-        "  session to compare against (right-censored fires excluded — no way to\n"
-        "  tell if the last advise of a session was heeded). Ignored = that later\n"
-        "  fire was 'advise' again — the same condition recurred unchanged. A\n"
-        "  later 'pass' means the hook stopped flagging (heeded, NOT ignored);\n"
-        "  a later block/ask means the verdict escalated (also NOT ignored — a\n"
-        "  different outcome, not a recurrence). Rate = ignored / observed. This\n"
-        "  approximates 'did the flagged pattern recur' via the hook's own\n"
-        "  re-evaluation, not a literal command diff (fire-events carry no\n"
-        "  tool_input field)."
-    )
-
-
 def _render_bypass_attribution_section(
     lines: list[str], bypass_join: dict[str, dict]
 ) -> None:
@@ -1798,7 +1825,6 @@ def render_fire_report(
     days: int,
     telemetry_dir: Path,
     roster: tuple[set[str], set[str]] | None,
-    advise_ignored: dict[str, dict] | None = None,
     bypass_join: dict[str, dict] | None = None,
     outcome_proxy: dict[str, dict] | None = None,
 ) -> str:
@@ -1877,8 +1903,7 @@ def render_fire_report(
         "     Excluded from 'Fires' and every derived metric."
     )
 
-    # ── issue #710 remaining scope: advise_ignored_rate / bypass_count / outcome-proxy ──
-    _render_advise_ignored_section(lines, advise_ignored or {})
+    # ── issue #710 remaining scope: bypass_count / outcome-proxy ──
     _render_bypass_attribution_section(lines, bypass_join or {})
     _render_outcome_proxy_section(lines, outcome_proxy or {})
 
@@ -1990,10 +2015,6 @@ def run_fire_rate(args: argparse.Namespace, telemetry_dir: Path) -> int:
     # the production numbers this report exists to judge are no longer mixed with
     # local test runs. Pass --dir to inspect a checkout's dev ledger.
     bypass_events = load_events(telemetry_dir, args.days)
-    # Scope advise-ignored to full-rich hooks: single-event-rich Stop hooks
-    # (issue #847) record only escalations, so their silent passes are invisible
-    # and the "next == pass ⇒ heeded" inference would mis-score them.
-    advise_ignored = compute_advise_ignored(events, bash_group_roster(manifest_path))
     exact_map = bypass_env_exact_map(manifest_path)
     bypass_join = join_bypass_to_hooks(events, bypass_events, exact_map=exact_map)
     state_dir = Path(args.state_dir) if args.state_dir else default_strike_state_dir()
@@ -2009,7 +2030,6 @@ def run_fire_rate(args: argparse.Namespace, telemetry_dir: Path) -> int:
 
     print(render_fire_report(
         by_hook, args.days, telemetry_dir, roster,
-        advise_ignored=advise_ignored,
         bypass_join=bypass_join,
         outcome_proxy=outcome_proxy,
     ))
@@ -2031,7 +2051,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.telemetry_dir is not None:
         telemetry_dir = Path(args.telemetry_dir)
     else:
-        telemetry_dir = Path.home() / ".praxis" / "telemetry"
+        telemetry_dir = default_telemetry_dir()
 
     if args.mode == "fire-rate":
         return run_fire_rate(args, telemetry_dir)

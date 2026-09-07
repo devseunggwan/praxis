@@ -47,12 +47,16 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "_lib"))
 import _fire_ledger  # type: ignore[import-not-found]  # noqa: E402
 from _hook_io import emit_stop_advisory  # type: ignore[import-not-found]  # noqa: E402
-from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
+from _hook_runtime import (  # type: ignore[import-not-found]  # noqa: E402
+    MIN_SUBPROC_BUDGET_SEC,
+    fail_open,
+    remaining_budget,
+)
 from _payload import read_payload  # type: ignore[import-not-found]  # noqa: E402
 from _transcript import (  # type: ignore[import-not-found]  # noqa: E402
-    extract_last_assistant_text,
     has_tool_in_turn,
-    load_current_turn,
+    load_stop_turn,
+    stop_last_assistant_text,
 )
 
 # ---------------------------------------------------------------------------
@@ -62,6 +66,9 @@ from _transcript import (  # type: ignore[import-not-found]  # noqa: E402
 PREFIX = "[praxis:completion-signal-gate]"
 
 _HOOK_NAME = "completion-signal-gate"
+# Upper bound on the origin-URL probe; the effective timeout is this clamped
+# to the remaining member budget (see _get_cwd_git_slug).
+_GIT_TIMEOUT_SEC = 3
 _ROLE = "completion-verify"
 
 # ---------------------------------------------------------------------------
@@ -372,11 +379,17 @@ def _get_cwd_plugin_name() -> str | None:
 def _get_cwd_git_slug() -> str | None:
     """Return repo name slug from git remote origin."""
     try:
+        # Clamped to the member budget the dispatcher publishes (issue
+        # #1167): under the Stop group a fixed 3s here could outlive the
+        # group deadline and get the whole dispatcher killed by the host.
+        budget = remaining_budget(_GIT_TIMEOUT_SEC)
+        if budget < MIN_SUBPROC_BUDGET_SEC:
+            return None
         result = subprocess.run(
             ["git", "remote", "get-url", "origin"],
             capture_output=True,
             text=True,
-            timeout=3,
+            timeout=min(_GIT_TIMEOUT_SEC, budget),
         )
         if result.returncode == 0:
             url = result.stdout.strip()
@@ -460,15 +473,15 @@ def main() -> int:
     if stop_hook_active:
         return 0
 
-    transcript_path = payload.get("transcript_path") or ""
-    if not transcript_path or not os.path.isfile(transcript_path):
-        return 0
-
-    turn = load_current_turn(transcript_path)
+    # Stop reads the session transcript; SubagentStop reads the subagent's own
+    # (`agent_transcript_path`) — see `_transcript.resolve_stop_transcript`.
+    # An unreadable or empty turn still passes: a claim graded against
+    # evidence that was never read is the one failure mode worth avoiding.
+    turn = load_stop_turn(payload)
     if not turn:
         return 0
 
-    last_text = extract_last_assistant_text(turn)
+    last_text = stop_last_assistant_text(payload, turn)
     if not last_text:
         return 0
 

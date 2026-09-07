@@ -1,14 +1,15 @@
 # PreToolUse Composed Command Gate
 
 Supported hosts: all
-Requires: slack-or-notion-mcp (mcp matcher entry only — the Bash entry carries no requirement)
 
-`hooks/composed-command-gate.sh` is a **default-on** PreToolUse advisory that
+`hooks/advisory-nudge/composed-command-gate/impl.py` is a **default-on**
+PreToolUse(Bash) advisory that
 fires when an external-write body's fenced blocks carry `$` command lines with
 no counterpart among this session's Bash calls.
 
-It enforces the global `~/.claude/CLAUDE.md` clause *"Every `$` block is a
-transcription, never a composition"* at the publication surface (issue #1117).
+It enforces the clause *"Every `$` block is a transcription, never a
+composition"* ([`ETHOS.md` → Rules praxis carries](../../../ETHOS.md#rules-praxis-carries)) at the
+publication surface (issue #1117).
 The failure it targets is specific: the **output is genuine and only the
 command line above it was composed** — a probe run three or four times, with
 the version the author *meant* to run written above the output of a different
@@ -43,8 +44,8 @@ line into one command.
 
 Surfaces scanned are the shared ones (`_lib/_external_write_body.py`): `gh
 issue|pr comment|create|edit`, `gh pr review` with `--body` / `-b` /
-`--body=` / `--body-file` / `-F`, plus the Slack/Notion MCP nested
-container/leaf shapes, plus the `gh api` comment endpoints (issue #1265) — a
+`--body=` / `--body-file` / `-F`, plus the `gh api` comment endpoints
+(issue #1265) — a
 `POST` / `PATCH` / `PUT` against `repos/{o}/{r}/issues/comments/<id>`,
 `issues/<n>/comments`, `pulls/comments/<id>`, `pulls/<n>/comments` or
 `pulls/<n>/reviews`, with the body from `-f body=` / `--raw-field`,
@@ -108,10 +109,11 @@ A line never reaches T2 at all when any of these holds:
   (` ``` [transcribed] `), which clears the whole block.
 - **no readable transcript** is available. Arm B then has no oracle, and an
   advisory would carry no information. T1 still fires — it needs none.
-  `tail_lines` returns `[]` for a missing file, an unreadable one, and a
-  genuinely empty one alike; only the last means "this session ran nothing",
-  so readability is probed separately rather than inferred from the empty
-  list (codex review round 1, P3).
+  A missing or unreadable file and a genuinely empty one are different
+  answers — only the last means "this session ran nothing" — so the read is
+  `tail_lines(strict=True)`, which raises for the first and returns `[]` for
+  the last in one open, instead of the earlier probe-then-read whose window
+  let a file vanish between the two (codex review round 1, P3; issue #1279).
 
 ## Provenance excludes calls that never ran
 
@@ -206,6 +208,15 @@ Inherited from `_hook_utils.safe_tokenize`: quoted strings, comments, and
 subshells are opaque to shlex. Malformed stdin JSON, a missing
 `transcript_path`, and an unreadable transcript all fail open (exit 0, no
 output).
+
+**Slack / Notion MCP writes are out of scope (#1359).** The
+`mcp__.*slack.*|mcp__.*notion.*` registration this hook carried was dropped
+on an owner judgement: it hardcoded two vendors into the runtime surface for
+a leg that only reaches an installer who has such a server, and no fire was
+ever measured on it. The rule itself is unchanged — it still scans `gh` external writes and fires when a
+fenced `$` line matches T1 or, against the transcript, T2. The body extractor those writes used
+(`_lib/_external_write_body.py`) stays: the opt-in
+`external-write-falsify-check` still consumes it.
 
 ## Tests
 

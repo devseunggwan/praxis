@@ -1,6 +1,6 @@
 # ADR-0002: PreToolUse(Bash) hook dispatch consolidation (single-process group runner)
 
-- **Status**: Proposed
+- **Status**: Accepted (shipped — see the decision log)
 - **Date**: 2026-06-05
 - **Authors**: praxis maintainers
 - **Supersedes**: n/a
@@ -177,6 +177,18 @@ decision — eager import is already well under the per-process baseline.
   one skipped — the audit record must not be it. It does NOT recognise a top-level `{"decision": "block"}` on PostToolUse,
   which no member emits today — a member that starts to would need its own
   lane, the way Stop got one.
+  The `Stop` group (#1281) closed the last high-fan-out event: thirteen
+  interpreter cold starts per Stop became one dispatcher node plus the
+  standalone `strike-counter stop` node (an `args` member, kept outside by
+  the #1199 rule). Two things made it possible. A Stop advisory lane merges
+  members' top-level `systemMessage` strings — the field is common to every
+  hook event, so it rides on the block object when a sibling blocks — where
+  before the context merge dropped them. And `run_one` runs a `body:
+  impl.sh` member as a subprocess under the member deadline, with the
+  child's own fire-ledger arming switched off so the group records it
+  once; the build's "no shell body in a group" gate was removed with it.
+  Members that read the current turn share one transcript parse per group
+  run (`_transcript.enable_turn_memo`, keyed on size and mtime).
 - Each hook's `impl.py` source and its `spec.md`.
 - `_lib/_hook_utils.py` / `_lib/_hook_io.py` public API.
 
@@ -311,6 +323,8 @@ Decision record only. No code change.
 | ---------- | --------------------------------------------------------------------------------------------------------------------- | ------------------ |
 | 2026-06-05 | ADR drafted, Status = Proposed                                                                                        | praxis maintainers |
 | 2026-09-03 | Scope extended to `PostToolUse(Bash)` (#1239); multi-matcher hooks split their `Bash` leg into the exact-`Bash` group | praxis maintainers |
+| 2026-09-05 | Status → Accepted. The design has been the live runtime path since `_dispatch.py` and the Rule 14 guard landed (#617); five groups are collapsed today and `ARCHITECTURE.md` documents it as current architecture | praxis maintainers |
+| 2026-09-06 | Scope extended to `Stop` (#1281): systemMessage lane, subprocess path for `impl.sh` members, shared turn parse        | praxis maintainers |
 
 ---
 

@@ -21,6 +21,39 @@ command -v jq >/dev/null 2>&1 || exit 0
 INPUT=$(cat)
 TRANSCRIPT_PATH=$(echo "$INPUT" | jq -r '.transcript_path // ""')
 STOP_HOOK_ACTIVE=$(echo "$INPUT" | jq -r '.stop_hook_active // false')
+# SubagentStop (issue #1337) carries two transcripts: `transcript_path` is the
+# MAIN session's and `agent_transcript_path` is the subagent's own, "stored in
+# a nested subagents/ folder" (hooks reference, read 2026-09-06). Grading a
+# subagent's completion claim against the parent's turn is the defect this
+# selection prevents. The agent path wins only when it names an existing file,
+# so a plain Stop payload (no such key) and a SubagentStop whose agent
+# transcript has not been flushed both fall back to the main one.
+#
+# ALLOW_SIDECHAIN rides along into the jq below: every event in a per-agent
+# transcript belongs to that agent, so the `isSidechain` filters — which exist
+# to keep a subagent's events out of the MAIN transcript's turn — must not
+# apply to it. Left on, they would empty the turn and the gate would pass
+# every subagent silently. Mirrors `_transcript.load_recent_events`'s
+# `drop_sidechain` for the two Python siblings.
+# A payload that is about a subagent resolves to that agent transcript or to
+# NOTHING — never to the parent's. The fallback an earlier draft had
+# reintroduced the very defect this registration removes (CodeRabbit on
+# #1358): with an unflushed agent transcript the turn came from the PARENT
+# while LAST_TEXT came from the subagent's `last_assistant_message`, so a
+# subagent that ran nothing and merely repeated a number from the parent's
+# output ("9 tests passed. All done.") cleared the evidence and paste checks
+# against evidence it never produced.
+HOOK_EVENT_NAME=$(echo "$INPUT" | jq -r '.hook_event_name // ""')
+AGENT_TRANSCRIPT_PATH=$(echo "$INPUT" | jq -r '.agent_transcript_path // ""')
+ALLOW_SIDECHAIN=false
+if [ "$HOOK_EVENT_NAME" = "SubagentStop" ] || [ -n "$AGENT_TRANSCRIPT_PATH" ]; then
+  if [ -n "$AGENT_TRANSCRIPT_PATH" ] && [ -f "$AGENT_TRANSCRIPT_PATH" ]; then
+    TRANSCRIPT_PATH="$AGENT_TRANSCRIPT_PATH"
+    ALLOW_SIDECHAIN=true
+  else
+    TRANSCRIPT_PATH=""
+  fi
+fi
 SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // "unknown"')
 # The log line below has always written the "unknown" placeholder, but the
 # ledger must not: aggregate_fires adds any non-empty session string to its
@@ -115,12 +148,12 @@ BROWSER_EVIDENCE_TOOL_PATTERN='(browser|playwright|puppeteer|chrome_devtools).*(
 # Current turn boundary = events after the last real user input (string content, or
 # array containing any non-tool_result block). Tool-result-only user messages are
 # tool replies and do not reset the turn. [PR #144]
-TURN_JSON=$(tail -n 400 "$TRANSCRIPT_PATH" | jq -sc '
+TURN_JSON=$(tail -n 400 "$TRANSCRIPT_PATH" | jq -sc --argjson allow_sidechain "$ALLOW_SIDECHAIN" '
   ([
     to_entries[]
     | select(
         .value.message.role == "user"
-        and (.value.isSidechain // false) == false
+        and ($allow_sidechain or ((.value.isSidechain // false) == false))
         and (
           (.value.message.content | type) == "string"
           or (
@@ -134,13 +167,13 @@ TURN_JSON=$(tail -n 400 "$TRANSCRIPT_PATH" | jq -sc '
   | (if $user_idx == null then 0 else $user_idx + 1 end) as $start
   | (.[$start:]) as $turn
   | ([$turn[]
-       | select(.message.role == "assistant" and (.isSidechain // false) == false)]
+       | select(.message.role == "assistant" and ($allow_sidechain or ((.isSidechain // false) == false)))]
      | last
      | (.message.content // [])
      | map(select(.type == "text") | .text)
      | join("\n")) as $last_text
   | ([$turn[]
-       | select(.message.role == "assistant" and (.isSidechain // false) == false)
+       | select(.message.role == "assistant" and ($allow_sidechain or ((.isSidechain // false) == false)))
        | (.message.content // [])[]
        | select(.type == "tool_use" and .name == "Bash")
        | {id: .id, cmd: (.input.command // "")}]) as $bash_uses
@@ -173,7 +206,7 @@ TURN_JSON=$(tail -n 400 "$TRANSCRIPT_PATH" | jq -sc '
        | select(.type == "tool_result" and ((.is_error // false) == true))
        | .tool_use_id]) as $failed_ids
   | ([$turn[]
-       | select(.message.role == "assistant" and (.isSidechain // false) == false)
+       | select(.message.role == "assistant" and ($allow_sidechain or ((.isSidechain // false) == false)))
        | (.message.content // [])[]
        | select(.type == "tool_use")
        | select(.name == "Edit" or .name == "Write" or .name == "MultiEdit"
@@ -182,7 +215,7 @@ TURN_JSON=$(tail -n 400 "$TRANSCRIPT_PATH" | jq -sc '
        | ((.input.file_path // .input.notebook_path) // "")]
      | join("\n")) as $edited_paths
   | ([$turn[]
-       | select(.message.role == "assistant" and (.isSidechain // false) == false)
+       | select(.message.role == "assistant" and ($allow_sidechain or ((.isSidechain // false) == false)))
        | (.message.content // [])[]
        | select(.type == "tool_use")
        | select(.id as $i | $ok_ids | any(. == $i))
@@ -202,6 +235,20 @@ TURN_JSON=$(tail -n 400 "$TRANSCRIPT_PATH" | jq -sc '
 [ -z "$TURN_JSON" ] && exit 0
 
 LAST_TEXT=$(printf '%s' "$TURN_JSON" | jq -r '.last_text // ""')
+# The transcript "is written asynchronously and may lag the in-memory
+# conversation ... Hooks that need the final assistant text of the current
+# turn should use `last_assistant_message` on Stop and SubagentStop instead of
+# reading the transcript" (hooks reference, read 2026-09-06). The turn read
+# above still gates the whole check — a claim taken from the payload is graded
+# only against evidence this run actually read, never against an empty turn.
+# The `| ltrimstr` pair is not enough for a whitespace-only value, so the
+# emptiness test is on the trimmed copy while the assignment keeps the text
+# verbatim — matching `_transcript.stop_last_assistant_text`, which falls back
+# to the turn when the field is blank rather than grading an empty claim.
+PAYLOAD_LAST_TEXT=$(echo "$INPUT" | jq -r 'if (.last_assistant_message | type) == "string" then .last_assistant_message else "" end')
+if [ -n "$(printf '%s' "$PAYLOAD_LAST_TEXT" | tr -d '[:space:]')" ]; then
+  LAST_TEXT="$PAYLOAD_LAST_TEXT"
+fi
 BASH_OUTPUTS=$(printf '%s' "$TURN_JSON" | jq -r '.bash_outputs // ""')
 # genuine_outputs excludes results produced by echo/printf-only commands, so a
 # fabricated `echo "tests passed"` cannot satisfy the evidence gate. [issue #758]
@@ -285,6 +332,7 @@ if [ -n "$block_reason" ]; then
   # Diagnostics live under the documented logs root (issue #1182); the
   # pre-#1182 ~/.praxis/scope-confirm/ dir was an undocumented 4th root.
   _log="$(praxis_resolve_writable logs stop-triggered.log)"
+  command -v praxis_rotate_log >/dev/null 2>&1 && praxis_rotate_log "$_log"
   echo "$(date -Iseconds) session=$SESSION_ID blocked_completion_without_evidence" >> "$_log" || true
 
   # shellcheck disable=SC2034  # read by the EXIT trap installed in sourced record_fire.sh

@@ -5,6 +5,7 @@ description: >
   tree does not yet satisfy — runs each requirement's `Verify:` command and
   classifies it `implemented` / `missing` / `UNKNOWN`. Report-only: no writes,
   no commits, no issues.
+when_to_use: >
   Triggers on "spec drift", "spec-drift", "스펙 드리프트", "미구현 요구",
   "unmet requirement", "what does this spec still need", "requirement status".
   Do NOT activate on SKILL.md frontmatter drift (that is `codex-review-wrap`'s
@@ -45,8 +46,8 @@ trust.
 ## Not for
 
 - **Enforcing** a spec. Nothing here blocks a commit, a PR, or a merge.
-  `0001`'s Assumptions set that boundary: this reports, and the remedy if
-  that is not enough is a hook, decided then.
+  The spec-store convention sets that boundary: this reports, and the remedy
+  if that is not enough is a hook, decided then.
 - **Skill spec drift** — SKILL.md frontmatter against live runtime is
   [`codex-review-wrap`](../codex-review-wrap/SKILL.md)'s live-runtime gate
   (#208), a different oracle on a different artifact.
@@ -104,7 +105,8 @@ paraphrasing — the reader needs to see whether the requirement failed or the
 oracle did.
 
 `UNKNOWN` rows are not failures. Some requirements are about prose and have no
-eligible command; `0001`'s FR-003 and SC-003 say so in the spec itself. What a
+eligible command; [`docs/spec-store.md`](../../docs/spec-store.md) lets such a
+requirement carry no `Verify:` line for exactly that reason. What a
 rising `UNKNOWN` count does mean is that specs are being written without
 checkable requirements, which is the feedback loop this design is built on.
 

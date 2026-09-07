@@ -66,9 +66,7 @@ from _transcript import TRANSCRIPT_SCAN_LINES, tail_lines  # type: ignore[import
 # private names so call sites and tests stay unchanged.
 from _external_write_body import (  # type: ignore[import-not-found]  # noqa: E402
     extract_gh_body as _extract_gh_body,
-    extract_mcp_body as _extract_mcp_body,
     is_gh_external_write as _is_gh_external_write,
-    is_mcp_external_write as _is_mcp_external_write,
 )
 
 
@@ -280,10 +278,6 @@ def main() -> int:
                 candidate = _extract_gh_body(argv)
                 if candidate is not None:
                     all_bodies.append(candidate)
-    elif _is_mcp_external_write(tool_name):
-        mcp_body = _extract_mcp_body(tool_input)
-        if mcp_body:
-            all_bodies.append(mcp_body)
     else:
         return 0
 

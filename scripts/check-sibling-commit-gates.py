@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """Invariant canary: the sibling `git commit` gate list must be derived, not copied.
 
-`side-effect-scan` demotes its `git-commit` category to ADVISE on one load-bearing
-premise: other `PreToolUse(Bash)` hooks already gate a `git commit` argv, so the
-ask this hook used to raise was redundant (issue #874). That premise is only as
-good as the enumeration behind it — and the enumeration was hand-copied into
-three prose surfaces with nothing tying them to the hook registry.
+`side-effect-scan`'s spec states that other `PreToolUse(Bash)` hooks also gate a
+`git commit` argv, and enumerates them. That enumeration does **not** justify the
+`git-commit` ADVISE tier — issue #1153 removed it from the rationale, which now
+rests on reversibility alone, a property of the command rather than of the
+installed hook set. What the enumeration still is: a factual claim about what
+each platform ships, hand-copied into three prose surfaces with nothing tying
+them to the hook registry. This canary ties them.
 
 It drifted exactly the way a hand-copied list does. PR #1123 retired one of the
 enumerated hooks, edited the count word and the name list, and left the table it
@@ -27,13 +29,13 @@ a table after its hook was retired, and a stale "Six sibling …" all fail here.
 Three things the canary verifies beyond that bare name diff:
 
 1. **Per-host coverage.** `side-effect-scan` itself carries no `hosts` key, so
-   its ADVISE demotion ships to every platform that installs hooks — but four
-   of the seven siblings carry `hosts: ["claude"]`, and
+   its ADVISE tier ships to every platform that installs hooks — but four
+   of the eight siblings carry `hosts: ["claude"]`, and
    ``_dispatch.group_members("PreToolUse", "Bash", host)`` applies that
    whitelist at runtime (the generated plugin invokes
    ``_dispatch.sh PreToolUse Bash <host>``). A count derived without the host
    filter is therefore right on `claude` and wrong on `codex` / `cursor`,
-   which is the same class of premise error this canary exists to catch. `derive()` takes a `host`, the host list is read from
+   which is the same class of drift this canary exists to catch. `derive()` takes a `host`, the host list is read from
    ``manifests/platforms/*.json`` (only platforms that emit a ``hooks``
    output; every shipped platform does today), and the spec's host table is checked
    row by row, in both directions, against every one of them. A bare
@@ -77,10 +79,12 @@ only fires on a pipeline, and `branch-name-check` mentions commits while gating
 branch creation. Membership stays a human judgement, recorded once in the
 manifest and enforced everywhere from there.
 
-It also does not decide whether the ADVISE demotion is *justified* on a given
-host — only that the prose states the same coverage the manifest ships. The
-spec records, and does not hide, that the demotion's "already covered in depth"
-half is materially weaker outside `claude`.
+It also does not validate the ADVISE tier, on any host. That grade is argued in
+the spec from reversibility, which this canary cannot measure and does not try
+to; a green run here says only that the prose states the same coverage the
+manifest ships. The per-host gap it does surface — the commit-intent siblings
+are `claude`-only — is why the coverage claim was retired as a justification
+(issue #1153), not a reason to re-tier.
 
 The PROSE table below is the pin point (a third, intentional copy — the same
 model as ``scripts/check-hook-token-invariants.py``): if a surface is reworded

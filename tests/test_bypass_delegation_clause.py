@@ -1,8 +1,9 @@
 """Regression fixture for the bypass-delegation clause (issue #1009).
 
-The #1009 rule lives only in prose — no hook backstops it (see
-`docs/hook/RULE-BACKSTOP-GAPS.md` gap #4), so the prose itself is the artifact
-under test. Its whole content is a *distinction*: praxis' own sanctioned
+The #1009 rule lives only in prose — no hook backstops its prose and menu
+lanes (see `docs/hook/RULE-BACKSTOP-GAPS.md` gap #4; the follow-up `Write`
+lane has `settings-path-advisory`, #1337), so the prose itself is the
+artifact under test. Its whole content is a *distinction*: praxis' own sanctioned
 `Bypass (if truly needed): …` line MAY be relayed to the user, while a route
 the agent originates (permission rule, `.claude/settings.json` edit, moving the
 file out of the guarded path) MAY NOT. A one-directional test would let the
@@ -179,7 +180,17 @@ def test_gap_row_4_recorded_high():
 
 def test_gap_4_is_recorded_as_unhooked():
     text = GAPS.read_text(encoding="utf-8")
-    assert "Gap #4 → prose containment, deliberately no hook" in text, (
-        "the follow-up list must say gap #4 has no hook, so the prose clause "
-        "is not mistaken for enforcement"
+    assert (
+        "Gap #4, prose and menu lanes → prose containment, deliberately no hook"
+        in text
+    ), (
+        "the follow-up list must say the prose and menu lanes of gap #4 have "
+        "no hook, so the prose clause is not mistaken for enforcement"
+    )
+    # The follow-up-write lane is the one lane that is a tool call; #1337
+    # item 3 hooked it. The record must name the hook AND keep the other two
+    # lanes unhooked, so neither half of the split is mistaken for the whole.
+    assert "Gap #4, follow-up-write lane → `settings-path-advisory`" in text, (
+        "the follow-up list must record which lane of gap #4 the settings "
+        "advisory covers"
     )

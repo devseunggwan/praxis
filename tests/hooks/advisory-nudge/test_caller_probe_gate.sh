@@ -265,12 +265,16 @@ run_case "env-prefix FOO=1 gh issue comment (warn)" \
   "warn" "advisory" \
   '{"tool_name":"Bash","tool_input":{"command":"FOO=1 gh issue comment 3 --body \"pool.py fails to release the handle\""}}'
 
-run_case "MCP slack send (warn)" \
-  "warn" "advisory" \
+# The Slack/Notion MCP registrations were dropped (#1359); these hooks are
+# PreToolUse(Bash) only now, so an MCP payload falls through the `else` arm
+# and is silent. Kept as the regression pin for the removal — the payloads
+# still carry the shapes that used to warn.
+run_case "MCP slack send is out of scope (silent)" \
+  "silent" "advisory" \
   '{"tool_name":"mcp__laplace-slack__slack_send_message","tool_input":{"text":"heads up: pool.py fails to release the handle"}}'
 
-run_case "MCP notion create page (warn)" \
-  "warn" "advisory" \
+run_case "MCP notion create page is out of scope (silent)" \
+  "silent" "advisory" \
   '{"tool_name":"mcp__notion__notion-create-pages","tool_input":{"children":[{"paragraph":{"rich_text":[{"text":{"content":"pool.py fails to release the handle"}}]}}]}}'
 
 run_case "--body-file missing path (silent fail-open)" \

@@ -15,7 +15,8 @@ disappeared, not just the one the agent intended to clean up. Issue #865 /
 PR #867 documented a snapshot -> dry-run -> STOP gate -> post-diff procedure
 in prose (`praxis:worktree-merge-cleanup` skill), but no hook enforced it. A
 2026-07-27 session retrospect (finding #3, HIGH — flagged by an external
-critic as "이번 세션 최대의 엔지니어링 오판") found the gap:
+critic as "the biggest engineering misjudgement of the session", original:
+"이번 세션 최대의 엔지니어링 오판") found the gap:
 `grep -rln "worktree prune" hooks/` returned nothing. The pattern is
 deterministic and checkable before execution, and the sibling failure mode
 (`gh pr merge --delete-branch` vs. a checked-out worktree) is already

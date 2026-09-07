@@ -1,16 +1,16 @@
 # PreToolUse Source-Citation Probe Gate
 
 Supported hosts: all
-Requires: slack-or-notion-mcp (mcp matcher entry only — the Bash entry carries no requirement)
 
-`hooks/source-citation-probe-gate.sh` is a **default-on** PreToolUse advisory
-that fires when an external-write body (PR/issue bodies and comments, Slack
-messages, Notion pages) cites **source facts** — `file:line` references,
+`hooks/advisory-nudge/source-citation-probe-gate/impl.py` is a **default-on**
+PreToolUse(Bash) advisory
+that fires when an external-write body (PR/issue bodies and comments) cites
+**source facts** — `file:line` references,
 exact call syntax, or test-semantics claims — with **no read-probe** found in
 the recent transcript or in the body itself.
 
-It enforces the global `~/.claude/CLAUDE.md` Information Accuracy rule's
-"checkmark = citation" clause at the external-write surface: a source-fact
+It enforces the *Information Accuracy* rule's "checkmark = citation" clause
+([`ETHOS.md` → Rules praxis carries](../../../ETHOS.md#rules-praxis-carries)) at the external-write surface: a source-fact
 citation written from recall (not from a Read / `grep -n` executed this
 session) is a fabrication-shaped claim, and publishing it trains downstream
 readers (review bots, teammates) on potentially wrong specifics (issue #830).
@@ -35,8 +35,8 @@ surface is uncovered in a default install).
 | T2 | exact call syntax | inside **inline code spans (single backticks) only**: `name(...)` whose argument list contains `.` or `[` — the weakest detector by design |
 | T3 | test-semantics claim | `test*` token + `assert*` / `raise(s)` / `expect*` within an 80-char same-sentence window (case-insensitive) |
 
-Surfaces scanned (shared with `external-write-falsify-check` — gh argv walk
-plus MCP nested container/leaf walk, extracted to
+Surfaces scanned (shared with `external-write-falsify-check` — the gh argv
+walk, extracted to
 `_lib/_external_write_body.py` at the 3rd consumer per repo 2-copy
 convention, issue #907):
 
@@ -52,9 +52,6 @@ convention, issue #907):
   other method or endpoint stays outside: a read, `graphql`, a workflow
   dispatch. The verification-anchor convention makes this the only path a
   rev ≥2 anchor can take.
-- `mcp__*slack*__*send|post|update*`, `mcp__*notion*__*create|update*page*` /
-  `*append*block*` (nested `children[].paragraph.rich_text[].text.content` /
-  `blocks[].text.text` shapes gated to recognized container/leaf entry points)
 
 ## Clearing — "probe basis present" (per citation)
 
@@ -134,6 +131,15 @@ comments, and `echo` arguments do not match; env prefixes (`FOO=1 gh ...`)
 and wrapper commands are peeled; subshells (`$(...)`) are opaque to shlex.
 Malformed stdin JSON, missing `transcript_path`, and unreadable transcript
 files all fail-open (exit 0, no output).
+
+**Slack / Notion MCP writes are out of scope (#1359).** The
+`mcp__.*slack.*|mcp__.*notion.*` registration this hook carried was dropped
+on an owner judgement: it hardcoded two vendors into the runtime surface for
+a leg that only reaches an installer who has such a server, and no fire was
+ever measured on it. The rule itself is unchanged — it still scans `gh` external writes and fires when a
+citation shape is present with no probe basis. The body extractor those writes used
+(`_lib/_external_write_body.py`) stays: the opt-in
+`external-write-falsify-check` still consumes it.
 
 ## Tests
 

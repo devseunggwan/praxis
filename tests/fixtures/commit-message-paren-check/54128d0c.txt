@@ -1,0 +1,70 @@
+fix(docs): realign markdown tables for MD060/MD056 (#736)
+
+* fix(docs): realign markdown tables for MD060/MD056 (issue #734)
+
+dependabot PR #725(reviewdog/action-markdownlint 0.26.2→0.27.0)가 번들
+markdownlint-cli를 0.41.0→0.49.0(core ~0.34.x→~0.41.x)으로 바꾸며 MD060
+(table-column-style)/MD056(table-column-count)을 리포 전역에 조용히
+활성화했다(PR #733에서 첫 표면화). #734에서 방침을 사용자에게 질의한 결과
+"전역 재정렬" 선택 — 98개 파일, 1305 MD060 + 5 MD056 위반을 실제로 수정.
+
+## MD056 (5건, 진짜 데이터 버그)
+
+테이블 셀 안의 이스케이프 안 된 리터럴 `|`가 추가 컬럼 구분자로 오분석되던
+케이스: ARCHITECTURE.md(정규식 alternation 예시), destructive-bash-guard/
+spec.md(fork bomb 패턴), version-bump-evidence-check/spec.md(URL alternation
+8개), verify-commit-flag-override/spec.md(git config 값), docs/adr/
+0001-hook-layout.md(1개 셀 누락 — 원문 그대로 자연스러운 단어 경계에서
+분리, 신규 데이터 발명 없음). 모두 `` \| `` 이스케이프 또는 셀 분리로 수정.
+
+## MD060 (1305건, 재정렬)
+
+1차: `markdownlint-cli@0.49.0 --fix`(MD060/MD056만 활성화한 스코프 config)
+가 대부분(1305→150) 자동 해결. 잔여는 --fix 자체의 한계(수렴 안 함) —
+직접 작성한 Python aligner(East-Asian-wide 문자 폭 인식, 표준 유니코드
+`east_asian_width()` 사용)로 마무리. 한글 포함 셀에서 raw len() 폭 계산이
+markdownlint의 렌더 폭 계산과 달라 최초 스크립트가 4개 파일에서 미수렴한
+것을 East-Asian-width 인식 로직으로 수정.
+
+## docs/hook-operating-matrix.md (자동생성 파일, 별도 처리)
+
+이 파일은 `scripts/build-plugin-manifests.py`가 생성하며 "DO NOT EDIT"
+마커가 있다 — lint --fix로 수동 정렬하면 생성기 출력과 drift가 생겨
+`check-plugin-manifests.py`가 실패한다(실제로 테스트 스위트 1차 실행에서
+`test_baseline_check_clean` 실패로 확인). 근본 수정: 생성기의
+`render_hook_operating_matrix()`에 하드코딩된 compact 구분자 대신 컬럼별
+max-width 계산 헬퍼(`_render_aligned_table`, East-Asian-width 인식)를
+추가해 생성 시점부터 MD060 준수 출력을 내도록 변경. 재생성 후
+`check-plugin-manifests.py` clean 확인 — 향후 재생성에도 drift 없음.
+
+## .markdownlint.yaml
+
+MD060/MD056 활성화 사실과 #725 버전 정보를 반영해 stale 주석 갱신.
+MD013/MD024/MD041/MD033 카운트는 재파생하지 않음(#734 범위 밖, 명시).
+
+## 스코프 검증
+
+MD032/MD040/MD022/MD001/MD031/MD038/MD029/MD007/MD028/MD036/MD034/MD012/
+MD004 카운트는 수정 전후 정확히 동일(187/131/101/54/50/13/10/6/2/1/1/1/1)
+— 다른 규칙에 대한 scope creep 없음.
+
+Closes #734
+
+Pre-commit verified: `bash scripts/run-tests.sh`(clean re-run, 최초 1차
+실행은 동시 mutation과의 race로 test_baseline_check_clean이 우발적으로
+실패했었음 — race 원인 규명 후 mutation 없이 재실행해 확인) → ALL TESTS
+PASSED (405 pytest + 전체 shell suite); `npx markdownlint-cli@0.49.0`
+(CI 실사용 버전, 전체 리포) → MD060/MD056 0건, 다른 규칙 카운트 불변;
+`./scripts/check-plugin-manifests.py` → OK, 재생성 idempotent 확인
+(2회 연속 "clean — no changes")
+
+Confidence: high
+Scope-risk: broad
+Not-tested: 개별 96개 파일의 렌더링 결과를 GitHub UI에서 육안 확인하지
+않음(테이블 텍스트 내용은 변경 없이 공백 패딩만 변경되었으므로 렌더링
+결과는 lint 이전과 동일해야 함); MD013/MD024/MD041/MD033의 stale 카운트는
+이 PR에서 재파생하지 않음(범위 밖, 별도 후속 필요 시 이슈화)
+
+* fix(docs): apply reviewdog markdownlint fixes
+
+* fix(docs): correct multi-matcher standalone count in ADR-0002

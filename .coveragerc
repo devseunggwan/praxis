@@ -1,0 +1,21 @@
+# coverage.py configuration for the pytest step of scripts/run-tests.sh
+# (issue #1303). Measures the Python under hooks/ and scripts/ that the pytest
+# suite imports in-process; impl.py executions driven from the shell suites
+# (tests/hooks/*/test_*.sh) are subprocesses and are not yet counted — that
+# is the follow-up half of #1303.
+[run]
+source = hooks, scripts
+omit =
+    */__pycache__/*
+    tests/*
+branch = False
+
+[report]
+skip_empty = True
+show_missing = False
+# Floor = measured baseline minus one. The first measurement (2026-09-05,
+# issue #1303) was 51% over 19,739 statements, so 50 holds the line without
+# failing on rounding noise. Raise it as coverage climbs: re-measure with
+# `python3 -m coverage run -m pytest tests/ -q && python3 -m coverage report`
+# and set fail_under to the new TOTAL minus one.
+fail_under = 50

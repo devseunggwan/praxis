@@ -16,8 +16,8 @@ state can go stale mid-turn: the PR gets merged or closed (by another actor,
 or by an earlier step in the same turn) and the menu still surfaces
 "merge PR #N?"-style options against that outdated premise. The user then has
 to notice the mismatch and correct the agent themselves — exactly the kind of
-silent premise drift the `External Discussion Fidelity — Lock-boundary
-re-fetch` rule in the global CLAUDE.md targets for other surfaces (Slack
+silent premise drift the *External Discussion Fidelity — lock-boundary
+re-fetch* rule ([`ETHOS.md` → Rules praxis carries](../../../ETHOS.md#rules-praxis-carries)) targets for other surfaces (Slack
 threads, PR mergeable status at merge-ask time).
 
 No existing hook covers this surface:

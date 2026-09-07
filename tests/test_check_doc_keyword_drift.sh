@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # test_check_doc_keyword_drift.sh — verify check-plugin-manifests.py Rule 13e
 # (#1177): docs/skills.md trigger-keyword cells mirror the skill's frontmatter
-# description.
+# `when_to_use` (or `description` for a clause that has not moved; #1331).
 #
-# The case that matters: a description's `Do NOT activate on "..."` clause lists
-# phrases that must NOT route to the skill. Searching the whole description
-# would accept one of them as a valid trigger, so the roster could advertise
-# `strike a balance` and pass.
+# The case that matters: a `Do NOT activate on "..."` clause lists phrases
+# that must NOT route to the skill. Searching the whole field would accept one
+# of them as a valid trigger, so the roster could advertise `strike a balance`
+# and pass.
 #
 # Usage: bash tests/test_check_doc_keyword_drift.sh
 # Exit:  0 = all pass; 1 = at least one fail

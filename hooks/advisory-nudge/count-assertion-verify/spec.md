@@ -21,7 +21,7 @@ verifying each arm individually.
   to 28 — the `\|^run_test` arm introduced one extra match. Rerunning with
   `grep -c '^run_case '` confirmed 28.
 
-Global `~/.claude/CLAUDE.md` "Information Accuracy → Layer 2" already requires:
+The *Information Accuracy* rule's Layer 2 ([`ETHOS.md` → Rules praxis carries](../../../ETHOS.md#rules-praxis-carries)) already requires:
 
 > **Data-driven claims** → show the query/command output first. Verify test
 > inputs actually reproduce the intended case before accepting results.

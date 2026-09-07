@@ -1,0 +1,201 @@
+docs(audit): recalibrate hook verdicts from 30-day window (#938)
+
+* fix(bypass-review): classify instrumentation by chokepoint
+
+roster_split() 이 "body 가 .sh 면 계측 불가" 프록시를 쓴다. #892 가 shell
+body 에 hooks/_lib/record_fire.sh 를 주기 전 기준이라, 리포트가 per-hook
+표에 shell 훅 4개의 fire 약 15,000건을 집계하면서 바로 아래에서 "이들은
+fire event 를 전혀 내지 않는다"고 출력하고 있었다. never-fired 로스터의
+근거가 되는 분류라 판정이 그대로 오염된다.
+
+판정을 실제 chokepoint 로 바꾼다 — Bash dispatch 그룹 소속(중앙
+디스패처가 기록하므로 body 에 마커가 없다), 또는 body 의 fail_open /
+record_fire 참조. 셋 다 봐야 한다: body 마커만 검사하면 dispatch 그룹
+훅(side-effect-scan, pre-merge-approval-gate 등 5개)이 거꾸로 오분류된다
+— 실제로 첫 구현에서 그렇게 났고 로스터 실행으로 잡았다.
+
+body 를 읽을 수 없을 때만 기존 확장자 프록시를 fallback 으로 남긴다.
+남은 신호가 그것뿐이고, 판정을 지어내기보다 #892 이전 동작으로 기우는
+편이 낫다.
+
+이름이 여러 entry 를 갖는 다중 이벤트 훅은 하나라도 기록하면 기록됨으로
+본다 — entry 순서가 판정을 좌우하지 않게 한다.
+
+검증 (실제 manifest 81개 이름):
+  before: uninstrumentable = {codex-review-route, completion-verify,
+          retrospect-mix-check, strike-counter}
+  after : uninstrumentable = {} (81개 전부 계측 가능)
+  리포트의 "Uninstrumented" 섹션이 사라지고 never-fired 는 여전히 0건.
+
+테스트 4건 추가(fallback / body 마커 / dispatch 그룹 / 다중 entry).
+음성 대조: 구 roster_split 로 되돌리면 신규 중 2건이 FAIL 한다.
+python3 -m pytest tests/test_fire_ledger.py -> 101 passed.
+PRAXIS_TESTS_STRICT=1 ./scripts/run-tests.sh -> ALL TESTS PASSED.
+
+Refs #874
+
+Confidence: high
+Premise-Verified: 4개 shell 훅이 record_fire.sh 를 실제로 참조함을
+  grep 으로 확인, 오분류된 5개가 dispatch 그룹 소속임을 manifest 로 확인
+Not-tested: body 를 읽을 수 없는 fallback 경로는 합성 manifest(디스크에
+  body 파일 없음)로만 덮었고, 권한 오류 등 실제 OSError 상황은 재현하지
+  않았다
+Session-Id: c16298d9-ce90-4536-8b4b-3d63818b411d
+
+* docs(audit): recalibrate hook verdicts from 30-day window
+
+첫 감사의 표본은 49 세션 / 실질 5일이었다. 이번 창은 2026-07-05 →
+08-03, 743 세션, 등록 훅 81개(구 58개)다. #874 Task 2.
+
+판정 결과: drop 후보 0건. Axis 1 never-fired 0건(81개 전부 발화),
+Axis 4 never-escalated 는 dispatch 그룹 45개 중 4개뿐이다.
+
+큰 표본이 구 문서의 구조적 주장 두 개를 뒤집는다.
+
+- shell 훅 4개는 더 이상 "계측 불가"가 아니다. #892 가 record_fire.sh 를
+  주면서 30일간 약 15,000건을 기록했다. "Unmeasurable — instrument first"
+  행을 제거한다.
+- falsification-gate 쌍은 merge 하면 안 된다. 구 문서는 "데이터 부족,
+  merge 보류"였는데 실제로는 output-block-falsify-advisory 가 1,007건
+  escalate(deny/ask), pre-output-falsification-gate 는 advise 161·escalate
+  0 으로 심각도 분리가 살아 있다. 보류가 아니라 결론이 반대로 뒤집힌다.
+
+전제 재검증에서 구 문서 오류 하나를 더 잡았다. version-bump-evidence-check
+를 "praxis 자체 VERSION 범프가 창 밖이라 미발화"로 정당화했는데, 스펙상
+이 훅은 외부 의존성 버전 범프 문구를 다룬다. 창 안 릴리스 PR 7건과
+무관하며 유지 이유 자체가 틀렸다. 결론(KEEP)은 같고 근거를 바꾼다.
+
+이슈 본문의 "ADVISE 티어 효과 = 0"은 743 세션에서 지지되지 않는다 —
+pipefail-advisory 재발률 24%, momentum-rule-retrieval-gate 1%. 다만
+지표가 훅 자체의 재평가일 뿐 행동 diff 가 아니라는 점과, right-censored
+표본 제외가 무작위가 아니라는 점을 한계로 함께 적는다. 전달 경로
+(stderr vs systemMessage) 질문은 이 데이터로 결론나지 않으며 실험이
+필요하다는 것도 명시한다.
+
+fire 카운트는 원장이 append-only 라 분 단위로 오르므로 스냅샷 시점을
+밝히고, 판정이 기대는 수치는 fire 가 아니라 escalation 임을 명시한다.
+
+RULE-BACKSTOP-GAPS.md 의 "58 hooks" 는 그 교차분석 시점의 값이라 값을
+갈아끼우지 않고, 시점과 현재 81개라는 사실 및 재도출되지 않았음을
+주석으로 남긴다.
+
+검증: 인용 수치를 전사 대신 ledger 에서 재산출해 대조했고, 그 과정에서
+초안의 "릴리스 PR 8건"(실제 7건)과 memory-hint 의 hookable 항목 13개
+(실제 12개)를 잡아 고쳤다.
+PRAXIS_TESTS_STRICT=1 ./scripts/run-tests.sh -> ALL TESTS PASSED
+(markdownlint 대상 2파일 0 issues).
+
+Refs #874
+
+Confidence: high
+Premise-Verified: version-bump-evidence-check 의 트리거 표면을 spec.md 로
+  확인, 릴리스 PR 목록을 gh pr list 로 확인, 훅별 block/ask/advise 를
+  ledger 재산출로 대조
+Constraint: 이슈 Task 4개 중 Task 2 만 다룬다. Task 3(ADVISE 전달 경로)은
+  이 데이터로 결론나지 않아 실험이 필요하고, Task 4(side-effect-scan
+  임계)는 별도 판단이라 Closes 가 아닌 Refs 로 건다.
+Not-tested: 이 문서의 어떤 판정도 훅의 "효과"를 측정하지 않는다 —
+  원장은 발화만 기록하며, Axis 2 의 heed rate 는 훅 자신의 재평가지
+  행동 diff 가 아니다. 문서 안에 한계로 명시했다.
+Session-Id: c16298d9-ce90-4536-8b4b-3d63818b411d
+
+* fix(bypass-review): match instrumentation syntax, not substring
+
+codex 리뷰 P2. 계측 판정이 단순 부분문자열 검사라 주석이나 문자열에서
+마커를 언급만 해도 계측됨으로 본다.
+
+가설적 결함이 아니다. 이 리포의 shell 훅 4개가 전부 실제 source 라인
+바로 위에 shellcheck 지시자를 갖고 있다.
+
+  32: # shellcheck source=../../_lib/record_fire.sh   <- 주석
+  33: . "$(dirname "$0")/../../_lib/record_fire.sh"   <- 실제
+
+33행을 지우고 32행만 남기면 분류는 조용히 "계측됨"으로 남는다.
+
+오분류 방향이 비대칭이라 이 방향이 나쁜 쪽이다. 잘못 uninstrumented 로
+보면 "판단 불가" 목록으로 빠져 안전하지만, 잘못 계측됨으로 보면
+never-fired 로스터에 올라 프룬 후보로 읽힌다 — 이 함수가 막으려던
+실패의 거울상이다.
+
+records_fire_events() 로 분리하고 구문을 매칭한다: 주석 라인을 건너뛴 뒤
+@fail_open 데코레이터 / fail_open import / record_fire.sh 를 source·.
+하는 라인만 인정한다.
+
+검증:
+- 실제 manifest 81개 판정 무변경 (instrumentable 81 / uninstrumentable 0)
+- 주석 전용 shell·python body -> False, 실제 4개 형태 -> True
+- 테스트 3건 추가. 음성 대조: 부분문자열로 되돌리면 신규 중 2건만
+  FAIL (102 passed / 2 failed), 복원 시 104 passed
+- PRAXIS_TESTS_STRICT=1 ./scripts/run-tests.sh -> ALL TESTS PASSED
+
+Refs #874
+
+Confidence: high
+Premise-Verified: substring 검사 vs 구문 검사를 실제 manifest 81개에
+  전수 비교해 차이 0건 확인(현재 오분류 없음), 그럼에도 오탐 형태가
+  4개 파일에 인접 존재함을 grep 으로 확인
+Not-tested: 매처는 이 리포가 쓰는 세 형태만 인정한다. 다른 방식으로
+  계측하는 body 는 uninstrumented 로 분류되는데, 이는 안전한 방향이지만
+  실제로 그런 body 를 만들어 확인하지는 않았다
+Session-Id: c16298d9-ce90-4536-8b4b-3d63818b411d
+
+* fix(bypass-review): anchor chokepoint match to syntax
+
+CodeRabbit C1: `records_fire_events()` 가 부분문자열로 판정해
+`print("import fail_open")` 같은 단순 언급과 `@fail_opened` 같은
+다른 심볼까지 계측된 것으로 오인했다.
+
+세 패턴을 stripped line 선두 anchor + 토큰 경계로 교체한다:
+- `@fail_open(?![\w])`
+- `(from\s+[\w.]+\s+)?import\s+.*(?<![\w])fail_open(?![\w])`
+- `(\.|source)\s+.*record_fire\.sh(?![\w.])`
+
+shell 쪽은 `\S*` 가 아니라 `.*` 여야 한다 — 실제 소스 라인
+`. "$(dirname "$0")/../../_lib/record_fire.sh"` 의 경로 인자에
+command substitution 안 공백이 들어 있다. 첫 수정에서 `\S*` 와
+`@fail_open\s*(\(|$)` 를 썼다가 실제 로스터가 81/0 → 77/4 로
+퇴행했고(이 PR 이 고치는 바로 그 버그), 열거한 21 변형 목록이
+그 퇴행을 잡았다.
+
+praxis:surface-enumeration 으로 입력 표면 21 변형(주석/문자열
+리터럴/인접 심볼/들여쓰기/import 형태)을 열거해 전부
+파라미터라이즈드 테스트로 승격했다.
+
+검증:
+- pytest tests/test_fire_ledger.py → 123 passed
+- 21/21 변형 통과
+- 실제 매니페스트 로스터 재실행 → 81 instrumented / 0 uninstrumented
+
+Confidence: high
+Premise-Verified: print("import fail_open") → True(수정 전), @fail_opened → True(수정 전) 실행 확인
+Not-tested: `;` 구분자 뒤 source 라인과 괄호 다중행 import 는 의도적으로 미매칭(주석에 방향 명시)
+Session-Id: c16298d9-ce90-4536-8b4b-3d63818b411d
+
+* docs(audit): widen axis 4 to all rich-recording hooks
+
+CodeRabbit C2: Axis 4(escalation-free 후보) 모집단이 다른 축과
+불일치했다. rich-granularity 훅 전체로 재산출한다.
+
+- 모집단 45 → 63 (rich-recording 훅 전부)
+- 결과 4 → 3: jq-config-empty-dict-advisory (60,634/402),
+  askuserquestion-loop-signal (1,930/189, 설계상 observe-only),
+  pytest-direct-exec-advisory (1,030/8)
+- coarse-only 18개를 명시 제외 목록으로 기재 (ask/advise 가
+  pass 로 접히므로 escalation 판정 불가)
+- 1차 감사의 version-bump-evidence-check 근거 오독을 blockquote 로
+  정정: 이 훅은 praxis 자체 VERSION 이 아니라 gh issue/pr 본문의
+  외부 의존성 bump 산문을 게이트한다 (spec.md 확인)
+- 감사 집필 중 두 훅(version-bump-evidence-check, caller-probe-gate)이
+  0 → non-zero escalation 으로 이동한 관측자 효과를 별도 문단으로 기록
+- 요약 표 60+1+2+18=81 로 정합화, bottom line 5개 항목 갱신
+
+markdownlint MD028(no-blanks-blockquote) 회피를 위해 관측자 효과
+노트는 blockquote 가 아닌 일반 문단으로 작성했다.
+
+검증:
+- markdownlint docs/hook-prune-audit.md → Summary: 0 issues in 0 files
+- 인용한 수치는 전부 ledger 에서 재산출 (전사 아님)
+
+Confidence: high
+Not-tested: ADVISE 전달 채널 문제(#874 Task 3)는 이 문서로 답할 수 없음 — 별도 실험 필요
+Session-Id: c16298d9-ce90-4536-8b4b-3d63818b411d

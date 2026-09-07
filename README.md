@@ -41,7 +41,7 @@ directly from the repo root.
 ### Codex — marketplace + plugin
 
 ```bash
-# Register the local marketplace (points at this repo's .agents/plugins/marketplace.json)
+# Register this repo as a marketplace (its root is .agents/plugins/marketplace.json)
 codex marketplace add https://github.com/devseunggwan/praxis
 codex plugin install praxis
 ```
@@ -53,12 +53,43 @@ into the repo-root runtime — there is no source duplication.
 
 ### Direct skill install (fallback)
 
-When the plugin surface isn't available:
+When the plugin surface isn't available, Claude Code still loads personal
+skills from `~/.claude/skills/<skill-name>/SKILL.md` (project skills from
+`.claude/skills/`). Clone the repo and link the skill directories you want:
 
 ```bash
 git clone https://github.com/devseunggwan/praxis.git ~/projects/praxis
-claude skill add ~/projects/praxis/skills/<skill-name>
+mkdir -p ~/.claude/skills
+ln -s ~/projects/praxis/skills/<skill-name> ~/.claude/skills/<skill-name>
 ```
+
+Skills installed this way are invoked as `/<skill-name>` rather than
+`/praxis:<skill-name>`, and the hooks are not installed — this path ships
+skills only. Skills that call a bundled helper through `CLAUDE_PLUGIN_ROOT`
+(`strike`, `spec-drift`, the `cmux-*` skills) need that variable exported to
+the clone path, e.g. `export CLAUDE_PLUGIN_ROOT=~/projects/praxis`.
+
+## Where to start
+
+Three reading paths, each 3–4 steps. Time estimates are for a first read.
+
+**Fix or add a hook** (~25 min)
+
+1. [`ETHOS.md` → Hook Ethos](ETHOS.md#hook-ethos) — why a hook exists at all and what it may never do (5 min)
+2. [`DESIGN.md` → Adding a new hook](DESIGN.md#adding-a-new-hook) — the shared contracts and the per-hook checklist (10 min)
+3. The hook's own `hooks/<role>/<name>/spec.md`, found via [`docs/hook/INDEX.md`](docs/hook/INDEX.md) — what it blocks, passes, and how it fails open (5 min)
+4. [`CONTRIBUTING.md` → Adding or modifying a hook](CONTRIBUTING.md#adding-or-modifying-a-hook) — registration, tests, and the runtime canary (5 min)
+
+**Change a skill** (~15 min)
+
+1. [`RUNTIME_CONSTRAINTS.md`](RUNTIME_CONSTRAINTS.md) — the fixed Claude Code limits a skill must fit inside (5 min)
+2. [`skills/SKILL.md.tmpl`](skills/SKILL.md.tmpl) — the frontmatter and section skeleton to copy (2 min)
+3. [`CONTRIBUTING.md` → Adding or modifying a skill](CONTRIBUTING.md#adding-or-modifying-a-skill) — the live-runtime verification gate (8 min)
+
+**Change packaging or manifests** (~10 min)
+
+1. [`ARCHITECTURE.md` → Multi-Platform Packaging](ARCHITECTURE.md#multi-platform-packaging) — canonical source, generated outputs, add-a-platform flow (6 min)
+2. [`CONTRIBUTING.md` → Packaging](CONTRIBUTING.md#packaging) — which files are generated and how to regenerate them (4 min)
 
 ## Skills
 
@@ -79,13 +110,14 @@ on day one:
 
 Praxis also ships `bypass-review`, a shell wrapper with no `SKILL.md`. It is **not**
 invocable as `/praxis:*`; it reads the review bypass-telemetry event logs. See
-[AGENTS.md → Local Development](AGENTS.md#local-development) for every shipped CLI
-wrapper.
+[CONTRIBUTING.md → Local development](CONTRIBUTING.md#local-development) for every
+shipped CLI wrapper.
 
 ## Hooks
 
-Hooks are the larger half of praxis: **96 hooks**, registered at 110 points across
-`PreToolUse`, `PostToolUse`, `Stop`, `UserPromptSubmit`, and `SessionStart`. They run
+Hooks are the larger half of praxis: **99 hooks**, registered at 114 points across
+`PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `PostToolBatch`, `Stop`,
+`SubagentStart`, `SubagentStop`, `UserPromptSubmit`, and `SessionStart`. They run
 without being invoked, so this section is the one to read before installing — it is what
 changes about your session.
 
@@ -94,9 +126,9 @@ promoted into blocking:
 
 | Role | Count | What it does |
 | ------ | ------- | -------------- |
-| `preflight-gate` | 36 | Inspects a tool call before it runs and can deny it |
+| `preflight-gate` | 37 | Inspects a tool call before it runs and can deny it |
 | `completion-verify` | 13 | Fires at `Stop` — can block a response that claims completion without evidence |
-| `advisory-nudge` | 42 | Prints a warning to stderr and lets the call through — 17 read a `PRAXIS_*_STRICT` variable that makes them stop the call instead |
+| `advisory-nudge` | 44 | Prints a warning to stderr and lets the call through — 18 read a `PRAXIS_*_STRICT` variable that makes them stop the call instead |
 | `postuse-correction` | 5 | Reacts after a tool call — telemetry, follow-up signals |
 
 Concretely, what a gate stops looks like this — `gh issue create` without a duplicate
@@ -116,16 +148,15 @@ variable in the message, so you rarely have to go looking for it.
 The complete list, with each hook's events, hosts, strict/bypass knobs, and the external
 commands it may run, is the generated
 [Hook Operating Matrix](docs/hook-operating-matrix.md). Per-hook specs live at
-`hooks/<role>/<name>/spec.md`, indexed by [`docs/hook/INDEX.md`](docs/hook/INDEX.md);
-[ARCHITECTURE.md → Hook index](ARCHITECTURE.md#hook-index) maps them to the component
-graph, and [DESIGN.md → Hook Design Contracts](DESIGN.md#hook-design-contracts) covers
-the contracts every hook follows.
+`hooks/<role>/<name>/spec.md`, indexed by [`docs/hook/INDEX.md`](docs/hook/INDEX.md),
+and [DESIGN.md → Hook Design Contracts](DESIGN.md#hook-design-contracts) covers the
+contracts every hook follows.
 
 ## Turning it off
 
 A hook that blocks something you meant to do is not a wall. There are three levers.
 
-**One gate.** 58 of the 96 hooks declare an opt-out or tuning variable. Which variable
+**One gate.** 61 of the 99 hooks declare an opt-out or tuning variable. Which variable
 belongs to which hook, and what setting it actually does to that hook, is the table in
 [`docs/bypass-vars.md`](docs/bypass-vars.md); the generated
 [Hook Operating Matrix](docs/hook-operating-matrix.md) carries the same mapping with each
@@ -161,11 +192,34 @@ Most skills delegate to external agents or session managers. Install the depende
 | **cmux** | Session management skills (cmux-*) | Mac app installer |
 | **codex-cli, gemini-cli** | Multi-provider routing in `cmux-delegate` | per upstream docs |
 
+### Hook dependencies
+
+Hooks fail open, so a missing component never breaks a session — the hooks that
+key on it simply never fire, and nothing says so. `hooks/manifest.json` declares
+those components per hook in its `requires` field (#1158); this table is the
+reader's view of that field, and `scripts/check-plugin-manifests.py` Rule 27
+checks the two against each other in both directions (#1332).
+
+| Component | Hooks inert without it | Install |
+| ----------- | ------------------------ | --------- |
+| `cmux` | `model-routing-advisory` | Mac app installer (the Full tier below) |
+| `codex-plugin` | `codex-review-route` | `/plugin marketplace add openai/codex-plugin-cc`, then `/plugin install codex@openai-codex` |
+| `hookable-memory-store` | `memory-hint` | a memory directory whose entries carry `hookable:` frontmatter, located per `hooks/_lib/_memory_dir.py` (`PRAXIS_MEMORY_DIR` overrides) |
+| `zsh` | `block-unmatched-glob` | `brew install zsh`, or the distro package |
+
+`builtin-task-postuse` is the one hook whose premise is another plugin rather
+than a component: it corrects an oh-my-claudecode `pre-tool-enforcer` false
+positive and is registered for the Claude host only (`hosts`), so it carries no
+`requires` row. None of these components is declared as a `plugin.json`
+`dependencies` entry — the harness has no optional-dependency concept, so a
+declaration would turn every tier below into a hard requirement; see
+[ARCHITECTURE.md → Why `plugin.json` declares no `dependencies`](ARCHITECTURE.md#why-pluginjson-declares-no-dependencies).
+
 ### Compatibility Tiers
 
 | Tier | What works | What you need |
 | ------ | ----------- | --------------- |
-| **Standalone** | recover-sessions, strike / strikes / reset-strikes, debt | `gh` CLI, `jq`; `debt` needs only `git` |
+| **Standalone** | recover-sessions, strike / strikes / reset-strikes, debt | `gh` CLI, `jq`; `recover-sessions` also needs `tmux`; `debt` needs only `git` |
 | **Enhanced** | + retrospect, codex-review-wrap | + oh-my-claudecode |
 | **Full** | + all cmux-* skills | + cmux |
 | **Multi-provider** | + codex/gemini routing in cmux-delegate | + codex-cli, gemini-cli |
@@ -206,16 +260,20 @@ Generated artifacts are committed:
 - `plugins/praxis/.codex-plugin/plugin.json`
 - `plugins/praxis/{skills,hooks,scripts}` (symlinks into repo root)
 
-To add a new platform, drop a `manifests/platforms/<name>.json` file listing
-its outputs and run the build script — no changes to skills, hooks, or
+To add a new platform, add a `manifests/platforms/<name>.json` file listing
+its outputs, add its `host_id` to the `hosts` enum in
+`hooks/manifest.schema.json` (a test asserts the enum and the platform set
+are equal), and run the build script — no changes to skills, hooks, or
 existing platforms required.
 
 ## Local Development
 
-This repository should live at **`~/projects/praxis`**. CLI tools shipped by
-skills (e.g. `cmux-recover-sessions`, `claude-recover`, `cmux-save-sessions`)
-are symlinked from `~/.local/bin` into this clone, so patches you commit here
-land in the version that actually runs at the shell.
+When you work from a clone rather than the plugin cache, the CLI wrappers
+shipped by skills (`cmux-recover-sessions`, `claude-recover`,
+`cmux-save-sessions`, …) are installed as `~/.local/bin` symlinks into
+whichever clone ran `scripts/install.sh` — so a patch reaches the version that
+runs at the shell only if it lands in that clone. One clone per machine keeps
+the links honest; `verify-symlinks.sh` tells you when they are not.
 
 ```bash
 # Install / refresh CLI symlinks (idempotent)
@@ -225,8 +283,8 @@ land in the version that actually runs at the shell.
 ./scripts/verify-symlinks.sh
 ```
 
-See [AGENTS.md → Local Development](AGENTS.md#local-development) for the full
-list of shipped CLI wrappers and drift-recovery rationale.
+See [CONTRIBUTING.md → Local development](CONTRIBUTING.md#local-development) for
+the full list of shipped CLI wrappers and drift-recovery rationale.
 
 ## Security & Privacy
 

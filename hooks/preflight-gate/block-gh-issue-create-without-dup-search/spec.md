@@ -17,7 +17,7 @@ Retrospect pattern (praxis issue #374): the agent spawned a new follow-up
 issue from a fresh analysis finding without running a duplicate search;
 an existing open issue already covered the same root-cause scope (often
 surfaced earlier in the same session by a sibling sciomc Stage or a PR
-body "후속 검토" item). User redirect → `/cancel` cycle.
+body "follow-up review" ("후속 검토") item). User redirect → `/cancel` cycle.
 
 ### What is blocked
 
@@ -58,7 +58,9 @@ literally in a prior search command.
   changed enforcement per-installer (issue #1156).
 - Set `CLAUDE_HOOK_BYPASS_DUP_GATE=1` for a deliberate one-off bypass.
 - Title with no extractable keyword ≥4 chars → silent pass (cannot enforce).
-- Missing / unreadable / oversized (`>50MB`) transcript → silent pass.
+- Missing / unreadable transcript → silent pass. There is no size bound any
+  more (issue #1279): the tail is read from the end, so an oversized
+  transcript is scanned like any other and can block.
   Malformed stdin → silent fail-open.
 
 ### Tests

@@ -330,7 +330,7 @@ echo "== fire-ledger instrumentation (issue #740 single-event RICH) =="
 # it never touches the production ledger, and the opt-out is unset so an
 # inherited DISABLE=1 cannot make an empty ledger read as "never fired".
 ledger_out=$(python3 - "$HOOK" <<'PY'
-import json, os, subprocess, sys, tempfile
+import glob, json, os, subprocess, sys, tempfile
 
 hook = sys.argv[1]
 ledger = os.path.join(tempfile.mkdtemp(), "fire.jsonl")
@@ -364,6 +364,16 @@ def read():
         return [json.loads(line) for line in handle if line.strip()]
 
 
+def read_counts():
+    """A `pass` is counted, not appended (issue #1238), so it lands in the
+    counter siblings beside the override rather than in the override itself."""
+    rows = []
+    for path in sorted(glob.glob(os.path.join(os.path.dirname(ledger), "fire-counts-*.jsonl"))):
+        with open(path, encoding="utf-8") as handle:
+            rows.extend(json.loads(line) for line in handle if line.strip())
+    return rows
+
+
 failures = []
 
 
@@ -390,10 +400,14 @@ if rows:
 advised, rows = run("x = 1\n")
 check("silent run emits no stderr", not advised)
 # A silent pass is exactly what the coarse record already says, so the hook
-# must not add a second one.
-check("silent run writes one coarse pass", len(rows) == 1
-      and rows[0].get("granularity") == "coarse"
-      and rows[0].get("decision") == "pass")
+# must not add a second one. It is counted rather than appended, so the row
+# lives in the counter sibling and carries a count of 1.
+counts = read_counts()
+check("silent run writes no ledger row", len(rows) == 0)
+check("silent run counts one coarse pass", len(counts) == 1
+      and counts[0].get("granularity") == "coarse"
+      and counts[0].get("decision") == "pass"
+      and counts[0].get("count") == 1)
 
 advised, rows = run(YAP, tool="Edit")
 check("Edit tool attributed", len(rows) == 1 and rows[0].get("tool") == "Edit")
@@ -408,7 +422,7 @@ check("missing session_id still records the decision",
 # Telemetry is opt-out, and the opt-out must not disturb the advisory itself.
 advised, rows = run(YAP, disable=True)
 check("DISABLE=1 still advises", advised)
-check("DISABLE=1 writes nothing", len(rows) == 0)
+check("DISABLE=1 writes nothing", len(rows) == 0 and len(read_counts()) == 1)
 
 print("FAILURES:" + ",".join(failures) if failures else "ALL_OK")
 PY

@@ -8,8 +8,8 @@ reminder to stderr and exit 0. Neither ever blocks tool execution.
 
 ### Why this exists
 
-The global `~/.claude/CLAUDE.md` `Output-Block-Level Falsification Gate` and
-`One-Probe-Before-Action Gate` rules fail to fire at execution time because
+The *Output-Block-Level Falsification Gate* and *One-Probe-Before-Action
+Gate* rules ([`ETHOS.md` → Rules praxis carries](../../../ETHOS.md#rules-praxis-carries)) fail to fire at execution time because
 rule retrieval is not structural — the rule is loaded but not re-triggered at
 the moment a `(Recommended)` option is surfaced or a status check is repeated.
 This hook adds two structural enforcement points that nudge the agent before

@@ -36,9 +36,10 @@ from _hook_io import (  # type: ignore[import-not-found]  # noqa: E402
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
 from _payload import read_payload  # type: ignore[import-not-found]  # noqa: E402
 from _transcript import (  # type: ignore[import-not-found]  # noqa: E402
-    extract_last_assistant_text,
     get_current_turn,
     load_recent_events,
+    resolve_stop_transcript,
+    stop_last_assistant_text,
 )
 
 _PREFIX = "[merge-state-claim-gate]"
@@ -410,18 +411,24 @@ def main() -> int:
     if payload.get("stop_hook_active"):
         return 0  # avoid re-entrant loops
 
-    transcript_path = payload.get("transcript_path") or ""
+    # Stop reads the session transcript; SubagentStop reads the subagent's own
+    # (`agent_transcript_path`), whose sidechain markers are dropped so the
+    # shared readers do not treat a file that is entirely the subagent's as
+    # somebody else's events — see `_transcript.resolve_stop_transcript`.
+    transcript_path, is_agent = resolve_stop_transcript(payload)
     if not transcript_path or not os.path.isfile(transcript_path):
         return 0
 
     # Bounded tail rather than the whole transcript (#1076). min_events
     # covers the _EVIDENCE_WINDOW slices below, which read past the turn.
-    events = load_recent_events(transcript_path, min_events=_EVIDENCE_WINDOW)
+    events = load_recent_events(
+        transcript_path, min_events=_EVIDENCE_WINDOW, drop_sidechain=is_agent
+    )
     if not events:
         return 0
 
     turn = get_current_turn(events)
-    last_text = extract_last_assistant_text(turn) if turn else ""
+    last_text = stop_last_assistant_text(payload, turn) if turn else ""
     if not last_text:
         return 0
 

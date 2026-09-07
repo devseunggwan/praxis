@@ -23,52 +23,113 @@ The observation: one 2026-07-27 session (`5d46110f`) spent **23 of its 37 total
 ask prompts** on this single hook — 62%. An approval gate that becomes habitual
 stops functioning as a gate, so the volume itself is the defect.
 
-`git-commit` is the category that absorbs the reduction, and the only one:
+`git-commit` is the category that absorbs the reduction, and the ground is
+reversibility alone. Issue #874 argued it on two halves; issue #1153 removed
+the second ("sibling hooks already cover this argv") from the argument, because
+that half is a property of the installation rather than of the command — see
+[The sibling gates are context, not ground](#the-sibling-gates-are-context-not-ground)
+below.
 
-1. **It is the only category whose action is local-only and fully reversible.**
-   `git push`, `gh pr merge` / `gh pr create` / `gh workflow run` and
-   `kubectl apply` all publish to state another party can already be reading.
-   A commit is recoverable with `git reset` / `git commit --amend` from the
-   same shell, before anything leaves the machine.
-2. **It is the only category already covered in depth — on `claude`.**
-   Eight sibling `PreToolUse(Bash)` hooks gate a `git commit` argv on their
-   own — derived from the `"gates": ["git-commit"]` field each carries in
-   `hooks/manifest.json`, and each verified by reading its detector to key on
-   the `commit` subcommand:
+**What makes a `git-commit`-category command reversible, concretely.** The
+category covers `git commit`, `git merge`, `git rebase`, `git cherry-pick` and
+`git revert`. None of them moves a remote ref: no network call is made, and
+nothing outside this machine can observe the result. Git records the
+pre-command HEAD before each of them — `ORIG_HEAD` for merge / rebase /
+cherry-pick / revert, `HEAD@{1}` in the reflog for a plain commit — and
+`gc.reflogExpire` keeps reflog entries for 90 days by default (`man
+git-config`, verified on git 2.50.1). So `git reset --hard ORIG_HEAD` (merge /
+rebase / cherry-pick / revert) or `git reset --hard HEAD@{1}` (a plain commit)
+puts the previous state back from the same shell, with no second party to
+notify. `git commit --amend` is not on that list: it replaces the commit rather
+than restoring the state before it, so it edits the mistake instead of undoing
+it. The claim is checkable in
+one command: `git reflog -n 2` after any of these prints the state to return
+to.
 
-   | Sibling hook | Hosts | What it gates |
-   | -------------- | ------- | --------------- |
-   | `block-commit-without-codex-review` | `claude` | commit before the review step |
-   | `block-rename-sweep-survivors` | `claude` | a rename sweep with surviving occurrences |
-   | `commit-decomposition-advisory` | `claude` | oversized single commit |
-   | `commit-message-paren-check` | all | a message line release-please's parser rejects |
-   | `commit-title-format-check` | all | Conventional Commits title format |
-   | `commit-title-length-check` | all | title length |
-   | `pre-commit-staged-file-enumeration` | `claude` | staging without enumerating files |
-   | `verify-commit-flag-override` | all | `-n` / `--no-verify` flag override |
+**What the recovery does and does not restore.** It is a *ref* recovery, and
+three conditions bound it — state them rather than let "reversible" be read as
+unconditional:
 
-   Four of the eight siblings are the checklist `verify-commit-flag-override`
-   already prints on its own deny (issue #941). By contrast **no** sibling
-   hook gates `kubectl apply` at all.
+- **The tracked working tree and index move too.** Merge / rebase /
+  cherry-pick / revert update them, not only `.git` — `git-merge(1)`: "your
+  HEAD, index, and working tree are updated to it."
+- **The undo itself can destroy work.** `git-reset(1)` on `--hard`: "Resets
+  the index and working tree. Any changes to tracked files in the working tree
+  since <commit> are discarded." Uncommitted work is not in the reflog, so the
+  recipe above restores the ref while losing it.
+- **A repository can attach arbitrary side effects.** `pre-commit`,
+  `post-commit` and `post-merge` (`githooks(5)`) run whatever that checkout
+  installs, including a network call — so "no network call is made" is a
+  property of plain git, not a guarantee about every repository.
 
-   The manifest field is the single source of truth for that list;
-   `scripts/check-sibling-commit-gates.py` re-derives it on every
-   `scripts/run-tests.sh` run and fails on a name, a `hosts` cell or a count
-   that drifted from it in either direction (issue #1127). The list is
-   hand-curated — membership means "this hook's detector keys on the `commit`
-   subcommand", which no string scan can decide (`pipefail-advisory` names the
-   subcommand but only fires on a pipeline; `branch-name-check` mentions
-   commits while gating branch creation) — but once curated it is copied
-   nowhere by hand again.
+None of the three reaches publication, which is why the tier holds: the ADVISE
+ground is *no remote ref moved and no second party has seen it*, never *nothing
+outside `.git` changed*. A reader who needs the stronger property will not find
+it here.
 
-#### That coverage is host-scoped, and the demotion is not equally supported
+**Where reversibility stops is publication, and that boundary carries its own
+ask.** Once the commit leaves the machine another party can already be reading
+it, and no local undo reaches what they have seen. That transition is
+`git push` — a *separate* category in the table above, held at `ask`. Because
+`side-effect-scan` carries no `hosts` key, that ask ships on every platform
+that installs hooks, and `push-remote-ref-verify`
+(`hooks/advisory-nudge/push-remote-ref-verify/spec.md`, `PostToolUse(Bash)`,
+likewise unrestricted by host) checks the far side afterwards. A mixed match
+keeps the ask and names every matched category (see [Response](#response)), so
+`git commit -am x && git push` was never quieted by the demotion.
 
-`side-effect-scan` carries no `hosts` key, so it — and the ADVISE demotion —
-ships to every platform that installs hooks. The `Hosts` column above is not decoration: `build-plugin-manifests.py`
-applies that whitelist when it writes each platform's `hooks.json`, and the
-generated entry point is `_dispatch.sh PreToolUse Bash <host>`, so
+**No other category can make this argument.** `git push`, `gh pr merge` /
+`gh pr create` / `gh workflow run`, `kubectl apply` and the `wrapper-commit`
+CLIs all publish to state another party can already be reading, so there is no
+local undo to point at. That asymmetry is the whole tier split, and it holds on
+every host because it is a property of the commands, not of which hooks happen
+to be installed beside them.
+
+#### The sibling gates are context, not ground
+
+The enumeration below is measured, still true, and still worth checking — but
+the ADVISE grade does not rest on it. A grade that ships to every host cannot
+stand on a premise that varies per host, and this one does.
+
+Eight sibling `PreToolUse(Bash)` hooks gate a `git commit` argv on their own —
+derived from the `"gates": ["git-commit"]` field each carries in
+`hooks/manifest.json`, and each verified by reading its detector to key on the
+`commit` subcommand:
+
+| Sibling hook | Hosts | What it gates |
+| -------------- | ------- | --------------- |
+| `block-commit-without-codex-review` | `claude` | commit before the review step |
+| `block-rename-sweep-survivors` | `claude` | a rename sweep with surviving occurrences |
+| `commit-decomposition-advisory` | `claude` | oversized single commit |
+| `commit-message-paren-check` | all | a message line release-please's parser rejects |
+| `commit-title-format-check` | all | Conventional Commits title format |
+| `commit-title-length-check` | all | title length |
+| `pre-commit-staged-file-enumeration` | `claude` | staging without enumerating files |
+| `verify-commit-flag-override` | all | `-n` / `--no-verify` flag override |
+
+Four of the eight siblings are the checklist `verify-commit-flag-override`
+already prints on its own deny (issue #941). By contrast **no** sibling hook
+gates `kubectl apply` at all.
+
+The manifest field is the single source of truth for that list;
+`scripts/check-sibling-commit-gates.py` re-derives it on every
+`scripts/run-tests.sh` run and fails on a name, a `hosts` cell or a count
+that drifted from it in either direction (issue #1127). The list is
+hand-curated — membership means "this hook's detector keys on the `commit`
+subcommand", which no string scan can decide (`pipefail-advisory` names the
+subcommand but only fires on a pipeline; `branch-name-check` mentions
+commits while gating branch creation) — but once curated it is copied
+nowhere by hand again.
+
+#### The sibling set is per-host — which is why it is context
+
+`side-effect-scan` carries no `hosts` key, so it, and the ADVISE tier with it,
+ships to every platform that installs hooks. The `Hosts` column above is not
+decoration: `build-plugin-manifests.py` applies that whitelist when it writes
+each platform's `hooks.json`, and the generated entry point is
+`_dispatch.sh PreToolUse Bash <host>`, so
 `_dispatch.group_members("PreToolUse", "Bash", host)` re-applies it at runtime.
-The sibling set behind the premise is therefore a per-host set:
+The sibling set is therefore a per-host set:
 
 | Host | Sibling commit gates | Also in the deny checklist |
 | ------ | ---------------------- | ---------------------------- |
@@ -91,23 +152,27 @@ same whitelist also thins `verify-commit-flag-override`'s own printed deny
 checklist: some of its rows name hooks the host does not install, which is what
 the `Also in the deny checklist` column counts per host.
 
-So of issue #874's two-part rationale, part 1 (local-only and fully reversible)
-is host-independent and holds everywhere, while part 2 ("already covered in
-depth") holds on `claude` and is **materially weaker on `codex` and
-`cursor`**. The 62%-of-asks measurement the demotion was argued from was also
-taken on `claude`.
+That gap is what disqualified the coverage half as a justification
+(issue #1153). The measurement it was argued alongside — 62% of one session's asks —
+was taken on `claude` too, so both parts of the retired half describe the
+author's own host. Nothing above changes the grade: `git-commit` stays at
+ADVISE on every host, because the reversibility ground it now rests on is a
+property of `git commit` / `merge` / `rebase` / `cherry-pick` / `revert`
+themselves and does not vary with the installation. **The runtime is
+unchanged** — issue #1153 rewrote the stated reason, not the tier.
 
-This is recorded, not repaired. Re-tiering `git-commit` per host — or widening
-the `hosts` whitelist on the `claude`-only siblings — is a runtime behaviour
-change outside issue #1127's scope, and needs its own issue. What issue #1127
-buys is that the enumeration can no longer claim `claude`'s coverage on every
-platform without this checker failing.
+What the enumeration is still for: drift detection. Issue #1127's checker
+fails when a prose surface claims coverage the manifest does not ship, on any
+host — so the tables above stay an accurate picture of what each platform
+installs, without being the reason `git-commit` advises.
 
 **`wrapper-commit` is a deliberate narrowing.** The wrapper CLIs used to
-carry the `git-commit` label; issue #874's demotion does not follow them
-down, because both halves of the rationale fail for them. The eight sibling
-gates match a literal `git commit` argv, so a commit made *inside* a wrapper
-process is invisible to every one of them. They keep asking, under their own
+carry the `git-commit` label; the demotion does not follow them down, because
+the reversibility ground fails for them. What a wrapper process does inside
+itself is not readable from the argv the hook sees: `iceberg-schema promote`
+writes a shared catalog, not this checkout's `.git`, so there is no
+`git reset` that undoes it. The eight sibling gates match a literal
+`git commit` argv and never see it either. They keep asking, under their own
 category name.
 
 **Which wrapper CLIs exist is installer-specific**, so since #1157 the

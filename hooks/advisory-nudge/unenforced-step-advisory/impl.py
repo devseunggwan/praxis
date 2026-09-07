@@ -60,7 +60,11 @@ from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
     strip_prefix,
 )
 from _payload import read_payload  # type: ignore[import-not-found]  # noqa: E402
-from _transcript import iter_transcript  # type: ignore[import-not-found]  # noqa: E402
+from _transcript import (  # type: ignore[import-not-found]  # noqa: E402
+    TranscriptReadError,
+    scan_cursor_path,
+    scan_transcript_resumable,
+)
 
 STRICT_ENV = "PRAXIS_UNENFORCED_STEP_STRICT"
 SKIP_ENV = "PRAXIS_UNENFORCED_STEP_SKIP"
@@ -72,6 +76,7 @@ _MANIFEST_TIMEOUT_SEC = 8
 # Bound the transcript scan the same way the sibling gates do: a session large
 # enough to exceed this is one where the scan cost outweighs the nudge.
 _MAX_TRANSCRIPT_BYTES = 50 * 1024 * 1024
+_HOOK_NAME = "unenforced-step-advisory"
 
 _REVIEW_AGENT = "code-reviewer"
 _CODEX_SKILL = "praxis:codex-review-wrap"
@@ -389,19 +394,87 @@ def _note_tool_use(facts: _SessionFacts, block: dict) -> None:
             facts.codex_review = True
 
 
-def _absorb(facts: _SessionFacts, path: str) -> None:
-    for event in iter_transcript(path):
+# Every fact `_note_tool_use` can settle lives in a `tool_use` block whose
+# `name` is one of these, so a record without the quoted tool name cannot
+# contribute. Rejecting on it before the parse is what keeps a `review` scan
+# of a session with no review in it — the case the advisory exists for, where
+# nothing ever settles — from parsing every line to EOF on every commit
+# (issue #1278). Keyed per fact rather than on a blanket `"tool_use"`: the
+# large assistant lines are Bash heredocs and Edit/Write bodies, and a
+# `review` walk that parsed every one of those would still pay a parse per
+# tool call instead of per Agent/Task/Skill call.
+_FACT_NEEDLES = {
+    "review_agent": ('"Agent"', '"Task"'),
+    "codex_review": ('"Skill"',),
+    "open_pr_scan": ('"Bash"',),
+}
+
+
+def _needles_for(facts: _SessionFacts) -> tuple[str, ...]:
+    """Quoted tool-name tokens for the facts this trigger still wants.
+
+    Sorted by fact so the tuple is deterministic; a line carrying none of
+    them cannot settle any wanted fact and is rejected before `json.loads`.
+    """
+    return tuple(n for fact in sorted(facts._wanted) for n in _FACT_NEEDLES[fact])
+
+
+_FACT_NAMES = ("review_agent", "codex_review", "open_pr_scan")
+
+
+def _encode_facts(facts: _SessionFacts) -> dict:
+    """Cursor form of the facts: one bool per fact name."""
+    return {name: bool(getattr(facts, name)) for name in _FACT_NAMES}
+
+
+def _absorb(facts: _SessionFacts, path: str, cursor_path: str | None = None) -> bool:
+    """Fold one transcript's tool_use blocks into `facts`, stopping once settled.
+
+    Returns True when the walk finished (EOF, or every wanted fact settled)
+    and False when the per-call byte budget cut it short. With `cursor_path`
+    the walk resumes where the previous call for this file and trigger
+    stopped, so a commit reads only the bytes appended since the last one
+    and a settled fact is never re-derived. Raises `TranscriptReadError` for
+    a missing or unreadable file.
+    """
+    wanted = facts._wanted
+
+    def decode(saved: dict) -> _SessionFacts:
+        """Rebuild the facts object a previous call saved in the cursor."""
+        resumed = _SessionFacts(wanted)
+        for name in _FACT_NAMES:
+            if saved.get(name) is True:
+                setattr(resumed, name, True)
+        return resumed
+
+    def fold(state: _SessionFacts, event: dict) -> None:
+        """Note every tool_use block of one assistant record."""
         message = event.get("message")
         if not isinstance(message, dict):
-            continue
+            return
         content = message.get("content")
         if not isinstance(content, list):
-            continue
+            return
         for block in content:
             if isinstance(block, dict) and block.get("type") == "tool_use":
-                _note_tool_use(facts, block)
-        if facts.settled():
-            return
+                _note_tool_use(state, block)
+
+    state, complete = scan_transcript_resumable(
+        path,
+        cursor_path,
+        lambda: facts,
+        fold,
+        needle=tuple(n.encode("utf-8") for n in _needles_for(facts)),
+        max_bytes=_MAX_TRANSCRIPT_BYTES,
+        stop_when=lambda f: f.settled(),
+        encode=_encode_facts,
+        decode=decode,
+    )
+    if state is not facts:  # resumed from the cursor: carry it into the caller's object
+        for name in _FACT_NAMES:
+            if getattr(state, name):
+                setattr(facts, name, True)
+    return complete
 
 
 def _subagents_dir(transcript_path: str):
@@ -421,38 +494,52 @@ def _subagents_dir(transcript_path: str):
     return candidate if candidate.is_dir() else None
 
 
-def _scan_session(transcript_path: str, trigger: str) -> _SessionFacts | None:
-    """Collect the facts `trigger` needs, or None if the root is unreadable.
+def _scan_session(transcript_path: str, trigger: str, session_id=None) -> _SessionFacts | None:
+    """Collect the facts `trigger` needs, or None if the root is unreadable or
+    its scan has not caught up yet.
 
     Subagent transcripts are scanned alongside the root one: an Agent dispatch
     made inside a Task-dispatched subagent is recorded only in that subagent's
     own JSONL, so a root-only scan under-reports work that actually happened
     (the blindness `block-commit-without-codex-review` documents for #730).
+
+    Cursors are keyed per trigger and per file (`<trigger>-root`,
+    `<trigger>-<subagent stem>`): the two triggers read different tool
+    names, and a `review` walk that skipped Bash lines must never move the
+    `in-flight` cursor past them. Without a `session_id` the scan runs
+    without persistence, under the same per-call budget.
     """
     facts = _SessionFacts(_TRIGGER_FACTS[trigger])
     if facts.settled():
         return facts  # this trigger reads nothing from the transcript
 
-    root = _Path(transcript_path)
     try:
-        if not root.is_file() or root.stat().st_size > _MAX_TRANSCRIPT_BYTES:
-            return None
-    except OSError:
+        complete = _absorb(
+            facts, transcript_path, scan_cursor_path(_HOOK_NAME, session_id, f"{trigger}-root")
+        )
+    except TranscriptReadError:
         return None
+    if not complete and not facts.settled():
+        return None  # not caught up this call: nothing to measure against yet
 
-    _absorb(facts, str(root))
-
+    pending = False
     subagents = _subagents_dir(transcript_path)
     if subagents is not None and not facts.settled():
         for agent_file in sorted(subagents.glob("agent-*.jsonl")):
             try:
-                if agent_file.stat().st_size > _MAX_TRANSCRIPT_BYTES:
-                    continue
-            except OSError:
-                continue
-            _absorb(facts, str(agent_file))
+                complete = _absorb(
+                    facts,
+                    str(agent_file),
+                    scan_cursor_path(_HOOK_NAME, session_id, f"{trigger}-{agent_file.stem}"),
+                )
+            except TranscriptReadError:
+                continue  # one subagent's history just cannot contribute
             if facts.settled():
                 break
+            if not complete:
+                pending = True  # its unread tail may still settle a fact
+    if pending and not facts.settled():
+        return None  # a subagent is not caught up: an absence is not yet a fact
     return facts
 
 
@@ -501,17 +588,20 @@ def _worktree_count(cwd: str | None, deadline: float) -> int | None:
 def _advise(trigger: str, detail: str) -> int:
     strict = os.environ.get(STRICT_ENV) == "1"
     closing = (
+        f"    STRICT mode ({STRICT_ENV}=1) — this call was blocked.\n"
         f"    STRICT 모드({STRICT_ENV}=1) — 이 호출을 차단했습니다.\n"
         if strict
-        else "    의도적으로 건너뛰는 것이면 그대로 진행하십시오 — 차단하지 않습니다.\n"
+        else "    Skipping on purpose? Carry on — this is not a block.\n"
+        "    의도적으로 건너뛰는 것이면 그대로 진행하십시오 — 차단하지 않습니다.\n"
     )
     sys.stderr.write(
         "\n⚠️  UNENFORCED MANDATORY STEP — no gate owns this one\n"
         f"    trigger: {trigger}\n"
         f"    {detail}\n"
+        "    No hook owns this step, so skipping it leaves no is_error behind (praxis #1064).\n"
         "    이 단계는 훅이 없어 건너뛰어도 is_error 가 남지 않습니다 (praxis #1064).\n"
         + closing
-        + f"    상시 해제: {SKIP_ENV}=1\n"
+        + f"    Permanent opt-out / 상시 해제: {SKIP_ENV}=1\n"
     )
     return 2 if strict else 0
 
@@ -541,13 +631,15 @@ def _advise_rebase(trigger: str, cwd: str | None, deadline: float) -> int:
     )
     return _advise(
         label,
-        f"HEAD 가 {base} 보다 {count} 커밋 뒤에 있습니다: "
-        f"`git fetch origin && git rebase {base}`",
+        f"HEAD is {count} commit(s) behind {base}: "
+        f"`git fetch origin && git rebase {base}`\n"
+        f"    HEAD 가 {base} 보다 {count} 커밋 뒤에 있습니다.",
     )
 
 
 @fail_open
 def main() -> int:
+    """Hook entry point: classify the command, scan the session, advise."""
     if os.environ.get(SKIP_ENV) == "1":
         return 0
 
@@ -574,7 +666,7 @@ def main() -> int:
     transcript_path = payload.get("transcript_path")
     if not isinstance(transcript_path, str) or not transcript_path:
         return 0  # nothing to measure against → stay silent
-    facts = _scan_session(transcript_path, trigger)
+    facts = _scan_session(transcript_path, trigger, payload.get("session_id"))
     if facts is None:
         return 0
 
@@ -583,19 +675,24 @@ def main() -> int:
             return 0
         return _advise(
             "content commit → oh-my-claudecode:code-reviewer (MANDATORY)",
-            "이 세션에서 code-reviewer 에이전트 호출 0건 "
+            "no code-reviewer agent call in this session "
+            "(model-routing-advisory/spec.md 'Deliver' table).\n"
+            "    이 세션에서 code-reviewer 에이전트 호출 0건 "
             "(model-routing-advisory/spec.md 'Deliver' 표).",
         )
 
     if facts.open_pr_scan:
         return 0
     count = _worktree_count(cwd, deadline)
-    worktrees = (
-        f"활성 워크트리 {count}개" if count is not None else "활성 워크트리 수 미확인"
+    worktrees_en = (
+        f"{count} active worktree(s)" if count is not None else "active worktree count unknown"
     )
+    worktrees_ko = f"{count}개" if count is not None else "수 미확인"
     return _advise(
         "worktree/dispatch → in-flight PR 검사 (MANDATORY)",
-        f"이 세션에서 open PR 열거 0건, {worktrees}: "
+        f"no open-PR enumeration in this session, {worktrees_en}: "
+        "run `gh pr list --state open` on every related repo first.\n"
+        f"    이 세션에서 open PR 열거 0건, 활성 워크트리 {worktrees_ko}: "
         "`gh pr list --state open` 를 관련 repo 전부에 대해 먼저 확인하십시오.",
     )
 

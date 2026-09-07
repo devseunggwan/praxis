@@ -53,6 +53,8 @@ _ASK = '{"hookSpecificOutput": {"permissionDecision": "ask"}}'
 _STOP_BLOCK = '{"decision": "block", "reason": "no evidence"}'
 # jq's pretty-printed form (shell Stop hooks) parses identically.
 _STOP_BLOCK_JQ = '{\n  "decision": "block",\n  "reason": "no evidence"\n}\n'
+# The non-blocking half of the same lane (`_hook_io.emit_stop_advisory`).
+_STOP_ADVISORY = '{"systemMessage": "mind the gap"}'
 # A context payload that merely QUOTES the block shape must NOT classify as a
 # block — recognition is parse-based, not substring.
 _STOP_QUOTING = (
@@ -84,6 +86,14 @@ _STOP_QUOTING = (
     (0, _STOP_BLOCK_JQ, "", "Stop", "block"),  # jq pretty-printed form -> block
     (0, _STOP_QUOTING, "", "Stop", "pass"),  # QUOTED block shape -> parse says no block
     (0, _STOP_QUOTING, "nudge", "Stop", "advise"),  # quoted shape + stderr stays advise
+    # issue #1337: SubagentStop carries a decision in the same top-level shape
+    # (the dispatcher accepts it under both events), so the ledger must record
+    # it under both too. Gated the same way the dispatcher gates it — under an
+    # event with no Stop lane the object is not a decision and stays a pass.
+    (0, _STOP_BLOCK, "", "SubagentStop", "block"),
+    (0, _STOP_ADVISORY, "", "SubagentStop", "advise"),
+    (0, _STOP_BLOCK, "", "PostToolUse", "pass"),
+    (0, _STOP_ADVISORY, "", "PostToolUse", "pass"),
 ])
 def test_classify_decision(rc, stdout, stderr, event, expected):
     # `event` is a column rather than a constant: every lane below the exit-2
@@ -109,6 +119,22 @@ def test_block_is_not_misread_as_pass():
 
 def _payload(session="sess-1", tool="Bash") -> str:
     return json.dumps({"session_id": session, "tool_name": tool, "tool_input": {"command": "ls"}})
+
+
+def _pass_records(session: str = "sess-1") -> list[dict]:
+    """Flush and read back the `pass` counters for one session (#1238).
+
+    `pass` fires never reach the events JSONL — they are buffered and merged
+    into a per-session counter file at process exit — so a test asserting on a
+    pass has to flush first and read that file.
+    """
+    for module in (fl, sys.modules.get("_fire_ledger")):
+        if module is not None:
+            module.flush_pass_counts()
+    path = fl.resolve_counts_path(session)
+    if not path.exists():
+        return []
+    return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
 
 
 def test_record_group_fires_writes_one_line_per_member(tmp_path, monkeypatch):
@@ -150,8 +176,10 @@ def test_malformed_payload_still_records(tmp_path, monkeypatch):
     monkeypatch.setenv("PRAXIS_FIRE_TELEMETRY_FILE", str(out))
     monkeypatch.delenv("PRAXIS_FIRE_TELEMETRY_DISABLE", raising=False)
     fl.record_group_fires([("r", "h", Path("x"))], [(0, "", "")], "not json{")
-    rec = json.loads(out.read_text().splitlines()[0])
+    assert not out.exists()  # a pass is counted, never written as a row
+    rec = _pass_records("")[0]
     assert rec["session_id"] == "" and rec["tool"] == "" and rec["hook"] == "h"
+    assert rec["decision"] == "pass" and rec["count"] == 1
 
 
 # ---------------------------------------------------------------------------
@@ -292,11 +320,14 @@ def test_record_standalone_fire_writes_coarse(tmp_path, monkeypatch):
     fl.record_standalone_fire("stop-gate", "completion-verify", 2)
     fl.record_standalone_fire("nudge", "advisory-nudge", 0)
     recs = [json.loads(line) for line in out.read_text().splitlines() if line.strip()]
-    assert len(recs) == 2
+    assert len(recs) == 1  # the block is a row; the pass is a counter (#1238)
     assert recs[0]["decision"] == "block" and recs[0]["granularity"] == "coarse"
     assert recs[0]["hook"] == "stop-gate" and recs[0]["session_id"] == ""
     # rc 0 collapses to pass (coarse cannot distinguish ask/advise/pass)
-    assert recs[1]["decision"] == "pass"
+    counted = _pass_records("")
+    assert len(counted) == 1
+    assert counted[0]["decision"] == "pass" and counted[0]["granularity"] == "coarse"
+    assert counted[0]["hook"] == "nudge" and counted[0]["count"] == 1
 
 
 def test_record_standalone_fire_skipped_in_dispatcher(tmp_path, monkeypatch):
@@ -332,16 +363,19 @@ def test_record_session_fire_writes_rich_with_real_session(tmp_path, monkeypatch
         "askuserquestion-loop-signal", "postuse-correction", "pass",
         "sess-real", "AskUserQuestion",
     )
-    recs = [json.loads(line) for line in out.read_text().splitlines() if line.strip()]
+    assert not out.exists()  # a pass is counted, never written as a row
+    recs = _pass_records("sess-real")
     assert len(recs) == 1
     assert recs[0] == {
         "timestamp": recs[0]["timestamp"],
+        "first_timestamp": recs[0]["first_timestamp"],
         "session_id": "sess-real",
         "tool": "AskUserQuestion",
         "hook": "askuserquestion-loop-signal",
         "role": "postuse-correction",
         "decision": "pass",
         "granularity": "rich",
+        "count": 1,
     }
 
 
@@ -465,7 +499,7 @@ def test_record_session_fire_non_string_session_and_tool_default_empty(tmp_path,
     monkeypatch.setenv("PRAXIS_FIRE_TELEMETRY_FILE", str(out))
     monkeypatch.delenv("PRAXIS_FIRE_TELEMETRY_DISABLE", raising=False)
     fl.record_session_fire("h", "r", "pass", None, None)  # type: ignore[arg-type]
-    rec = json.loads(out.read_text().splitlines()[0])
+    rec = _pass_records("")[0]
     assert rec["session_id"] == "" and rec["tool"] == ""
 
 
@@ -812,7 +846,7 @@ def test_fail_open_swallows_exception_and_still_records(tmp_path, monkeypatch):
 
     rc = boom()
     assert rc == 0  # exception -> fail-open 0
-    recs = [json.loads(line) for line in out.read_text().splitlines() if line.strip()]
+    recs = _pass_records("")
     assert recs and recs[0]["decision"] == "pass"  # rc 0 after swallow
 
 
@@ -946,125 +980,170 @@ def test_fire_report_header_excludes_skip_only_hooks():
 
 
 # ---------------------------------------------------------------------------
-# issue #710 remaining scope: advise_ignored_rate
+# `pass` counters (issue #1238)
 # ---------------------------------------------------------------------------
 
-def test_advise_ignored_counts_recurrence_without_escalation():
-    """advise@0's next fire is advise@10 (ignored); advise@10's next fire is
-    block@20 (escalated, not ignored) -> observed=2, ignored=1, rate=0.5."""
-    events = [
-        {"hook": "h", "session_id": "s1", "decision": "advise", "timestamp": "2026-06-26T00:00:00+00:00"},
-        {"hook": "h", "session_id": "s1", "decision": "advise", "timestamp": "2026-06-26T00:00:10+00:00"},
-        {"hook": "h", "session_id": "s1", "decision": "block", "timestamp": "2026-06-26T00:00:20+00:00"},
+def test_repeated_passes_collapse_into_one_counter_row(tmp_path, monkeypatch):
+    """The whole point: N passes of one hook cost one row, not N."""
+    out = tmp_path / "fire-events.jsonl"
+    monkeypatch.setenv("PRAXIS_FIRE_TELEMETRY_FILE", str(out))
+    monkeypatch.delenv("PRAXIS_FIRE_TELEMETRY_DISABLE", raising=False)
+    members = [("preflight-gate", "gate-a", Path("x"))]
+    for _ in range(40):
+        fl.record_group_fires(members, [(0, "", "")], _payload("sess-many"))
+
+    assert not out.exists()
+    recs = _pass_records("sess-many")
+    assert len(recs) == 1
+    assert recs[0]["count"] == 40
+
+
+def test_a_later_flush_adds_to_the_counts_already_on_disk(tmp_path, monkeypatch):
+    """The merge is additive — a second process must not overwrite the first."""
+    out = tmp_path / "fire-events.jsonl"
+    monkeypatch.setenv("PRAXIS_FIRE_TELEMETRY_FILE", str(out))
+    monkeypatch.delenv("PRAXIS_FIRE_TELEMETRY_DISABLE", raising=False)
+    members = [("preflight-gate", "gate-a", Path("x"))]
+    fl.record_group_fires(members, [(0, "", "")], _payload("sess-merge"))
+    assert _pass_records("sess-merge")[0]["count"] == 1
+    fl.record_group_fires(members, [(0, "", "")], _payload("sess-merge"))
+    recs = _pass_records("sess-merge")
+    assert len(recs) == 1 and recs[0]["count"] == 2
+
+
+def test_non_pass_decisions_still_write_their_own_row(tmp_path, monkeypatch):
+    """Only `pass` is folded; every decision a gate reads keeps its row."""
+    out = tmp_path / "fire-events.jsonl"
+    monkeypatch.setenv("PRAXIS_FIRE_TELEMETRY_FILE", str(out))
+    monkeypatch.delenv("PRAXIS_FIRE_TELEMETRY_DISABLE", raising=False)
+    members = [
+        ("preflight-gate", "blocker", Path("x")),
+        ("advisory-nudge", "nudger", Path("y")),
+        ("preflight-gate", "quiet", Path("z")),
     ]
-    result = cli.compute_advise_ignored(events)
-    row = result["h"]
-    assert row["advise_fires"] == 2
-    assert row["observed"] == 2
-    assert row["ignored"] == 1
-    assert row["rate"] == 0.5
+    fl.record_group_fires(
+        members, [(2, "", ""), (0, "", "a nudge"), (0, "", "")], _payload("sess-mix")
+    )
+    rows = [json.loads(line) for line in out.read_text().splitlines() if line.strip()]
+    assert [r["hook"] for r in rows] == ["blocker", "nudger"]
+    assert [r["hook"] for r in _pass_records("sess-mix")] == ["quiet"]
 
 
-def test_advise_ignored_escalation_to_block_is_not_ignored():
+def test_sessions_do_not_share_a_counter_file(tmp_path, monkeypatch):
+    """One file per session — that is what makes the lock uncontended."""
+    out = tmp_path / "fire-events.jsonl"
+    monkeypatch.setenv("PRAXIS_FIRE_TELEMETRY_FILE", str(out))
+    monkeypatch.delenv("PRAXIS_FIRE_TELEMETRY_DISABLE", raising=False)
+    members = [("preflight-gate", "gate-a", Path("x"))]
+    fl.record_group_fires(members, [(0, "", "")], _payload("sess-one"))
+    fl.record_group_fires(members, [(0, "", "")], _payload("sess-two"))
+    assert fl.resolve_counts_path("sess-one") != fl.resolve_counts_path("sess-two")
+    assert _pass_records("sess-one")[0]["count"] == 1
+    assert _pass_records("sess-two")[0]["count"] == 1
+
+
+def test_ids_the_filename_sanitiser_flattens_keep_separate_counters(tmp_path, monkeypatch):
+    """`a/b` and `ab` survive the strip identically — the digest separates them.
+
+    Sharing a file is not the whole damage: the merge keeps the first writer's
+    `session_id`, and `count_session_fires` filters on it, so the second
+    session would read its own count back as zero.
+    """
+    out = tmp_path / "fire-events.jsonl"
+    monkeypatch.setenv("PRAXIS_FIRE_TELEMETRY_FILE", str(out))
+    monkeypatch.delenv("PRAXIS_FIRE_TELEMETRY_DISABLE", raising=False)
+    members = [("preflight-gate", "gate-a", Path("x"))]
+    fl.record_group_fires(members, [(0, "", "")], _payload("a/b"))
+    fl.record_group_fires(members, [(0, "", "")], _payload("ab"))
+    assert fl.resolve_counts_path("a/b") != fl.resolve_counts_path("ab")
+    fl.flush_pass_counts()
+    assert fl.count_session_fires("gate-a", "a/b", "pass") == 1
+    assert fl.count_session_fires("gate-a", "ab", "pass") == 1
+
+
+def test_session_ids_sharing_a_long_prefix_keep_separate_counters(tmp_path, monkeypatch):
+    """The length cap is the sanitiser's other lossy half."""
+    out = tmp_path / "fire-events.jsonl"
+    monkeypatch.setenv("PRAXIS_FIRE_TELEMETRY_FILE", str(out))
+    prefix = "s" * 64
+    assert fl.resolve_counts_path(prefix + "-one") != fl.resolve_counts_path(prefix + "-two")
+
+
+def test_session_id_cannot_escape_the_telemetry_directory(tmp_path, monkeypatch):
+    """The id reaches a filename from an untrusted payload."""
+    out = tmp_path / "fire-events.jsonl"
+    monkeypatch.setenv("PRAXIS_FIRE_TELEMETRY_FILE", str(out))
+    path = fl.resolve_counts_path("../../etc/passwd")
+    assert path.parent == out.parent
+    assert ".." not in path.name and "/" not in path.name
+
+
+def test_count_session_fires_reads_the_counter_file(tmp_path, monkeypatch):
+    """A pass count is still answerable — from the counters, not the rows."""
+    out = tmp_path / "fire-events.jsonl"
+    monkeypatch.setenv("PRAXIS_FIRE_TELEMETRY_FILE", str(out))
+    monkeypatch.delenv("PRAXIS_FIRE_TELEMETRY_DISABLE", raising=False)
+    members = [("preflight-gate", "gate-a", Path("x"))]
+    for _ in range(3):
+        fl.record_group_fires(members, [(0, "", "")], _payload("sess-read"))
+    # Before the flush the count comes from the buffer, after it from the file.
+    assert fl.count_session_fires("gate-a", "sess-read", "pass") == 3
+    fl.flush_pass_counts()
+    assert fl.count_session_fires("gate-a", "sess-read", "pass") == 3
+    assert fl.count_session_fires("gate-a", "sess-read", "advise") == 0
+
+
+def test_aggregate_fires_sums_a_folded_count():
     events = [
-        {"hook": "h", "session_id": "s1", "decision": "advise", "timestamp": "2026-06-26T00:00:00+00:00"},
-        {"hook": "h", "session_id": "s1", "decision": "block", "timestamp": "2026-06-26T00:00:10+00:00"},
+        {"hook": "a", "role": "preflight-gate", "decision": "pass", "session_id": "s1",
+         "timestamp": "2026-06-26T01:00:00+00:00", "granularity": "rich", "count": 120},
+        {"hook": "a", "role": "preflight-gate", "decision": "block", "session_id": "s1",
+         "timestamp": "2026-06-26T02:00:00+00:00", "granularity": "rich"},
     ]
-    result = cli.compute_advise_ignored(events)
-    row = result["h"]
-    assert row["observed"] == 1
-    assert row["ignored"] == 0
-    assert row["rate"] == 0.0
+    agg = cli.aggregate_fires(events)
+    assert agg["a"]["fires"] == 121
+    assert agg["a"]["pass"] == 120 and agg["a"]["block"] == 1
 
 
-def test_advise_ignored_last_fire_in_session_is_right_censored():
-    """A trailing advise with no follow-up in the session is excluded from
-    the observed denominator — it must not be silently counted either way."""
-    events = [
-        {"hook": "h", "session_id": "s1", "decision": "advise", "timestamp": "2026-06-26T00:00:00+00:00"},
-    ]
-    result = cli.compute_advise_ignored(events)
-    row = result["h"]
-    assert row["advise_fires"] == 1
-    assert row["observed"] == 0
-    assert row["ignored"] == 0
-    assert row["rate"] is None
+def test_a_folded_record_marks_both_ends_of_its_run(tmp_path, monkeypatch):
+    """The rework-commit fallback matches on timestamps, so both ends count."""
+    out = tmp_path / "fire-events.jsonl"
+    monkeypatch.setenv("PRAXIS_FIRE_TELEMETRY_FILE", str(out))
+    monkeypatch.delenv("PRAXIS_FIRE_TELEMETRY_DISABLE", raising=False)
+    for ts in ("2026-06-26T01:00:00+00:00", "2026-06-26T05:00:00+00:00"):
+        fl._buffer_pass("gate-a", "preflight-gate", "sess-span", "Bash", "rich", ts)
+    rec = _pass_records("sess-span")[0]
+    assert rec["first_timestamp"] == "2026-06-26T01:00:00+00:00"
+    assert rec["timestamp"] == "2026-06-26T05:00:00+00:00"
+
+    index = cli._session_timestamp_index([rec])
+    assert len(index["sess-span"]) == 2
 
 
-def test_advise_ignored_scoped_per_session_not_cross_session():
-    """The 'next fire' lookup must not cross session boundaries — a fire in
-    session s2 must never resolve session s1's advise outcome."""
-    events = [
-        {"hook": "h", "session_id": "s1", "decision": "advise", "timestamp": "2026-06-26T00:00:00+00:00"},
-        {"hook": "h", "session_id": "s2", "decision": "block", "timestamp": "2026-06-26T00:00:05+00:00"},
-    ]
-    result = cli.compute_advise_ignored(events)
-    row = result["h"]
-    assert row["observed"] == 0  # s1's lone advise has no same-session follow-up
-    assert row["rate"] is None
+def test_fold_pass_false_writes_the_row_the_shell_writer_would(tmp_path, monkeypatch):
+    """`record_fire.sh`'s escape fallback must not land somewhere else.
+
+    Its fast path appends the row with a shell redirect, so a session id that
+    happens to need real JSON escaping would otherwise write to the counter
+    file while the same hook's other fires wrote rows.
+    """
+    out = tmp_path / "fire-events.jsonl"
+    monkeypatch.setenv("PRAXIS_FIRE_TELEMETRY_FILE", str(out))
+    monkeypatch.delenv("PRAXIS_FIRE_TELEMETRY_DISABLE", raising=False)
+    assert fl.record_session_fire(
+        "shell-hook", "completion-verify", "pass", 'weird "sess" id', "",
+        fold_pass=False,
+    ) is True
+    rows = [json.loads(line) for line in out.read_text().splitlines() if line.strip()]
+    assert len(rows) == 1
+    assert rows[0]["session_id"] == 'weird "sess" id'
+    assert rows[0]["decision"] == "pass" and "count" not in rows[0]
+    assert _pass_records('weird "sess" id') == []
 
 
-def test_advise_ignored_pass_after_advise_is_heeded_not_ignored():
-    """A 'pass' after 'advise' means the hook stopped flagging — the call
-    changed enough to satisfy it. Must NOT be counted as ignored (codex
-    review finding, praxis PR): counting pass as ignored inflates the rate
-    on the exact case the metric exists to distinguish from real recurrence."""
-    events = [
-        {"hook": "h", "session_id": "s1", "decision": "advise", "timestamp": "2026-06-26T00:00:00+00:00"},
-        {"hook": "h", "session_id": "s1", "decision": "pass", "timestamp": "2026-06-26T00:00:10+00:00"},
-    ]
-    result = cli.compute_advise_ignored(events)
-    row = result["h"]
-    assert row["observed"] == 1
-    assert row["ignored"] == 0
-    assert row["rate"] == 0.0
-
-
-def test_advise_ignored_skip_is_not_an_outcome():
-    """issue #1167 / PR #1195 review: a budget-skip after an advise means the
-    hook never EVALUATED the next call — it is not evidence the advisory was
-    heeded. Skips are dropped from the stream: advise → skip → advise still
-    scores as ignored (the condition recurred at the next real evaluation),
-    and advise → skip alone stays right-censored."""
-    events = [
-        {"hook": "h", "session_id": "s1", "decision": "advise", "timestamp": "2026-06-26T00:00:00+00:00"},
-        {"hook": "h", "session_id": "s1", "decision": "skip", "timestamp": "2026-06-26T00:00:10+00:00"},
-        {"hook": "h", "session_id": "s1", "decision": "advise", "timestamp": "2026-06-26T00:00:20+00:00"},
-        {"hook": "g", "session_id": "s1", "decision": "advise", "timestamp": "2026-06-26T00:00:00+00:00"},
-        {"hook": "g", "session_id": "s1", "decision": "skip", "timestamp": "2026-06-26T00:00:10+00:00"},
-    ]
-    result = cli.compute_advise_ignored(events)
-    assert result["h"]["observed"] == 1
-    assert result["h"]["ignored"] == 1  # recurred at the next REAL evaluation
-    assert result["g"]["advise_fires"] == 1
-    assert result["g"]["observed"] == 0  # skip is not a follow-up: censored
-    assert result["g"]["rate"] is None
-
-
-def test_advise_ignored_excludes_partial_rich_stop_hook_when_scoped():
-    """issue #847: a single-event-rich Stop hook records only escalations —
-    its silent passes never reach the rich stream, so advise, advise (the
-    intervening heeded pass invisible) would mis-score as ignored=100%. When a
-    full-rich roster is supplied, the partial-stream hook is excluded entirely
-    while a genuine full-rich hook is still scored."""
-    events = [
-        # partial-rich Stop hook: two advises, the heeded pass between them is
-        # never recorded rich, so leaving it in would read as ignored.
-        {"hook": "merge-state-claim-gate", "session_id": "s1", "decision": "advise", "timestamp": "2026-06-26T00:00:00+00:00"},
-        {"hook": "merge-state-claim-gate", "session_id": "s1", "decision": "advise", "timestamp": "2026-06-26T00:00:20+00:00"},
-        # full-rich Bash-group hook: advise then pass (heeded) — still scored.
-        {"hook": "destructive-bash-guard", "session_id": "s1", "decision": "advise", "timestamp": "2026-06-26T00:00:00+00:00"},
-        {"hook": "destructive-bash-guard", "session_id": "s1", "decision": "pass", "timestamp": "2026-06-26T00:00:10+00:00"},
-    ]
-    scoped = cli.compute_advise_ignored(events, {"destructive-bash-guard"})
-    assert "merge-state-claim-gate" not in scoped  # partial stream — excluded
-    assert scoped["destructive-bash-guard"]["observed"] == 1
-    assert scoped["destructive-bash-guard"]["ignored"] == 0  # pass = heeded
-
-    # None (roster unreadable) falls back to legacy unscoped behavior — the
-    # partial-rich hook reappears and its advise, advise reads as ignored.
-    legacy = cli.compute_advise_ignored(events)
-    assert legacy["merge-state-claim-gate"]["ignored"] == 1
+def test_fire_count_treats_a_malformed_count_as_one():
+    for bad in ({"count": "12"}, {"count": -3}, {"count": True}, {}):
+        assert cli.fire_count(bad) == 1
 
 
 # ---------------------------------------------------------------------------
@@ -1405,6 +1484,7 @@ def test_fire_rate_report_shows_nonzero_reclarification_loop_signal(tmp_path, mo
         "askuserquestion-loop-signal", "postuse-correction", "pass",
         "s-reclarify", "AskUserQuestion",
     )
+    fl.flush_pass_counts()  # a pass is counted, not written as a row (#1238)
 
     buf = io.StringIO()
     with redirect_stdout(buf):
@@ -1680,9 +1760,7 @@ def test_fire_rate_report_includes_remaining_scope_sections(tmp_path, monkeypatc
     report = buf.getvalue()
 
     assert rc == 0
-    assert "Advise-Ignored Detail" in report
     assert "destructive-bash-guard" in report
-    assert "100%" in report  # both advise fires ignored (no escalation)
     assert "Bypass Attribution" in report
     assert "Outcome Proxy" in report
     assert "s1" in report and "1" in report  # strike_count surfaced
@@ -1718,8 +1796,14 @@ def test_dev_checkout_diverts_off_the_real_ledger(monkeypatch):
 
 
 def test_installed_plugin_still_uses_the_real_ledger(monkeypatch):
-    """No checkout above the module → unchanged production behaviour."""
+    """No checkout above the module → unchanged production behaviour.
+
+    `tests/conftest.py` roots PRAXIS_HOME per test, so the real ledger is only
+    reached with the variable removed; the #1340 section below covers the
+    relocated case.
+    """
     monkeypatch.delenv("PRAXIS_FIRE_TELEMETRY_FILE", raising=False)
+    monkeypatch.delenv("PRAXIS_HOME", raising=False)
     monkeypatch.setattr(fl, "_checkout_root", lambda: None)
     resolved = fl.resolve_path()
     assert resolved.parent == Path.home() / ".praxis" / "telemetry"
@@ -1780,7 +1864,16 @@ def test_direct_shell_test_run_does_not_touch_the_real_ledger(tmp_path, monkeypa
     assert session_id not in _tail(real_file, real_offset), (
         "a hook run from the checkout appended this invocation to the real ledger"
     )
-    assert session_id in _tail(dev_file, dev_offset), (
+    # The group's members overwhelmingly `pass`, and a pass lands in the
+    # session's counter file rather than the events JSONL (#1238) — so the dev
+    # side is proven by whichever of the two carries this invocation.
+    # The counter filename carries a digest of the session id, so glob rather
+    # than rebuild it — this test asserts on the ledger root, not on the name.
+    dev_counts = sorted(dev_file.parent.glob(f"fire-counts-{today}.*.jsonl"))
+    dev_written = _tail(dev_file, dev_offset) + "".join(
+        path.read_text(encoding="utf-8", errors="replace") for path in dev_counts
+    )
+    assert session_id in dev_written, (
         "the dev ledger did not receive this invocation — telemetry silently off?"
     )
 
@@ -1808,7 +1901,10 @@ def test_install_layout_under_a_git_ancestor_is_not_a_checkout(tmp_path, monkeyp
     assert mod._checkout_root() is None, "install layout misread as a checkout"
 
     monkeypatch.delenv("PRAXIS_FIRE_TELEMETRY_FILE", raising=False)
-    assert mod.resolve_telemetry_dir() == Path.home() / ".praxis" / "telemetry"
+    # The production root — conftest relocates it per test via PRAXIS_HOME
+    # (#1340); the point here is that it is not a dev ledger.
+    assert mod.resolve_telemetry_dir() == Path(os.environ["PRAXIS_HOME"]) / "telemetry"
+    assert mod.resolve_telemetry_dir().parent.name != fl.DEV_LEDGER_DIRNAME
 
 
 def test_bypass_and_fire_writers_share_one_directory():
@@ -1818,6 +1914,108 @@ def test_bypass_and_fire_writers_share_one_directory():
         _REPO / "hooks" / "postuse-correction" / "bypass-telemetry" / "impl.py",
     )
     assert bypass.resolve_telemetry_path().parent == fl.resolve_telemetry_dir()
+
+
+# ---------------------------------------------------------------------------
+# PRAXIS_HOME relocation (issue #1340)
+#
+# PRIVACY.md lists PRAXIS_HOME as the override for ~/.praxis/telemetry, and
+# every other runtime root followed it; the ledger alone kept defaulting to
+# Path.home()/.praxis/telemetry, which scripts/run-tests.sh papered over with
+# a suite-wide PRAXIS_FIRE_TELEMETRY_FILE (#849). The resolution now goes
+# through _paths.praxis_home(), with the override and the dev-checkout branch
+# still ahead of it.
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_telemetry_dir_honours_praxis_home(tmp_path, monkeypatch):
+    monkeypatch.setattr(fl, "_checkout_root", lambda: None)
+    monkeypatch.setenv("PRAXIS_HOME", str(tmp_path / "relocated"))
+    assert fl.resolve_telemetry_dir() == tmp_path / "relocated" / "telemetry"
+
+
+def test_resolve_telemetry_dir_expands_a_tilde_praxis_home(tmp_path, monkeypatch):
+    """A quoted PRAXIS_HOME=~/x reaches the process literally; _paths expands it."""
+    monkeypatch.setattr(fl, "_checkout_root", lambda: None)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("PRAXIS_HOME", "~/relocated")
+    assert fl.resolve_telemetry_dir() == tmp_path / "relocated" / "telemetry"
+
+
+def test_resolve_telemetry_dir_default_when_praxis_home_is_unset_or_empty(monkeypatch):
+    """Unset and empty both mean ~/.praxis, exactly as before #1340."""
+    monkeypatch.setattr(fl, "_checkout_root", lambda: None)
+    monkeypatch.delenv("PRAXIS_HOME", raising=False)
+    assert fl.resolve_telemetry_dir() == Path.home() / ".praxis" / "telemetry"
+    monkeypatch.setenv("PRAXIS_HOME", "")
+    assert fl.resolve_telemetry_dir() == Path.home() / ".praxis" / "telemetry"
+
+
+def test_resolve_path_precedence_is_override_then_checkout_then_praxis_home(tmp_path, monkeypatch):
+    monkeypatch.setenv("PRAXIS_HOME", str(tmp_path / "relocated"))
+    monkeypatch.delenv("PRAXIS_FIRE_TELEMETRY_FILE", raising=False)
+    checkout = tmp_path / "checkout"
+    monkeypatch.setattr(fl, "_checkout_root", lambda: checkout)
+    assert fl.resolve_path().parent == checkout / fl.DEV_LEDGER_DIRNAME
+    monkeypatch.setenv("PRAXIS_FIRE_TELEMETRY_FILE", str(tmp_path / "explicit.jsonl"))
+    assert fl.resolve_path() == tmp_path / "explicit.jsonl"
+
+
+def test_praxis_home_rule_survives_a_missing_paths_module(tmp_path, monkeypatch):
+    """The fail-open fallback restates the rule; it must not revert to ~/.praxis.
+
+    record_fire.sh's escape fallback imports _fire_ledger out of a probe _lib
+    holding nothing else, so `_paths` (and the `_state_lock` it imports) can
+    be absent. A None entry in sys.modules makes the import raise the way an
+    absent file would.
+    """
+    monkeypatch.setitem(sys.modules, "_paths", None)
+    monkeypatch.setattr(fl, "_checkout_root", lambda: None)
+    monkeypatch.setenv("PRAXIS_HOME", str(tmp_path / "relocated"))
+    assert fl.resolve_telemetry_dir() == tmp_path / "relocated" / "telemetry"
+    monkeypatch.delenv("PRAXIS_HOME")
+    assert fl.resolve_telemetry_dir() == Path.home() / ".praxis" / "telemetry"
+
+
+def test_record_lands_under_praxis_home_outside_a_checkout(tmp_path):
+    """End to end in a subprocess: a copy of _lib with no .git two levels up,
+    no file override, PRAXIS_HOME set → today's file under $PRAXIS_HOME/telemetry
+    and nothing under HOME/.praxis."""
+    lib = tmp_path / "pkg" / "hooks" / "_lib"
+    lib.mkdir(parents=True)
+    for name in ("_fire_ledger.py", "_paths.py", "_state_lock.py"):
+        (lib / name).write_bytes((_REPO / "hooks" / "_lib" / name).read_bytes())
+    home = tmp_path / "relocated"
+    env = {k: v for k, v in os.environ.items() if k != "PRAXIS_FIRE_TELEMETRY_FILE"}
+    env["PRAXIS_HOME"] = str(home)
+    env["HOME"] = str(tmp_path / "home")
+    code = (
+        "import sys; sys.path.insert(0, sys.argv[1]); import _fire_ledger as f; "
+        "assert f._checkout_root() is None; "
+        "print(f.record_session_fire('h1340', 'r', 'pass', 'sess-1340', 'Bash'))"
+    )
+    proc = subprocess.run([sys.executable, "-c", code, str(lib)], env=env,
+                          capture_output=True, text=True, check=False)
+    assert proc.returncode == 0 and proc.stdout.strip() == "True", proc.stderr
+    today = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d")
+    # A `pass` is counted, not appended, so the relocated root is proved by the
+    # counter file the subprocess flushed at exit.
+    ledger = home / "telemetry" / f"fire-counts-{today}.{fl._session_token('sess-1340')}.jsonl"
+    recs = [json.loads(line) for line in ledger.read_text().splitlines() if line.strip()]
+    assert [r["session_id"] for r in recs] == ["sess-1340"]
+    assert not (tmp_path / "home" / ".praxis").exists()
+
+
+def test_bypass_review_default_dir_follows_praxis_home(tmp_path, monkeypatch):
+    """The reader resolves the same root as the writers, through _paths."""
+    monkeypatch.setenv("PRAXIS_HOME", str(tmp_path / "relocated"))
+    assert cli.default_telemetry_dir() == tmp_path / "relocated" / "telemetry"
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("PRAXIS_HOME", "~/relocated")
+    assert cli.default_telemetry_dir() == tmp_path / "relocated" / "telemetry"
+    monkeypatch.delenv("PRAXIS_HOME")
+    assert cli.default_telemetry_dir() == Path.home() / ".praxis" / "telemetry"
+    assert cli._praxis_paths() is not None, "resolver did not load from the checkout"
 
 
 # ---------------------------------------------------------------------------
@@ -1836,6 +2034,28 @@ def _dated(directory: Path, prefix: str, days_ago: int) -> Path:
     p = directory / f"{prefix}{stamp}.jsonl"
     p.write_text('{"hook": "x"}\n')
     return p
+
+
+def test_prune_sweeps_an_orphaned_counter_lock(tmp_path):
+    """A counter file's `flock` sibling ages out with the file it guarded.
+
+    Nothing else can remove it: the counter file itself is renamed aside at
+    the day rollover and compressed, which orphans the lock, and the lock's
+    name is not one the compressor understands. Left unswept it is one file
+    per session per day, forever.
+    """
+    stale_counts = _dated(tmp_path, "fire-counts-", 40)
+    stale_lock = stale_counts.with_name(stale_counts.name + ".lock")
+    stale_lock.write_text("")
+    fresh_lock = _dated(tmp_path, "fire-counts-", 1).with_name(
+        _dated(tmp_path, "fire-counts-", 1).name + ".lock"
+    )
+    fresh_lock.write_text("")
+
+    fl.prune_telemetry(tmp_path, days=30)
+
+    assert not stale_counts.exists() and not stale_lock.exists()
+    assert fresh_lock.exists()
 
 
 def test_prune_removes_only_files_past_the_window(tmp_path):
@@ -1889,6 +2109,28 @@ def test_write_sweeps_on_the_day_rollover(tmp_path, monkeypatch):
     survivor = _dated(tmp_path, "fire-events-", 90)
     fl.record_group_fires([("r", "h", Path("x"))], [(0, "", "")], _payload())
     assert survivor.exists()           # today's file existed — no second sweep
+
+
+def test_flushing_folded_passes_sweeps_on_the_day_rollover(tmp_path, monkeypatch):
+    """A day that has written nothing but folded passes still gets its sweep.
+
+    `record_standalone_fire` returns straight after buffering a pass, so the
+    sweep inside `_atomic_append` is never reached — without a second trigger
+    the day's housekeeping waits for the first non-pass write, which on a
+    quiet day may never come.
+    """
+    out = tmp_path / "fire-events-2099-01-01.jsonl"
+    monkeypatch.setenv("PRAXIS_FIRE_TELEMETRY_FILE", str(out))
+    monkeypatch.delenv("PRAXIS_FIRE_TELEMETRY_DISABLE", raising=False)
+    monkeypatch.setenv("PRAXIS_TELEMETRY_RETENTION_DAYS", "30")
+    stale = _dated(tmp_path, "fire-events-", 90)
+
+    fl.record_standalone_fire("h2099", "preflight-gate", 0)
+    assert not out.exists()   # a coarse pass writes no row at all
+    assert stale.exists()     # ...so nothing has swept yet
+
+    fl.flush_pass_counts()
+    assert not stale.exists()
 
 
 def test_count_session_fires_prefilter_matches_the_parse(tmp_path, monkeypatch):

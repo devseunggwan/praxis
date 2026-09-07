@@ -14,7 +14,7 @@ paths on protected branches:
 
 ### Why this exists
 
-The global `~/.claude/CLAUDE.md` rule "Issue-Driven Worktree Workflow (MANDATORY)"
+The *Issue-Driven Worktree Workflow* rule ([`ETHOS.md` → Rules praxis carries](../../../ETHOS.md#rules-praxis-carries))
 requires every code change to live in a dedicated issue + branch + worktree.
 Existing hooks (e.g. `block-pr-without-caller-evidence`) catch violations at
 PR creation time — but the window between "first file edit" and "PR creation"

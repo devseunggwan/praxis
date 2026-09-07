@@ -237,11 +237,12 @@ mkdir -p "$SYM_ROOT/r1/_lib" "$SYM_ROOT/r2/.git" "$SYM_ROOT/r2/role/name" "$SYM_
 cp "$ROOT_DIR/hooks/_lib/record_fire.sh" "$SYM_ROOT/r1/_lib/"
 ln -s "$SYM_ROOT/r1/_lib" "$SYM_ROOT/r2/_lib"
 cp "$PROBE_ROOT/role/name/impl.sh" "$SYM_ROOT/r2/role/name/impl.sh"
-# Empty override: this case exercises DEFAULT path resolution, and
-# scripts/run-tests.sh exports PRAXIS_FIRE_TELEMETRY_FILE suite-wide — an
-# inherited override would swallow the record this assertion looks for.
-# Empty means unset to both writers (Python strips then falsy-checks).
-HOME="$SYM_ROOT/home" PRAXIS_FIRE_TELEMETRY_FILE='' sh "$SYM_ROOT/r2/role/name/impl.sh"
+# Empty overrides: this case exercises DEFAULT path resolution, and
+# scripts/run-tests.sh exports PRAXIS_HOME suite-wide — since #1340 the
+# default ledger sits under it, so an inherited value would relocate the
+# record this assertion looks for (as an inherited PRAXIS_FIRE_TELEMETRY_FILE
+# would swallow it). Empty means unset to both writers.
+HOME="$SYM_ROOT/home" PRAXIS_HOME='' PRAXIS_FIRE_TELEMETRY_FILE='' sh "$SYM_ROOT/r2/role/name/impl.sh"
 SYM_TODAY=$(date -u +%Y-%m-%d)
 SYM_REAL="$SYM_ROOT/home/.praxis/telemetry/fire-events-$SYM_TODAY.jsonl"
 if [ -s "$SYM_REAL" ] && [ ! -e "$SYM_ROOT/r2/.praxis-dev-telemetry" ]; then
@@ -251,6 +252,52 @@ else
     "real=$(ls "$SYM_REAL" 2>&1) dev=$(ls "$SYM_ROOT/r2/.praxis-dev-telemetry" 2>&1)"
 fi
 rm -rf "$SYM_ROOT"
+
+# PRAXIS_HOME relocation (issue #1340): the real-ledger branch is
+# $PRAXIS_HOME/telemetry — the rule _paths.sh praxis_home() states (one
+# trailing slash stripped, a leading tilde expanded against HOME, empty means
+# unset), restated inline in record_fire.sh because this file is copied on
+# its own into probe trees like this one. Non-checkout layout: no .git two
+# levels above _lib, so the dev-checkout branch cannot be what diverts the
+# record away from HOME/.praxis.
+PH_ROOT="$(mktemp -d)" || { echo "FATAL: mktemp -d failed — no writable temp dir" >&2; exit 1; }
+mkdir -p "$PH_ROOT/pkg/hooks/_lib" "$PH_ROOT/pkg/hooks/role/name" "$PH_ROOT/home"
+cp "$ROOT_DIR/hooks/_lib/record_fire.sh" "$PH_ROOT/pkg/hooks/_lib/"
+cp "$PROBE_ROOT/role/name/impl.sh" "$PH_ROOT/pkg/hooks/role/name/impl.sh"
+PH_TODAY=$(date -u +%Y-%m-%d)
+env -u PRAXIS_FIRE_TELEMETRY_FILE HOME="$PH_ROOT/home" PRAXIS_HOME="$PH_ROOT/relocated/" \
+  sh "$PH_ROOT/pkg/hooks/role/name/impl.sh"
+assert_record "$PH_ROOT/relocated/telemetry/fire-events-$PH_TODAY.jsonl" \
+  "PRAXIS_HOME relocates the default ledger (trailing slash stripped)" probe-hook pass sess-probe
+if [ -e "$PH_ROOT/home/.praxis" ]; then
+  ko "PRAXIS_HOME relocation writes nothing under HOME/.praxis" "$(find "$PH_ROOT/home" -type f)"
+else
+  ok "PRAXIS_HOME relocation writes nothing under HOME/.praxis"
+fi
+# A quoted PRAXIS_HOME=~/x arrives literally; expanded against HOME as
+# _paths.sh does (and _paths.py via expanduser), so both writers agree.
+env -u PRAXIS_FIRE_TELEMETRY_FILE HOME="$PH_ROOT/home" PRAXIS_HOME='~/tilde-home' \
+  sh "$PH_ROOT/pkg/hooks/role/name/impl.sh"
+assert_record "$PH_ROOT/home/tilde-home/telemetry/fire-events-$PH_TODAY.jsonl" \
+  "tilde PRAXIS_HOME expands against HOME" probe-hook pass sess-probe
+# Tilde with HOME unset: _paths.py's expanduser consults the passwd database,
+# so the shell writer does too (same stub technique as the HOME-unset case
+# below). The bare tilde is the whole home directory.
+mkdir -p "$PH_ROOT/bin" "$PH_ROOT/pwhome"
+cat > "$PH_ROOT/bin/getent" <<EOF
+#!/bin/sh
+echo "stubuser:x:1000:1000:Stub User:$PH_ROOT/pwhome:/bin/sh"
+EOF
+cat > "$PH_ROOT/bin/dscl" <<EOF
+#!/bin/sh
+echo "NFSHomeDirectory: $PH_ROOT/pwhome"
+EOF
+chmod +x "$PH_ROOT/bin/getent" "$PH_ROOT/bin/dscl"
+env -u HOME -u PRAXIS_FIRE_TELEMETRY_FILE PATH="$PH_ROOT/bin:$PATH" PRAXIS_HOME='~' \
+  sh "$PH_ROOT/pkg/hooks/role/name/impl.sh"
+assert_record "$PH_ROOT/pwhome/telemetry/fire-events-$PH_TODAY.jsonl" \
+  "tilde PRAXIS_HOME with HOME unset expands against the passwd-db home" probe-hook pass sess-probe
+rm -rf "$PH_ROOT"
 
 # HOME-unset fallback (Codex review, PR #1207 round 2): with $HOME unset and
 # no `.git` marker at the checkout root, the pre-fix code built
@@ -273,7 +320,10 @@ echo "stubuser:x:1000:1000:Stub User:$HOMEFB_ROOT/fakehome:/bin/sh"
 EOF
 chmod +x "$HOMEFB_ROOT/bin/dscl" "$HOMEFB_ROOT/bin/getent"
 HOMEFB_TODAY=$(date -u +%Y-%m-%d)
-env -u HOME -u PRAXIS_FIRE_TELEMETRY_FILE PATH="$HOMEFB_ROOT/bin:$PATH" \
+# PRAXIS_HOME is taken out too: the default under test is HOME/.praxis, and
+# scripts/run-tests.sh exports a throwaway PRAXIS_HOME that would relocate it
+# (#1340).
+env -u HOME -u PRAXIS_HOME -u PRAXIS_FIRE_TELEMETRY_FILE PATH="$HOMEFB_ROOT/bin:$PATH" \
   PRAXIS_LIB_DIR="$HOMEFB_ROOT/pkgroot/hooks/_lib" sh -c '
     . "$1/pkgroot/hooks/_lib/record_fire.sh"
     praxis_record_fire homefb-hook homefb-role pass sess-homefb ""
@@ -358,6 +408,12 @@ assert_record "$LEDGER" "retrospect-mix-check records pass" retrospect-mix-check
 
 # codex-review-route — /codex:review advises.
 #
+# Ported from impl.sh to impl.py in #1304, so it no longer goes through
+# record_fire.sh: the advising path calls `_fire_ledger.record_session_fire`
+# directly and suppresses the coarse duplicate. The assertion is unchanged —
+# exactly one RICH advise record keyed to the payload's session — which is
+# what pins the port to the ledger shape the shell version wrote.
+#
 # The advisory fires on >= 2 non-bare worktrees, so it must run against a
 # repository this test builds rather than whichever checkout happens to host
 # the run: a developer machine mid-session has many worktrees and a CI runner
@@ -372,7 +428,7 @@ git -C "$CR_REPO" worktree add -q -b second "$TMP/cr-wt2"
 LEDGER="$TMP/cr-led.jsonl"
 printf '{"prompt":"/codex:review","session_id":"sess-cr"}' \
   | (cd "$CR_REPO" && PRAXIS_FIRE_TELEMETRY_FILE="$LEDGER" \
-      bash "$ROOT_DIR/hooks/advisory-nudge/codex-review-route/impl.sh") >/dev/null
+      python3 "$ROOT_DIR/hooks/advisory-nudge/codex-review-route/impl.py") >/dev/null
 assert_record "$LEDGER" "codex-review-route records advise" codex-review-route advise sess-cr
 
 # An absent session_id must reach the ledger as "", never as the "unknown"

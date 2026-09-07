@@ -193,6 +193,22 @@ run_case "/private/tmp/.env (macOS realpath)" silent Write "/private/tmp/.env"
 run_case "/private/tmp/cert.pem (macOS realpath)" silent Write "/private/tmp/cert.pem"
 run_case ".omc/plans/sketch.env" silent Write "/proj/.omc/plans/sketch.env"
 run_case ".claude/projects/X/log.env" silent Write "/proj/.claude/projects/X/log.env"
+run_case ".omc/plans (relative)" silent Write ".omc/plans/sketch.env"
+
+# === issue #1362 — the scratch exemption is for absolute /tmp only =========
+#
+# _is_planning_artifact used to write "/" + path.lstrip("/") before the prefix
+# test, so every relative `tmp/` path took the scratch exemption, and it
+# compared the prefix before collapsing `..`, so a path could start with
+# `/tmp/` and resolve into the project. Both are advisory-bearing paths.
+
+run_case "relative tmp/.env is a project path" advisory Write "tmp/.env"
+run_case "relative tmp/ nested" advisory Write "tmp/config/credentials"
+run_case "relative private/tmp/.env" advisory Write "private/tmp/.env"
+run_case "/tmp/.. escapes scratch" advisory Write "/tmp/../proj/.env"
+run_case "/private/tmp/.. escapes scratch" advisory Write "/private/tmp/../proj/.env"
+run_case "fragment .. escapes planning" advisory Write "/proj/.omc/plans/../../.env"
+run_case "/tmp/./ stays scratch" silent Write "/tmp/./sketch.env"
 
 # === SILENT — self-edit (CLAUDE_PLUGIN_ROOT) ==============================
 

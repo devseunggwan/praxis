@@ -32,9 +32,9 @@ Two proposals were refuted by the files' own bodies — both carried an explicit
 merge had already been considered and rejected. 17 of 21 rows had no executed
 evidence behind a label that said `근거 확정`.
 
-The prompt layer was fully loaded and still failed. `~/.claude/CLAUDE.md`
-§Information Accuracy Layer 3 **Author-exempt verification trap** describes
-this case verbatim:
+The prompt layer was fully loaded and still failed. The *Information
+Accuracy* rule's Layer 3, **Author-exempt verification trap**
+([`ETHOS.md` → Rules praxis carries](../../../ETHOS.md#rules-praxis-carries)), describes this case verbatim:
 
 > applies to *own-authored content* (mapping tables, example blocks, default
 > values, identifiers…). Plausibility from naming pattern, sibling-repo

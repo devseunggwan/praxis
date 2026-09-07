@@ -105,14 +105,25 @@ def _write_delay_fixture(tmp_path: Path) -> Path:
 
 
 def _ledger_decisions(path: Path) -> dict[str, str]:
-    """Parse ``{hook: decision}`` from a JSONL fire-ledger file."""
+    """Parse ``{hook: decision}`` from a fire ledger and its `pass` counters.
+
+    Both files, because since issue #1238 a `pass` is not a row in ``path`` at
+    all — it is counted into a per-session ``fire-counts-*.jsonl`` sibling. A
+    reader that opens only the events file sees a hook that passed as a hook
+    that never fired, which is exactly the distinction this test is making.
+    """
+    _fire_ledger.flush_pass_counts()
     result: dict[str, str] = {}
-    for line in path.read_text().splitlines():
-        try:
-            rec = json.loads(line)
-        except json.JSONDecodeError:
+    sources = [path, *sorted(path.parent.glob("fire-counts-*.jsonl"))]
+    for source in sources:
+        if not source.exists():
             continue
-        result[rec["hook"]] = rec["decision"]
+        for line in source.read_text().splitlines():
+            try:
+                rec = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            result[rec["hook"]] = rec["decision"]
     return result
 
 

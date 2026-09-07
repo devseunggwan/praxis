@@ -122,6 +122,20 @@ run_case "gh issue create + no prior search (block)" \
   "block:no-search" \
   "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"gh issue create --repo acme/repo --title 'feat(provider): add zeta brands lookup pattern'\"},\"transcript_path\":\"$TX_EMPTY\"}"
 
+# The gate's two fail-open answers must stay distinct (#1279): a transcript
+# that cannot be read is "cannot enforce" (silent), a zero-byte one is a real
+# "no search ran" (block). `tail_lines` answers [] for both; the gate asks
+# for the strict form so the first never reaches the block.
+TX_ZERO="$TMPDIR/tx-zero.jsonl"
+: > "$TX_ZERO"
+run_case "gh issue create + missing transcript file (silent — cannot enforce)" \
+  "silent" \
+  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"gh issue create --repo acme/repo --title 'feat(provider): add zeta brands lookup pattern'\"},\"transcript_path\":\"$TMPDIR/does-not-exist.jsonl\"}"
+
+run_case "gh issue create + zero-byte transcript (block)" \
+  "block:no-search" \
+  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"gh issue create --repo acme/repo --title 'feat(provider): add zeta brands lookup pattern'\"},\"transcript_path\":\"$TX_ZERO\"}"
+
 run_case "gh issue create + prior search but no keyword overlap (block)" \
   "block:no-overlap" \
   "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"gh issue create --repo acme/repo --title 'feat(provider): add zeta brands lookup pattern'\"},\"transcript_path\":\"$TX_NO_OVERLAP\"}"

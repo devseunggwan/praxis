@@ -163,6 +163,13 @@ tests/
     fixtures/
 ```
 
+> **Amendment (issue #1305, 2026-09-05).** `_lib/_hook_utils.py` was split
+> into `_shell_tokenize.py`, `_subst.py`, `_compound.py`, and `_roles.py`.
+> It stays in place as a re-export shim, so the "unchanged API" promise in
+> the tree above, and in the list of what this ADR leaves unchanged, still
+> holds for every `from _hook_utils import …` consumer; new code imports
+> from the defining sub-module.
+
 Four structural changes combine into a single coherent end state:
 
 ### 2.1 A — Role-based subdirectories under `hooks/`
@@ -458,7 +465,7 @@ costs in §1.2 will compound as the hook count grows past 50.
 Each phase ships as a separate PR. No phase merges until the previous one
 has soaked in `dev` for at least one session without regressions.
 
-### 5.1 Phase 1 — Low-risk cleanup (issue #TBD-1)
+### 5.1 Phase 1 — Low-risk cleanup (issue #421, PR #424)
 
 **Scope** ([D] + a slice of [C]):
 
@@ -479,7 +486,7 @@ has soaked in `dev` for at least one session without regressions.
 **Rollback**: revert the PR. Source wrappers are untouched, so the runtime
 is identical.
 
-### 5.2 Phase 2 — Wrapper elimination + role-based directories (issue #TBD-2)
+### 5.2 Phase 2 — Wrapper elimination + role-based directories (issue #422)
 
 **Scope** ([A] + remainder of [C]):
 
@@ -514,7 +521,7 @@ is identical.
 
 **Rollback**: revert the PR. Phase 1 state continues to work.
 
-### 5.3 Phase 3 — Per-hook spec collocation + docs cleanup (issue #TBD-3)
+### 5.3 Phase 3 — Per-hook spec collocation + docs cleanup (issue #423, PR #435)
 
 **Scope** ([B]):
 
@@ -582,15 +589,16 @@ After one full release cycle following Phase 3, delete the 39
 | 2026-05-26 | Phase 1 merged (#421 / PR #424) | praxis maintainers |
 | 2026-05-26 | Phase 2 merged (#422) — role dirs + per-hook folders + `manifest.json` + wrapper drop | praxis maintainers |
 | 2026-05-27 | Phase 3 merged (#423 / PR #435) — spec collocation + redirect stubs + check-manifest invariant #10 | praxis maintainers |
-| TBD | Status → Accepted (post-Phase-3 soak) | — |
+| 2026-09-05 | Post-Phase-3 soak row closed: the layout has been unchanged since Phase 3 and Status stays Accepted | praxis maintainers |
 
 ---
 
 ## 8. References
 
 - [`docs/hook/INDEX.md`](../hook/INDEX.md) — current four-role taxonomy
-- [`ARCHITECTURE.md → Hook index`](../../ARCHITECTURE.md#hook-index) — flat
-  hook table
+- [`ARCHITECTURE.md → Hook index`](../../ARCHITECTURE.md#hook-index) — pointer
+  to the per-hook index and the generated operating matrix (the flat hook
+  table it once held was retired in #1306)
 - [`DESIGN.md`](../../DESIGN.md) — hook design contracts (structural
   tokenization, session_id keying, compound-bash cascade)
 - [`ETHOS.md`](../../ETHOS.md) — why hooks exist; fail-open invariant

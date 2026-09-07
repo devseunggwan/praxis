@@ -339,6 +339,42 @@ def _mutating_description(argv: list[str]) -> str | None:
     return None
 
 
+# Irreversible-mutation enum for the `&&`-gating predicate (issue #1271).
+# Mirrors `side-effect-scan`'s ASK tier rather than reusing
+# `_GIT_MUTATING_SUB` / `_GH_MUTATING_VERBS` above, and the difference is
+# the whole point: those cover every mutation, while this predicate's
+# ground is that the gated command cannot be taken back. `git commit` /
+# `merge` / `rebase` / `cherry-pick` / `revert` write only to this
+# checkout's `.git` and are recoverable from the same shell, so a masked
+# `git status | tail -1 && git commit ...` is noise, not a finding.
+# `kubectl` sits in that ASK tier too but has no detector in this hook —
+# see spec.md "Known limitations".
+_IRREVERSIBLE_GIT_SUB = frozenset({"push"})
+
+_IRREVERSIBLE_GH_VERBS: dict[str, frozenset[str]] = {
+    "pr": frozenset({"merge", "create"}),
+    "workflow": frozenset({"run"}),
+}
+
+
+def _irreversible_description(argv: list[str]) -> str | None:
+    """Return a short description if argv publishes state another party can
+    already be reading, else None."""
+    argv = _recover_command_argv(argv)
+    sub = _git_subcommand(argv)
+    if sub is not None and sub in _IRREVERSIBLE_GIT_SUB:
+        return f"git {sub}"
+    method = _gh_api_mutating_method(argv)
+    if method is not None:
+        return f"gh api --method {method}"
+    gh = _gh_object_verb(argv)
+    if gh is not None:
+        obj, verb = gh
+        if obj in _IRREVERSIBLE_GH_VERBS and verb in _IRREVERSIBLE_GH_VERBS[obj]:
+            return f"gh {obj} {verb}"
+    return None
+
+
 def _is_truncating_sink(argv: list[str]) -> bool:
     stripped = strip_prefix(argv)
     if not stripped:
@@ -425,15 +461,23 @@ def _heredoc_open_marker(argv: list[str]) -> str | None:
     return None
 
 
-def _pipe_chains(tokens: list[str]) -> list[list[list[str]]]:
-    """Split `tokens` into pipe chains, skipping heredoc body segments.
+def _command_units(tokens: list[str]) -> list[tuple[list[list[str]], str | None]]:
+    """Split `tokens` into pipeline units, each paired with the shell
+    separator that terminated it (`None` for the last unit).
 
-    A chain is a list of argv segments connected consecutively by `|`.
-    Chains of length < 2 are dropped. Any segment that is a heredoc body
-    line (between an opener like `cat <<EOF` and its matching `EOF`
-    marker segment) is excluded from chain-building entirely — it never
-    starts, extends, or ends a chain — so example text inside a heredoc
-    body cannot be mistaken for a live pipeline.
+    A unit is the list of argv segments connected consecutively by `|` —
+    a single-segment unit is a command with no pipe. Any segment that is a
+    heredoc body line (between an opener like `cat <<EOF` and its matching
+    `EOF` marker segment) is excluded from unit-building entirely — it
+    never starts, extends, or ends a unit — so example text inside a
+    heredoc body cannot be mistaken for a live pipeline.
+
+    Two detectors consume this: `_pipe_chains` keeps only the multi-segment
+    units (a mutating command piped into a truncating sink, issue #788),
+    and `_masked_gating_advisory` needs the separators as well, because
+    what it looks for is a masked unit sitting on the LEFT of `&&` from an
+    irreversible one (issue #1271). Splitting once here is what keeps the
+    heredoc rule from being written twice.
     """
     # Re-split on shell separators ourselves (rather than reusing
     # iter_command_starts) because we need to know WHICH separator
@@ -453,13 +497,21 @@ def _pipe_chains(tokens: list[str]) -> list[list[list[str]]]:
             current.append(tok)
     raw_segments.append((current, None))
 
-    chains: list[list[list[str]]] = []
+    units: list[tuple[list[list[str]], str | None]] = []
     current_chain: list[list[str]] = []
 
-    def flush_chain() -> None:
+    def flush_chain(terminator: str | None) -> None:
+        """Close the unit being built, recording the separator that ended it.
+
+        `terminator` is the separator sitting between this unit's last
+        segment and whatever follows — `None` at end of input. It is the
+        field `_masked_gating_advisory` reads, so it must be the separator
+        BEFORE the segment that broke the pipe run, not that segment's own
+        trailing one.
+        """
         nonlocal current_chain
-        if len(current_chain) >= 2:
-            chains.append(current_chain)
+        if current_chain:
+            units.append((current_chain, terminator))
         current_chain = []
 
     heredoc_end: str | None = None
@@ -495,19 +547,24 @@ def _pipe_chains(tokens: list[str]) -> list[list[list[str]]]:
         opens = _heredoc_open_marker(argv)
         if opens is not None:
             heredoc_end = opens
-            flush_chain()
+            flush_chain(sep_before)
             sep_before = sep_after
             continue
 
         if sep_before in ("|", "|&") and current_chain:
             current_chain.append(argv)
         else:
-            flush_chain()
+            flush_chain(sep_before)
             current_chain = [argv]
         sep_before = sep_after
 
-    flush_chain()
-    return chains
+    flush_chain(None)
+    return units
+
+
+def _pipe_chains(tokens: list[str]) -> list[list[list[str]]]:
+    """Return only the multi-segment units — the pipe chains of issue #788."""
+    return [unit for unit, _ in _command_units(tokens) if len(unit) >= 2]
 
 
 def _advisory_text(chain: list[list[str]], mutating_desc: str) -> str:
@@ -532,6 +589,76 @@ def _advisory_text(chain: list[list[str]], mutating_desc: str) -> str:
         "  Reference: issue #788 (gen-2: `gh pr merge ... 2>&1 | tail -3`\n"
         "  masked a network-error exit)"
     )
+
+
+def _masked_gating_text(masked: list[list[str]], gated_desc: str) -> str:
+    binaries = []
+    for seg in masked:
+        stripped = strip_prefix(seg)
+        binaries.append(os.path.basename(stripped[0]) if stripped else "?")
+    masked_summary = " | ".join(binaries)
+    return (
+        "[pipefail-advisory] masked exit code gates an irreversible command\n"
+        "\n"
+        f"  Masked segment: {masked_summary}\n"
+        f"  Gated by `&&`: {gated_desc}\n"
+        "\n"
+        "  The left side of `&&` is a pipeline, so its exit status is the\n"
+        "  LAST command's — `tail`/`head`/`grep` return 0 even when the\n"
+        "  command upstream of them failed. The `&&` therefore fires on a\n"
+        "  precondition that was never actually checked.\n"
+        "\n"
+        "  Fix: run the left side as its own Bash call and read its result,\n"
+        "  or prepend `set -o pipefail;` so the pipeline reports the real\n"
+        "  exit code.\n"
+        "\n"
+        "  Reference: issue #1271 (`git switch main 2>&1 | tail -1 &&\n"
+        "  gh pr merge ...` merged even when the branch switch failed)"
+    )
+
+
+def _masked_gating_advisory(tokens: list[str]) -> str | None:
+    """Return advisory text when a pipeline whose exit code is masked sits on
+    the LEFT of `&&` from an irreversible command, else None.
+
+    The gap this closes (issue #1271): `pipefail-advisory`'s original
+    predicate needs the MUTATING command to be the piped one, and
+    `inspection-chain-advisory` is silent by spec on any `&&` chain that
+    mixes inspection with state change. A chain whose non-mutating segment
+    is piped and whose mutating segment is not therefore reaches neither.
+
+    Only `&&` runs are walked. `;` sequences do not gate the command that
+    follows them, so a masked exit code there changes nothing.
+
+    Every segment of a gated unit is inspected, not just its first: `&&` gates
+    the whole pipeline that follows it, so `… | tail -1 && echo x |
+    gh pr merge` puts the irreversible command downstream of a pipe while
+    leaving the gating relation exactly as it was.
+    """
+    units = _command_units(tokens)
+    run: list[list[list[str]]] = []
+
+    def scan(group: list[list[list[str]]]) -> str | None:
+        masked: list[list[str]] | None = None
+        for unit in group:
+            if masked is not None:
+                for segment in unit:
+                    desc = _irreversible_description(segment)
+                    if desc:
+                        return _masked_gating_text(masked, desc)
+            if masked is None and len(unit) >= 2 and _is_truncating_sink(unit[-1]):
+                masked = unit
+        return None
+
+    for unit, sep in units:
+        run.append(unit)
+        if sep == "&&":
+            continue
+        found = scan(run)
+        if found:
+            return found
+        run = []
+    return scan(run) if run else None
 
 
 def _scan_tokens_for_advisory(tokens: list[str]) -> str | None:
@@ -641,14 +768,25 @@ def main() -> int:
     if not tokens:
         return 0
 
+    tokens = _merge_fd_dup_redirects(tokens)
     advisory = _scan_tokens_for_advisory(tokens)
+    if advisory is None:
+        advisory = _masked_gating_advisory(tokens)
     if advisory is None:
         for tok in tokens:
             for body in _extract_substitution_bodies(tok):
                 inner_tokens = safe_tokenize(body)
                 if not inner_tokens:
                     continue
+                # Same three steps the outer command gets. A substitution body
+                # is a command list of its own, so an `&&` chain written inside
+                # one gates exactly as it would outside — what does not carry
+                # across the boundary is the substitution's own exit code, and
+                # that is a different case (see Known limitations in spec.md).
+                inner_tokens = _merge_fd_dup_redirects(inner_tokens)
                 advisory = _scan_tokens_for_advisory(inner_tokens)
+                if advisory is None:
+                    advisory = _masked_gating_advisory(inner_tokens)
                 if advisory:
                     break
             if advisory:

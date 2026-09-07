@@ -1,6 +1,8 @@
 ---
 name: strike
-description: Declare a rule violation in the current Claude Code session. Use ONLY when the user says "/strike", "/praxis:strike", "strike 1/2/3", "삼진", or explicitly asks to record a rule violation. Do NOT activate on colloquial uses like "strike a balance" or "strike that". Escalates — strike 1 warning, strike 2 forced review, strike 3 response block.
+description: Declare a rule violation in the current Claude Code session. Escalates — strike 1 warning, strike 2 forced review, strike 3 response block.
+when_to_use: Use ONLY when the user says "/strike", "/praxis:strike", "strike 1/2/3", "삼진", or explicitly asks to record a rule violation. Do NOT activate on colloquial uses like "strike a balance" or "strike that".
+disable-model-invocation: true
 ---
 
 # Praxis Strike
@@ -46,9 +48,9 @@ Record a single rule violation against the current session's strike counter.
 ## Reinforcement after the call
 
 - If the script output starts with `⚠️ Strike 1`, internalize the recorded reason and commit to stricter rule adherence for the rest of the session.
-- If the script output starts with `🔶 Strike 2`, **stop any in-flight work**, list the cumulative violations, identify the matching global `~/.claude/CLAUDE.md` section, re-read it, and state explicitly how you will avoid another strike before resuming.
+- If the script output starts with `🔶 Strike 2`, **stop any in-flight work**, list the cumulative violations, identify the rule that was broken (project `CLAUDE.md` / `AGENTS.md`, `ETHOS.md`, or the user's global `CLAUDE.md`), re-read it, and state explicitly how you will avoid another strike before resuming.
 - If the script output starts with `🔴 Strike 3`, recovery is a **two-step trust process**:
-  1. **Write the reflection** at the path the script printed — violations summary, root cause per violation tied to a specific global `~/.claude/CLAUDE.md` rule/section, and a concrete preventive checklist. The file must be non-empty or `/praxis:reset-strikes` will be refused.
+  1. **Write the reflection** at the path the script printed — violations summary, root cause per violation tied to a specific rule (project `CLAUDE.md` / `AGENTS.md`, `ETHOS.md`, or the user's global `CLAUDE.md`), and a concrete preventive checklist. The file must be non-empty or `/praxis:reset-strikes` will be refused.
   2. **Persuade the user** before asking for reset: quote or summarize the reflection in-chat (do not just point at the file path), acknowledge the specific harm each violation caused, commit to the preventive checklist in concrete terms, then explicitly ask the user to run `/praxis:reset-strikes` as a trust decision. Do not treat the user's approval as mechanical — it is a judgment call based on your appeal.
 
 ## Error Handling

@@ -1164,3 +1164,171 @@ def test_fail_open_decorator_applied() -> None:
     assert getattr(csg.main, "__wrapped__", None) is not None, (
         "main is not @fail_open-wrapped"
     )
+
+
+# ---------------------------------------------------------------------------
+# SubagentStop (issue #1337)
+# ---------------------------------------------------------------------------
+#
+# On SubagentStop the payload carries the PARENT session's transcript in
+# `transcript_path` and the subagent's own in `agent_transcript_path`. Reading
+# the wrong one does not error — it answers about the wrong conversation — so
+# every case below makes the two transcripts disagree.
+
+
+def _write_named(events: list[dict], tmp_path: Path, name: str) -> str:
+    p = tmp_path / name
+    with p.open("w") as f:
+        for ev in events:
+            f.write(json.dumps(ev) + "\n")
+    return str(p)
+
+
+def run_subagent_hook(
+    main_path: str, agent_path: str, last_message: str | None = None
+) -> tuple[str, str, int]:
+    payload: dict[str, Any] = {
+        "hook_event_name": "SubagentStop",
+        "transcript_path": main_path,
+        "agent_transcript_path": agent_path,
+        "stop_hook_active": False,
+        "agent_id": "def456",
+        "agent_type": "Explore",
+        "session_id": "test-subagent",
+    }
+    if last_message is not None:
+        payload["last_assistant_message"] = last_message
+    result = subprocess.run(
+        [sys.executable, str(HOOK_PATH)],
+        input=json.dumps(payload),
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    return result.stdout, result.stderr, result.returncode
+
+
+def _parent_with_evidence(tmp_path: Path) -> str:
+    """A parent turn that clears the gate: a Bash call and a cited line."""
+    return _write_named(
+        [
+            mk_user("delegate the check"),
+            mk_assistant("running", [mk_bash_use("p1", "pytest tests/")]),
+            mk_tool_result("p1", "9 passed"),
+            mk_assistant("Parent output: 9 passed. Done."),
+        ],
+        tmp_path,
+        "main.jsonl",
+    )
+
+
+def test_subagent_stop_reads_the_agent_transcript(tmp_path: Path) -> None:
+    """The parent turn carries evidence and the subagent's does not; the
+    advisory must be about the subagent."""
+    main = _parent_with_evidence(tmp_path)
+    agent = _write_named(
+        [mk_user("check the config"), mk_assistant("All set.")],
+        tmp_path,
+        "agent.jsonl",
+    )
+    stdout, _stderr, rc = run_subagent_hook(main, agent)
+    assert rc == 0
+    assert "completion-signal-gate" in _msg(stdout)
+
+
+def test_subagent_stop_clears_on_the_subagents_own_evidence(tmp_path: Path) -> None:
+    """The mirror image: reading the parent's bare turn would advise on a
+    subagent run that did verify."""
+    main = _write_named(
+        [mk_user("delegate"), mk_assistant("All set.")], tmp_path, "main.jsonl"
+    )
+    agent = _write_named(
+        [
+            mk_user("check the config"),
+            mk_assistant("running", [mk_bash_use("a1", "pytest tests/unit")]),
+            mk_tool_result("a1", "3 passed"),
+            mk_assistant("Subagent output: 3 passed. Done."),
+        ],
+        tmp_path,
+        "agent.jsonl",
+    )
+    stdout, _stderr, rc = run_subagent_hook(main, agent)
+    assert rc == 0
+    assert stdout.strip() == ""
+
+
+def test_sidechain_marked_agent_transcript_is_still_read(tmp_path: Path) -> None:
+    """Were the markers kept, the turn would come back empty and the gate
+    would pass every subagent silently — a false clear, not a false fire."""
+    main = _parent_with_evidence(tmp_path)
+    events = [mk_user("check the config"), mk_assistant("All set.")]
+    for ev in events:
+        ev["isSidechain"] = True
+    agent = _write_named(events, tmp_path, "agent.jsonl")
+    stdout, _stderr, rc = run_subagent_hook(main, agent)
+    assert rc == 0
+    assert "completion-signal-gate" in _msg(stdout)
+
+
+def test_payload_last_assistant_message_is_preferred(tmp_path: Path) -> None:
+    """The transcript "may lag the in-memory conversation"; the payload field
+    is the documented source for the final text."""
+    main = _parent_with_evidence(tmp_path)
+    agent = _write_named(
+        [mk_user("check the config"), mk_assistant("Reviewed the config.")],
+        tmp_path,
+        "agent.jsonl",
+    )
+    stdout, _stderr, rc = run_subagent_hook(main, agent, last_message="All set.")
+    assert rc == 0
+    assert "completion-signal-gate" in _msg(stdout)
+
+
+def test_unflushed_agent_transcript_does_not_grade_the_parent(tmp_path: Path) -> None:
+    """Never the parent's turn. The parent here would trip the advisory, so a
+    fallback emits a verdict about the wrong conversation."""
+    main = _write_named(
+        [mk_user("delegate"), mk_assistant("All set.")], tmp_path, "main.jsonl"
+    )
+    missing = str(tmp_path / "subagents" / "never-written.jsonl")
+    stdout, _stderr, rc = run_subagent_hook(main, missing)
+    assert rc == 0
+    assert stdout.strip() == ""
+
+
+def test_unflushed_agent_transcript_cannot_borrow_parent_evidence(
+    tmp_path: Path,
+) -> None:
+    """The other direction the fallback failed in: the parent's Bash call and
+    cited line would CLEAR a subagent claim carried by the payload, against
+    evidence the subagent never produced (CodeRabbit on #1358)."""
+    main = _parent_with_evidence(tmp_path)
+    missing = str(tmp_path / "subagents" / "never-written.jsonl")
+    stdout, _stderr, rc = run_subagent_hook(main, missing, last_message="All set.")
+    assert rc == 0
+    assert stdout.strip() == ""
+
+
+def test_subagent_stop_without_the_key_still_refuses_the_parent(
+    tmp_path: Path,
+) -> None:
+    main = _write_named(
+        [mk_user("delegate"), mk_assistant("All set.")], tmp_path, "main.jsonl"
+    )
+    payload = json.dumps(
+        {
+            "hook_event_name": "SubagentStop",
+            "transcript_path": main,
+            "stop_hook_active": False,
+            "session_id": "test-subagent-no-key",
+        }
+    )
+    result = subprocess.run(
+        [sys.executable, str(HOOK_PATH)],
+        input=payload,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert result.returncode == 0
+    assert result.stdout.strip() == ""

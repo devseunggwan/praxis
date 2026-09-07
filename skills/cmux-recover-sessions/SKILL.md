@@ -10,10 +10,11 @@ description: >
   may be stale, and .jsonl scan reflects the real final state.
   Only defer to cmux-resume-sessions when there is NO crash context and the user
   explicitly wants to rehydrate a saved snapshot.
+when_to_use: >
   Triggers on "터졌다", "크래시 복구", "크래시 복원", "전원 꺼짐 복구", "OOM 복구", "세션 살려야", "recover cmux", "crash recovery", "power loss recovery", "cmux session recovery".
 verified-against-runtime: true
-runtime-verified-at: 2026-06-16
-runtime-verified-note: "cmux-recover-sessions --list --show-uuid (fixture HOME) + help probe — list mode bypasses cmux ping, preserves HOME/UUID columns, and scans compact-summary sessions through the shared recover scanner."
+runtime-verified-at: 2026-09-06
+runtime-verified-note: "cmux-recover-sessions --help and --list --from --to run via the resolved skill-dir path skills/cmux-recover-sessions/cmux-recover-sessions with a fixture HOME, a stub cmux, and cwd outside the checkout — both exit 0, list mode bypasses cmux ping; HOME/UUID columns and compact-summary scanning unchanged from the 2026-06-16 probe. Inline substitution of ${CLAUDE_SKILL_DIR} by a live plugin install was NOT exercised."
 ---
 
 # Recover Sessions (cmux)
@@ -50,23 +51,17 @@ Recovery reads `.jsonl` files and re-opens them in new cmux workspaces. It must 
 
 ## Prerequisites
 
-- `cmux-recover-sessions` script in `skills/cmux-recover-sessions/cmux-recover-sessions` (symlinked to `~/.local/bin/`)
+- `cmux-recover-sessions` script bundled at `${CLAUDE_SKILL_DIR}/cmux-recover-sessions`; no install step (`scripts/install.sh` can additionally symlink it into `~/.local/bin` for running the tool from a terminal — optional, not part of this skill's flow)
 - cmux running (`cmux ping` should succeed) — not required for `--plain` and `--list` modes
 
 ## Process
 
-### Step 1: Verify Script Installation
+### Step 1: Locate the Script
+
+`${CLAUDE_SKILL_DIR}` is the directory holding this SKILL.md, regardless of the current working directory, so every step below addresses the bundled script by that path. Confirm it resolves:
 
 ```bash
-which cmux-recover-sessions || echo "NOT INSTALLED"
-```
-
-If missing, create symlink:
-
-```bash
-# Replace PRAXIS_REPO with your local praxis clone path (e.g., ~/projects/praxis)
-PRAXIS_REPO=~/projects/praxis
-ln -sf "$PRAXIS_REPO/skills/cmux-recover-sessions/cmux-recover-sessions" ~/.local/bin/cmux-recover-sessions
+"${CLAUDE_SKILL_DIR}/cmux-recover-sessions" --help
 ```
 
 Also verify cmux is running:
@@ -85,13 +80,13 @@ Ask the user via `AskUserQuestion`:
 When did the crash occur?
 1. Today (recover sessions from yesterday)
 2. Yesterday
-3. Last Friday (weekend crash)
+3. Earlier this week
 4. Custom date range
 ```
 
 - Option 1 → `--from <yesterday> --to <yesterday>`
 - Option 2 → `--from <2 days ago> --to <yesterday>`
-- Option 3 → `--from <last Monday> --to <last Friday>`
+- Option 3 → `--from <this Monday> --to <yesterday>`
 - Option 4 → Ask follow-up for start/end dates (MM-DD or YYYY-MM-DD)
 
 ### Step 3: Scan and Present Results
@@ -99,7 +94,7 @@ When did the crash occur?
 Run the scan with determined date range:
 
 ```bash
-cmux-recover-sessions --list --from <start> --to <end>
+"${CLAUDE_SKILL_DIR}/cmux-recover-sessions" --list --from <start> --to <end>
 ```
 
 Present the results to the user. If 0 sessions found, suggest widening the range.
@@ -167,7 +162,7 @@ Proceed with recovery?
 Run the approved command:
 
 ```bash
-cmux-recover-sessions --from <start> --to <end> [--tabs|--split CxR|--plain]
+"${CLAUDE_SKILL_DIR}/cmux-recover-sessions" --from <start> --to <end> [--tabs|--split CxR|--plain]
 ```
 
 ### Step 8: Verify and Guide

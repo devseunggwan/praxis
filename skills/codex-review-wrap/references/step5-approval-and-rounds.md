@@ -110,8 +110,8 @@ flip: none
 - When the agent's verdict option is labelled `(Recommended)`, a line
   starting at column 0 with the literal prefix `Falsified:` must carry the
   disconfirming-test result — either in the question body or in that
-  option's `description` (global CLAUDE.md → *Self-Falsify Before
-  Recommendation Lock*; enforced by
+  option's `description` (*Self-Falsify Before Recommendation Lock*,
+  [`ETHOS.md`](../../../ETHOS.md#rules-praxis-carries); enforced by
   `hooks/advisory-nudge/output-block-falsify-advisory/impl.py`, which does a
   `startswith` check, so a mid-sentence or fenced `Falsified:` does not
   count). The 5b probe usually supplies that line; when it does not, run one
@@ -141,8 +141,9 @@ re-proposal of a *decision*, not as a factual contradiction (see 5c →
 Do **not** create an issue per answer. Collect all `후속이슈` findings of the
 round and, once the batch is complete, surface a single implementation-approach
 review — scope, target repo(s), expected PR count, verification plan — and
-create issues only after the user approves that approach (global CLAUDE.md →
-*Implementation-approach review BEFORE issue creation*). Append the resulting
+create issues only after the user approves that approach
+(*Implementation-approach review before issue creation*,
+[`ETHOS.md`](../../../ETHOS.md#rules-praxis-carries)). Append the resulting
 URL to each `deferred:` row; leave `issue=pending` if the user declines.
 
 ### Relationship to 5d-iii (sibling PRs)

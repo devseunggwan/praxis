@@ -1,69 +1,80 @@
 #!/usr/bin/env python3
-"""UserPromptSubmit hook: inject post-compaction context into the next prompt.
+"""SessionStart(compact) hook: re-inject session context after a compaction.
 
-Reframes the original #466 design ("PreCompact custom_instructions") after
-Wave 0 falsified its premise. The Claude Code PreCompact event accepts only
-top-level decision/reason/continue/stopReason/suppressOutput/systemMessage —
-no `hookSpecificOutput.additionalContext` channel exists at that event.
+History of the design, because each step falsified the one before it:
 
-The transcript JSONL however records compaction as a `user`-type record with
-`isCompactSummary: true` and a stable `uuid`. UserPromptSubmit fires before
-each new user prompt and DOES support `hookSpecificOutput.additionalContext`,
-so the same goal — make the post-compaction prompt aware of carried-over
-session state — can be achieved by detecting the compaction marker in the
-transcript tail and injecting context on the first prompt after it.
+- #466 proposed a `PreCompact` hook seeding the summary. `PreCompact` accepts
+  only top-level decision / reason / continue / stopReason / suppressOutput /
+  systemMessage — no `hookSpecificOutput.additionalContext` channel.
+- #472 moved to `UserPromptSubmit`, which does carry `additionalContext`, and
+  detected the compaction by scanning the transcript tail for the
+  `{"type": "user", "isCompactSummary": true, "uuid": ...}` record. Because
+  the hook then fired on EVERY prompt and the marker stayed in the tail for
+  many of them, it needed a per-session state file recording the last
+  injected uuid, a `state_lock` around it (#1034), and a bounded reverse
+  reader (#1155) — all machinery for answering "did a compaction just
+  happen?" from the outside.
+- #1339 (this file): Claude Code's `SessionStart` event exposes a `compact`
+  matcher and a `source` payload field, and supports
+  `hookSpecificOutput.additionalContext` (`hookEventName: "SessionStart"`).
+  The hooks guide ships a "Re-inject context after compaction" recipe that
+  is exactly `SessionStart` + `"matcher": "compact"`. `PostCompact` exists
+  but "hooks have no decision control" and its `systemMessage` / `continue`
+  fields are discarded, so it is not a context channel either. Read
+  2026-09-06 at https://code.claude.com/docs/en/hooks and
+  https://code.claude.com/docs/en/hooks-guide.
+
+The event IS the trigger now: it fires once per compaction, so the transcript
+scan, the uuid state file, the lock, and the tail-line budget are gone.
 
 Behaviour
 =========
 
-On every `UserPromptSubmit`:
+On `SessionStart` with manifest matcher `compact`:
 
-1. Read `transcript_path`, `session_id`, `cwd` from the payload. Any missing
-   → silent fail-open.
-2. Tail-read the transcript JSONL (last N lines, default 100) looking for the
-   most recent `{"type": "user", "isCompactSummary": true, ...}` entry.
-3. If none found → silent (no compaction in recent history).
-4. Compare the compaction entry's `uuid` against the session state file's
-   `last_compact_uuid_emitted`. If they match → already injected for this
-   compaction, silent. Unlocked: this only skips work, it does not decide
-   the injection (step 6 does).
-5. Gather context (read-only, fail-open per source):
-     - `session_id`        — from payload
-     - `cwd`               — from payload (worktree absolute path)
-     - `git branch`        — `git -C <cwd> branch --show-current`
-     - `active PR`         — `gh pr list --state open --head <branch>` (JSON)
-     - `strike state`      — read `~/.praxis/state/strikes/<sid>.json` first;
-                             fallback to `~/.claude/state/praxis/strikes/<sid>.json`
-                             when no `PRAXIS_STATE_DIR` override is set and the
-                             new location is absent (pre-#527 legacy support)
-6. Under `state_lock`, re-read the state and claim the uuid: on a match this
-   time a sibling published it while step 5 was shelling out, and this run
-   goes silent; otherwise record `last_compact_uuid_emitted = <uuid>`.
-7. Emit `hookSpecificOutput.additionalContext` JSON to stdout.
+1. Bypass env set → silent.
+2. Read the payload. `source`, when present, must be `compact`; any other
+   value (`startup`, `resume`, `clear`, `fork`, ...) → silent. The manifest
+   matcher already filters, so this is a belt for a host that ignores it.
+3. `session_id` and `cwd` are required; either missing → silent fail-open.
+4. Gather context (read-only, fail-open per source):
+     - `session_id`  — from payload
+     - `cwd`         — from payload (worktree absolute path)
+     - `git branch`  — `git -C <cwd> branch --show-current`
+     - `active PR`   — `gh pr list --state open --head <branch>` (JSON)
+     - `strike state`— `~/.praxis/state/strikes/<sid>.json` first; fallback
+                       to `~/.claude/state/praxis/strikes/<sid>.json` when
+                       no `PRAXIS_STATE_DIR` override is set and the new
+                       location is absent (pre-#527 legacy support)
+5. Emit `hookSpecificOutput.additionalContext` JSON to stdout, exit 0.
 
-State file
-==========
+Time budget
+===========
 
-`<PRAXIS_HOME>/cache/postcompact-context-${session_id}.json`
-
-Path resolution: `PRAXIS_POSTCOMPACT_CONTEXT_FILE` env override → session_id
-keyed file. The PPID fallback used by sibling `preflight-gate/session-intent`
-is dropped here because `main()` rejects payloads with missing `session_id`
-before `resolve_state_path` is reached, so the fallback would be unreachable.
+`git` 1.5s + `gh` 3.0s + ~0.5s interpreter startup is a 5.0s ceiling under
+the manifest's `timeout: 8`. There is no lock to wait on any more.
 
 Env vars
 ========
 
-`PRAXIS_POSTCOMPACT_CONTEXT_FILE`   — explicit state file path (test override)
-`PRAXIS_HOOK_BYPASS_POSTCOMPACT_CONTEXT=1` — full bypass (silent, no scan)
-`PRAXIS_POSTCOMPACT_TAIL_LINES`     — tail line count (default 100)
+`PRAXIS_HOOK_BYPASS_POSTCOMPACT_CONTEXT=1` — full bypass (silent)
+`PRAXIS_POSTCOMPACT_GIT_TIMEOUT` / `PRAXIS_POSTCOMPACT_GH_TIMEOUT` — test
+overrides for the subprocess timeouts (seconds); production keeps the defaults.
+
+Coverage
+========
+
+The hooks reference lists the `compact` matcher as "Auto or manual
+compaction" (read 2026-09-06), so this one registration covers `/compact`
+and the automatic compaction alike. Documented, not yet observed live from
+this repo; nothing here depends on the distinction.
 
 Fail-open
 =========
 
 Every external call (file read, subprocess, JSON decode) is wrapped. No
 exception propagates. Worst case: a compaction goes uninjected. The hook
-NEVER blocks the prompt.
+NEVER blocks the session.
 """
 from __future__ import annotations
 
@@ -71,8 +82,6 @@ import json
 import os
 import subprocess
 import sys
-import tempfile
-from pathlib import Path
 
 import sys as _sys
 from pathlib import Path as _Path
@@ -82,19 +91,15 @@ from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E
 from _paths import (  # type: ignore[import-not-found]  # noqa: E402
     legacy_state_dir,
     praxis_state_dir,
-    resolve_cache_file,
 )
 from _payload import read_payload  # type: ignore[import-not-found]  # noqa: E402
-from _state_lock import state_lock  # type: ignore[import-not-found]  # noqa: E402
 
-DEFAULT_TAIL_LINES = 100
 BYPASS_ENV = "PRAXIS_HOOK_BYPASS_POSTCOMPACT_CONTEXT"
-STATE_FILE_ENV = "PRAXIS_POSTCOMPACT_CONTEXT_FILE"
-TAIL_LINES_ENV = "PRAXIS_POSTCOMPACT_TAIL_LINES"
+COMPACT_SOURCE = "compact"
 
 
 # ---------------------------------------------------------------------------
-# Payload + state-file helpers (mirrors session-intent canonical pattern)
+# Payload helpers
 # ---------------------------------------------------------------------------
 
 def _extract_session_id(payload: dict) -> str | None:
@@ -104,237 +109,21 @@ def _extract_session_id(payload: dict) -> str | None:
     return None
 
 
-def resolve_state_path(session_id: str) -> str:
-    """Resolve the dedup state file path.
+def is_compact_source(payload: dict) -> bool:
+    """True unless the payload names a SessionStart `source` other than compact.
 
-    Priority: `PRAXIS_POSTCOMPACT_CONTEXT_FILE` env override → `session_id`
-    keyed file under `<PRAXIS_HOME>/cache`. The caller is responsible for
-    rejecting missing session_id BEFORE calling this — `main()` already
-    does so, so no PPID fallback is needed (the session-intent hook keeps
-    one only to support direct CLI / test invocation without a payload).
+    The manifest registers this hook with `matcher: "compact"`, so the host
+    should only ever deliver `source: "compact"`. A missing `source` is
+    accepted — the matcher already did the filtering and an older host that
+    omits the field must not silence the hook. Any OTHER value means the
+    matcher was not honoured, and the context would land on a fresh
+    `startup` / `resume` / `clear` / `fork` session that has no compaction
+    boundary to carry state across.
     """
-    explicit = os.environ.get(STATE_FILE_ENV, "").strip()
-    if explicit:
-        return explicit
-    return resolve_cache_file(
-        f"postcompact-context-{session_id}.json", session_id=session_id
-    )
-
-
-def read_state(path: str) -> dict:
-    try:
-        with open(path, "r", encoding="utf-8") as fh:
-            data = json.load(fh)
-        if isinstance(data, dict):
-            return data
-    except (OSError, ValueError, UnicodeDecodeError):
-        # ValueError covers JSONDecodeError + embedded-null path raises.
-        pass
-    return {}
-
-
-def write_state(path: str, state: dict) -> None:
-    """Publish the state atomically, staging through a name of its own.
-
-    The comment above calls this family the session-intent canonical pattern,
-    but until #1034 this was the one member that wrote the final name in
-    place. That makes the state file its own staging file — the degenerate
-    case of DESIGN.md Q0's shared `<path>.tmp` — so two siblings sharing a
-    `session_id` truncate and write the same bytes at the same offset, and the
-    shorter write leaves the longer one's tail behind. Measured, unforced, on
-    the pre-fix code: 5 of 300 concurrent pairs published
-    `{..."short-uuid"}uuuu..."}` — bytes `read_state`'s `except ValueError`
-    answers with an empty dict.
-
-    `tempfile.mkstemp` is the fix its three unlocked siblings already had: the
-    name is unique per call, so no sibling can write into this one's file, and
-    `os.replace` publishes it whole. It is also the floor under `main()`'s
-    `state_lock`, which is fail-open by contract — an unacquired lock leaves
-    the pair racing, and the race has to land on a lost update rather than an
-    unreadable file (the same argument #970 recorded for `jq-config`).
-    """
-    try:
-        parent = os.path.dirname(path)
-        if parent and not os.path.isdir(parent):
-            os.makedirs(parent, exist_ok=True)
-        fd, tmp_path = tempfile.mkstemp(
-            dir=parent or ".", prefix=".postcompact-context-"
-        )
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as fh:
-                json.dump(state, fh)
-            os.replace(tmp_path, path)
-        except Exception:
-            # Broad on purpose, and mirrored from session-intent: json.dump
-            # raises TypeError, not OSError, and any failure before the
-            # replace must not leak the staging file.
-            try:
-                os.unlink(tmp_path)
-            except OSError:
-                pass
-            raise
-    except (OSError, ValueError):
-        pass  # non-fatal: next run will simply re-inject
-
-
-def claim_injection(path: str, compact_uuid: str) -> dict | None:
-    """Decide, under the caller's lock, whether THIS process injects.
-
-    Returns the state to publish when the claim is ours, and None when a
-    sibling already recorded `compact_uuid` — the caller then returns without
-    injecting. It reads and decides but deliberately does not write: the
-    publish is the caller's, one statement later, still inside the lock.
-
-    Split out from `main()` for two reasons. It is the whole of the critical
-    section's logic, so keeping it in one named place is what keeps the
-    section auditable against the budget note in `_active_pr` — the section
-    must stay shorter than the lock's own acquisition deadline. And it
-    is the decision the double-injection race turns on, so the race test can
-    hold both children between the decision and the publish — a barrier on a
-    function that had already written would let the first child publish before
-    the second decided, which is the interleaving the arm exists to produce.
-    """
-    state = read_state(path)
-    if state.get("last_compact_uuid_emitted") == compact_uuid:
-        return None
-    state["last_compact_uuid_emitted"] = compact_uuid
-    return state
-
-
-# ---------------------------------------------------------------------------
-# Transcript tail scan
-# ---------------------------------------------------------------------------
-
-# Cheap lexical marker for a compaction record. A line without it can never
-# satisfy `find_latest_compact_summary`, so the tail scan does not retain it.
-_COMPACT_MARKER = '"isCompactSummary"'
-
-
-def _tail_candidate_lines(path: str, n: int, marker: str = _COMPACT_MARKER) -> list[str]:
-    """Last `n` lines of a UTF-8 text file, with non-candidates elided to "".
-
-    The window is still the last `n` lines — a line that does not contain
-    `marker` is kept as an empty placeholder so its slot, and therefore the
-    caller's "within the last n lines" semantics, survives. Only candidate
-    lines are held in full.
-
-    That distinction is the point. A plain `deque(fh, maxlen=n)` bounds memory
-    by LINE COUNT, not by bytes: a transcript whose records are large — and a
-    compaction summary is exactly such a record — costs `n * line_size`.
-    Measured at n=100 with 200KB records, the plain form peaked at 20.9 MB of
-    retained tail. Compactions are rare, so eliding non-candidates drops that
-    to the size of the few real candidates.
-
-    Time complexity: O(window size), not O(file size). The implementation reads
-    backward from EOF in fixed-size chunks, splitting on newlines and eliding
-    non-candidates immediately so memory is bounded by O(n * candidate_size),
-    not O(n * max_line_size). Stops as soon as n line boundaries are found.
-    Each chunk is decoded as bytes-then-split to avoid tearing multi-byte
-    characters at a chunk boundary. ValueError is caught alongside OSError to
-    cover embedded-null path payloads.
-
-    Issue #1155: before this change the scan read the whole file to reach its
-    end (105 ms on a 102 MB fixture). After, runtime is O(window size)
-    regardless of file length.
-    """
-    # Fixed chunk size: large enough to span several typical JSONL lines but
-    # small enough not to read the entire file for short tails. 512 KB is a
-    # practical sweet spot — it spans ~500 lines at 1 KB/line or ~2 lines at
-    # 200 KB/line.
-    _CHUNK = 512 * 1024  # 512 KB
-
-    try:
-        with open(path, "rb") as fh:
-            fh.seek(0, 2)  # seek to EOF
-            file_size = fh.tell()
-            if file_size == 0:
-                return []
-
-            # Accumulate decoded lines from back to front; stop at n lines.
-            # `leftover` holds an incomplete line fragment from the start of
-            # the previous chunk (which is the tail of an earlier chunk).
-            collected: list[str] = []  # most-recent line first
-            leftover = b""
-            pos = file_size
-
-            while pos > 0 and len(collected) < n:
-                read_size = min(_CHUNK, pos)
-                pos -= read_size
-                fh.seek(pos)
-                chunk = fh.read(read_size)
-
-                # Prepend the leftover from the previous (later) iteration.
-                # Since we are going backward, the leftover is the beginning
-                # of the next (chronologically later) line.
-                data = chunk + leftover
-
-                # Split into lines. All elements except the first are complete
-                # lines (they end with \n that we split on).
-                parts = data.split(b"\n")
-                # The first element is the tail of a line whose start is even
-                # earlier in the file — keep it as the new leftover.
-                leftover = parts[0]
-                # The rest are complete lines, in file order (oldest first).
-                # Reverse them so we process newest-first.
-                complete = parts[1:]
-                for raw in reversed(complete):
-                    if not raw and not collected:
-                        # trailing newline at EOF — skip the empty fragment
-                        continue
-                    try:
-                        line = raw.decode("utf-8", errors="replace")
-                        if line and not line.endswith("\n"):
-                            line = line + "\n"
-                    except (UnicodeDecodeError, ValueError):
-                        line = ""
-                    collected.append(line if marker in line else "")
-                    if len(collected) >= n:
-                        break
-
-            # Handle leftover (the first line of the file, or the partial line
-            # that bridges pos=0 and the first chunk).
-            if len(collected) < n and leftover:
-                try:
-                    line = leftover.decode("utf-8", errors="replace")
-                    if line and not line.endswith("\n"):
-                        line = line + "\n"
-                except (UnicodeDecodeError, ValueError):
-                    line = ""
-                collected.append(line if marker in line else "")
-
-            # `collected` is newest-first; reverse to restore file order.
-            collected.reverse()
-            return collected[-n:]
-
-    except (OSError, ValueError):
-        return []
-def find_latest_compact_summary(transcript_path: str, n_lines: int) -> dict | None:
-    """Scan the tail of the JSONL transcript for the most recent compaction.
-
-    A compaction is encoded as `{"type": "user", "isCompactSummary": true, ...}`.
-    The function returns the most-recent matching record (by file order — the
-    transcript is append-only and time-ordered) or None.
-    """
-    lines = _tail_candidate_lines(transcript_path, n_lines)
-    if not lines:
-        return None
-    for raw in reversed(lines):
-        raw = raw.strip()
-        if not raw or '"isCompactSummary"' not in raw:
-            # quick lexical filter — avoids json.loads cost for >99% of records
-            continue
-        try:
-            record = json.loads(raw)
-        except (json.JSONDecodeError, ValueError):
-            continue
-        if not isinstance(record, dict):
-            continue
-        if record.get("type") != "user":
-            continue
-        if record.get("isCompactSummary") is not True:
-            continue
-        return record
-    return None
+    source = payload.get("source")
+    if source is None:
+        return True
+    return isinstance(source, str) and source.strip() == COMPACT_SOURCE
 
 
 # ---------------------------------------------------------------------------
@@ -407,17 +196,10 @@ def _active_pr(cwd: str, branch: str) -> dict | None:
     """
     if not branch:
         return None
-    # 3.0s gh + 1.5s git + ~0.5s python startup is a 5.0s build ceiling. Since
-    # #1034 the run can also wait on `state_lock`, whose acquisition deadline
-    # is 2.0s, for an absolute ceiling of 7.0s under the manifest's `timeout:
-    # 8`. That 2.0s is a bound, not a cost: `main()` builds the context BEFORE
-    # taking the lock, so the section a sibling waits on is one `read_state`
-    # plus one `write_state` — the deadline is reachable only if a holder is
-    # descheduled through it, never because a holder is calling gh. (Build the
-    # context inside the section instead and the wait becomes the build, which
-    # exceeds the deadline outright.) Authenticated gh on a fast network
-    # responds in <1s; the timeout exists to bound auth-prompt / network-hung
-    # paths so the hook never trips Claude Code's hard timeout.
+    # 3.0s gh + 1.5s git + ~0.5s python startup is a 5.0s ceiling under the
+    # manifest's `timeout: 8`. Authenticated gh on a fast network responds in
+    # <1s; the timeout exists to bound auth-prompt / network-hung paths so the
+    # hook never trips Claude Code's hard timeout.
     out = _run(
         [
             "gh", "pr", "list",
@@ -479,12 +261,7 @@ def _strike_state(session_id: str) -> dict | None:
     return {"count": count, "reasons": [str(r) for r in reasons]}
 
 
-def build_context(
-    session_id: str,
-    cwd: str,
-    compact_uuid: str,
-    compact_timestamp: str,
-) -> str:
+def build_context(session_id: str, cwd: str) -> str:
     """Assemble the human-readable additionalContext block."""
     branch = _git_branch(cwd)
     pr = _active_pr(cwd, branch) if branch else None
@@ -513,11 +290,9 @@ def build_context(
         lines.append("  • strikes    : 0/3")
 
     lines.append("")
-    ts_repr = compact_timestamp or "(unknown)"
     lines.append(
-        f"Compaction marker uuid={compact_uuid} timestamp={ts_repr}. "
-        "This context is injected once per compaction event; subsequent prompts "
-        "will not repeat it."
+        "Injected by the SessionStart(compact) hook once per compaction; "
+        "later prompts will not repeat it."
     )
     return "\n".join(lines)
 
@@ -525,19 +300,6 @@ def build_context(
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
-
-def _tail_lines_setting() -> int:
-    raw = os.environ.get(TAIL_LINES_ENV, "").strip()
-    if not raw:
-        return DEFAULT_TAIL_LINES
-    try:
-        value = int(raw)
-    except ValueError:
-        return DEFAULT_TAIL_LINES
-    if value < 1:
-        return DEFAULT_TAIL_LINES
-    return value
-
 
 @fail_open
 def main() -> int:
@@ -550,66 +312,22 @@ def main() -> int:
     if not isinstance(payload, dict):
         return 0
 
-    transcript_path = payload.get("transcript_path")
+    if not is_compact_source(payload):
+        return 0
+
     session_id = _extract_session_id(payload)
     cwd = payload.get("cwd")
-
-    if not isinstance(transcript_path, str) or not transcript_path:
-        return 0
     if not session_id:
         return 0
     if not isinstance(cwd, str) or not cwd:
         return 0
-    if not Path(transcript_path).is_file():
-        return 0
 
-    compact = find_latest_compact_summary(transcript_path, _tail_lines_setting())
-    if not compact:
-        return 0
-
-    compact_uuid = compact.get("uuid")
-    compact_timestamp = compact.get("timestamp", "")
-    if not isinstance(compact_uuid, str) or not compact_uuid:
-        return 0
-
-    state_path = resolve_state_path(session_id)
-
-    # Unlocked fast path. The compaction marker stays in the transcript tail
-    # for as many prompts as it takes to scroll out, so this hook re-reaches
-    # this point on every one of them; without the pre-check each would pay
-    # the git+gh build below only to discard it. A stale read here can cost
-    # at most one wasted build — it never decides the injection, which is
-    # re-taken under the lock.
-    if read_state(state_path).get("last_compact_uuid_emitted") == compact_uuid:
-        return 0  # already injected for this compaction
-
-    # Built BEFORE the lock, and that ordering is load-bearing (#1034 review).
-    # `build_context` shells out to git and gh, whose timeouts bound it at
-    # ~4.5s — more than double `state_lock`'s 2s acquisition deadline. Build
-    # it inside the section and a holder on the slow `gh` path guarantees the
-    # deadline expires for every sibling; each then proceeds unlocked, reads
-    # state the holder has not written yet, and injects too — the exact
-    # double injection the lock is here to close.
-    context = build_context(session_id, cwd, compact_uuid, compact_timestamp)
-
-    # Serialized because the read-modify-write below shares a name with any
-    # sibling on this `session_id` — DESIGN.md Q0, re-graded against a live
-    # measurement in #1034. The section now holds one `read_state` and one
-    # `write_state`, so a sibling waits on two file operations rather than on
-    # a network call. `claim_injection` re-reads inside it on purpose: the
-    # fast path above ran before the build, and a sibling that published
-    # during it must still turn this process back.
-    with state_lock(state_path):
-        state = claim_injection(state_path, compact_uuid)
-        if state is None:
-            return 0  # a sibling injected while this process was building
-
-        write_state(state_path, state)
+    context = build_context(session_id, cwd)
 
     json.dump(
         {
             "hookSpecificOutput": {
-                "hookEventName": "UserPromptSubmit",
+                "hookEventName": "SessionStart",
                 "additionalContext": context,
             }
         },

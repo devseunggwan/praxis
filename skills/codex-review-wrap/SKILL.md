@@ -8,10 +8,19 @@ description: >
   port or parallel hotfix, a diminishing-returns advisory
   (PRAXIS_DIMINISHING_RETURNS_N), and a per-finding approval ask. It also
   reaps leaked openai-codex brokers (PRAXIS_CODEX_REAP=1).
+when_to_use: >
   Triggers on "codex review", "review codex", "safe review",
   "/codex-review-wrap", "premise verification", "flip detection",
   "sibling defect", "sibling cross-check", "diminishing returns",
   "broker reap", "finding approval", "적용 승인".
+allowed-tools:
+  - Read
+  - Grep
+  - Glob
+  - Bash(git worktree list *)
+  - Bash(git diff *)
+  - Bash(gh pr view *)
+  - Bash(ps *)
 verified-against-runtime: true
 runtime-verified-at: 2026-08-15
 runtime-verified-note: "Measured against codex@openai-codex 1.0.6 and the live AskUserQuestion runtime; latest measurement 2026-08-15 (Step 4b/liveness source pins plus live review round-trips from two worktrees). The full dated log lives in references/verification-log.md."
@@ -327,7 +336,9 @@ crosses the macOS memory-compressor threshold, each idle broker's periodic
 wakeup drives compress/decompress churn that surfaces as `kernel_task` system
 CPU — a non-linear spike, not a linear one.
 
-Run the co-located reaper at the end of every review invocation. It is the
+Run the co-located reaper at the end of every review invocation — **macOS
+only**: the leak is a launchd/`/var/folders` mechanism and the script uses BSD
+`stat`, so on other platforms skip this step entirely. It is the
 single source of truth for safe reaping, shared with the launchd job (see
 `LAUNCHD.md`). Resolve it via the plugin root, mirroring the strike-counter
 convention used by the `strike` / `reset-strikes` skills:

@@ -26,7 +26,10 @@ main() is labeled with its number, and this list is the canonical roster
      executable bit and, when tracked, a 100755 git index mode (Rule 6d,
      #1172); and no orphan hooks/*.sh outside the generated set survives
      (Rule 6e, #1172 — the reverse sweep Rule 6 lacked).
-  7. INDEX.md ↔ manifest entry cross-check.
+  7. INDEX.md ↔ manifest entry cross-check (#1306: ARCHITECTURE.md no
+     longer carries a per-hook table, so only docs/hook/INDEX.md is
+     checked; the operating matrix is generated and drift-checked
+     separately).
   8. Spec `Supported hosts:` ↔ manifest `hosts` cross-check.
   9. Release version wiring (#1172): `VERSION` equals the "." version in
      `.release-please-manifest.json`, and every versioned platform artifact
@@ -47,7 +50,8 @@ main() is labeled with its number, and this list is the canonical roster
      routed by a table row, no phantom skill names in category rows or
      scenario routing cells) all match EXPECTED_SKILLS; docs/skills.md
      trigger-keyword cells quote keywords verbatim from each skill's
-     frontmatter description; and the compatibility-tier tables in
+     frontmatter `when_to_use` (or `description`, #1331); and the
+     compatibility-tier tables in
      README.md, AGENTS.md, and using-praxis stay normalized-identical.
   14. Each manifest `dispatch_groups` (event, matcher) collapses to exactly
      one dispatcher node per platform hooks.json (no member silently left as
@@ -106,6 +110,37 @@ main() is labeled with its number, and this list is the canonical roster
       silently disable the whole group. Non-dispatcher commands are out of
       scope (a deliberate compound command is legitimate shell). (Numbered 25
       on rebase: authored as 22 before rules 21-23 landed on main.)
+  26. Sunset review (#1300): every hook NAME carries a well-formed
+      `review_by` date (YYYY-MM-DD; the first registration carries it and
+      multi-event siblings may omit it, exactly like `hosts`) — REVIEW_BY
+      MISSING / MALFORMED / CONFLICT — and that date is not in the past
+      (REVIEW_BY OVERDUE). An overdue hook is re-audited, then either the
+      date is bumped or the verdict is recorded in docs/hook-prune-audit.md;
+      the rule exists because the audit found zero drops and cannot rank
+      hooks by value, so without a deadline the roster only grows. The
+      field never reaches a platform hooks.json (the node builder copies
+      only command/timeout/hosts).
+  27. README hook-dependency table (#1332): the `### Hook dependencies`
+      table in README.md is the reader's view of the manifest `requires`
+      field (Rule 20). Every component some hook declares has exactly one
+      row, every row names a declared component, each row's hook cell is the
+      exact set of hooks declaring it, and the install cell is non-empty —
+      HOOK DEPS MISSING / ORPHAN / DRIFT / NO INSTALL. The audit that added
+      `requires` (docs/hook-suitability-audit.md §B) found the README's tier
+      table covered skills only, so a user without oh-my-claudecode or the
+      codex plugin had nowhere to read which hooks were inert; `plugin.json`
+      `dependencies` was rejected for this (no optional form — see
+      ARCHITECTURE.md), so the declaration is documentary and this rule keeps
+      it true.
+  28. Claude-only events declare it (#1337): every registration on an event
+      only Claude Code raises — `PostToolUseFailure`, `SubagentStop` — must
+      carry `hosts: ["claude"]`. `hosts` is optional in the schema and an
+      absent value means every host, so a registration that forgets it is
+      written into the Codex and Cursor `hooks.json` for an event those hosts
+      never fire. The schema states the contract in its `event` description;
+      this is the half that enforces it, because JSON Schema's supported
+      subset here cannot express "if event is X then hosts must be Y".
+      (Numbered 28 to leave 27 to the parallel #1332 branch.)
 
 An unnumbered auxiliary check verifies the Codex adapter symlinks
 (plugins/praxis/{skills,hooks,scripts} → repo root).
@@ -134,10 +169,22 @@ import re
 import shlex
 import subprocess
 import sys
+from collections.abc import Set as AbstractSet
+from datetime import date
 from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+
+# Events only Claude Code raises. A registration on one of these must declare
+# `hosts: ["claude"]` — Rule 28 (#1337, #1368, #1369). Kept beside the schema's
+# `event` enum description, which states the same contract in prose.
+CLAUDE_ONLY_EVENTS = (
+    "PostToolUseFailure",
+    "SubagentStop",
+    "PostToolBatch",
+    "SubagentStart",
+)
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
 
 _spec = importlib.util.spec_from_file_location(
@@ -178,6 +225,67 @@ RUNTIME_METADATA_PLACEHOLDERS = {
     },
 }
 RUNTIME_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+REVIEW_BY_OVERDUE_REMEDY = (
+    "re-audit the hook, then either bump review_by or record the verdict "
+    "in docs/hook-prune-audit.md"
+)
+
+
+def review_by_drifts(manifest: dict, today: date) -> list[str]:
+    """Rule 26 (#1300): every hook NAME carries a well-formed, unexpired `review_by`.
+
+    `review_by` is required per hook name, not per registration: the first
+    registration carries it and multi-event siblings may omit it, mirroring
+    how `hosts` is read ("first registration wins"). Two registrations that
+    disagree are a CONFLICT — silently preferring one would let the other
+    rot. A date strictly before `today` is OVERDUE: the sunset review is due,
+    and the way out is a re-audit, not a bare date bump. `today` is a
+    parameter so tests can pin it.
+    """
+    declared: dict[str, list] = {}
+    for entry in manifest["hooks"]:
+        values = declared.setdefault(entry["name"], [])
+        if "review_by" in entry:
+            values.append(entry["review_by"])
+
+    drifts: list[str] = []
+    for name, values in declared.items():
+        if not values:
+            drifts.append(
+                f"REVIEW_BY MISSING {name}: add review_by YYYY-MM-DD to its "
+                "first manifest registration — merge date + 90 days for a new "
+                "hook (#1300)"
+            )
+            continue
+        distinct = list(dict.fromkeys(values))
+        if len(distinct) > 1:
+            drifts.append(
+                f"REVIEW_BY CONFLICT {name}: registrations disagree "
+                f"{distinct!r} — keep one value on the first registration and "
+                "drop the rest (#1300)"
+            )
+            continue
+        value = distinct[0]
+        parsed: date | None = None
+        if isinstance(value, str) and RUNTIME_DATE_RE.fullmatch(value):
+            try:
+                parsed = date.fromisoformat(value)
+            except ValueError:
+                parsed = None
+        if parsed is None:
+            drifts.append(
+                f"REVIEW_BY MALFORMED {name}: {value!r} — expected a real "
+                "calendar date as YYYY-MM-DD (#1300)"
+            )
+            continue
+        if parsed < today:
+            drifts.append(
+                f"REVIEW_BY OVERDUE {name}: {value} is past — "
+                f"{REVIEW_BY_OVERDUE_REMEDY} (#1300)"
+            )
+    return drifts
+
+
 SKILL_CALL_RE = re.compile(r"\bSkill\(\s*(?:(?:\"|')|skill\s*=)")
 ASK_USER_QUESTION_CALL_RE = re.compile(
     r"\bAskUserQuestion\s*\("
@@ -357,7 +465,7 @@ def dispatch_node_drifts(
     host_id: str,
     expected_members: set[str],
     dispatch_wrapper_name: str,
-    args_wrappers: set[str] = frozenset(),
+    args_wrappers: AbstractSet[str] = frozenset(),
 ) -> list[str]:
     """Drift strings for one (event, matcher) group's node shape in a hooks.json.
 
@@ -871,7 +979,7 @@ def main() -> int:
         host_id = platform.get("host_id", platform["platform"])
         for output in platform["outputs"]:
             out_path = REPO_ROOT / output["path"]
-            expected = (
+            expected_text = (
                 json.dumps(
                     _build.render_output(
                         base, output, hooks_source, host_id, dispatch_groups
@@ -882,7 +990,7 @@ def main() -> int:
                 + "\n"
             )
             actual = out_path.read_text() if out_path.exists() else ""
-            if expected != actual:
+            if expected_text != actual:
                 drifts.append(
                     f"DRIFT {output['path']}: regenerate with "
                     "./scripts/build-plugin-manifests.py"
@@ -1100,10 +1208,14 @@ def main() -> int:
             )
 
     # ------------------------------------------------------------------
-    # Rule 7 — INDEX.md + ARCHITECTURE.md cross-check
+    # Rule 7 — INDEX.md cross-check
+    #
+    # docs/hook/INDEX.md is the only hand-maintained per-hook list left
+    # (#1306). ARCHITECTURE.md → Hook index is a pointer to it and to the
+    # generated operating matrix, so it is no longer required to name every
+    # hook — the matrix is drift-checked as a generated artifact instead.
     # ------------------------------------------------------------------
     index_md = (REPO_ROOT / "docs" / "hook" / "INDEX.md").read_text()
-    arch_md = (REPO_ROOT / "ARCHITECTURE.md").read_text()
     seen_names: set[str] = set()
     for entry in manifest["hooks"]:
         name = entry["name"]
@@ -1114,11 +1226,6 @@ def main() -> int:
             drifts.append(
                 f"MISSING INDEX docs/hook/INDEX.md: {name} "
                 "(registered in manifest.json but not in INDEX.md)"
-            )
-        if name not in arch_md:
-            drifts.append(
-                f"MISSING INDEX ARCHITECTURE.md: {name} "
-                "(registered in manifest.json but not in ARCHITECTURE.md)"
             )
 
     # ------------------------------------------------------------------
@@ -1513,12 +1620,19 @@ def main() -> int:
         )
 
     # Rule 13e — docs/skills.md trigger-keyword cells mirror the skill's
-    # frontmatter description verbatim (#1177).  Every `backtick` keyword in
-    # a roster row's second column must appear double-quoted in that skill's
-    # frontmatter description (whitespace-normalized, so YAML `>` folding
-    # does not count as drift).  Quoted match, not substring — `skill spec`
-    # must not pass just because `praxis skill spec` is quoted.
-    def _frontmatter_description(skill: str) -> str:
+    # frontmatter trigger fields verbatim (#1177).  Every `backtick` keyword
+    # in a roster row's second column must appear double-quoted in that
+    # skill's frontmatter `when_to_use` or `description` (whitespace-
+    # normalized, so YAML `>` folding does not count as drift).  Quoted
+    # match, not substring — `skill spec` must not pass just because
+    # `praxis skill spec` is quoted.
+    #
+    # Since #1331 the trigger phrases live in `when_to_use` (the documented
+    # field the runtime appends to `description` in the skill listing) and
+    # `description` says only what the skill does.  Both fields are read so
+    # a phrase quoted in either counts, and so a skill that has not moved its
+    # clause yet is still mirrored rather than silently exempt.
+    def _frontmatter_triggers(skill: str) -> str:
         try:
             text = (REPO_ROOT / "skills" / skill / "SKILL.md").read_text()
         except OSError:
@@ -1526,17 +1640,21 @@ def main() -> int:
         fm = _re.match(r"---\n(.*?)\n---\n", text, _re.DOTALL)
         if not fm:
             return ""
-        desc = _re.search(
-            r"^description:(.*?)(?=^\S|\Z)", fm.group(1), _re.DOTALL | _re.MULTILINE
-        )
-        if not desc:
-            return ""
-        # Everything from `Do NOT activate on` onward lists phrases that must
-        # NOT route to the skill. Searching the whole description would accept
-        # one of those as a valid trigger keyword, so a roster row could list
-        # `strike a balance` and pass.
-        text = _norm_ws(desc.group(1))
-        return text.split("Do NOT activate on")[0].rstrip()
+        parts: list[str] = []
+        for key in ("description", "when_to_use"):
+            field = _re.search(
+                rf"^{key}:(.*?)(?=^\S|\Z)", fm.group(1), _re.DOTALL | _re.MULTILINE
+            )
+            if not field:
+                continue
+            # Everything from `Do NOT activate on` onward lists phrases that
+            # must NOT route to the skill. Searching the whole field would
+            # accept one of those as a valid trigger keyword, so a roster row
+            # could list `strike a balance` and pass. The cut is per field:
+            # a negative clause in `description` must not swallow the
+            # positive triggers that follow in `when_to_use`.
+            parts.append(_norm_ws(field.group(1)).split("Do NOT activate on")[0].rstrip())
+        return " ".join(parts)
 
     for line in skills_doc_text.splitlines():
         cells = _table_cells(line)
@@ -1546,30 +1664,31 @@ def main() -> int:
         if not first_col or first_col.group(1) not in EXPECTED_SKILLS:
             continue
         skill_name = first_col.group(1)
-        description = _frontmatter_description(skill_name)
+        triggers = _frontmatter_triggers(skill_name)
         # Both directions, because a mirror contract broken either way is still
-        # broken: a row listing a phrase the description never claims routes
-        # readers to a keyword that does not trigger, and a description quoting
+        # broken: a row listing a phrase the frontmatter never claims routes
+        # readers to a keyword that does not trigger, and a frontmatter quoting
         # a phrase the row omits hides a live trigger from the roster. Only the
         # first direction has a failing test upstream of it, so the second is
         # the one that silently drifts.
         documented = {_norm_ws(k) for k in _re.findall(r"`([^`]+)`", cells[1])}
-        # Every quoted phrase left in `description` is a trigger: the negative
-        # clause was already cut above, so no positive-clause parse is needed.
-        quoted = {_norm_ws(k) for k in _re.findall(r'"([^"]+)"', description)}
+        # Every quoted phrase left in the trigger fields is a trigger: the
+        # negative clause was already cut above, so no positive-clause parse
+        # is needed.
+        quoted = {_norm_ws(k) for k in _re.findall(r'"([^"]+)"', triggers)}
         for keyword in sorted(documented - quoted):
             drifts.append(
                 f"DOC KEYWORD DRIFT docs/skills.md: `{skill_name}` row lists "
-                f"{keyword!r} but the skill's frontmatter description does "
-                "not quote it — keyword cells mirror the description "
-                "verbatim; fix the row or the description"
+                f"{keyword!r} but the skill's frontmatter (when_to_use / "
+                "description) does not quote it — keyword cells mirror the "
+                "frontmatter verbatim; fix the row or the frontmatter"
             )
         for keyword in sorted(quoted - documented):
             drifts.append(
                 f"DOC KEYWORD DRIFT docs/skills.md: `{skill_name}` frontmatter "
                 f"quotes {keyword!r} but the row does not list it — keyword "
-                "cells mirror the description verbatim; fix the row or the "
-                "description"
+                "cells mirror the frontmatter (when_to_use / description) "
+                "verbatim; fix the row or the frontmatter"
             )
 
     # Rule 13f — the compatibility-tier table is maintained in three places
@@ -1679,7 +1798,7 @@ def main() -> int:
 
     for event, matcher in sorted(dispatch_groups, key=lambda em: (em[0], em[1] or "")):
         for host_id, hooks_path in hooks_outputs:
-            expected, args_excluded, args_wrappers = _manifest_members_for(
+            expected_members, args_excluded, args_wrappers = _manifest_members_for(
                 event, matcher, host_id
             )
 
@@ -1693,11 +1812,11 @@ def main() -> int:
                     f"group_members resolves a hook more than once "
                     f"({sorted(resolved_names)})"
                 )
-            if set(resolved_names) != expected:
+            if set(resolved_names) != expected_members:
                 drifts.append(
                     f"DISPATCH MEMBER DRIFT {event}/{matcher} host={host_id}: "
                     f"group_members={sorted(set(resolved_names))} != "
-                    f"manifest={sorted(expected)} (args-declaring members are "
+                    f"manifest={sorted(expected_members)} (args-declaring members are "
                     f"excluded on both sides — excluded here: "
                     f"{sorted(args_excluded)})"
                 )
@@ -1723,7 +1842,7 @@ def main() -> int:
                     event,
                     matcher,
                     host_id,
-                    expected,
+                    expected_members,
                     _build.DISPATCH_WRAPPER_NAME,
                     args_wrappers=args_wrappers,
                 )
@@ -2145,7 +2264,7 @@ def main() -> int:
                 (role_dir_counts[role],),
             )
         )
-    for label, pattern, expected in readme_count_specs:
+    for label, pattern, expected_counts in readme_count_specs:
         match = re.search(pattern, readme_text, re.MULTILINE)
         if match is None:
             drifts.append(
@@ -2155,10 +2274,10 @@ def main() -> int:
             )
             continue
         found = tuple(int(g) for g in match.groups())
-        if found != expected:
+        if found != expected_counts:
             drifts.append(
                 f"README COUNT DRIFT ({label}): README.md says {found}, "
-                f"derived {expected} — update the number(s) at "
+                f"derived {expected_counts} — update the number(s) at "
                 f"{match.group(0)!r} (#1176)"
             )
 
@@ -2271,6 +2390,116 @@ def main() -> int:
                             f"token(s) {bad!r} — the interpolated matcher/host "
                             "must be shlex-quoted (#1198)"
                         )
+
+    # ------------------------------------------------------------------
+    # Rule 26 — sunset review: review_by present, well-formed, not overdue
+    # (#1300)
+    #
+    # docs/hook-prune-audit.md found zero drops on a 30-day ledger and says
+    # it cannot rank hooks by value, so left alone the roster only grows. A
+    # per-hook review_by date is the structural counterweight: CI fails once
+    # the date passes, and the only ways out are a re-audit that bumps the
+    # date or a verdict recorded in the audit. The logic lives in
+    # review_by_drifts() so tests can drive it with a pinned `today`.
+    # ------------------------------------------------------------------
+    drifts.extend(review_by_drifts(manifest, date.today()))
+
+    # ------------------------------------------------------------------
+    # Rule 27 — README hook-dependency table ↔ manifest `requires` (#1332)
+    #
+    # docs/hook-suitability-audit.md §B: the README's tier table covers
+    # skills, so a user without oh-my-claudecode or the codex plugin has
+    # nowhere to read which hooks are inert. The `requires` field (Rule 20)
+    # is the declaration; README.md's `### Hook dependencies` table is the
+    # reader's view of it. Tie them in both directions, the way Rule 17 ties
+    # `mode` to docs/bypass-vars.md: every declared component has one row
+    # (MISSING), every row names a declared component (ORPHAN), each row's
+    # hook cell equals the declaring set (DRIFT), and the install cell is
+    # non-empty (NO INSTALL) — an install column with a blank cell says
+    # nothing to the reader the table exists for.
+    # ------------------------------------------------------------------
+    readme_lines = (REPO_ROOT / "README.md").read_text().splitlines()
+    doc_deps: dict[str, tuple[set[str], str]] = {}
+    in_section = False
+    for line in readme_lines:
+        if line.startswith("#"):
+            in_section = line.strip() == "### Hook dependencies"
+            continue
+        if not in_section:
+            continue
+        cells = _table_cells(line)
+        if len(cells) < 3 or not cells[0].startswith("`"):
+            continue
+        component_tokens = re.findall(r"`([^`]+)`", cells[0])
+        if not component_tokens:
+            continue
+        component = component_tokens[0]
+        if component in doc_deps:
+            drifts.append(
+                f"HOOK DEPS DUPLICATE README.md: {component!r} has two rows "
+                "in the Hook dependencies table (#1332)"
+            )
+            continue
+        doc_deps[component] = (set(re.findall(r"`([^`]+)`", cells[1])), cells[2])
+    if not doc_deps:
+        drifts.append(
+            "HOOK DEPS MISSING README.md: no `### Hook dependencies` table "
+            "rows found — it is the reader's view of the manifest `requires` "
+            "field (#1332)"
+        )
+    manifest_deps: dict[str, set[str]] = {}
+    for name, comps in manifest_requires.items():
+        for comp in comps:
+            manifest_deps.setdefault(comp, set()).add(name)
+    for comp in sorted(set(manifest_deps) - set(doc_deps)):
+        drifts.append(
+            f"HOOK DEPS MISSING README.md: {comp!r} is declared in `requires` "
+            f"by {sorted(manifest_deps[comp])!r} but has no row in the Hook "
+            "dependencies table (#1332)"
+        )
+    for comp in sorted(set(doc_deps) - set(manifest_deps)):
+        drifts.append(
+            f"HOOK DEPS ORPHAN README.md: {comp!r} has a Hook dependencies "
+            "row but no manifest hook declares it in `requires` (#1332)"
+        )
+    for comp in sorted(set(doc_deps) & set(manifest_deps)):
+        doc_hooks, install = doc_deps[comp]
+        if doc_hooks != manifest_deps[comp]:
+            drifts.append(
+                f"HOOK DEPS DRIFT README.md: {comp!r} row lists "
+                f"{sorted(doc_hooks)!r} but the manifest declares it for "
+                f"{sorted(manifest_deps[comp])!r} (#1332)"
+            )
+        if not install.strip():
+            drifts.append(
+                f"HOOK DEPS NO INSTALL README.md: {comp!r} row has an empty "
+                "install cell (#1332)"
+            )
+
+    # ------------------------------------------------------------------
+    # Rule 28 — Claude-only events declare `hosts: ["claude"]` (#1337)
+    #
+    # `PostToolUseFailure` and `SubagentStop` exist only in Claude Code. The
+    # `hosts` field is optional and absent means "every host", so a
+    # registration that omits it is emitted into the Codex and Cursor
+    # hooks.json for an event those hosts never raise — silent manifest drift,
+    # not a runtime fault, which is exactly the kind a checker is for. The
+    # schema's `event` description already states the contract; the supported
+    # JSON-Schema subset cannot express the conditional, so it lives here.
+    # ------------------------------------------------------------------
+    for entry in manifest["hooks"]:
+        event = entry.get("event")
+        if event not in CLAUDE_ONLY_EVENTS:
+            continue
+        hosts = entry.get("hosts")
+        if hosts != ["claude"]:
+            drifts.append(
+                f"CLAUDE-ONLY HOSTS {entry.get('name')!r}: its {event} "
+                f"registration declares hosts={hosts!r}, expected "
+                '[\'claude\'] — the event exists only in Claude Code, and an '
+                "absent or wider value writes the hook into the Codex and "
+                "Cursor hooks.json for an event they never raise (#1337)"
+            )
 
     if drifts:
         print("plugin-manifest check FAILED:")

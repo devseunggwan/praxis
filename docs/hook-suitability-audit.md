@@ -1,10 +1,15 @@
 # Hook Suitability Audit
 
+> **Snapshot.** Written in August 2026 against the roster and the five
+> platform manifests of that time. Hook lists below are historical; the
+> platform references were corrected on 2026-09-05 after the Gemini (#1221)
+> and OpenCode (#1226) removals. The current roster is `hooks/manifest.json`.
+
 A complement to [`hook-prune-audit.md`](hook-prune-audit.md). That audit asks
 "does this hook fire?" against the fire-rate ledger and found nothing to drop.
 This audit asks a different question: **is each hook appropriate for the
 context it ships into?** — where "context" means (a) this repository as a
-publicly distributed, multi-platform plugin (Claude, Codex, Cursor, OpenCode),
+publicly distributed, multi-platform plugin (Claude, Codex, Cursor),
 and (b) an installing environment that may lack the author's toolchain
 (codex CLI, cmux, oh-my-claudecode, a `hookable:` memory store, zsh,
 slack/notion MCP servers).
@@ -59,7 +64,6 @@ stock Claude Code session without the named component:
 | `codex-review-route` | Matches only `^/codex(:\|-)review` prompts — inert without the openai-codex plugin; also needs `jq` + `gh` | `impl.sh:42` |
 | `model-routing-advisory` | Recognizes only `cmux …`/`cmux-delegate` delegation argv | `impl.py:14-15` |
 | `momentum-rule-retrieval-gate` (dispatch trigger only) | `cmux new-workspace` arm dead without cmux; merge/force-push arms still live | `impl.py:15` |
-| `caller-probe-gate`, `source-citation-probe-gate` (MCP matcher only) | `mcp__.*slack.*\|mcp__.*notion.*` entries never match without those servers; Bash matcher still live | `hooks/manifest.json` |
 | `block-unmatched-glob` | Verdict delegated to `zsh -f`; no zsh → vacuous pass | `impl.py:14-15`, `spec.md:82` |
 | `memory-hint` | Permanent no-op without a memory dir using `hookable:`/`hookKeywords:` frontmatter | `impl.py:27-30` |
 | `builtin-task-postuse` | Exists to correct **oh-my-claudecode** `pre-tool-enforcer` false positives; without omc there is nothing to correct | its `spec.md` |
@@ -75,7 +79,7 @@ plugin's bug.
 
 ## C. Personal/org assets hardcoded into a publicly distributed plugin
 
-The repository is public and packaged for five platforms, but several hooks
+The repository is public and packaged for three hook-installing platforms, but several hooks
 carry the author's private namespace as code, not config:
 
 | Location | Asset | Note |

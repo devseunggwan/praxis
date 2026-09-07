@@ -444,6 +444,86 @@ run_case silent "unchanged-cleared-by-pr-url-read" '{}'
 build_transcript "PR #864 는 여전히 OPEN, 커밋 유실 없음." none
 run_case advisory-strict "unchanged-strict-mode" '{}' PRAXIS_MERGE_CLAIM_STRICT=1
 
+# --- SubagentStop (issue #1337) --------------------------------------------
+#
+# On SubagentStop `transcript_path` is the PARENT session's and
+# `agent_transcript_path` is the subagent's own. Reading the wrong one does
+# not error, it answers about the wrong conversation — so each case below
+# makes the two transcripts disagree and asserts the subagent's verdict.
+
+mark_sidechain() {
+  # $1 = transcript path; rewrites it with isSidechain: true on every event.
+  python3 - "$1" <<'MARKPY'
+import json, sys
+path = sys.argv[1]
+events = [json.loads(line) for line in open(path, encoding="utf-8") if line.strip()]
+for e in events:
+    e["isSidechain"] = True
+with open(path, "w", encoding="utf-8") as f:
+    for e in events:
+        f.write(json.dumps(e, ensure_ascii=False) + "\n")
+MARKPY
+}
+
+# Parent turn HAS the fresh state query (would be silent); the subagent's does
+# not. The advisory must come from the subagent's transcript.
+build_transcript "PR #543 머지 완료." gh
+SS_PARENT="$TRANSCRIPT"
+build_transcript "PR #543 머지 완료." none
+SS_AGENT="$TRANSCRIPT"
+TRANSCRIPT="$SS_PARENT"
+run_case advisory "subagent-stop-grades-the-subagent" \
+  "{\"agent_transcript_path\": \"$SS_AGENT\"}"
+
+# Mirror image: the subagent DID query and the parent did not. Reading the
+# parent would advise on a clean subagent run.
+build_transcript "PR #543 머지 완료." none
+SS_PARENT="$TRANSCRIPT"
+build_transcript "PR #543 머지 완료." gh
+SS_AGENT="$TRANSCRIPT"
+TRANSCRIPT="$SS_PARENT"
+run_case silent "subagent-stop-clears-on-the-subagents-own-query" \
+  "{\"agent_transcript_path\": \"$SS_AGENT\"}"
+
+# The agent transcript may carry isSidechain markers; keeping the filter would
+# empty its turn and clear the gate silently — a false clear, so this case is
+# built to advise.
+build_transcript "PR #543 머지 완료." gh
+SS_PARENT="$TRANSCRIPT"
+build_transcript "PR #543 머지 완료." none
+SS_AGENT="$TRANSCRIPT"
+mark_sidechain "$SS_AGENT"
+TRANSCRIPT="$SS_PARENT"
+run_case advisory "subagent-stop-sidechain-marked-agent-transcript" \
+  "{\"agent_transcript_path\": \"$SS_AGENT\"}"
+
+# last_assistant_message is the documented source for the final text; here the
+# agent transcript's last message carries no claim and the payload's does.
+build_transcript "PR #543 머지 완료." gh
+SS_PARENT="$TRANSCRIPT"
+build_transcript "리뷰만 했습니다." none
+SS_AGENT="$TRANSCRIPT"
+TRANSCRIPT="$SS_PARENT"
+run_case advisory "subagent-stop-payload-last-assistant-message" \
+  "{\"agent_transcript_path\": \"$SS_AGENT\", \"last_assistant_message\": \"PR #543 머지 완료.\"}"
+
+# An agent transcript that has not been flushed resolves to NOTHING. The
+# parent's turn here would advise, so a fallback emits a verdict about the
+# wrong conversation; with a fresh parent query it would instead CLEAR a
+# subagent claim on evidence the subagent never produced (CodeRabbit on #1358).
+build_transcript "PR #543 머지 완료." none
+run_case silent "subagent-stop-unflushed-agent-transcript-is-not-the-parent" \
+  '{"agent_transcript_path": "/nonexistent/subagents/never-written.jsonl"}'
+
+build_transcript "PR #543 머지 완료." gh
+run_case silent "subagent-stop-unflushed-cannot-borrow-parent-evidence" \
+  '{"agent_transcript_path": "/nonexistent/subagents/never-written.jsonl", "last_assistant_message": "PR #543 머지 완료."}'
+
+# The event name alone keeps the parent's transcript out.
+build_transcript "PR #543 머지 완료." none
+run_case silent "subagent-stop-without-the-key-still-refuses-the-parent" \
+  '{"hook_event_name": "SubagentStop"}'
+
 echo "----"
 echo "PASS: $PASS / FAIL: $FAIL"
 [ "$FAIL" -eq 0 ]

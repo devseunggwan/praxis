@@ -11,7 +11,14 @@ Daily rotation (UTC date):
 ~/.praxis/telemetry/bypass-events-YYYY-MM-DD.jsonl
 ```
 
-Directories are created on first write.  The file is append-only.
+`~/.praxis` is the `PRAXIS_HOME`-relocated root shared with every other
+runtime file praxis writes (see `PRIVACY.md`), so with `PRAXIS_HOME` set the
+file lives at `$PRAXIS_HOME/telemetry/bypass-events-YYYY-MM-DD.jsonl`; the
+`fire-events-*` family and `bypass-review` follow the same rule (issue #1340).
+A hook run from a development checkout writes to
+`<checkout>/.praxis-dev-telemetry/` instead, whatever `PRAXIS_HOME` says
+(issue #934). Directories are created on first write.  The file is
+append-only.
 
 On the first write of a new UTC day, files older than
 `PRAXIS_TELEMETRY_RETENTION_DAYS` (default 30) are removed and a detached
@@ -44,6 +51,7 @@ One JSON object per line.  Example:
 | --------------------------------- | ------------------ | -------------------------------------------------------------------------- |
 | `PRAXIS_BYPASS_TELEMETRY_DISABLE` | unset              | `1` = hook is a no-op for the session                                      |
 | `PRAXIS_BYPASS_TELEMETRY_FILE`    | (daily path above) | Override the full target path — useful for tests or custom log aggregation |
+| `PRAXIS_HOME`                     | `~/.praxis`        | Relocate the whole runtime tree; the telemetry directory moves with it     |
 
 ## Detected bypass var families
 
@@ -88,7 +96,8 @@ bypass-review [OPTIONS]
 Options:
   -d, --days N      Query the last N days (default: 7)
   --dir PATH        Override the telemetry directory
-                    (default: ~/.praxis/telemetry)
+                    (default: $PRAXIS_HOME/telemetry, or
+                    ~/.praxis/telemetry when PRAXIS_HOME is unset)
   --errors-only     Show only events where tool_result_status == "error"
   -h, --help        Show help and exit
 ```

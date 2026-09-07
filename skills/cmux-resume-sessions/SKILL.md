@@ -3,9 +3,10 @@ name: cmux-resume-sessions
 description: >
   Restore cmux workspaces from a JSON snapshot saved by cmux-save-sessions.
   Use this when you want to rehydrate an intentionally saved layout with NO crash context.
-  Crash routing override: if the request mentions a crash, power loss, OOM, or "살려야",
+  Crash routing override: if the request mentions a crash, power loss, OOM, or 살려야,
   route to cmux-recover-sessions instead — even when the user also mentions a snapshot,
   because the snapshot may be stale and .jsonl scanning reflects the real latest state.
+when_to_use: >
   Triggers on "resume sessions", "session resume", "session restore", "cmux resume", "restore from snapshot", "rehydrate sessions", "세션 복원", "스냅샷 복구", "스냅샷 복원".
 verified-against-runtime: true
 runtime-verified-at: 2026-05-28
@@ -85,9 +86,14 @@ current_host=$(hostname)
    - If user selects `"취소"`: abort with `"Resume 취소됨 — 호스트 불일치 (${saved_host} → ${current_host})."`
 4. Execute (only after the hostname gate passes). Pass through all original args (`"$@"`) so flags like `--no-claude` survive:
 ```bash
-bash "$(dirname "${0}")/cmux-resume-sessions" "$@"
+bash "${CLAUDE_PLUGIN_ROOT:?praxis plugin root not set — run via the installed plugin or export CLAUDE_PLUGIN_ROOT}/skills/cmux-resume-sessions/cmux-resume-sessions" "$@"
 ```
 5. Show output to the user
+
+If `CLAUDE_PLUGIN_ROOT` is unset the `:?` guard aborts with `praxis plugin root
+not set`; resolve it from the installed-plugins manifest
+(`jq -r '.plugins["praxis@praxis"][0].installPath // empty' "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/plugins/installed_plugins.json"`),
+export it, and re-run — do not fall back to a relative path.
 
 **What gets restored:**
 - Creates a cmux workspace per session (with `--cwd` for working directory)
@@ -129,8 +135,8 @@ bash "$(dirname "${0}")/cmux-resume-sessions" "$@"
 Resuming from: sessions-20260407-143000.json
   Saved at: 2026-04-07T14:30:00+0900 | Host: macbook-pro.local | Sessions: 7
 
-  ✓ Review PR comments → workspace:150 (/Users/nathan.song/projects/hub)
-  ✓ Fix auth bug → workspace:151 (/Users/nathan.song/projects/backend)
+  ✓ Review PR comments → workspace:150 (/Users/dev/projects/my-repo)
+  ✓ Fix auth bug → workspace:151 (/Users/dev/projects/backend)
   ⚠ SKIP: Old worktree task (cwd not found: /tmp/wt-deleted)
   ✗ FAIL: Broken session
 

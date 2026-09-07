@@ -61,6 +61,22 @@ print(json.dumps({
       [ -z "$out" ]   || ok=0
       [ -z "$err" ]   || ok=0
       ;;
+    # The two detectors share the `[pipefail-advisory]` marker, so
+    # `advisory` above cannot tell them apart — and telling them apart is
+    # the whole assertion for issue #1271: a case must reach the detector
+    # it was written for, not merely produce some advisory. `gating` and
+    # `pipe` pin the headline instead of the marker.
+    gating)
+      [ "$rc" -eq 0 ] || ok=0
+      [ -z "$out" ]   || ok=0
+      echo "$err" | grep -q "masked exit code gates an irreversible command" || ok=0
+      ;;
+    pipe)
+      [ "$rc" -eq 0 ] || ok=0
+      [ -z "$out" ]   || ok=0
+      echo "$err" | grep -q "mutating command piped without" || ok=0
+      echo "$err" | grep -q "masked exit code gates" && ok=0
+      ;;
     *)
       echo "FAIL  [$name] unknown expected: $expected"
       FAIL=$((FAIL + 1)); FAILED_NAMES+=("$name"); return
@@ -413,6 +429,93 @@ else
   echo "FAIL  [874: non-'1' env value turned the arm on] stdout: $_arm_out"
   FAIL=$((FAIL + 1)); FAILED_NAMES+=("874: non-'1' env value keeps default arm")
 fi
+
+# === GATING — masked exit code on the left of `&&` (issue #1271) ==========
+#
+# The gap: `pipefail-advisory`'s original predicate needs the MUTATING
+# command to be the piped one, and `inspection-chain-advisory` is silent by
+# spec on any `&&` chain mixing inspection with state change. A chain whose
+# non-mutating segment is piped and whose mutating segment is not reaches
+# neither, so these cases must hit the NEW detector specifically.
+
+run_case "issue #1271 verbatim: git switch | tail && gh pr merge" \
+  gating \
+  "git switch main 2>&1 | tail -1 && gh pr merge 1264 --squash --delete-branch"
+
+run_case "cd prefix before the masked segment" \
+  gating \
+  "cd /repo && git switch main 2>&1 | tail -1 && gh pr merge 4964 --squash --delete-branch"
+
+run_case "head sink gating git push" \
+  gating \
+  "git log --oneline | head -1 && git push origin main"
+
+run_case "grep sink gating gh workflow run" \
+  gating \
+  "gh pr view 1 --json state | grep OPEN && gh workflow run ci.yml"
+
+run_case "grep sink gating a mutating gh api call" \
+  gating \
+  "gh pr view 1 --json state | grep OPEN && gh api -X PATCH /repos/o/r/issues/comments/1 -F body=@b.md"
+
+# `&&` gates the whole pipeline on its right, so the irreversible command need
+# not be that pipeline's first segment. Scanning only unit[0] missed these.
+run_case "irreversible command is the second segment of the gated pipeline" \
+  gating \
+  "git switch main 2>&1 | tail -1 && echo x | gh pr merge 1264"
+
+run_case "irreversible command is the last of three gated segments" \
+  gating \
+  "git status --porcelain | tail -1 && cat f | tee log | git push origin main"
+
+# A substitution body is its own command list, so an `&&` chain written inside
+# one gates the same way. What does not cross the boundary is the
+# substitution's own exit code — that case stays out of scope (spec.md).
+run_case "gating chain written inside a command substitution" \
+  gating \
+  'OUT="$(git switch main 2>&1 | tail -1 && gh pr merge 1264)"'
+
+run_case "substitution body needs the fd-dup merge to see the sink" \
+  gating \
+  'OUT="$(git switch main 2>&1 | tail -1 && gh workflow run ci.yml)"'
+
+# --- SILENT counterparts: each removes exactly one element of the predicate
+
+run_case "a semicolon does not gate, so a masked exit changes nothing" \
+  silent \
+  "git switch main 2>&1 | tail -1 ; gh pr merge 1264 --squash"
+
+run_case "gated command is reversible (git commit) — not this predicate" \
+  silent \
+  "git status --porcelain | tail -1 && git commit -m x"
+
+run_case "left side has no pipe at all" \
+  silent \
+  "git switch main && gh pr merge 1264 --squash"
+
+run_case "left side pipes into a non-truncating sink" \
+  silent \
+  "git switch main 2>&1 | cat && gh pr merge 1264 --squash"
+
+run_case "masked pipeline sits AFTER the mutation — gates nothing" \
+  silent \
+  "gh pr merge 1264 --squash && git log --oneline | tail -1"
+
+run_case "heredoc body holding the issue's own example" \
+  silent \
+  "cat <<EOF
+git switch main 2>&1 | tail -1 && gh pr merge 1264 --squash
+EOF"
+
+# --- The original detector must keep its own headline, not be shadowed
+
+run_case "gen-2 pattern still reports the piped-mutation headline" \
+  pipe \
+  "gh pr merge 123 --squash 2>&1 | tail -3"
+
+run_case "gen-1 pattern still reports the piped-mutation headline" \
+  pipe \
+  "git commit -m x | tail"
 
 # === Fail-open infrastructure =============================================
 

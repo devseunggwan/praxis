@@ -137,9 +137,9 @@ while*, never as grounds to cancel. Cancel on the pid.
 
 `find -mmin` is used rather than `stat`, whose mtime syntax splits BSD from
 GNU (`stat -f` on macOS, `stat -c` on Linux); the reaper script next door
-carries that split and its test skips off Darwin because of it. Quote the
-path — the state directory is relocatable and may sit under a name
-containing spaces.
+resolves that split at run time with a BSD-then-GNU-then-python3 `mtime()`
+(issue #1302). Quote the path — the state directory is relocatable and may
+sit under a name containing spaces.
 
 `status: "running"` with no matching process is a **stale** job, not a
 progressing one. Cancel it (`node "{resolved_companion_path}" cancel --cwd

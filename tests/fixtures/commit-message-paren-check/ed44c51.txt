@@ -1,0 +1,142 @@
+perf(hooks): normalize matcher spellings and add Edit/Write dispatch groups (#1198)
+
+* perf(hooks): normalize matcher spellings and add Edit/Write dispatch groups
+
+동일한 matcher 집합이 표기 순서만 달라 서로 다른 리터럴 문자열로 흩어져
+있었고 (`Edit|Write` vs `Write|Edit`, `Write|Edit|Bash` vs `Bash|Write|Edit`
+등), dispatch와 hooks.json 그룹핑은 리터럴 문자열을 키로 쓰기 때문에 같은
+집합끼리도 합쳐지지 못했다. 그 결과 Edit 한 번에 15개, Write 한 번에 14개의
+프로세스가 각각 뜨는 상태였다 (.claude-plugin/hooks/hooks.json 기준).
+
+변경 내용:
+
+- hooks/manifest.json의 평문 파이프 결합 matcher를 전부 정준 표기(토큰
+  알파벳 정렬)로 통일. 정규식 성격의 matcher(`mcp__.*` 등)는 건드리지 않음.
+- check-plugin-manifests.py에 Rule 21 추가: hook 항목과 dispatch_groups의
+  평문 matcher가 정렬·중복 제거된 정준 표기인지 검증 (기존 규칙 번호는
+  변경하지 않음 — 번호 드리프트는 #1172 소관).
+- dispatch_groups에 `(PreToolUse, Edit|Write)` 와
+  `(PreToolUse, Edit|NotebookEdit|Write)` 두 그룹 추가. 일부러 두 그룹으로
+  분리: `Edit|Write` 훅을 NotebookEdit 그룹에 합치면 원래 matcher가 커버하지
+  않던 NotebookEdit 호출에서도 발화하게 되기 때문. 멤버 9개 훅 전원이
+  `@fail_open main()` + stdin 페이로드 + exit 2 / permissionDecision 방식으로
+  판정을 내는 것을 확인했고, `args`를 선언한 훅은 없음
+  (pre-edit-md-escape-advisory는 matcher가 `Edit` 단독이라 그룹 밖).
+- 그룹 전용 멤버 9개의 per-hook 래퍼(.sh) 삭제 — Bash 그룹 도입(#618)과 동일한
+  마이그레이션 패턴. 훅 셸 테스트는 전부 impl.py를 직접 호출하므로 수정 불필요.
+- 생성물 재생성: 플랫폼별 hooks.json 4종, docs/hook-operating-matrix.md.
+- tests/hooks/_lib/test_dispatch.py에 새 그룹 멤버 구성·호스트 필터·noop
+  allow·in-process/subprocess 동등성 테스트 추가.
+- ARCHITECTURE.md dispatch 절과 그룹 멤버 spec.md의 래퍼 참조 갱신.
+
+효과 (.claude-plugin/hooks/hooks.json 노드 수, PreToolUse+PostToolUse 합산):
+Edit 15→8, Write 14→7, NotebookEdit 6→3. Bash(12)와 AskUserQuestion(10)은
+변화 없음 — Bash 복합 matcher 재편과 Stop 레인은 #1167/#1169 소관으로 제외.
+
+Closes #1168
+
+Co-Authored-By: Claude <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01PBTDLnV7eaAqz7GGuSD5X7
+
+* fix(hooks): review round 1 — quote dispatcher matchers, empty-token drift, doc sweep
+
+PR #1198 리뷰에서 재현된 치명 결함 수정: 생성된 dispatcher 커맨드가 파이프
+포함 matcher를 따옴표 없이 삽입해 (`_dispatch.sh PreToolUse
+Edit|NotebookEdit|Write claude`), 호스트의 `sh -c` 실행에서 3개 커맨드
+파이프라인으로 파싱됐다. dispatcher는 잘못된 그룹('Edit')으로 실행되고
+stdout(deny JSON)은 파이프에 삼켜져, 그룹 소속 9개 훅 전부 — deny 게이트
+protected-paths-guard / worktree-edit-gate / pre-edit-protected-branch-guard
+포함 — 가 4개 플랫폼 전부에서 발화하지 않는 상태였다. 근본 원인은
+`_dispatcher_node`의 무인용 `{matcher}` 삽입: 기존 Bash 그룹은 파이프가 없어
+잠복해 있던 결함이 이번 PR의 첫 파이프 포함 그룹 matcher로 발현됐다.
+
+수정 내용:
+
+1. (CRITICAL) `_dispatcher_node`가 event/matcher/host를 전부 shlex.quote로
+   인용 — 메타문자 없는 토큰(Bash, host id)은 no-op이라 기존 Bash 노드는
+   바이트 동일. `_command_for`의 args 삽입도 동일하게 인용(현 값들엔 no-op).
+   Rule 14의 DISPATCH ARGS 검사도 인용된 표기를 기대하도록 갱신.
+   가드 2종 추가:
+   - Rule 22: 모든 플랫폼 hooks.json의 모든 command 문자열을 shlex
+     punctuation_chars로 셸과 같은 방식으로 토큰 분해해, 무인용 제어 연산자
+     토큰(| & ; ( ) < >)이 나오면 드리프트로 보고. 인용된 연산자는 토큰
+     내부에 보호되므로 통과.
+   - sh -c 엔드투엔드 테스트: 커밋된 hooks.json의 실제 dispatcher 커맨드
+     문자열을 `sh -c`로 실행해 (Rule 14/pytest가 셸을 우회해 못 잡던 클래스)
+     noop allow(rc 0, 'not found' 없음)와 strict deny(rc 2)가 실제 셸 경로로
+     흐르는 것을 검증.
+2. (HIGH) path-probe-gate / pre-edit-protected-branch-guard spec.md의 수동
+   설치 예시도 동일하게 인용 표기로 수정. 손댄 spec 전체에서 무인용 dispatcher
+   커맨드 패턴 없음 확인.
+3. (MED) Rule 21이 빈 alternation 토큰(`Edit|`, `Edit||Write`)을 "정규식"으로
+   면제하던 문제 수정 — 빈 토큰은 모든 툴에 매치되므로 드리프트로 보고.
+4. (MED) 정준화 이후 남아 있던 구 표기 프로즈/주석 일괄 정리
+   (fan-out-scope-gate, comment-yap-advisory, protected-paths-guard,
+   bulk-write-memory-checkpoint, secret-print-redaction-advisory,
+   block-personal-asset-leak의 spec/impl/테스트 헤더). CHANGELOG와 ADR-0002는
+   역사 기록이라 그대로 둠.
+5. (LOW) 새 그룹 테스트를 manifest dispatch_groups 기반 파라미터라이즈로
+   재작성 — 미래 그룹(Stop 등)이 선언되는 즉시 noop/동등성/셸 실행 커버리지를
+   자동으로 받는다. exact-Bash 그룹은 기존 전용 스위트 유지.
+
+Co-Authored-By: Claude <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01PBTDLnV7eaAqz7GGuSD5X7
+
+* fix(hooks): review round 2 — deny write-through dependency note, third group, scoped Rule 22
+
+라운드 2 리뷰 5건 반영:
+
+1. (HIGH, 설계 노출) 그룹화된 write-path deny 게이트에서 한 멤버가 오래
+   멈추면(예: pre-edit-protected-branch-guard의 hung mount git 호출) 호스트가
+   그룹 타임아웃에 dispatcher를 죽일 때 이미 계산된 다른 멤버의 deny가
+   버퍼째 유실될 수 있다. 멤버별 예산/스킵 장치는 PR #1195(claude/1167-
+   dispatch-member-deadline) 소관이므로 여기서 중복 구현하지 않고,
+   _dispatch.py 버퍼링 지점에 노출 설명 + #1195 리베이스 지시 주석을 달고
+   PR 본문에 "#1195 선머지" 의존성을 명시. 루프 재구조화(write-through)는
+   #1195 diff와 정면 충돌이라 이 PR에서는 하지 않음.
+2. (MED) ARCHITECTURE.md의 "multi-tool 훅은 standalone 유지" 근거가 이번
+   PR로 낡았으므로, 세 번째 그룹 `(PreToolUse, Bash|Edit|Write)`를 실제로
+   추가 (secret-print-redaction-advisory, block-personal-asset-leak,
+   external-api-literal-trigger — 3 프로세스 → 1, Bash/Edit/Write 호출마다).
+   멤버 3개 전원 `@fail_open main()` + stdin + args 미선언 확인. memory-hint는
+   해당 matcher의 유일한 훅이라 1-멤버 그룹은 이득이 없어 standalone 유지 —
+   ARCHITECTURE.md에 그 근거를 정직하게 기술. 래퍼 3개 삭제(Rule 6b),
+   block-personal-asset-leak spec의 "standalone wrapper" 서술 갱신.
+3. (MED) Rule 22 범위 축소: dispatcher(_dispatch.sh) 호출 커맨드만 검사 —
+   빌드가 manifest 값을 삽입하는 표면이 그곳뿐이고, 미래의 정당한 복합
+   커맨드(`... 2>&1`, `a && b`)가 matcher 인용 메시지로 CI에서 깨지면 안
+   되므로. 네거티브 체크: 무인용 dispatcher matcher는 여전히 플래그,
+   비-dispatcher 복합 커맨드는 Rule 22 미플래그(바이트 드리프트 Rule 5만).
+4. (LOW) 테스트 _sh_env가 PRAXIS_* 전부를 스크럽하도록 수정 (결정성),
+   단 PRAXIS_HOME/PRAXIS_FIRE_TELEMETRY_FILE은 모듈 전용 임시 디렉터리로
+   재설정해 개발자의 실제 ~/.praxis에 쓰지 않도록 격리 유지.
+5. (LOW) 삭제된 래퍼를 지칭하던 테스트 파일 헤더 4건 갱신
+   (path-probe-gate, advisory-wrapper-signature-verify,
+   bulk-write-memory-checkpoint, pre-edit-protected-branch-guard) + 잘못된
+   Usage 경로 동반 수정.
+
+프로세스 수 (origin/main → 현재, .claude-plugin/hooks/hooks.json):
+Edit 15→6, Write 14→5, NotebookEdit 6→3, Bash 12→10, AskUserQuestion 10→10.
+
+Co-Authored-By: Claude <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01PBTDLnV7eaAqz7GGuSD5X7
+
+* fix(hooks): return a dispatcher deny immediately
+
+Members ran to the end of the group before any decision was written, so a
+host kill at the group timeout discarded a deny another member had already
+computed. Under per-hook wrappers that deny would have landed on its own.
+The group consolidation this PR adds extends the shape to the write path,
+where the lost decision is one that should have blocked an edit.
+
+A deny is now written and returned the moment a member computes it. Which
+deny wins is unchanged (the first one already won); the cost is the advisory
+stderr of members after it, on a call that is blocked regardless.
+
+Confidence: high
+Not-tested: an actual host kill at the group timeout — it cannot be staged from inside the process; the test asserts the observable equivalent (no member runs after a deny)
+Session-Id: c044205b-803f-48b1-acc9-aab9aa5e25e1
+
+---------
+
+Co-authored-by: Claude <noreply@anthropic.com>

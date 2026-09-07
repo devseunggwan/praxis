@@ -82,35 +82,6 @@ class TestLoadTranscript:
 
 
 # ---------------------------------------------------------------------------
-# load_transcript_objs / read_transcript_tail (bounded readers)
-# ---------------------------------------------------------------------------
-
-class TestBoundedReaders:
-    def test_objs_keeps_non_dicts_and_skips_bad_lines(self, tmp_path):
-        path = _write_jsonl(tmp_path, [_user(text="hi"), json.dumps([1]), "broken"])
-        objs = T.load_transcript_objs(path, max_bytes=1 << 20)
-        assert len(objs) == 2  # dict + list survive, broken line skipped
-        assert isinstance(objs[1], list)
-
-    def test_objs_over_max_bytes_returns_none(self, tmp_path):
-        path = _write_jsonl(tmp_path, [_user(text="x" * 100)])
-        assert T.load_transcript_objs(path, max_bytes=10) is None
-
-    def test_objs_missing_file_returns_none(self):
-        assert T.load_transcript_objs("/nonexistent/x.jsonl", max_bytes=100) is None
-
-    def test_tail_returns_last_n_lines(self, tmp_path):
-        path = _write_jsonl(tmp_path, [f'{{"i": {i}}}' for i in range(10)])
-        tail = T.read_transcript_tail(path, max_lines=3, max_bytes=1 << 20)
-        assert tail is not None
-        assert tail.splitlines() == ['{"i": 7}', '{"i": 8}', '{"i": 9}']
-
-    def test_tail_over_max_bytes_returns_none(self, tmp_path):
-        path = _write_jsonl(tmp_path, ['{"k": "v"}'] * 5)
-        assert T.read_transcript_tail(path, max_lines=2, max_bytes=3) is None
-
-
-# ---------------------------------------------------------------------------
 # get_current_turn
 # ---------------------------------------------------------------------------
 
@@ -418,6 +389,77 @@ class TestScanUserRejections:
         # and not a scan that stopped finding things.
         assert len(T.scan_user_rejections(path)) == 1
 
+    def test_file_exactly_at_the_bound_is_scanned(self, tmp_path):
+        # The bound is "past", not "at": a file whose size equals max_bytes is
+        # inside it (#1280 kept the streamed reader on the same edge).
+        path = _write_jsonl(tmp_path, [
+            _asst_tool_use("A1", "toolu_1", "AskUserQuestion", {"questions": []}),
+            _rejection("toolu_1", "A1"),
+        ])
+        size = os.path.getsize(path)
+        assert len(T.scan_user_rejections(path, max_bytes=size)) == 1
+        assert T.scan_user_rejections(path, max_bytes=size - 1) is None
+
+    def test_scan_memory_does_not_track_file_size(self, tmp_path):
+        # Both passes stream (#1280): the earlier reader held the bound's worth
+        # of text twice (string + splitlines list). The peak must not grow with
+        # the file, so a 100x larger session costs about the same to scan.
+        import tracemalloc
+
+        def build(n, name):
+            d = tmp_path / name
+            d.mkdir()
+            filler = [_user(text="x" * 200) for _ in range(n)]
+            return _write_jsonl(d, filler + [
+                _asst_tool_use("A1", "toolu_1", "AskUserQuestion", {"questions": []}),
+                _rejection("toolu_1", "A1"),
+            ])
+
+        small, big = build(100, "s"), build(10000, "b")
+
+        def peak(path):
+            tracemalloc.start()
+            try:
+                assert len(T.scan_user_rejections(path, max_bytes=1 << 30)) == 1
+                return tracemalloc.get_traced_memory()[1]
+            finally:
+                tracemalloc.stop()
+
+        assert peak(big) < 4 * peak(small) + 1 * 1024 * 1024
+
+    def test_one_oversized_line_is_refused_before_allocation(self, tmp_path):
+        # A single line past the bound must not be read whole and only then
+        # measured: each read is capped at the budget left (#1280 review).
+        import tracemalloc
+
+        path = tmp_path / "t.jsonl"
+        path.write_bytes(b'{"type": "user", "pad": "' + b"x" * (4 * 1024 * 1024) + b'"}\n')
+        tracemalloc.start()
+        try:
+            assert T.scan_user_rejections(str(path), max_bytes=64 * 1024) is None
+            peak = tracemalloc.get_traced_memory()[1]
+        finally:
+            tracemalloc.stop()
+        assert peak < 1024 * 1024
+
+    def test_unreadable_but_oversized_stays_indeterminate(self, tmp_path, monkeypatch):
+        # EACCES cannot be provoked as root, so the open is stubbed: the
+        # answer must follow the size, not collapse to "no rejections".
+        import builtins
+
+        path = _write_jsonl(tmp_path, [_user(text="x" * 100)])
+        size = os.path.getsize(path)
+        real_open = builtins.open
+
+        def denied(p, *a, **k):
+            if str(p) == path:
+                raise PermissionError(p)
+            return real_open(p, *a, **k)
+
+        monkeypatch.setattr(builtins, "open", denied)
+        assert T.scan_user_rejections(path, max_bytes=size - 1) is None
+        assert T.scan_user_rejections(path, max_bytes=size) == []
+
     def test_malformed_line_next_to_a_rejection_is_skipped(self, tmp_path):
         path = _write_jsonl(tmp_path, [
             _asst_tool_use("A1", "toolu_1", "AskUserQuestion",
@@ -437,12 +479,18 @@ HOOKS = REPO_ROOT / "hooks"
 _CONSUMERS = {
     HOOKS / "completion-verify" / "readonly-verify-deferral-gate" / "impl.py":
         ["load_current_turn", "extract_last_assistant_text"],
+    # Registered on SubagentStop as well (#1337), so it takes the turn through
+    # the payload reader that chooses between the session transcript and the
+    # subagent's own rather than reading `transcript_path` itself.
     HOOKS / "completion-verify" / "completion-signal-gate" / "impl.py":
-        ["load_current_turn", "extract_last_assistant_text", "has_tool_in_turn"],
+        ["load_stop_turn", "stop_last_assistant_text", "has_tool_in_turn"],
     # Reads a fixed window past the turn (`events[-_EVIDENCE_WINDOW:]`), so it
-    # binds the min_events reader and slices the turn out itself (#1076).
+    # binds the min_events reader and slices the turn out itself (#1076); the
+    # SubagentStop registration (#1337) makes it resolve the path first and
+    # pass that reader the matching `drop_sidechain`.
     HOOKS / "completion-verify" / "merge-state-claim-gate" / "impl.py":
-        ["load_recent_events", "get_current_turn", "extract_last_assistant_text"],
+        ["load_recent_events", "get_current_turn", "resolve_stop_transcript",
+         "stop_last_assistant_text"],
     HOOKS / "completion-verify" / "negative-existence-verdict-gate" / "impl.py":
         ["load_current_turn", "extract_last_assistant_text"],
     HOOKS / "completion-verify" / "proposal-premise-gate" / "impl.py":
@@ -463,14 +511,27 @@ _CONSUMERS = {
     # Same whole-session rationale as pr-report-destination-gate above (#1113).
     HOOKS / "completion-verify" / "pr-anchor-existence-gate" / "impl.py":
         ["reduce_transcript_resumable", "stop_scan_cursor_path"],
+    # Matches search commands in the last N lines only; reads the tail from the
+    # end instead of loading up to 50 MB to keep 400 lines (#1279).
     HOOKS / "preflight-gate" / "block-gh-issue-create-without-dup-search" / "impl.py":
-        ["read_transcript_tail"],
+        ["tail_lines", "TranscriptReadError"],
+    # Whole-session scan, needle-prefiltered and resumable: one cursor per
+    # transcript file and session, a byte budget per call (#1277).
+    HOOKS / "preflight-gate" / "block-commit-without-codex-review" / "impl.py":
+        ["scan_transcript_resumable", "scan_cursor_path", "TranscriptReadError"],
+    # Whole-session scans under a byte cap, needle-prefiltered (#1312).
+    HOOKS / "preflight-gate" / "skill-gate-commands" / "impl.py":
+        ["iter_transcript_bounded", "TranscriptReadError", "json_needle"],
+    HOOKS / "advisory-nudge" / "pre-commit-staged-file-enumeration" / "impl.py":
+        ["iter_transcript_bounded", "TranscriptReadError"],
     HOOKS / "preflight-gate" / "block-ask-end-option" / "impl.py":
         ["read_last_user_message"],
     HOOKS / "preflight-gate" / "block-manufactured-action-menu" / "impl.py":
         ["read_last_user_message"],
+    # Resumable through a session-keyed cursor so the byte bound is a budget
+    # per call, not a ceiling on the session (#1280).
     HOOKS / "preflight-gate" / "rejected-mutation-reconsent-gate" / "impl.py":
-        ["scan_user_rejections"],
+        ["scan_user_rejections", "scan_cursor_path"],
     # Counts this turn's delegation targets and quotes the request they were
     # meant to serve, so it binds the turn reader and the user-message reader.
     HOOKS / "preflight-gate" / "fan-out-scope-gate" / "impl.py":
@@ -483,12 +544,14 @@ _CONSUMERS = {
     HOOKS / "advisory-nudge" / "external-write-falsify-check" / "impl.py": ["tail_lines"],
     # Needs the whole session (a dispatch or enumeration anywhere in it clears
     # the predicate), so it streams instead of reading a tail; the scan stops
-    # as soon as the matched trigger's facts are settled (#1064).
+    # as soon as the matched trigger's facts are settled (#1064) and resumes
+    # from a per-trigger cursor on the next commit (#1278).
     HOOKS / "advisory-nudge" / "unenforced-step-advisory" / "impl.py":
-        ["iter_transcript"],
+        ["scan_transcript_resumable", "scan_cursor_path", "TranscriptReadError"],
     # Also correlates each Bash tool_use with its result, so it binds the
     # refusal sentence the never-ran markers are keyed on (#1117).
-    HOOKS / "advisory-nudge" / "composed-command-gate" / "impl.py": ["tail_lines"],
+    HOOKS / "advisory-nudge" / "composed-command-gate" / "impl.py":
+        ["tail_lines", "TranscriptReadError"],
 }
 
 # Constants are values, not bindings, so the function map above cannot pin them:
@@ -505,6 +568,8 @@ _CONSTANT_CONSUMERS = {
         ["TRANSCRIPT_SCAN_LINES"],
     HOOKS / "advisory-nudge" / "composed-command-gate" / "impl.py":
         ["TRANSCRIPT_SCAN_LINES", "REJECTION_PHRASE"],
+    HOOKS / "preflight-gate" / "block-gh-issue-create-without-dup-search" / "impl.py":
+        ["TRANSCRIPT_SCAN_LINES"],
 }
 
 
@@ -700,6 +765,47 @@ class TestTailReaders:
 
     def test_iter_transcript_missing_file_yields_nothing(self, tmp_path):
         assert list(T.iter_transcript(str(tmp_path / "absent.jsonl"))) == []
+
+    def test_iter_transcript_needle_skips_lines_without_it(self, tmp_path, monkeypatch):
+        """A line without the needle never reaches `json.loads`."""
+        # The needle is a pre-parse reject (#1278): a line without it is never
+        # handed to json.loads, one with it still goes through the full parse
+        # and dict check. Counted through the parser so the test cannot pass
+        # on a filter that merely drops the yielded dicts afterwards.
+        path = _write_jsonl(tmp_path, [
+            _user(text="plain"),
+            _asst_tool_use("A1", "toolu_1", "Bash", {"command": "ls"}),
+            'not json but has "tool_use"',
+            _user(text="another"),
+        ])
+        calls = []
+        real = T.json.loads
+
+        def counting(s, *a, **k):
+            """Record every string handed to the parser, then parse it."""
+            calls.append(s)
+            return real(s, *a, **k)
+
+        monkeypatch.setattr(T.json, "loads", counting)
+        got = list(T.iter_transcript(path, needle='"tool_use"'))
+        assert len(got) == 1 and got[0]["uuid"] == "A1"
+        assert len(calls) == 2  # the tool_use record and the non-JSON line only
+
+    def test_iter_transcript_any_of_needle(self, tmp_path):
+        """A tuple needle keeps a line carrying any one of its tokens."""
+        path = _write_jsonl(tmp_path, [
+            _asst_tool_use("A1", "t1", "Bash", {"command": "ls"}),
+            _asst_tool_use("A2", "t2", "Agent", {"prompt": "review"}),
+            _asst_tool_use("A3", "t3", "Skill", {"skill": "x"}),
+        ])
+        got = [e["uuid"] for e in T.iter_transcript(path, needle=('"Agent"', '"Skill"'))]
+        assert got == ["A2", "A3"]
+
+    def test_iter_transcript_without_needle_is_unchanged(self, tmp_path):
+        """No needle (or `needle=None`) yields every record as before."""
+        path = _write_jsonl(tmp_path, [_user(text="a"), _user(text="b")])
+        assert list(T.iter_transcript(path)) == list(T.iter_transcript(path, needle=None))
+        assert len(list(T.iter_transcript(path))) == 2
 
 
 class TestCappedScanFailsOpen:
@@ -907,6 +1013,21 @@ class TestTailLines:
         assert got[0] == '{"ok": 1}' and "\ufffd" in got[1]
 
 
+class TestTailLinesStrict:
+    def test_strict_raises_where_default_answers_empty(self, tmp_path):
+        """`strict=True` raises on an unreadable path instead of folding it to `[]`."""
+        absent = str(tmp_path / "absent.jsonl")
+        assert T.tail_lines(absent, 3) == []
+        with pytest.raises(T.TranscriptReadError):
+            T.tail_lines(absent, 3, strict=True)
+
+    def test_strict_keeps_the_empty_file_answer(self, tmp_path):
+        """An empty but readable file is still `[]` under `strict=True`."""
+        path = tmp_path / "empty.jsonl"
+        path.write_bytes(b"")
+        assert T.tail_lines(str(path), 3, strict=True) == []
+
+
 class TestReduceTranscriptResumable:
     """`reduce_transcript_resumable` — the Stop gates' incremental scan (#1237)."""
 
@@ -1077,3 +1198,538 @@ class TestReduceTranscriptResumable:
         assert T.stop_scan_cursor_path("some-gate", "") is None
         p = T.stop_scan_cursor_path("some-gate", "sid-1")
         assert p == str(tmp_path / "cache" / "stop-scan-some-gate-sid-1.json")
+
+
+class TestIterTranscriptBounded:
+    """The shared bounded reader (#1277, #1312): one loop for every gate that
+    scans a whole session under a size cap."""
+
+    def test_yields_only_needle_lines_and_parses_them(self, tmp_path, monkeypatch):
+        path = _write_jsonl(tmp_path, [
+            _user(text="plain"),
+            _asst_tool_use("A1", "toolu_1", "Skill", {"skill": "praxis:x"}),
+            'not json but has "Skill"',
+        ])
+        calls = []
+        real = T.json.loads
+
+        def counting(s, *a, **k):
+            calls.append(s)
+            return real(s, *a, **k)
+
+        monkeypatch.setattr(T.json, "loads", counting)
+        got = list(T.iter_transcript_bounded(path, 1 << 20, b'"Skill"'))
+        assert [g["uuid"] for g in got] == ["A1"]
+        assert len(calls) == 2  # the record and the non-JSON line; the plain line never parsed
+
+    def test_any_of_needle_and_no_needle(self, tmp_path):
+        path = _write_jsonl(tmp_path, [
+            _asst_tool_use("A1", "t1", "Bash", {"command": "ls"}),
+            _asst_tool_use("A2", "t2", "Skill", {"skill": "x"}),
+            _user(text="hello"),
+        ])
+        assert [g["uuid"] for g in T.iter_transcript_bounded(path, 1 << 20, (b'"Bash"', b'"Skill"'))] == ["A1", "A2"]
+        assert len(list(T.iter_transcript_bounded(path, 1 << 20))) == 3
+
+    def test_missing_and_non_regular_paths_raise(self, tmp_path):
+        import os
+
+        with pytest.raises(T.TranscriptReadError):
+            list(T.iter_transcript_bounded(str(tmp_path / "absent.jsonl"), 1 << 20))
+        fifo = tmp_path / "t.fifo"
+        os.mkfifo(fifo)
+        with pytest.raises(T.TranscriptReadError):
+            list(T.iter_transcript_bounded(str(fifo), 1 << 20))  # must not block on open()
+        with pytest.raises(T.TranscriptReadError):
+            list(T.iter_transcript_bounded("bad\x00path", 1 << 20))
+
+    def test_over_the_bound_raises_too_large_before_reading(self, tmp_path, monkeypatch):
+        path = _write_jsonl(tmp_path, [_user(text="x" * 100)] * 10)
+        size = os.path.getsize(path)
+        reads = []
+        real = T._parse_line
+        monkeypatch.setattr(T, "_parse_line", lambda raw: reads.append(raw) or real(raw))
+        with pytest.raises(T.TranscriptTooLarge):
+            list(T.iter_transcript_bounded(path, size - 1))
+        assert reads == []  # fstat early-out: nothing was parsed
+        assert len(list(T.iter_transcript_bounded(path, size))) == 10  # at the bound is inside
+
+    def test_too_large_is_a_read_error(self):
+        assert issubclass(T.TranscriptTooLarge, T.TranscriptReadError)
+
+    def test_one_oversized_line_is_refused_before_allocation(self, tmp_path, monkeypatch):
+        # The fstat early-out is what normally catches a file this size, so it
+        # is stubbed to report a small file: the line itself must then be
+        # stopped by the per-read cap, before it is allocated in full.
+        import tracemalloc
+
+        path = tmp_path / "t.jsonl"
+        path.write_bytes(b'{"type": "user", "pad": "' + b"x" * (4 * 1024 * 1024) + b'"}\n')
+        small = type("St", (), {"st_size": 0})()
+        monkeypatch.setattr(T.os, "fstat", lambda fd: small)
+        tracemalloc.start()
+        try:
+            with pytest.raises(T.TranscriptTooLarge):
+                list(T.iter_transcript_bounded(str(path), 64 * 1024))
+            peak = tracemalloc.get_traced_memory()[1]
+        finally:
+            tracemalloc.stop()
+        assert peak < 1024 * 1024
+
+
+class TestJsonNeedle:
+    def test_plain_ascii_value_is_quoted(self):
+        assert T.json_needle("praxis:codex-review-wrap") == b'"praxis:codex-review-wrap"'
+
+    def test_values_the_encoder_rewrites_answer_none(self):
+        assert T.json_needle('say "hi"') is None
+        assert T.json_needle("a\\b") is None
+        assert T.json_needle("praxis:회고") is None  # escaped by the default encoder
+
+
+class TestScanTranscriptResumable:
+    """`scan_transcript_resumable` — the budgeted, needle-prefiltered cursor
+    scan behind the three whole-session gates (#1277 / #1278 / #1280)."""
+
+    @staticmethod
+    def _append(path, events):
+        """Append `events` as JSONL, one complete line each."""
+        with open(path, "a", encoding="utf-8") as fh:
+            for ev in events:
+                fh.write(json.dumps(ev) + "\n")
+
+    @staticmethod
+    def _run(path, cursor, seen, **kw):
+        """Fold `path` into a counting state, recording each event's `i`."""
+        def reduce_event(state, ev):
+            """Count the event and record its `i`."""
+            state["n"] += 1
+            seen.append(ev["i"])
+
+        return T.scan_transcript_resumable(str(path), cursor, lambda: {"n": 0}, reduce_event, **kw)
+
+    def test_budget_cut_reports_incomplete_and_the_next_call_continues(self, tmp_path):
+        """The budget is per call: the second call starts where the first stopped."""
+        path = tmp_path / "t.jsonl"
+        cursor = str(tmp_path / "cursor.json")
+        events = [{"i": i, "pad": "x" * 90} for i in range(5)]
+        self._append(path, events)
+        line = len(json.dumps(events[0])) + 1
+        seen: list = []
+        state, complete = self._run(path, cursor, seen, max_bytes=2 * line + 5)
+        assert (state, complete) == ({"n": 2}, False)
+        assert seen == [0, 1]
+        seen.clear()
+        state, complete = self._run(path, cursor, seen, max_bytes=10 * line)
+        assert (state, complete) == ({"n": 5}, True)
+        assert seen == [2, 3, 4]
+
+    def test_budget_spent_exactly_at_eof_is_complete(self, tmp_path):
+        """A budget that ends on the last newline is not reported as a cut."""
+        path = tmp_path / "t.jsonl"
+        self._append(path, [{"i": 1}, {"i": 2}])
+        size = path.stat().st_size
+        assert self._run(path, None, [], max_bytes=size)[1] is True
+        assert self._run(path, None, [], max_bytes=size - 1)[1] is False
+
+    def test_needle_rejects_lines_before_the_parser(self, tmp_path, monkeypatch):
+        """A line without the needle never reaches `json.loads`."""
+        path = tmp_path / "t.jsonl"
+        self._append(path, [{"i": 1, "k": "keep"}, {"i": 2}, {"i": 3, "k": "keep"}])
+        calls: list = []
+        real = T.json.loads
+
+        def counting(s, *a, **k):
+            """Record every string handed to the parser, then parse it."""
+            calls.append(s)
+            return real(s, *a, **k)
+
+        monkeypatch.setattr(T.json, "loads", counting)
+        seen: list = []
+        self._run(path, None, seen, needle=b'"keep"')
+        assert seen == [1, 3]
+        assert len(calls) == 2
+
+    def test_stop_when_ends_the_walk_and_a_settled_cursor_reads_nothing(self, tmp_path, monkeypatch):
+        """Once the state has nothing left to learn, later calls do not parse."""
+        path = tmp_path / "t.jsonl"
+        cursor = str(tmp_path / "cursor.json")
+        self._append(path, [{"i": 1}, {"i": 2}, {"i": 3}])
+        seen: list = []
+        state, complete = self._run(path, cursor, seen, stop_when=lambda s: s["n"] >= 2)
+        assert (state, complete) == ({"n": 2}, True)
+        assert seen == [1, 2]
+        self._append(path, [{"i": 4}])
+        calls: list = []
+        monkeypatch.setattr(T, "_parse_line", lambda raw: calls.append(raw))
+        seen.clear()
+        state, complete = self._run(path, cursor, seen, stop_when=lambda s: s["n"] >= 2)
+        assert (state, complete) == ({"n": 2}, True)
+        assert calls == [] and seen == []
+
+    def test_rewritten_file_with_a_boundary_at_the_old_offset_restarts(self, tmp_path):
+        """Same inode, longer file, old offset on a newline — only the byte
+        sample before the offset tells the cursor the content changed."""
+        path = tmp_path / "t.jsonl"
+        cursor = str(tmp_path / "cursor.json")
+        self._append(path, [{"i": 1, "pad": "aaaa"}, {"i": 2, "pad": "aaaa"}])
+        self._run(path, cursor, [])
+        path.write_text(
+            "".join(json.dumps(ev) + "\n" for ev in
+                    [{"i": 7, "pad": "bbbb"}, {"i": 8, "pad": "bbbb"}, {"i": 9, "pad": "bbbb"}]),
+            encoding="utf-8",
+        )
+        seen: list = []
+        assert self._run(path, cursor, seen) == ({"n": 3}, True)
+        assert seen == [7, 8, 9]
+
+    def test_unterminated_last_record_is_folded_once_and_stepped_over(self, tmp_path):
+        """A complete record missing only its newline counts now, and is not
+        counted again when the newline and the next record arrive."""
+        path = tmp_path / "t.jsonl"
+        cursor = str(tmp_path / "cursor.json")
+        path.write_text(json.dumps({"i": 1}) + "\n" + json.dumps({"i": 2}), encoding="utf-8")
+        seen: list = []
+        assert self._run(path, cursor, seen) == ({"n": 2}, True)
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write("\n" + json.dumps({"i": 3}) + "\n")
+        seen.clear()
+        assert self._run(path, cursor, seen) == ({"n": 3}, True)
+        assert seen == [3]
+
+    def test_unreadable_paths_raise(self, tmp_path):
+        """Missing file and a directory both raise the read error."""
+        with pytest.raises(T.TranscriptReadError):
+            self._run(tmp_path / "absent.jsonl", None, [])
+        with pytest.raises(T.TranscriptReadError):
+            self._run(tmp_path, None, [])
+
+    def test_cursor_path_is_session_keyed(self, tmp_path, monkeypatch):
+        """`scan_cursor_path` keeps the session token last so the sweep spares it."""
+        monkeypatch.setenv("PRAXIS_HOME", str(tmp_path))
+        import _paths as P  # type: ignore[import-not-found]
+
+        path = T.scan_cursor_path("codex", "sess-1", "agent-0a/b")
+        assert path is not None
+        name = Path(path).name
+        assert name == "scan-codex-agent-0a_b-sess-1.json"
+        assert P._belongs_to_session(name, "sess-1")
+        assert T.scan_cursor_path("codex", "", "root") is None
+        assert T.scan_cursor_path("codex", None) is None
+
+
+class TestScanUserRejectionsResumable:
+    """The rejection scan through a cursor (#1280): indeterminate only until
+    the scan catches up, and a rejection resolves against a `tool_use` read
+    in an earlier call."""
+
+    def test_catches_up_over_calls_and_resolves_across_them(self, tmp_path):
+        """Call 1 is cut by the budget (None); call 2 finishes and resolves."""
+        pad = json.dumps({"type": "system", "pad": "x" * 200})
+        path = _write_jsonl(tmp_path, [
+            _asst_tool_use("A1", "toolu_1", "AskUserQuestion",
+                           {"questions": [{"question": "Delete s3://b/raw/2024/ ?"}]}),
+            *([pad] * 40),
+            _rejection("toolu_1", "A1"),
+        ])
+        cursor = str(tmp_path / "cursor.json")
+        assert T.scan_user_rejections(path, max_bytes=2000, cursor_path=cursor) is None
+        recs = T.scan_user_rejections(path, max_bytes=20_000, cursor_path=cursor)
+        assert recs is not None and len(recs) == 1
+        assert recs[0]["tool_name"] == "AskUserQuestion"
+        assert "s3://b/raw/2024/" in recs[0]["text"]
+        # Nothing appended: the answer stands without re-reading the file.
+        assert T.scan_user_rejections(path, max_bytes=100, cursor_path=cursor) == recs
+
+    def test_a_string_message_record_does_not_abort_the_scan(self, tmp_path):
+        """`message` guarded like every other reader: a record whose message
+        is a string is skipped, and the rejection after it still resolves."""
+        path = _write_jsonl(tmp_path, [
+            _asst_tool_use("A1", "toolu_1", "AskUserQuestion",
+                           {"questions": [{"question": "Delete s3://b/raw/2024/ ?"}]}),
+            {"type": "user", "message": "not a dict", "toolDenialKind": "user-rejected"},
+            _rejection("toolu_1", "A1"),
+        ])
+        recs = T.scan_user_rejections(path)
+        assert recs is not None and len(recs) == 1
+        assert recs[0]["tool_name"] == "AskUserQuestion"
+
+    def test_without_a_cursor_the_bound_still_means_indeterminate(self, tmp_path):
+        """No cursor path: the pre-cursor contract, call after call."""
+        pad = json.dumps({"type": "system", "pad": "x" * 200})
+        path = _write_jsonl(tmp_path, [_rejection("toolu_1", "A1"), *([pad] * 40)])
+        assert T.scan_user_rejections(path, max_bytes=2000) is None
+        assert T.scan_user_rejections(path, max_bytes=2000) is None
+
+    def test_oversized_input_keeps_its_text_but_not_the_dict(self, tmp_path):
+        """A tool_input past the text bound is carried as text only, so the
+        cursor file never stores a Write body on every call."""
+        big = {"content": "y" * (T._REJECTION_INPUT_MAX_CHARS + 10)}
+        path = _write_jsonl(tmp_path, [
+            _asst_tool_use("A1", "toolu_1", "Write", big),
+            _rejection("toolu_1", "A1"),
+        ])
+        recs = T.scan_user_rejections(path)
+        assert recs[0]["tool_name"] == "Write"
+        assert recs[0]["tool_input"] == {}
+        assert recs[0]["text"].startswith("yyyy")
+
+
+# ---------------------------------------------------------------------------
+# load_current_turn memo (issue #1281): one parse per dispatch group run
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def _memo_off():
+    # Every test in this module runs standalone (memo disabled); make sure a
+    # test that enables it cannot leak the state into its neighbours.
+    yield
+    T.disable_turn_memo()
+
+
+def _count_reads(monkeypatch) -> list[int]:
+    calls = [0]
+    real = T.load_recent_events
+
+    def counting(path, min_events=0, max_bytes=T.CURRENT_TURN_SCAN_MAX_BYTES):
+        calls[0] += 1
+        return real(path, min_events=min_events, max_bytes=max_bytes)
+
+    monkeypatch.setattr(T, "load_recent_events", counting)
+    return calls
+
+
+def test_turn_memo_is_off_standalone(tmp_path, monkeypatch, _memo_off):
+    # The standalone process (one hook, one call) must be untouched: every
+    # call parses, exactly as before the memo existed.
+    path = _write_jsonl(tmp_path, [_user("q"), _assistant("a")])
+    calls = _count_reads(monkeypatch)
+    assert T._TURN_MEMO is None
+    T.load_current_turn(path)
+    T.load_current_turn(path)
+    assert calls[0] == 2
+
+
+def test_turn_memo_shares_one_parse_across_members(tmp_path, monkeypatch, _memo_off):
+    path = _write_jsonl(tmp_path, [_user("q"), _assistant("a")])
+    calls = _count_reads(monkeypatch)
+    T.enable_turn_memo()
+    first = T.load_current_turn(path)
+    second = T.load_current_turn(path)
+    assert calls[0] == 1
+    assert first == second == [_assistant("a")]  # the turn starts after the user boundary
+
+
+def test_turn_memo_hands_each_member_its_own_list(tmp_path, _memo_off):
+    # A member's in-place edit must not leak into a sibling's view of the turn.
+    path = _write_jsonl(tmp_path, [_user("q"), _assistant("a")])
+    T.enable_turn_memo()
+    first = T.load_current_turn(path)
+    first.pop()
+    first.append({"type": "assistant", "message": {"role": "assistant", "content": "tampered"}})
+    assert T.load_current_turn(path) == [_assistant("a")]
+
+
+def test_turn_memo_rereads_a_changed_transcript(tmp_path, monkeypatch, _memo_off):
+    # The key carries size and mtime: a transcript appended between two
+    # members is parsed again rather than answered from the stale tail.
+    path = _write_jsonl(tmp_path, [_user("q"), _assistant("a")])
+    calls = _count_reads(monkeypatch)
+    T.enable_turn_memo()
+    T.load_current_turn(path)
+    with open(path, "a", encoding="utf-8") as fh:
+        fh.write("\n" + json.dumps(_assistant("more")))
+    st = os.stat(path)
+    os.utime(path, ns=(st.st_atime_ns, st.st_mtime_ns + 1_000_000))
+    turn = T.load_current_turn(path)
+    assert calls[0] == 2
+    assert turn[-1] == _assistant("more")
+
+
+def test_turn_memo_keys_on_max_bytes(tmp_path, monkeypatch, _memo_off):
+    # Two members with different scan bounds do not share an answer: the
+    # capped termination differs per bound (see load_recent_events).
+    path = _write_jsonl(tmp_path, [_user("q"), _assistant("a")])
+    calls = _count_reads(monkeypatch)
+    T.enable_turn_memo()
+    T.load_current_turn(path)
+    T.load_current_turn(path, max_bytes=10)
+    assert calls[0] == 2
+
+
+def test_turn_memo_missing_file_is_not_cached(tmp_path, monkeypatch, _memo_off):
+    # A stat failure yields no key: the fail-open [] is recomputed each time,
+    # so a transcript that appears mid-group is seen by the next member.
+    path = str(tmp_path / "absent.jsonl")
+    calls = _count_reads(monkeypatch)
+    T.enable_turn_memo()
+    assert T.load_current_turn(path) == []
+    assert T.load_current_turn(path) == []
+    assert calls[0] == 2
+    assert T._TURN_MEMO == {}
+
+
+def test_disable_turn_memo_drops_the_entries(tmp_path, _memo_off):
+    path = _write_jsonl(tmp_path, [_user("q"), _assistant("a")])
+    T.enable_turn_memo()
+    T.load_current_turn(path)
+    assert T._TURN_MEMO
+    T.disable_turn_memo()
+    assert T._TURN_MEMO is None
+
+
+# ---------------------------------------------------------------------------
+# Stop / SubagentStop payload readers (issue #1337)
+# ---------------------------------------------------------------------------
+#
+# The defect these three helpers exist to prevent is silent: a Stop gate
+# registered on SubagentStop keeps reading `transcript_path`, which on that
+# event is the PARENT session's transcript, and so grades the wrong
+# conversation without erroring. Every case below is written from that
+# failure — which file was read, and whether the sidechain markers a
+# per-agent transcript may carry can empty its turn.
+
+
+def _write_named(tmp_path: Path, name: str, lines: list) -> str:
+    p = tmp_path / name
+    p.write_text("\n".join(json.dumps(x) for x in lines), encoding="utf-8")
+    return str(p)
+
+
+class TestResolveStopTranscript:
+    def test_plain_stop_payload_uses_the_session_transcript(self, tmp_path):
+        main = _write_named(tmp_path, "main.jsonl", [_user(text="q")])
+        assert T.resolve_stop_transcript({"transcript_path": main}) == (main, False)
+
+    def test_agent_transcript_wins_when_it_exists(self, tmp_path):
+        main = _write_named(tmp_path, "main.jsonl", [_user(text="q")])
+        agent = _write_named(tmp_path, "agent.jsonl", [_user(text="task")])
+        got = T.resolve_stop_transcript(
+            {"transcript_path": main, "agent_transcript_path": agent}
+        )
+        assert got == (agent, True)
+
+    def test_unflushed_agent_transcript_resolves_to_nothing(self, tmp_path):
+        """Never the parent's. Falling back would grade the subagent's claim
+        (carried by `last_assistant_message`) against the parent's evidence —
+        the defect the registration exists to remove."""
+        main = _write_named(tmp_path, "main.jsonl", [_user(text="q")])
+        missing = str(tmp_path / "subagents" / "agent-def456.jsonl")
+        got = T.resolve_stop_transcript(
+            {"transcript_path": main, "agent_transcript_path": missing}
+        )
+        assert got == ("", True)
+
+    def test_subagent_stop_without_the_key_still_refuses_the_parent(self, tmp_path):
+        """`hook_event_name` alone is enough: a SubagentStop payload that
+        carries no `agent_transcript_path` at all must not read the parent's
+        transcript either."""
+        main = _write_named(tmp_path, "main.jsonl", [_user(text="q")])
+        got = T.resolve_stop_transcript(
+            {"hook_event_name": "SubagentStop", "transcript_path": main}
+        )
+        assert got == ("", True)
+
+    def test_load_stop_turn_is_empty_for_an_unreadable_agent_transcript(self, tmp_path):
+        main = _write_named(
+            tmp_path, "main.jsonl",
+            [_user(text="q"), _assistant(text="parent answer")],
+        )
+        missing = str(tmp_path / "subagents" / "agent-def456.jsonl")
+        assert T.load_stop_turn(
+            {"transcript_path": main, "agent_transcript_path": missing}
+        ) == []
+
+    @pytest.mark.parametrize("payload", [
+        {},
+        {"transcript_path": None},
+        {"transcript_path": 42},
+        "not a dict",
+    ])
+    def test_unusable_payloads_yield_no_path(self, payload):
+        assert T.resolve_stop_transcript(payload) == ("", False)
+
+
+class TestLoadStopTurn:
+    def _agent_events(self, sidechain: bool) -> list:
+        return [
+            _user(text="run the suite", sidechain=sidechain),
+            _assistant(
+                blocks=[{"type": "tool_use", "name": "Bash", "id": "t1"}],
+                sidechain=sidechain,
+            ),
+            _user(blocks=[{"type": "tool_result", "tool_use_id": "t1"}],
+                  sidechain=sidechain),
+            _assistant(text="12 passed", sidechain=sidechain),
+        ]
+
+    def test_reads_the_agent_transcript_not_the_parent(self, tmp_path):
+        main = _write_named(tmp_path, "main.jsonl",
+                            [_user(text="q"), _assistant(text="parent answer")])
+        agent = _write_named(tmp_path, "agent.jsonl", self._agent_events(False))
+        turn = T.load_stop_turn(
+            {"transcript_path": main, "agent_transcript_path": agent}
+        )
+        assert T.extract_last_assistant_text(turn) == "12 passed"
+        assert T.has_tool_in_turn(turn, "Bash")
+
+    def test_sidechain_marked_agent_transcript_is_not_empty(self, tmp_path):
+        """The regression this normalization exists for: were the markers kept,
+        every helper that filters on them would answer "nothing here" for a
+        file that is entirely the subagent's, and every gate would pass."""
+        main = _write_named(tmp_path, "main.jsonl", [_user(text="q")])
+        agent = _write_named(tmp_path, "agent.jsonl", self._agent_events(True))
+        turn = T.load_stop_turn(
+            {"transcript_path": main, "agent_transcript_path": agent}
+        )
+        assert T.extract_last_assistant_text(turn) == "12 passed"
+        assert T.has_tool_in_turn(turn, "Bash")
+
+    def test_sidechain_events_still_filtered_on_the_main_transcript(self, tmp_path):
+        """Control: the marker keeps its meaning where it has one. A subagent's
+        reply in the PARENT transcript is not the parent's last message."""
+        main = _write_named(tmp_path, "main.jsonl", [
+            _user(text="q"),
+            _assistant(text="parent answer"),
+            _assistant(text="subagent reply", sidechain=True),
+        ])
+        turn = T.load_stop_turn({"transcript_path": main})
+        assert T.extract_last_assistant_text(turn) == "parent answer"
+
+    def test_missing_files_pass(self, tmp_path):
+        assert T.load_stop_turn({"transcript_path": str(tmp_path / "gone")}) == []
+        assert T.load_stop_turn({}) == []
+
+
+class TestStopLastAssistantText:
+    def test_payload_field_wins_over_the_lagging_transcript(self):
+        turn = [_assistant(text="stale")]
+        payload = {"last_assistant_message": "the real final text"}
+        assert T.stop_last_assistant_text(payload, turn) == "the real final text"
+
+    @pytest.mark.parametrize("value", [None, "", "   ", 42, {"text": "x"}])
+    def test_absent_or_unusable_field_falls_back_to_the_turn(self, value):
+        turn = [_assistant(text="from the transcript")]
+        payload = {} if value is None else {"last_assistant_message": value}
+        assert T.stop_last_assistant_text(payload, turn) == "from the transcript"
+
+    def test_empty_turn_with_no_field_is_empty(self):
+        assert T.stop_last_assistant_text({}, []) == ""
+
+
+class TestDropSidechain:
+    def test_marker_removed_only_when_asked(self, tmp_path):
+        path = _write_named(tmp_path, "t.jsonl", [
+            _user(text="task", sidechain=True),
+            _assistant(text="done", sidechain=True),
+        ])
+        kept = T.load_recent_events(path)
+        assert all(e.get("isSidechain") for e in kept)
+        dropped = T.load_recent_events(path, drop_sidechain=True)
+        assert all("isSidechain" not in e for e in dropped)
+
+    def test_dropping_is_a_no_op_when_the_field_is_absent(self, tmp_path):
+        path = _write_named(tmp_path, "t.jsonl",
+                            [_user(text="task"), _assistant(text="done")])
+        assert T.load_recent_events(path, drop_sidechain=True) == \
+            T.load_recent_events(path)

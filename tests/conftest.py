@@ -63,3 +63,44 @@ def isolate_praxis_home(tmp_path_factory, monkeypatch):
     (home / "logs").mkdir(parents=True)  # the override path is used as-is, never created
     monkeypatch.setenv("PRAXIS_HOME", str(home))
     monkeypatch.setenv("PRAXIS_HOOK_ERROR_LOG", str(home / "logs" / "hook-errors.jsonl"))
+
+
+@pytest.fixture(autouse=True)
+def reset_pass_counters():
+    """Drop the in-process `pass` buffer between tests (#1238).
+
+    The buffer is module state that outlives a test, and it is merged at
+    process exit — so without this a test that records a `pass` would have its
+    count land in whichever test happened to flush next, and the whole suite's
+    counts would arrive in the last test's telemetry directory.
+    """
+    import sys
+    import types
+
+    def _clear() -> None:
+        # Every loaded copy, not just one: the suite loads `_fire_ledger`
+        # through `SourceFileLoader` without registering it in `sys.modules`,
+        # so a test module and the hook runtime it exercises each hold their
+        # own instance — and each has its own buffer. An unregistered copy is
+        # reachable only as an attribute of whichever module loaded it, which
+        # is why scanning `sys.modules` alone leaves one buffer uncleared:
+        # `tests/test_fire_ledger.py` keeps its copy as `fl`.
+        candidates = list(sys.modules.values())
+        for holder in list(sys.modules.values()):
+            if not isinstance(holder, types.ModuleType):
+                continue  # a stale `sys.modules` entry can be None
+            candidates.extend(
+                value
+                for value in vars(holder).values()
+                if isinstance(value, types.ModuleType)
+            )
+        for module in candidates:
+            counts = getattr(module, "_pass_counts", None)
+            if isinstance(counts, dict) and getattr(module, "__name__", "").endswith(
+                "_fire_ledger"
+            ):
+                counts.clear()
+
+    _clear()
+    yield
+    _clear()
