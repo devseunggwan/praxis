@@ -82,8 +82,16 @@ reply.
 
 ### Tests
 
-`tests/hooks/advisory-nudge/test_delegation_context_inject.sh` — a
+`tests/hooks/advisory-nudge/test_delegation_context_inject.sh` — 6 cases. A
 `SubagentStart` payload yields valid JSON whose `hookEventName` is
 `SubagentStart` and whose `additionalContext` names every isolation variable;
 the bypass env suppresses all output; a malformed payload fails open with no
-stdout.
+stdout; and a payload carrying `task` produces identical output, so no later
+edit can start depending on a field the runtime does not send.
+
+One case pins the **rules** rather than the variable names. Review found that
+the variable-name check passes even when a whole clause is deleted, because all
+four names live inside a single rule — measured by removing the scratch-path
+clause and watching the suite still report 5/5. Each of the four rules is now
+asserted by a distinctive phrase, and deleting any one of them names that rule
+in the failure.

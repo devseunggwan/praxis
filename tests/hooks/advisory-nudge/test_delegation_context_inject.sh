@@ -71,6 +71,27 @@ else
   ng "contract names every isolation variable" "missing:$MISSING"
 fi
 
+# --- 2b. every contract RULE survives, not just the variable names -----------
+# Case 2 above passes even when a whole clause is deleted, because the four
+# variable names live in one of the four rules. Each rule is pinned by a phrase
+# distinctive enough that rewording the sentence is a deliberate act, not a
+# typo — the point is that silently dropping a rule fails loudly.
+MISSING_RULE=""
+while IFS= read -r rule; do
+  [ -n "$rule" ] || continue
+  case "$CTX" in *"$rule"*) ;; *) MISSING_RULE="$MISSING_RULE | $rule" ;; esac
+done <<'RULES'
+Do NOT set or override
+never under ~/.praxis or ~/.claude
+read-only unless the task named it
+the target's reach, not the verb
+RULES
+if [ -z "$MISSING_RULE" ]; then
+  ok "contract carries every rule, not only the variable names"
+else
+  ng "contract carries every rule, not only the variable names" "missing:$MISSING_RULE"
+fi
+
 # --- 3. a `task` field changes nothing (the runtime never sends one) ----------
 OUT_TASK=$(payload with-task | env -u PRAXIS_HOOK_BYPASS_DELEGATION_CONTEXT python3 "$HOOK" 2>/dev/null)
 if [ "$OUT_TASK" = "$OUT" ]; then
