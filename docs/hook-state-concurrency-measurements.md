@@ -23,7 +23,12 @@ name, and the exemption claimed the lock covers the staging window. It does:
 0/100 corrupt under the lock, against 4/100 for `pre-edit-md-escape-advisory`
 with the lock neutered. (`second-failure-advisory`'s neutered arm loses an
 increment rather than corrupting on this scheduling, which its own case
-asserts.) `worktree-prune-snapshot-gate`, `retrospect-active-marker` and
+asserts.) (Historical since #1383: both now stage through
+`<path>.<pid>.tmp`, so the neutered arm has no shared name left to collide
+on. The paragraph records what #1034 measured, not a live row. What that
+issue also found is that the corruption is too rare to serve as the
+acceptance test — the same neutered arm ran 0/100 on the unpatched code at
+N=16 — so the property is pinned by asserting the staging name directly.) `worktree-prune-snapshot-gate`, `retrospect-active-marker` and
 `session-intent` stage through `tempfile.mkstemp`: 0/100 each, against 100/100
 with `mkstemp` forced to one shared name. Every one of those pairs was
 provably overlapped — both children reported through the post-read barrier —
