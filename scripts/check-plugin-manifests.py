@@ -218,6 +218,25 @@ def _index_trigger_cells(index_md: str) -> list[tuple[str, str, int]]:
     return rows
 
 
+# The same leading link cell with the target FILE left free. A row matching this
+# but not `_INDEX_ROW_RE` is shaped like a hook row and points into the hook's
+# own directory, yet its Trigger cell is never read — which is the drift the
+# `INDEX ROW` check reports.
+_INDEX_ROW_CANDIDATE_RE = re.compile(
+    r"^\|\s*\[[^\]]*\]\(\.\./\.\./hooks/[^/]+/(?P<name>[^/)]+)/[^)]*\)"
+)
+
+
+def _index_row_candidates(index_md: str) -> list[tuple[str, int]]:
+    """Every row-shaped line as (hook name, 1-based line), parsing or not."""
+    candidates: list[tuple[str, int]] = []
+    for line_no, line in enumerate(index_md.splitlines(), start=1):
+        m = _INDEX_ROW_CANDIDATE_RE.match(line.strip())
+        if m:
+            candidates.append((m.group("name"), line_no))
+    return candidates
+
+
 _PARENTHETICAL_RE = re.compile(r"\([^()]*\)")
 
 
@@ -2607,22 +2626,27 @@ def main() -> int:
     for entry in manifest["hooks"]:
         manifest_events.setdefault(entry["name"], set()).add(entry["event"])
 
-    # A registered hook whose name is in the file but whose row does not parse
-    # is graded by neither rule: Rule 7 is satisfied by the bare name, and this
-    # loop never sees the row. Changing a row's link target away from
-    # `<name>/spec.md` is enough — to an existing sibling file it also survives
-    # the offline link check — and the row's events then go unread. Reported
-    # here rather than by widening the row pattern, so the diagnostic says what
-    # is wrong with the row instead of silently matching a different shape.
-    parsed_names = {name for name, _, _ in index_rows}
-    for name in sorted({entry["name"] for entry in manifest["hooks"]}):
-        if name in parsed_names or name not in index_text:
-            # Absent entirely → Rule 7 already reported it; reporting again
-            # here would name one defect twice.
+    # A row shaped like a hook row whose link target is not `<name>/spec.md` is
+    # graded by neither rule: Rule 7 is satisfied by the bare name, and the
+    # grading loop below never sees the row. Repointing the link at an existing
+    # sibling file is enough — that also survives the offline link check — and
+    # the row's events then go unread. Reported here rather than by widening
+    # `_INDEX_ROW_RE`, so the diagnostic says what is wrong with the row
+    # instead of silently matching a different shape.
+    #
+    # Per ROW, not per hook name. Judging by name lets one good row vouch for a
+    # malformed duplicate of the same hook, and a stale duplicate is precisely
+    # what `_index_trigger_cells` returns a list to catch. A hook with no
+    # row-shaped line at all is absent entirely, which Rule 7 already reports —
+    # naming it again here would name one defect twice.
+    registered_names = {entry["name"] for entry in manifest["hooks"]}
+    parsed_lines = {line_no for _, _, line_no in index_rows}
+    for name, line_no in _index_row_candidates(index_text):
+        if name not in registered_names or line_no in parsed_lines:
             continue
         drifts.append(
-            f"INDEX ROW docs/hook/INDEX.md {name!r}: the name appears but no "
-            "row for it parses as a hook row — a row must link to "
+            f"INDEX ROW docs/hook/INDEX.md:{line_no} {name!r}: the row does not "
+            "parse as a hook row — a row must link to "
             f"`../../hooks/<role>/{name}/spec.md`, and its Trigger cell is "
             "unread until it does (#1376)"
         )

@@ -201,7 +201,7 @@ REPOINT
 OUT="$(python3 "$CHECK" 2>&1)"
 run_case "unparsed_row_nonzero" "$?" "1"
 case "$OUT" in
-  *"INDEX ROW"*"no row for it parses as a hook row"*) run_case "unparsed_row_named" "yes" "yes" ;;
+  *"INDEX ROW"*"the row does not parse as a hook row"*) run_case "unparsed_row_named" "yes" "yes" ;;
   *) run_case "unparsed_row_named" "no ($OUT)" "yes" ;;
 esac
 
@@ -221,7 +221,26 @@ run_case "dropped_row_rule7_only" \
   "$(printf '%s\n' "$OUT" | grep -c 'MISSING INDEX')/$(printf '%s\n' "$OUT" | grep -c 'INDEX ROW')" \
   "1/0"
 
-# 11. Restored tree passes.
+# 11. A malformed DUPLICATE is reported even though a good row for the same
+#     hook parses. Judging by hook name instead of by row lets the good row
+#     vouch for the stale one, which is the drift case 7 exists for.
+restore_index || exit 1
+python3 - "$INDEX" "$TARGET_HOOK" <<'DUP'
+import sys
+path, hook = sys.argv[1], sys.argv[2]
+out = []
+for line in open(path).read().splitlines(keepends=True):
+    out.append(line)
+    if f"[{hook}](" in line:
+        out.append(line.replace("/spec.md", "/impl.py", 1))
+open(path, "w").write("".join(out))
+DUP
+OUT="$(python3 "$CHECK" 2>&1)"
+run_case "dup_unparsed_row_nonzero" "$?" "1"
+run_case "dup_unparsed_row_named" \
+  "$(printf '%s\n' "$OUT" | grep -c 'INDEX ROW')" "1"
+
+# 12. Restored tree passes.
 restore_index || exit 1
 python3 "$CHECK" >/dev/null 2>&1
 run_case "restored_check_clean" "$?" "0"
