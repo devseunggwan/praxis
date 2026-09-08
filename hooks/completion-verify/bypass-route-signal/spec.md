@@ -84,11 +84,19 @@ one paragraph from pairing with a frame three paragraphs later.
 
 **Word-boundary note.** Korean tokens match as plain substrings — Hangul has no
 ASCII word-boundary hazard. English tokens use explicit `(?<![A-Za-z])` /
-`(?![A-Za-z])` guards rather than `\b`, because Python's `re` is Unicode-aware
-and `\b` does **not** separate an ASCII word from adjacent Hangul: `\badd\b`
-matches inside `add하면`, which is usually what you want, while `\ballow\b`
-would also have to be reasoned about against `allowed`. The explicit guards
-make the intent readable in both directions.
+`(?![A-Za-z])` guards rather than `\b`, because Python's `re` is Unicode-aware:
+Hangul counts as a word character, so `\b` finds **no** boundary between an
+ASCII word and adjacent Hangul, and the mixed-script forms this repo's sessions
+actually write go unmatched. Measured:
+
+```text
+re.search(r"\badd\b", "add하면")                    -> False   ← the hazard
+re.search(r"(?<![A-Za-z])add(?![A-Za-z])", "add하면") -> True
+re.search(r"(?<![A-Za-z])add(?![A-Za-z])", "additional") -> False
+```
+
+The guards keep `add하면` matching while still rejecting `additional`, which is
+the pair `\b` cannot separate in either direction.
 
 ## The relay carve-out
 
@@ -103,10 +111,17 @@ Both shapes are therefore stripped **before any matching runs**, at line scope:
 
 ```python
 _RELAY_LINE_RE = re.compile(
-    r"^.*\bBypass\b\s*(?:\(if truly needed\))?\s*:.*$",
-    re.MULTILINE | re.IGNORECASE,
+    r"^.*(?<![A-Za-z])(?i:Bypass)(?:\s*\(if truly needed\))?\s*:\s*"
+    r"[A-Z][A-Z0-9_]*=1(?![A-Za-z0-9_]).*$",
+    re.MULTILINE,
 )
 ```
+
+The `VAR=1` tail is load-bearing. Keyed on the word alone, the carve-out also
+swallows `Bypass: 권한 규칙을 추가하면 됩니다` — an originated route that merely
+opens with the word — which is the one shape this hook exists to count. Neither
+generated message can omit the tail: `block_message.py` interpolates
+`{bypass_env}=1`, and the hand-built advisories write the same literal.
 
 Line scope, not paragraph scope, is the point: a paragraph that relays the
 gate's line **and also** originates a route keeps its other lines and still
@@ -211,7 +226,8 @@ directly.
 `tests/hooks/completion-verify/test_bypass_route_signal.sh` — one case per
 enumerated variant, including the must-not-fire controls (relay line alone,
 route noun alone, proposal frame alone, cross-paragraph split) and the
-relay-plus-origination case that must still fire.
+relay-plus-origination case that must still fire, plus the `Bypass:`-prefixed
+origination that the word-keyed carve-out used to swallow.
 
 ## What this does not do
 
