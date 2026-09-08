@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import importlib.util
+import io
 import json
 import os
 import subprocess
@@ -448,3 +449,91 @@ def test_excluded_tool_does_not_count_toward_soleness():
     ask = _rej(tool_use_id="t0", tool_name="AskUserQuestion", text="어느 쪽으로?")
     bash = _rej(tool_use_id="t1", tool_name="Bash")
     assert gate.unreported([ask, bash], {"t0", "t1"}, "푸시는 거부되었습니다.") == []
+
+
+# --------------------------------------------------------------------------
+# the indeterminate branch through main(), not just the message builder
+# --------------------------------------------------------------------------
+
+
+def _drive_main(monkeypatch, capsys, payload, scan_result, turn):
+    """Run main() in-process with the scan's answer forced.
+
+    Producing a real INDETERMINATE end to end needs a transcript that grows past
+    the 20 MB budget between two Stop calls; building one in a fixture would add
+    a 20 MB write to a suite already near its CI ceiling. Forcing the scan's
+    return value exercises the same decision path in main() — which is the half
+    that was untested — while the scan's own None contract is `_transcript`'s.
+    """
+    monkeypatch.setattr(gate, "scan_user_rejections", lambda *a, **k: scan_result)
+    monkeypatch.setattr(gate, "load_stop_turn", lambda *a, **k: turn)
+    monkeypatch.setattr(gate, "resolve_stop_transcript", lambda p: (__file__, False))
+    monkeypatch.setattr(gate.sys, "stdin", io.StringIO(json.dumps(payload)))
+    for var in (_STRICT_ENV, _BYPASS_ENV):
+        monkeypatch.delenv(var, raising=False)
+    rc = gate.main()
+    return rc, capsys.readouterr().out
+
+
+def test_indeterminate_reaches_the_output_when_the_turn_has_an_error(monkeypatch, capsys):
+    rc, out = _drive_main(
+        monkeypatch, capsys,
+        {"session_id": "i1", "stop_hook_active": False, "last_assistant_message": "완료."},
+        None, _turn("a", is_error=True),
+    )
+    assert rc == 0
+    assert "#1231" in json.loads(out)["systemMessage"]
+
+
+def test_indeterminate_is_silent_when_the_turn_has_no_error(monkeypatch, capsys):
+    """The gate on the indeterminate branch: a scan that could not catch up must
+    not speak on turns that plainly had nothing to refuse."""
+    rc, out = _drive_main(
+        monkeypatch, capsys,
+        {"session_id": "i2", "stop_hook_active": False, "last_assistant_message": "완료."},
+        None, _turn("a", is_error=False),
+    )
+    assert rc == 0
+    assert out.strip() == ""
+
+
+# --------------------------------------------------------------------------
+# the SubagentStop registration, through the shipped dispatcher
+# --------------------------------------------------------------------------
+
+
+def test_subagent_stop_reaches_the_gate_through_the_dispatcher(tmp_path):
+    """Run the wrapper the plugin ships, not the impl directly.
+
+    The manifest entry and the impl can both be correct while the hook never
+    runs on `SubagentStop` — host filtering or the dispatch group could drop it,
+    and calling `impl.py` by path would leave that unpinned. `PRAXIS_HOME` and
+    the telemetry file are redirected because this runs the whole group, so
+    every member's state write lands in the tmp tree.
+    """
+    dispatcher = REPO / "hooks" / "_dispatch.sh"
+    assert dispatcher.is_file()
+    t = _transcript_with_rejection(tmp_path)
+    e = dict(os.environ)
+    e.pop(_STRICT_ENV, None)
+    e.pop(_BYPASS_ENV, None)
+    e["PRAXIS_HOME"] = str(tmp_path / "praxis")
+    e["PRAXIS_FIRE_TELEMETRY_FILE"] = str(tmp_path / "fires.jsonl")
+    proc = subprocess.run(
+        [str(dispatcher), "SubagentStop", "-", "claude"],
+        input=json.dumps(
+            {
+                "session_id": "sa1",
+                "stop_hook_active": False,
+                "transcript_path": str(t),
+                "last_assistant_message": "11건 실패가 있습니다. 원인을 봅니다.",
+            }
+        ),
+        capture_output=True,
+        text=True,
+        env=e,
+        cwd=str(REPO),
+    )
+    assert proc.returncode == 0
+    assert "denied-action-report-gate" in proc.stdout
+    assert "Bash" in proc.stdout
