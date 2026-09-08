@@ -40,12 +40,52 @@ if [ ! -f "$INDEX" ]; then
   exit 1
 fi
 
-# The row this suite mutates. Picked because it is the row #1365 left stale,
-# and because it carries two events — so both directions are exercisable on
-# one line. Fail loudly if it ever stops matching rather than testing nothing.
+# The row this suite mutates. Fail loudly if it ever stops matching rather
+# than testing nothing.
 TARGET_HOOK="second-failure-advisory"
 if ! grep -q "^| \[$TARGET_HOOK\]" "$INDEX"; then
   echo "FAIL  [target_row_present] expected=yes got=no ($TARGET_HOOK row not found)"
+  exit 1
+fi
+
+# Trigger-cell fixtures are built from the manifest, never written in. Hard
+# coding this hook's events made five cases assert the fixture rather than the
+# rule, so dropping one of its registrations failed them all while the rule
+# itself was intact.
+read_events() {
+  python3 - "$ROOT_DIR/hooks/manifest.json" "$1" <<'PY'
+import json, sys
+path, hook = sys.argv[1], sys.argv[2]
+print(" + ".join(sorted({h["event"] for h in json.load(open(path))["hooks"]
+                         if h["name"] == hook})))
+PY
+}
+
+TARGET_EVENTS="$(read_events "$TARGET_HOOK")"
+if [ -z "$TARGET_EVENTS" ]; then
+  echo "FAIL  [target_events_read] expected=nonempty got=empty ($TARGET_HOOK unregistered)"
+  exit 1
+fi
+TARGET_FIRST="${TARGET_EVENTS%% + *}"
+TARGET_LAST="${TARGET_EVENTS##* + }"
+TARGET_AFTER_FIRST="${TARGET_EVENTS#"$TARGET_FIRST"}"
+
+# Case 4 needs a row whose hook is registered on PostToolUse — the SHORTER of
+# the two prefix-sharing names. It cannot be the target row: no hook carries
+# both events any more, so the shorter one has to come from its own row.
+PREFIX_HOOK="$(python3 - "$ROOT_DIR/hooks/manifest.json" <<'PY'
+import json, sys
+per = {}
+for h in json.load(open(sys.argv[1]))["hooks"]:
+    per.setdefault(h["name"], set()).add(h["event"])
+for name in sorted(per):
+    if per[name] == {"PostToolUse"}:
+        print(name)
+        break
+PY
+)"
+if [ -z "$PREFIX_HOOK" ] || ! grep -q "^| \[$PREFIX_HOOK\]" "$INDEX"; then
+  echo "FAIL  [prefix_hook_present] expected=yes got=no (no PostToolUse-only row)"
   exit 1
 fi
 
@@ -69,9 +109,9 @@ restore_index() {
 }
 trap 'restore_index && rm -f "$BACKUP"' EXIT
 
-mutate_trigger() {
-  # Rewrite the Trigger cell (2nd column) of the target row.
-  python3 - "$INDEX" "$TARGET_HOOK" "$1" <<'PY'
+mutate_trigger_of() {
+  # Rewrite the Trigger cell (2nd column) of $1's row.
+  python3 - "$INDEX" "$1" "$2" <<'PY'
 import re, sys
 path, hook, trigger = sys.argv[1], sys.argv[2], sys.argv[3]
 out = []
@@ -83,17 +123,21 @@ open(path, "w").write("".join(out))
 PY
 }
 
+mutate_trigger() { mutate_trigger_of "$TARGET_HOOK" "$1"; }
+
 # 1. Baseline: the committed tree passes. Without this the mutations below
 #    could be reporting a pre-existing failure.
 python3 "$CHECK" >/dev/null 2>&1
 run_case "baseline_check_clean" "$?" "0"
 
 # 2. A row that drops a registered event fails, and names what is missing.
-mutate_trigger "PostToolUse (claude only, issue #1337)"
+#    The parenthetical is stripped before grading, so this cell declares
+#    nothing and every registered event is missing from it.
+mutate_trigger "(claude only, issue #1337)"
 OUT="$(python3 "$CHECK" 2>&1)"
 run_case "missing_event_nonzero" "$?" "1"
 case "$OUT" in
-  *"INDEX EVENTS"*"$TARGET_HOOK"*"missing PostToolUseFailure"*) run_case "missing_event_named" "yes" "yes" ;;
+  *"INDEX EVENTS"*"$TARGET_HOOK"*"missing $TARGET_FIRST"*) run_case "missing_event_named" "yes" "yes" ;;
   *) run_case "missing_event_named" "no ($OUT)" "yes" ;;
 esac
 
@@ -101,7 +145,7 @@ esac
 #    reverse direction, which a one-way "is every event mentioned" check
 #    would miss.
 restore_index || exit 1
-mutate_trigger "PostToolUse + PostToolUseFailure + SessionStart (claude only)"
+mutate_trigger "$TARGET_EVENTS + SessionStart (claude only)"
 OUT="$(python3 "$CHECK" 2>&1)"
 run_case "extra_event_nonzero" "$?" "1"
 case "$OUT" in
@@ -111,20 +155,24 @@ esac
 
 # 4. PostToolUse is a prefix of PostToolUseFailure. A cell naming only the
 #    longer event must NOT also read as the shorter one — otherwise the rule
-#    would silently accept a row that dropped PostToolUse.
+#    would silently accept a row that dropped PostToolUse. Graded on a
+#    PostToolUse-registered row, so the shorter name is the one required.
 restore_index || exit 1
-mutate_trigger "PostToolUseFailure (claude only, issue #1337)"
+mutate_trigger_of "$PREFIX_HOOK" "PostToolUseFailure (claude only, issue #1337)"
 OUT="$(python3 "$CHECK" 2>&1)"
 run_case "prefix_not_double_counted_nonzero" "$?" "1"
 case "$OUT" in
-  *"missing PostToolUse "*) run_case "prefix_not_double_counted_named" "yes" "yes" ;;
+  # The boundary character is what makes this a test: a bare `missing
+  # PostToolUse` also prefix-matches `missing PostToolUseFailure`, which is
+  # the very message this case exists to rule out.
+  *"missing PostToolUse;"* | *"missing PostToolUse "*) run_case "prefix_not_double_counted_named" "yes" "yes" ;;
   *) run_case "prefix_not_double_counted_named" "no ($OUT)" "yes" ;;
 esac
 
 # 5. Matchers and prose around the event names are not graded: the same event
 #    set written with a matcher and extra notes still passes.
 restore_index || exit 1
-mutate_trigger "PostToolUse(Bash) + PostToolUseFailure — see issue #1337 and the operating matrix"
+mutate_trigger "${TARGET_FIRST}(Bash)${TARGET_AFTER_FIRST} — see issue #1337 and the operating matrix"
 python3 "$CHECK" >/dev/null 2>&1
 run_case "matchers_and_prose_ignored" "$?" "0"
 
@@ -133,7 +181,7 @@ run_case "matchers_and_prose_ignored" "$?" "0"
 #    scanning the whole cell read them as one and failed the row as naming an
 #    unregistered event.
 restore_index || exit 1
-mutate_trigger "PostToolUse + PostToolUseFailure — SessionStart was never registered for this hook"
+mutate_trigger "$TARGET_EVENTS — SessionStart was never registered for this hook"
 OUT="$(python3 "$CHECK" 2>&1)"
 run_case "prose_mention_is_not_a_declaration" "$?" "0"
 case "$OUT" in
@@ -172,11 +220,11 @@ esac
 #    as `PostToolUseFailure`, so a typo would have declared the event it is a
 #    typo of — the drift this rule exists to catch, waved through.
 restore_index || exit 1
-mutate_trigger "PostToolUse + PostToolUseFailureNote"
+mutate_trigger "${TARGET_EVENTS}Note"
 OUT="$(python3 "$CHECK" 2>&1)"
 run_case "near_match_is_not_the_event_nonzero" "$?" "1"
 case "$OUT" in
-  *"INDEX EVENTS"*"missing PostToolUseFailure"*) run_case "near_match_is_not_the_event_named" "yes" "yes" ;;
+  *"INDEX EVENTS"*"missing $TARGET_LAST"*) run_case "near_match_is_not_the_event_named" "yes" "yes" ;;
   *) run_case "near_match_is_not_the_event_named" "no ($OUT)" "yes" ;;
 esac
 

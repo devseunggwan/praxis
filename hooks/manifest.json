@@ -1202,13 +1202,6 @@
     {
       "name": "second-failure-advisory",
       "role": "postuse-correction",
-      "event": "PostToolUse",
-      "timeout": 5,
-      "review_by": "2026-12-04"
-    },
-    {
-      "name": "second-failure-advisory",
-      "role": "postuse-correction",
       "event": "PostToolUseFailure",
       "hosts": ["claude"],
       "timeout": 5,

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""PostToolUse / PostToolUseFailure hook: advisory on repeated identical failures.
+"""PostToolUseFailure hook: advisory on repeated identical failures.
 
 Issue #944 — when a tool keeps failing with the same `(tool_name,
 error_signature)` pattern, the second retry should surface an advisory instead of
@@ -21,7 +21,7 @@ Only the repeated *failure* path is handled:
 PostToolUseFailure (issue #1337)
 ================================
 
-The hook is registered on two events. `PostToolUse` delivers `tool_response`,
+The hook was registered on two events. `PostToolUse` delivers `tool_response`,
 and the #1096 section below records why that payload cannot say whether a Bash
 command failed: a real Bash `tool_response` carries no exit status. The
 harness's `PostToolUseFailure` event exists for exactly that case — it fires
@@ -39,12 +39,18 @@ included. Three rules, in order:
   string `tool_response` does, and the same bare-`Exit code N` rule folds the
   command in as a separate digest.
 
-Both events can fire for one tool call, so each counted failure records its
-`tool_use_id` in the state file and a second event carrying an already-recorded
-id is dropped before the count moves — the pair is counted once whichever
-event arrives first. The id list is bounded (`_RECENT_TOOL_USE_IDS_MAX`) and
-ordered, so interleaved parallel calls still dedupe. `PostToolUse` stays
-registered for one release of parallel running; its removal is a follow-up.
+Each counted failure records its `tool_use_id` in the state file and an event
+carrying an already-recorded id is dropped before the count moves, so one tool
+call is counted once however many events reach the hook. The id list is
+bounded (`_RECENT_TOOL_USE_IDS_MAX`) and ordered, so interleaved parallel
+calls still dedupe.
+
+Only `PostToolUseFailure` is registered now. The `PostToolUse` entry ran in
+parallel for one release and was removed at the end of it (spec.md,
+Registration history). The `tool_response` reading below is therefore
+unreachable through any registration; it is kept rather than deleted because
+removing it is a larger change than the registration was, and the event
+branch still reads a `PostToolUse` payload correctly if one arrives.
 
 The emitted `hookEventName` mirrors the incoming event: the harness matches it
 against the event it is delivering, so a `PostToolUse` name on a
