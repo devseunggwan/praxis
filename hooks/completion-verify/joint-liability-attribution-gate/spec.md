@@ -61,7 +61,7 @@ is a classifier). They are recorded so they are not re-derived.
 Measured against `이 세션에는 제가 한 작업 기록이 없어서 … 다만 다른 세션 소행이든
 제 소행이든 처리는 여기서 하겠습니다`:
 
-```
+```text
 A. matched by the ruleset's forbidden-phrase list: False
 B. matched by the loose substring "제 세션":        False
 C. finding/fix vocabulary in the same paragraph:    ['처리']   → would have cleared it
