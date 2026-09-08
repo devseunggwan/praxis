@@ -133,9 +133,9 @@ that run. What the removal rests on, and what it does not:
 - **`PostToolUseFailure` is the event for a failed call.** The hooks
   reference's lifecycle table gives `PostToolUse` as "after a tool call
   succeeds" and `PostToolUseFailure` as "after a tool call fails". The
-  `PostToolUse` sections below were written around a payload that, per #1096,
-  cannot say whether a Bash command failed — the gap #1337 opened this hook's
-  second registration to close.
+  `PostToolUse` path was built around a payload that, per #1096, cannot say
+  whether a Bash command failed — the gap #1337 opened this hook's second
+  registration to close.
 - **The dedupe made the parallel run cost-free and its end lossless.** Both
   events counted one call once, keyed on `tool_use_id`, so removing one entry
   cannot change the count of any failure the remaining event sees.
@@ -272,7 +272,7 @@ is handled as silence.
 
 Only the replace (rename) is atomic; the read → increment → write → emit
 sequence is not serialised across processes. When tool calls in one session
-finish in parallel, PostToolUse runs in a separate process per call, so two
+finish in parallel, the hook runs in a separate process per call, so two
 processes can both read a stored count of 1, both write 2, and **both emit an
 advisory with the same occurrence number**. Conversely, simultaneous failures
 of different pairs can overwrite one another's increment and delay an
@@ -284,18 +284,19 @@ the same window).
 For the lock that now covers this, see *Concurrency* below.
 
 Output is one line on `stdout` as `hookSpecificOutput.additionalContext`
-(the PostToolUse corrective-emission convention in DESIGN.md, same shape as
-`builtin-task-postuse`). The `stderr` of an exit-0 PostToolUse hook goes
-only to debug logs and never reaches the model, so emitting there would
-defeat the retry-loop correction this hook exists for.
+(the post-tool corrective-emission convention in DESIGN.md, same shape as
+`builtin-task-postuse`). The `stderr` of an exit-0 post-tool hook goes only
+to debug logs and never reaches the model, so emitting there would defeat the
+retry-loop correction this hook exists for.
 
 ```json
-{"continue": true, "hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext": "[second-failure-advisory] Failure #<n> of the same error pattern in this session — … (동일한 오류 패턴으로 세션 내 <n>회째 실패가 감지되었습니다. …) … signature=<sig_prefix> Reference: <path?> — …"}}
+{"continue": true, "hookSpecificOutput": {"hookEventName": "PostToolUseFailure", "additionalContext": "[second-failure-advisory] Failure #<n> of the same error pattern in this session — … (동일한 오류 패턴으로 세션 내 <n>회째 실패가 감지되었습니다. …) … signature=<sig_prefix> Reference: <path?> — …"}}
 ```
 
 `<n>` is the session-cumulative occurrence (2, 3, 4, …) for that
-`(tool_name, signature)` pair. `hookEventName` is `PostToolUseFailure` when
-the advisory answers that event (issue #1337).
+`(tool_name, signature)` pair. `hookEventName` echoes the incoming event and
+is always `PostToolUseFailure`, since that is the only event `main()` accepts
+— a reply naming any other is discarded by the harness on arrival.
 
 `reference` is extracted first from a `Reference:` label, a `hooks/...` path,
 or a `*spec.md` path in the failure text, and otherwise from
@@ -337,8 +338,10 @@ Example format:
 ```
 
 `recent_tool_use_ids` (issue #1337) holds the ids of the last 16 counted
-failures, oldest first; it is what keeps a call that reaches both events
-from counting twice. Absent in state written before #1337, and read as
+failures, oldest first; it is what keeps a call redelivered under the same id
+from counting twice. It was added while two registrations were live and one
+call could arrive as either event; with one left, the same window covers a
+repeat of the one event. Absent in state written before #1337, and read as
 empty.
 
 ## Concurrency (issue #951)
