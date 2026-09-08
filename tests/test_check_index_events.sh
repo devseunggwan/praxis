@@ -180,7 +180,48 @@ case "$OUT" in
   *) run_case "near_match_is_not_the_event_named" "no ($OUT)" "yes" ;;
 esac
 
-# 9. Restored tree passes.
+# 9. A registered hook whose row does not parse as a hook row is reported.
+#    Rule 7 is satisfied by the bare name and this rule never saw the row, so
+#    repointing the link left the Trigger cell unread by both. `impl.py` rather
+#    than a made-up filename: an existing sibling also survives the offline
+#    link check, which is what makes the gap reachable in practice.
+restore_index || exit 1
+python3 - "$INDEX" "$TARGET_HOOK" <<'REPOINT'
+import re, sys
+path, hook = sys.argv[1], sys.argv[2]
+pat = re.compile(r"^(\| \[" + re.escape(hook) + r"\]\()([^)]*)(\).*)$", re.S)
+out = []
+for line in open(path).read().splitlines(keepends=True):
+    m = pat.match(line.rstrip("\n"))
+    if m:
+        line = m.group(1) + m.group(2).replace("/spec.md", "/impl.py") + m.group(3) + "\n"
+    out.append(line)
+open(path, "w").write("".join(out))
+REPOINT
+OUT="$(python3 "$CHECK" 2>&1)"
+run_case "unparsed_row_nonzero" "$?" "1"
+case "$OUT" in
+  *"INDEX ROW"*"no row for it parses as a hook row"*) run_case "unparsed_row_named" "yes" "yes" ;;
+  *) run_case "unparsed_row_named" "no ($OUT)" "yes" ;;
+esac
+
+# 10. The boundary against Rule 7: a hook whose row is gone ENTIRELY is one
+#     defect, so only Rule 7 names it. Without this the new check would report
+#     every absent hook a second time under a different heading.
+restore_index || exit 1
+python3 - "$INDEX" "$TARGET_HOOK" <<'DROP'
+import sys
+path, hook = sys.argv[1], sys.argv[2]
+lines = open(path).read().splitlines(keepends=True)
+open(path, "w").write("".join(l for l in lines if f"[{hook}](" not in l))
+DROP
+OUT="$(python3 "$CHECK" 2>&1)"
+run_case "dropped_row_nonzero" "$?" "1"
+run_case "dropped_row_rule7_only" \
+  "$(printf '%s\n' "$OUT" | grep -c 'MISSING INDEX')/$(printf '%s\n' "$OUT" | grep -c 'INDEX ROW')" \
+  "1/0"
+
+# 11. Restored tree passes.
 restore_index || exit 1
 python3 "$CHECK" >/dev/null 2>&1
 run_case "restored_check_clean" "$?" "0"

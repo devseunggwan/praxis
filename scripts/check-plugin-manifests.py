@@ -2596,10 +2596,31 @@ def main() -> int:
     # label and the name can differ, and the path is unambiguous.
     # ------------------------------------------------------------------
     index_path = REPO_ROOT / "docs" / "hook" / "INDEX.md"
-    index_rows = _index_trigger_cells(index_path.read_text())
+    index_text = index_path.read_text()
+    index_rows = _index_trigger_cells(index_text)
     manifest_events: dict[str, set[str]] = {}
     for entry in manifest["hooks"]:
         manifest_events.setdefault(entry["name"], set()).add(entry["event"])
+
+    # A registered hook whose name is in the file but whose row does not parse
+    # is graded by neither rule: Rule 7 is satisfied by the bare name, and this
+    # loop never sees the row. Changing a row's link target away from
+    # `<name>/spec.md` is enough — to an existing sibling file it also survives
+    # the offline link check — and the row's events then go unread. Reported
+    # here rather than by widening the row pattern, so the diagnostic says what
+    # is wrong with the row instead of silently matching a different shape.
+    parsed_names = {name for name, _, _ in index_rows}
+    for name in sorted({entry["name"] for entry in manifest["hooks"]}):
+        if name in parsed_names or name not in index_text:
+            # Absent entirely → Rule 7 already reported it; reporting again
+            # here would name one defect twice.
+            continue
+        drifts.append(
+            f"INDEX ROW docs/hook/INDEX.md {name!r}: the name appears but no "
+            "row for it parses as a hook row — a row must link to "
+            f"`../../hooks/<role>/{name}/spec.md`, and its Trigger cell is "
+            "unread until it does (#1376)"
+        )
 
     for name, trigger_cell, line_no in sorted(index_rows):
         expected = manifest_events.get(name)
