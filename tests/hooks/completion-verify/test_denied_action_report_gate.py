@@ -394,3 +394,44 @@ def test_e2e_askuserquestion_refusal_does_not_fire(tmp_path):
     )
     assert proc.returncode == 0
     assert proc.stdout.strip() == ""
+
+
+# --------------------------------------------------------------------------
+# acknowledgement is scoped to each refusal (CodeRabbit finding on PR #1395)
+# --------------------------------------------------------------------------
+
+
+def test_one_ack_word_does_not_clear_a_second_unnamed_refusal():
+    """A refusal word has one referent. With two refusals in a turn, naming one
+    says nothing about the other — the earlier global match retired both."""
+    bash = _rej(tool_use_id="t1", tool_name="Bash")
+    write = _rej(tool_use_id="t2", tool_name="Write", text="/etc/hosts")
+    out = gate.unreported([bash, write], {"t1", "t2"}, "Bash 호출은 거부되어 실행하지 못했습니다.")
+    assert [r["tool_name"] for r in out] == ["Write"]
+
+
+def test_two_refusals_both_named_clears_both():
+    bash = _rej(tool_use_id="t1", tool_name="Bash")
+    write = _rej(tool_use_id="t2", tool_name="Write", text="/etc/hosts")
+    assert gate.unreported([bash, write], {"t1", "t2"}, "Bash 와 Write 호출이 모두 막혔습니다.") == []
+
+
+def test_two_refusals_neither_named_reports_both():
+    bash = _rej(tool_use_id="t1", tool_name="Bash")
+    write = _rej(tool_use_id="t2", tool_name="Write", text="/etc/hosts")
+    out = gate.unreported([bash, write], {"t1", "t2"}, "푸시는 거부되어 로컬에만 남아 있습니다.")
+    assert sorted(r["tool_name"] for r in out) == ["Bash", "Write"]
+
+
+def test_sole_refusal_still_clears_on_a_bare_ack_word():
+    """The single-refusal path is unchanged — that is every turn in the measured
+    corpus, so the fix must not move the firing rate."""
+    assert gate.unreported([_rej(tool_use_id="t1")], {"t1"}, "푸시는 거부되었습니다.") == []
+
+
+def test_excluded_tool_does_not_count_toward_soleness():
+    """A refused AskUserQuestion is out of scope, so it must not silently turn a
+    sole real refusal into a multi-refusal turn and suppress the ack word."""
+    ask = _rej(tool_use_id="t0", tool_name="AskUserQuestion", text="어느 쪽으로?")
+    bash = _rej(tool_use_id="t1", tool_name="Bash")
+    assert gate.unreported([ask, bash], {"t0", "t1"}, "푸시는 거부되었습니다.") == []

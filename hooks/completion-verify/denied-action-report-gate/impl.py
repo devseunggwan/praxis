@@ -109,27 +109,33 @@ def _content_blocks(turn: list[dict]):
                 yield block
 
 
-def is_acknowledged(rejection: dict, message: str) -> bool:
-    """True when the report owns the refusal — by naming it, or by naming the
-    tool it refused. Either is enough: the gate asks for a mention, not an
-    account."""
+def is_acknowledged(rejection: dict, message: str, sole: bool = True) -> bool:
+    """True when the report owns *this* refusal.
+
+    Naming the refused tool always counts. A bare refusal word counts only when
+    it is the turn's `sole` refusal, because a word has one referent: with two
+    refusals in a turn, "the push was denied" accounts for the push and says
+    nothing about the other call, so reading it as covering both would let one
+    acknowledgement retire every omission beside it.
+    """
     if not message:
         return False
-    if _ACK.search(message):
-        return True
     name = (rejection.get("tool_name") or "").strip()
-    return bool(name) and name in set(_TOOL_NAME.findall(message))
+    if name and name in set(_TOOL_NAME.findall(message)):
+        return True
+    return sole and bool(_ACK.search(message))
 
 
 def unreported(rejections: list[dict], turn_ids: set[str], message: str) -> list[dict]:
     """This turn's refusals, minus the excluded class, that the report is silent on."""
-    return [
+    candidates = [
         r
         for r in rejections
         if r.get("tool_use_id") in turn_ids
         and r.get("tool_name") not in _EXCLUDED_TOOLS
-        and not is_acknowledged(r, message)
     ]
+    sole = len(candidates) == 1
+    return [r for r in candidates if not is_acknowledged(r, message, sole)]
 
 
 def _advisory(items: list[dict]) -> str:

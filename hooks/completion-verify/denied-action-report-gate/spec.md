@@ -31,7 +31,7 @@ No judgement about meaning is made at any point.
 | Was something refused? | `_transcript.scan_user_rejections` — `toolDenialKind`, `is_error: true`, and the runtime's fixed refusal sentence, three co-agreeing markers |
 | Was it refused *this turn*? | the rejection's `tool_use_id` appears among the `tool_result` ids in `load_stop_turn(payload)` |
 | Is it in scope? | `tool_name` is not `AskUserQuestion` |
-| Did the report own it? | the final message carries acknowledgement vocabulary, or names the refused tool |
+| Did the report own it? | the final message names the refused tool — or carries acknowledgement vocabulary, when this is the turn's only in-scope refusal |
 
 ### Turn scoping, and why the cursor cannot supply it
 
@@ -85,6 +85,19 @@ The list is deliberately generous. Both errors are possible, and they are not
 symmetric: a missed omission costs one unfired advisory, while a false fire adds
 noise to every clean turn across a 100-hook suite. Where the two are in tension,
 this gate stays quiet.
+
+**A bare word from that list clears only a turn whose refusal is the only one.**
+A refusal word has one referent, so with two refusals in a turn "the push was
+denied" accounts for the push and says nothing about the other call — reading it
+as covering both would let a single acknowledgement retire every omission beside
+it, which is the case this gate exists for. With two or more in-scope refusals,
+each is cleared only by its own tool name. Naming the tool always clears, at any
+count. The refused `AskUserQuestion` class is excluded before the count is taken,
+so it cannot turn a sole real refusal into a multi-refusal turn.
+
+Every turn in the measured corpus carried exactly one refusal (14 of 14), so this
+rule leaves the estimated rate untouched; it closes a case the corpus never
+reached rather than one it got wrong.
 
 ## What is emitted
 
