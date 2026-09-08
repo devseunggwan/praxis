@@ -207,18 +207,24 @@ _INDEX_ROW_RE = re.compile(
 )
 
 
-def _index_trigger_cells(index_md: str) -> dict[str, tuple[str, int]]:
-    """Map hook name -> (Trigger cell text, 1-based line number) for INDEX.md.
+def _index_trigger_cells(index_md: str) -> list[tuple[str, str, int]]:
+    """Every hook row in INDEX.md as (hook name, Trigger cell, 1-based line).
 
     The name is taken from the row's link TARGET, not its label: a row may
     label itself differently from the directory, and the path is unambiguous.
     Rows that are not hook links (section headers, the legend) do not match.
+
+    A list rather than a name-keyed map, because two rows may name the same
+    hook. Keying dropped all but the last, and Rule 7 only asks whether the
+    name appears somewhere in the file — so a duplicate row left behind by an
+    edit could keep declaring a registration that no longer exists, with
+    neither rule positioned to see it.
     """
-    rows: dict[str, tuple[str, int]] = {}
+    rows: list[tuple[str, str, int]] = []
     for line_no, line in enumerate(index_md.splitlines(), start=1):
         m = _INDEX_ROW_RE.match(line.strip())
         if m:
-            rows[m.group("name")] = (m.group("trigger"), line_no)
+            rows.append((m.group("name"), m.group("trigger"), line_no))
     return rows
 
 
@@ -2577,9 +2583,13 @@ def main() -> int:
     # because it is generated — INDEX is hand-written, so it needs the rule.
     #
     # The cell stays free-form (`PostToolUse(AskUserQuestion)`,
-    # `PreToolUse(Edit) ... + PostToolUse(Read)`, `Stop, SubagentStop`, plus
-    # trailing notes). Only the set of event TOKENS in it is compared, so the
-    # matchers, wrapper names and issue references around them are untouched.
+    # `PreToolUse(Edit) ... + PostToolUse(Read)`, plus trailing notes). Only
+    # the set of events it DECLARES is compared — an event opening a
+    # `+`-segment — so matchers, wrapper names, issue refs and explanatory
+    # prose around them are untouched.
+    #
+    # Every row is graded, including two that name the same hook: a stale
+    # duplicate is exactly what this rule has to catch.
     #
     # The hook name comes from the row's link target, not its label: the
     # label and the name can differ, and the path is unambiguous.
@@ -2590,7 +2600,7 @@ def main() -> int:
     for entry in manifest["hooks"]:
         manifest_events.setdefault(entry["name"], set()).add(entry["event"])
 
-    for name, (trigger_cell, line_no) in sorted(index_rows.items()):
+    for name, trigger_cell, line_no in sorted(index_rows):
         expected = manifest_events.get(name)
         if expected is None:
             # An opt-in hook or a row for something not registered. Rule 15's

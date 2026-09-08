@@ -125,7 +125,33 @@ case "$OUT" in
   *) run_case "prose_mention_no_stray_report" "yes" "yes" ;;
 esac
 
-# 7. Restored tree passes.
+# 7. Two rows naming the same hook are BOTH graded. Keying the rows by hook
+#    name dropped all but the last, and Rule 7 only asks whether the name
+#    appears somewhere in the file — so a stale duplicate left by an edit
+#    could keep declaring a registration that no longer exists.
+cp "$BACKUP" "$INDEX"
+python3 - "$INDEX" "$TARGET_HOOK" <<'DUP'
+import re, sys
+path, hook = sys.argv[1], sys.argv[2]
+pat = re.compile(r"^\| \[" + re.escape(hook) + r"\]\([^)]*\)\s*\|[^|]*(\|.*)$")
+out = []
+for line in open(path).read().splitlines(keepends=True):
+    m = pat.match(line.rstrip("\n"))
+    if m:
+        # A stale duplicate ABOVE the correct row: the old keying kept the last.
+        head = line.split("|")[1]
+        out.append(f"|{head}| SessionStart {m.group(1)}\n")
+    out.append(line)
+open(path, "w").write("".join(out))
+DUP
+OUT="$(python3 "$CHECK" 2>&1)"
+run_case "duplicate_row_nonzero" "$?" "1"
+case "$OUT" in
+  *"INDEX EVENTS"*"names SessionStart which is not registered"*) run_case "duplicate_row_named" "yes" "yes" ;;
+  *) run_case "duplicate_row_named" "no ($OUT)" "yes" ;;
+esac
+
+# 8. Restored tree passes.
 cp "$BACKUP" "$INDEX"
 python3 "$CHECK" >/dev/null 2>&1
 run_case "restored_check_clean" "$?" "0"
