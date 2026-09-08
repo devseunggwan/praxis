@@ -323,17 +323,33 @@ HOMEFB_TODAY=$(date -u +%Y-%m-%d)
 # PRAXIS_HOME is taken out too: the default under test is HOME/.praxis, and
 # scripts/run-tests.sh exports a throwaway PRAXIS_HOME that would relocate it
 # (#1340).
+# The negative half of this case asks whether THIS probe degrades an unset HOME
+# to "" and writes the ledger to /.praxis. Asserting that /.praxis does not
+# exist at all conflates that with "something else created it earlier": a stray
+# empty /.praxis in a container made the case fail on a clean checkout, every
+# run, until it was removed by hand (#1377). Snapshot the exact file the probe
+# would write BEFORE running it, and grade only what the probe changed.
+HOMEFB_ROOT_LEDGER="/.praxis/telemetry/fire-events-$HOMEFB_TODAY.jsonl"
+HOMEFB_ROOT_BEFORE=absent
+[ -e "$HOMEFB_ROOT_LEDGER" ] && HOMEFB_ROOT_BEFORE=present
+
 env -u HOME -u PRAXIS_HOME -u PRAXIS_FIRE_TELEMETRY_FILE PATH="$HOMEFB_ROOT/bin:$PATH" \
   PRAXIS_LIB_DIR="$HOMEFB_ROOT/pkgroot/hooks/_lib" sh -c '
     . "$1/pkgroot/hooks/_lib/record_fire.sh"
     praxis_record_fire homefb-hook homefb-role pass sess-homefb ""
   ' homefb "$HOMEFB_ROOT"
 HOMEFB_LEDGER="$HOMEFB_ROOT/fakehome/.praxis/telemetry/fire-events-$HOMEFB_TODAY.jsonl"
-if [ -s "$HOMEFB_LEDGER" ] && [ ! -e "/.praxis" ]; then
+
+HOMEFB_ROOT_AFTER=absent
+[ -e "$HOMEFB_ROOT_LEDGER" ] && HOMEFB_ROOT_AFTER=present
+# Fail only when the probe itself created the root-level ledger. A file that
+# was already there is someone else's, and says nothing about this writer.
+if [ -s "$HOMEFB_LEDGER" ] && \
+   ! { [ "$HOMEFB_ROOT_BEFORE" = absent ] && [ "$HOMEFB_ROOT_AFTER" = present ]; }; then
   ok "HOME-unset falls back to passwd-db home (not /.praxis)"
 else
   ko "HOME-unset falls back to passwd-db home (not /.praxis)" \
-    "fallback_ledger=$(ls "$HOMEFB_LEDGER" 2>&1)"
+    "fallback_ledger=$(ls "$HOMEFB_LEDGER" 2>&1) root_ledger=$HOMEFB_ROOT_BEFORE->$HOMEFB_ROOT_AFTER"
 fi
 rm -rf "$HOMEFB_ROOT"
 
