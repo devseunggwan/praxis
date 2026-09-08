@@ -84,8 +84,21 @@ skill's.
 ### Step 4: Say when the window is empty
 
 An empty report is a real answer and it looks exactly like a broken query, so
-distinguish them. `Total events : 0` with `exit 0` means the window held no
-events. If the user expected some, say the window and the source directory the
+distinguish them. Each mode says it differently, and the line to quote is the
+mode's own:
+
+| Mode | What an empty window prints |
+| --- | --- |
+| `bypass` | `Total events : 0`, then `No bypass events found in the selected period.` |
+| `fire-rate` | `Hooks fired : 0  (0 coarse, 0 mixed)`, then `No fire events found in the selected period.` |
+
+For `fire-rate`, do **not** read `Hooks fired : 0` as the empty answer on its
+own — skip-only records can produce that line with the ledger non-empty. The
+explicit `No fire events found` message is the one that means the window held
+nothing.
+
+In either mode, with `exit 0`, an empty window is a finding rather than a fault.
+If the user expected events, say the window and the `Source :` directory the
 report printed, and offer a longer `-d` before concluding anything is wrong.
 
 ## Error Handling
