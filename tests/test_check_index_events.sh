@@ -240,7 +240,35 @@ run_case "dup_unparsed_row_nonzero" "$?" "1"
 run_case "dup_unparsed_row_named" \
   "$(printf '%s\n' "$OUT" | grep -c 'INDEX ROW')" "1"
 
-# 12. Restored tree passes.
+# 12. A row whose LABEL still names the hook while its link and Trigger point at
+#     another registered hook is reported. Rule 7 reads the label and passes;
+#     this row parses and grades against the hook it now names; the original
+#     registration is graded by nothing. `block-gh-state-all` is a real sibling,
+#     so the repointed link also survives the offline link check.
+restore_index || exit 1
+python3 - "$INDEX" "$TARGET_HOOK" <<'RETARGET'
+import re, sys
+path, hook = sys.argv[1], sys.argv[2]
+THIEF, THIEF_ROLE, THIEF_TRIGGER = "block-gh-state-all", "preflight-gate", " PreToolUse "
+out = []
+for line in open(path).read().splitlines(keepends=True):
+    if f"[{hook}](" in line:
+        cells = line.split("|")
+        cells[1] = re.sub(r"\]\([^)]*\)",
+                          f"](../../hooks/{THIEF_ROLE}/{THIEF}/spec.md)", cells[1])
+        cells[2] = THIEF_TRIGGER
+        line = "|".join(cells)
+    out.append(line)
+open(path, "w").write("".join(out))
+RETARGET
+OUT="$(python3 "$CHECK" 2>&1)"
+run_case "retargeted_row_nonzero" "$?" "1"
+case "$OUT" in
+  *"INDEX ROW"*"no row LINKS to it"*) run_case "retargeted_row_named" "yes" "yes" ;;
+  *) run_case "retargeted_row_named" "no ($OUT)" "yes" ;;
+esac
+
+# 13. Restored tree passes.
 restore_index || exit 1
 python3 "$CHECK" >/dev/null 2>&1
 run_case "restored_check_clean" "$?" "0"

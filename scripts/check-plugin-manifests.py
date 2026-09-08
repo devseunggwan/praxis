@@ -2651,6 +2651,24 @@ def main() -> int:
             "unread until it does (#1376)"
         )
 
+    # A registered hook needs a row that points at IT, not merely its name
+    # somewhere in the file. Leave a row's label alone and repoint its link and
+    # Trigger cell at another registered hook, and both rules pass: Rule 7 finds
+    # the name in the label, this loop grades the row against the hook it now
+    # names, and the original registration is graded by nothing. Neither the
+    # `INDEX ROW` check above nor the offline link check sees it — the row parses
+    # and the target exists. Same double-report boundary as above: a name absent
+    # from the file entirely is Rule 7's to report.
+    for name in sorted(registered_names - {n for n, _, _ in index_rows}):
+        if name not in index_text:
+            continue
+        drifts.append(
+            f"INDEX ROW docs/hook/INDEX.md {name!r}: the name appears but no "
+            "row LINKS to it — a row's hook is its link target, not its label, "
+            f"so a row reading {name!r} while pointing elsewhere leaves this "
+            "registration graded by nothing (#1376)"
+        )
+
     for name, trigger_cell, line_no in sorted(index_rows):
         expected = manifest_events.get(name)
         if expected is None:
