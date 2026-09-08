@@ -24,6 +24,7 @@ import copy
 import importlib.util
 import io
 import json
+import re
 from contextlib import redirect_stdout
 from datetime import date
 from pathlib import Path
@@ -507,6 +508,144 @@ def test_main_reports_overdue_once_the_clock_passes_review_by(monkeypatch):
     assert rc == 1
     assert "REVIEW_BY OVERDUE" in out
     assert "docs/hook-prune-audit.md" in out
+
+
+# ---------------------------------------------------------------------------
+# events enum — Rule 29's event vocabulary is derived, not restated
+# ---------------------------------------------------------------------------
+
+def test_schema_events_enum_backs_rule29_event_vocabulary():
+    assert set(check._KNOWN_EVENTS) == set(build.manifest_events_enum())
+    # A set equality alone would also hold if both sides were empty, and an
+    # empty vocabulary makes Rule 29 silently grade nothing.
+    assert len(check._KNOWN_EVENTS) == len(build.manifest_events_enum()) > 0
+
+
+@pytest.mark.parametrize(
+    "accessor, path",
+    [
+        ("manifest_events_enum", ("event",)),
+        ("manifest_hosts_enum", ("hosts", "items")),
+    ],
+)
+def test_a_missing_enum_node_names_itself_instead_of_raising_KeyError(
+    monkeypatch, accessor, path
+):
+    # `_KNOWN_EVENTS` binds at import time, before main()'s
+    # `manifest_schema_drifts()` gate can run, so a schema missing this node
+    # used to abort the checker's import with a bare KeyError — no file, no
+    # path, none of the location diagnostics the schema gate exists to give.
+    schema = copy.deepcopy(build.load_schema())
+    node = schema["properties"]["hooks"]["items"]["properties"]
+    for key in path:
+        node = node[key]
+    del node["enum"]
+    monkeypatch.setattr(build, "load_schema", lambda: schema)
+
+    with pytest.raises(ValueError) as excinfo:
+        getattr(build, accessor)()
+    message = str(excinfo.value)
+    assert "hooks/manifest.schema.json" in message
+    assert "/".join(("properties", "hooks", "items", "properties") + path + ("enum",)) in message
+
+
+def test_a_non_list_enum_is_a_named_diagnostic_too(monkeypatch):
+    # An empty or wrong-typed enum reaches the caller as a silently empty
+    # vocabulary, which makes Rule 29 grade nothing while still passing.
+    schema = copy.deepcopy(build.load_schema())
+    schema["properties"]["hooks"]["items"]["properties"]["event"]["enum"] = []
+    monkeypatch.setattr(build, "load_schema", lambda: schema)
+
+    with pytest.raises(ValueError, match="must be a non-empty array"):
+        build.manifest_events_enum()
+
+
+def test_a_non_string_enum_element_is_a_named_diagnostic_too(monkeypatch):
+    # The length and emptiness checks let `[None, "Stop"]` through, and the
+    # value then travels to `_event_tokens`, where `startswith` raises a
+    # TypeError at the checker's IMPORT — a bare traceback naming neither the
+    # schema nor the key, which is the failure this accessor exists to replace.
+    schema = copy.deepcopy(build.load_schema())
+    schema["properties"]["hooks"]["items"]["properties"]["event"]["enum"] = [None, "Stop"]
+    monkeypatch.setattr(build, "load_schema", lambda: schema)
+
+    with pytest.raises(ValueError, match="holds a non-string value"):
+        build.manifest_events_enum()
+
+
+def test_the_checker_holds_no_second_copy_of_the_event_vocabulary():
+    # The equality above is only a guard while the vocabulary stays derived:
+    # re-introduce a literal tuple and it passes on the day it is written,
+    # then goes stale the next time the schema gains an event. So the source
+    # shape is asserted too. `CLAUDE_ONLY_EVENTS` is deliberately still a
+    # literal — it states a different fact (which events Claude alone raises),
+    # not a copy of the vocabulary — so the check is scoped to the binding.
+    src = (REPO_ROOT / "scripts" / "check-plugin-manifests.py").read_text()
+    assert "_KNOWN_EVENTS = tuple(_build.manifest_events_enum())" in src
+    assert re.search(r"^_KNOWN_EVENTS\s*=\s*\(", src, re.M) is None, (
+        "the event vocabulary is spelled out in the checker again — it has to "
+        "come from the schema, not a second copy"
+    )
+
+
+def test_an_escaped_pipe_does_not_cut_the_trigger_cell_short():
+    # A matcher alternation is written `PreToolUse(Edit\|Write)` so the table
+    # renders; the escaped pipe is cell content, not a column break. Reading it
+    # as a break truncates the cell and the registrations after it vanish, which
+    # Rule 29 then reports as events the row failed to document.
+    row = (
+        "| [x](../../hooks/preflight-gate/x/spec.md) "
+        "| PreToolUse(Edit\\|Write) + PostToolUseFailure(Bash) | note |"
+    )
+    match = check._INDEX_ROW_RE.match(row)
+    assert match, "the row no longer parses as a hook row"
+    assert check._event_tokens(match.group("trigger")) == {
+        "PreToolUse",
+        "PostToolUseFailure",
+    }
+
+
+def test_a_nested_parenthetical_declares_nothing():
+    # One pass of the pattern removes only the innermost pair, so the outer
+    # one's prose used to split into a segment opening with an event name —
+    # a declaration the row never made, reported as an unregistered event.
+    assert check._event_tokens("PreToolUse (note (nested) + PostToolUse)") == {
+        "PreToolUse"
+    }
+    # Sibling parentheticals are not nesting and were always handled; kept as
+    # the in-band control so the fix cannot pass by stripping too much.
+    assert check._event_tokens("PostToolUse (see (a) and (b))") == {"PostToolUse"}
+    assert check._event_tokens("PreToolUse(Edit) + PostToolUse(Bash)") == {
+        "PreToolUse",
+        "PostToolUse",
+    }
+
+
+def test_a_segment_declaring_no_registered_event_is_surfaced():
+    # The escape this closes: name every expected event, then add a misspelt
+    # segment. `_event_tokens` drops it, the sets compare equal, and the cell
+    # passes while disagreeing with the manifest.
+    cell = "PostToolUse + PostToolUseFailure + PostToolUseFaliure"
+    assert check._event_tokens(cell) == {"PostToolUse", "PostToolUseFailure"}
+    assert [t for t, e in check._cell_segments(cell) if e is None] == [
+        "PostToolUseFaliure"
+    ]
+    # Controls: a correct cell and a matcher-carrying one surface nothing.
+    for clean in ("PostToolUse + PostToolUseFailure", "PreToolUse(Edit) + Stop"):
+        assert [t for t, e in check._cell_segments(clean) if e is None] == []
+
+
+def test_every_real_trigger_segment_opens_with_a_registered_event():
+    # The rule change above only holds if INDEX.md already writes cells this
+    # way — otherwise it turns correct rows red. Measured, not assumed.
+    index = (REPO_ROOT / "docs" / "hook" / "INDEX.md").read_text()
+    offenders = [
+        (cell.strip(), text)
+        for _, cell, _ in check._index_trigger_cells(index)
+        for text, event in check._cell_segments(cell)
+        if event is None
+    ]
+    assert offenders == [], offenders
 
 
 def test_review_by_and_observe_only_never_reach_hooks_json(manifest):

@@ -185,6 +185,130 @@ CLAUDE_ONLY_EVENTS = (
     "PostToolBatch",
     "SubagentStart",
 )
+
+# The Trigger cell runs to the next UNESCAPED `|`. A cell may hold a matcher
+# alternation (`PreToolUse(Edit\|Write)`), and markdown escapes that pipe so the
+# table still renders; read it as a column break and the cell is truncated mid
+# matcher, dropping every registration after it — so a correctly documented row
+# reports the events it does not name as missing.
+_INDEX_ROW_RE = re.compile(
+    r"^\|\s*\[[^\]]*\]\(\.\./\.\./hooks/[^/]+/(?P<name>[^/)]+)/spec\.md\)\s*"
+    r"\|(?P<trigger>(?:\\.|[^|\\])*)\|"
+)
+
+
+def _index_trigger_cells(index_md: str) -> list[tuple[str, str, int]]:
+    """Every hook row in INDEX.md as (hook name, Trigger cell, 1-based line).
+
+    The name is taken from the row's link TARGET, not its label: a row may
+    label itself differently from the directory, and the path is unambiguous.
+    Rows that are not hook links (section headers, the legend) do not match.
+
+    A list rather than a name-keyed map, because two rows may name the same
+    hook. Keying dropped all but the last, and Rule 7 only asks whether the
+    name appears somewhere in the file — so a duplicate row left behind by an
+    edit could keep declaring a registration that no longer exists, with
+    neither rule positioned to see it.
+    """
+    rows: list[tuple[str, str, int]] = []
+    for line_no, line in enumerate(index_md.splitlines(), start=1):
+        m = _INDEX_ROW_RE.match(line.strip())
+        if m:
+            rows.append((m.group("name"), m.group("trigger"), line_no))
+    return rows
+
+
+# The same leading link cell with the target FILE left free. A row matching this
+# but not `_INDEX_ROW_RE` is shaped like a hook row and points into the hook's
+# own directory, yet its Trigger cell is never read — which is the drift the
+# `INDEX ROW` check reports.
+_INDEX_ROW_CANDIDATE_RE = re.compile(
+    r"^\|\s*\[[^\]]*\]\(\.\./\.\./hooks/[^/]+/(?P<name>[^/)]+)/[^)]*\)"
+)
+
+
+def _index_row_candidates(index_md: str) -> list[tuple[str, int]]:
+    """Every row-shaped line as (hook name, 1-based line), parsing or not."""
+    candidates: list[tuple[str, int]] = []
+    for line_no, line in enumerate(index_md.splitlines(), start=1):
+        m = _INDEX_ROW_CANDIDATE_RE.match(line.strip())
+        if m:
+            candidates.append((m.group("name"), line_no))
+    return candidates
+
+
+_PARENTHETICAL_RE = re.compile(r"\([^()]*\)")
+
+
+def _without_parentheticals(text: str) -> str:
+    """`text` with every parenthetical gone, nested ones included.
+
+    The pattern matches only innermost pairs, so one pass over
+    `PreToolUse (note (nested) + PostToolUse)` leaves the outer pair open and
+    its prose splits into a segment that opens with an event name — declaring
+    an event the row never registered. Repeat to a fixed point instead.
+    """
+    while True:
+        stripped = _PARENTHETICAL_RE.sub(" ", text)
+        if stripped == text:
+            return text
+        text = stripped
+
+
+def _event_tokens(cell: str) -> set[str]:
+    """Event names a Trigger cell *declares*, as opposed to merely mentions.
+
+    A cell is a `+`-joined list of registrations, each opening with its event
+    name and carrying its matcher and notes after it — every one of the
+    distinct cell shapes in INDEX.md has that form. So an event counts when it
+    opens a segment, and text further into the segment is prose whatever words
+    it uses. Scanning the whole cell instead reads `PostToolUseFailure — the
+    PostToolUse registration was removed` as declaring both, and the row then
+    fails as naming an unregistered event.
+
+    A segment that opens with something else declares nothing and is reported
+    by Rule 29 rather than ignored: a cell listing every expected event and
+    then adding a typo'd segment compares equal to the manifest.
+
+    Parentheticals go first because they hold the matchers and the notes
+    (`PostToolUse(Bash)`, `` (`wrapper-name`) ``, `(claude only, issue #1337)`),
+    none of which may open a segment. What keeps `PostToolUseFailure` from also
+    reporting a bare `PostToolUse` is the token-boundary check below, not the
+    order the names are tried in.
+    """
+    return {event for _, event in _cell_segments(cell) if event is not None}
+
+
+def _cell_segments(cell: str) -> list[tuple[str, str | None]]:
+    """Each non-empty `+`-segment of a Trigger cell, with the event it declares.
+
+    `None` for the event means the segment opens with something that is not a
+    registered event name. `_event_tokens` drops those; Rule 29 reports them,
+    because a cell that names every expected event and then adds a typo'd
+    fourth segment compares equal to the manifest and passes.
+    """
+    segments: list[tuple[str, str | None]] = []
+    for segment in _without_parentheticals(cell).split("+"):
+        text = segment.strip()
+        if not text:
+            continue
+        segments.append((text, _leading_event(text)))
+    return segments
+
+
+def _leading_event(text: str) -> str | None:
+    """The event name a segment opens with, or None."""
+    for event in _KNOWN_EVENTS:
+        if not text.startswith(event):
+            continue
+        rest = text[len(event):]
+        # The name has to END there too, or `Stopper` declares `Stop` and a
+        # typo like `PostToolUseFailureNote` declares the event it is a typo
+        # of — which is the drift this rule exists to catch, waved through.
+        if rest and (rest[0].isalnum() or rest[0] == "_"):
+            continue
+        return event
+    return None
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
 
 _spec = importlib.util.spec_from_file_location(
@@ -193,6 +317,15 @@ _spec = importlib.util.spec_from_file_location(
 assert _spec and _spec.loader
 _build = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_build)
+
+# Derived, not restated: a hand-kept copy of the schema enum drifts silently in
+# the one direction that matters, since Rule 29 would put a newly allowed event
+# in `expected` while `_event_tokens` could not find it in INDEX.md — reporting
+# a correctly documented registration as missing. Read after `_build` loads,
+# which is why this sits here rather than beside `_INDEX_ROW_RE`. Order is
+# presentational; the token-boundary check in `_event_tokens` is what keeps
+# `PostToolUse` from matching inside `PostToolUseFailure`.
+_KNOWN_EVENTS = tuple(_build.manifest_events_enum())
 
 # ADR-0002 (#617): the runtime dispatch resolver. Rule 14 cross-checks that the
 # build collapse (filter_hooks_for_host → committed hooks.json) and the runtime
@@ -2500,6 +2633,114 @@ def main() -> int:
                 "absent or wider value writes the hook into the Codex and "
                 "Cursor hooks.json for an event they never raise (#1337)"
             )
+
+    # ------------------------------------------------------------------
+    # Rule 29 — INDEX.md's Trigger cell names the registered events (#1376)
+    #
+    # Rule 7 above asserts only that each hook NAME appears somewhere in
+    # docs/hook/INDEX.md. Every other column is unchecked prose, and the
+    # Trigger cell is not prose: it restates a fact hooks/manifest.json
+    # already holds. #1365 removed a registration and the row went on naming
+    # the removed event; the checker passed and a human grep found it.
+    # docs/hook-operating-matrix.md carries the same fact and cannot drift
+    # because it is generated — INDEX is hand-written, so it needs the rule.
+    #
+    # The cell stays free-form (`PostToolUse(AskUserQuestion)`,
+    # `PreToolUse(Edit) ... + PostToolUse(Read)`, plus trailing notes). Only
+    # the set of events it DECLARES is compared — an event opening a
+    # `+`-segment — so matchers, wrapper names, issue refs and explanatory
+    # prose around them are untouched.
+    #
+    # Every row is graded, including two that name the same hook: a stale
+    # duplicate is exactly what this rule has to catch.
+    #
+    # The hook name comes from the row's link target, not its label: the
+    # label and the name can differ, and the path is unambiguous.
+    # ------------------------------------------------------------------
+    index_path = REPO_ROOT / "docs" / "hook" / "INDEX.md"
+    index_text = index_path.read_text()
+    index_rows = _index_trigger_cells(index_text)
+    manifest_events: dict[str, set[str]] = {}
+    for entry in manifest["hooks"]:
+        manifest_events.setdefault(entry["name"], set()).add(entry["event"])
+
+    # A row shaped like a hook row whose link target is not `<name>/spec.md` is
+    # graded by neither rule: Rule 7 is satisfied by the bare name, and the
+    # grading loop below never sees the row. Repointing the link at an existing
+    # sibling file is enough — that also survives the offline link check — and
+    # the row's events then go unread. Reported here rather than by widening
+    # `_INDEX_ROW_RE`, so the diagnostic says what is wrong with the row
+    # instead of silently matching a different shape.
+    #
+    # Per ROW, not per hook name. Judging by name lets one good row vouch for a
+    # malformed duplicate of the same hook, and a stale duplicate is precisely
+    # what `_index_trigger_cells` returns a list to catch. A hook with no
+    # row-shaped line at all is absent entirely, which Rule 7 already reports —
+    # naming it again here would name one defect twice.
+    registered_names = {entry["name"] for entry in manifest["hooks"]}
+    parsed_lines = {line_no for _, _, line_no in index_rows}
+    for name, line_no in _index_row_candidates(index_text):
+        if name not in registered_names or line_no in parsed_lines:
+            continue
+        drifts.append(
+            f"INDEX ROW docs/hook/INDEX.md:{line_no} {name!r}: the row does not "
+            "parse as a hook row — a row must link to "
+            f"`../../hooks/<role>/{name}/spec.md`, and its Trigger cell is "
+            "unread until it does (#1376)"
+        )
+
+    # A registered hook needs a row that points at IT, not merely its name
+    # somewhere in the file. Leave a row's label alone and repoint its link and
+    # Trigger cell at another registered hook, and both rules pass: Rule 7 finds
+    # the name in the label, this loop grades the row against the hook it now
+    # names, and the original registration is graded by nothing. Neither the
+    # `INDEX ROW` check above nor the offline link check sees it — the row parses
+    # and the target exists. Same double-report boundary as above: a name absent
+    # from the file entirely is Rule 7's to report.
+    for name in sorted(registered_names - {n for n, _, _ in index_rows}):
+        if name not in index_text:
+            continue
+        drifts.append(
+            f"INDEX ROW docs/hook/INDEX.md {name!r}: the name appears but no "
+            "row LINKS to it — a row's hook is its link target, not its label, "
+            f"so a row reading {name!r} while pointing elsewhere leaves this "
+            "registration graded by nothing (#1376)"
+        )
+
+    for name, trigger_cell, line_no in sorted(index_rows):
+        expected = manifest_events.get(name)
+        if expected is None:
+            # An opt-in hook or a row for something not registered. Rule 15's
+            # stub sweep owns that direction; this rule only grades rows whose
+            # hook the manifest registers.
+            continue
+        segments = _cell_segments(trigger_cell)
+        cell_events = {event for _, event in segments if event is not None}
+        undeclared = [text for text, event in segments if event is None]
+        if cell_events == expected and not undeclared:
+            continue
+        absent_events = sorted(expected - cell_events)
+        stray_events = sorted(cell_events - expected)
+        cell_problems: list[str] = []
+        if undeclared:
+            # A misspelt event name is the case this catches: it declares
+            # nothing, so without this the cell can name every registered
+            # event, carry the typo alongside, and still compare equal.
+            cell_problems.append(
+                "has a segment declaring no registered event: "
+                + ", ".join(repr(t) for t in undeclared)
+            )
+        if absent_events:
+            cell_problems.append(f"missing {', '.join(absent_events)}")
+        if stray_events:
+            cell_problems.append(
+                f"names {', '.join(stray_events)} which is not registered"
+            )
+        drifts.append(
+            f"INDEX EVENTS docs/hook/INDEX.md:{line_no} {name!r}: "
+            f"its Trigger cell {'; '.join(cell_problems)} — "
+            f"manifest registers {', '.join(sorted(expected))} (#1376)"
+        )
 
     if drifts:
         print("plugin-manifest check FAILED:")
