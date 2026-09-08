@@ -240,6 +240,21 @@ def _index_row_candidates(index_md: str) -> list[tuple[str, int]]:
 _PARENTHETICAL_RE = re.compile(r"\([^()]*\)")
 
 
+def _without_parentheticals(text: str) -> str:
+    """`text` with every parenthetical gone, nested ones included.
+
+    The pattern matches only innermost pairs, so one pass over
+    `PreToolUse (note (nested) + PostToolUse)` leaves the outer pair open and
+    its prose splits into a segment that opens with an event name — declaring
+    an event the row never registered. Repeat to a fixed point instead.
+    """
+    while True:
+        stripped = _PARENTHETICAL_RE.sub(" ", text)
+        if stripped == text:
+            return text
+        text = stripped
+
+
 def _event_tokens(cell: str) -> set[str]:
     """Event names a Trigger cell *declares*, as opposed to merely mentions.
 
@@ -257,7 +272,7 @@ def _event_tokens(cell: str) -> set[str]:
     `PostToolUseFailure` from also reporting a bare `PostToolUse`.
     """
     found: set[str] = set()
-    for segment in _PARENTHETICAL_RE.sub(" ", cell).split("+"):
+    for segment in _without_parentheticals(cell).split("+"):
         text = segment.strip()
         for event in _KNOWN_EVENTS:
             if not text.startswith(event):

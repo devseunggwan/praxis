@@ -605,6 +605,22 @@ def test_an_escaped_pipe_does_not_cut_the_trigger_cell_short():
     }
 
 
+def test_a_nested_parenthetical_declares_nothing():
+    # One pass of the pattern removes only the innermost pair, so the outer
+    # one's prose used to split into a segment opening with an event name —
+    # a declaration the row never made, reported as an unregistered event.
+    assert check._event_tokens("PreToolUse (note (nested) + PostToolUse)") == {
+        "PreToolUse"
+    }
+    # Sibling parentheticals are not nesting and were always handled; kept as
+    # the in-band control so the fix cannot pass by stripping too much.
+    assert check._event_tokens("PostToolUse (see (a) and (b))") == {"PostToolUse"}
+    assert check._event_tokens("PreToolUse(Edit) + PostToolUse(Bash)") == {
+        "PreToolUse",
+        "PostToolUse",
+    }
+
+
 def test_review_by_and_observe_only_never_reach_hooks_json(manifest):
     rendered = json.dumps(build.expand_to_hooks_json(manifest))
     assert "review_by" not in rendered
