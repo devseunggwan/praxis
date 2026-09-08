@@ -9,7 +9,9 @@ skill's correctness rests on, and these three properties are exactly that:
   - the convention lookup stays ahead of the scoring step, so a fork that a
     rule already settles never reaches the table;
   - both worked examples stay present, since they are the only recorded
-    output the skill's behaviour can be read against.
+    output the skill's behaviour can be read against;
+  - the scored example keeps more than two option rows, so the recorded
+    output never narrows to the two-way fork the prose is easy to read as.
 """
 from __future__ import annotations
 
@@ -74,6 +76,25 @@ def test_both_worked_examples_are_present() -> None:
     assert len(cases) == 2, (
         f"expected 2 worked examples under '## Examples', found {len(cases)}: "
         f"{cases!r}"
+    )
+
+
+def test_scored_example_compares_more_than_two_options() -> None:
+    """A fork is not inherently binary; the recorded output has to show that."""
+    lines = _lines()
+    start = _heading_line(r"^### Case 2")
+    rows: list[str] = []
+    for line in lines[start:]:
+        if line.startswith("###"):
+            break
+        if line.startswith("| ") and not re.match(r"^\|[\s-]+\|", line):
+            rows.append(line)
+    # Row 1 is the header; the rest are options.
+    options = rows[1:]
+    assert len(options) > 2, (
+        f"the scored example compares {len(options)} option(s); it must keep "
+        "more than two so the skill's own output never models a fork as "
+        f"binary. Rows found: {rows!r}"
     )
 
 

@@ -35,8 +35,9 @@ precedent, that precedent is the answer and no table is built.
 
 ## When to Use
 
-- An implementation fork with two or more real candidates (hook vs skill,
-  inline vs extracted, fix now vs later)
+- An implementation fork with two or more real candidates — a pair (hook vs
+  skill, inline vs extracted) or a wider set (enforce in a hook / in a skill /
+  in CI / in review only)
 - Deciding whether to act on a review finding, and whether it blocks
 
 Not for deciding whether a piece of work is worth starting — the Issue Review
@@ -55,7 +56,7 @@ then stop: this is the termination condition, not a search to be extended.
 2. **Convention or precedent** — has a rule, a sibling skill, or a prior
    decision already settled this? Read `AGENTS.md`, `ETHOS.md`, the sibling
    `SKILL.md` files.
-3. **Do nothing** — what happens if neither option is taken? Add it to the
+3. **Do nothing** — what happens if none of the options is taken? Add it to the
    option list; it is a real candidate, not a formality.
 
 **Probe 2 terminates the skill.** If it returns a precedent that covers the
@@ -78,7 +79,16 @@ values reads as a measurement.
 | Cost-if-wrong | What is paid if the judgement turns out to be mistaken? | `Confidence:` trailer |
 | Process cost | Review rounds, merge ordering, reviewer context reload | The SRP clause |
 
-Score every option on every axis. `UNKNOWN` is for a cell you cannot call
+Score every option on every axis — one row per option, however many there
+are, with the do-nothing row always among them. **Do not narrow the set to a
+pair before scoring.** Dropping a candidate on the way to the table is a
+judgement made with no axis behind it, and it is invisible afterwards: the
+reader sees a two-row table and takes it for the whole fork. A candidate that
+does not survive belongs in the table with the cell that killed it, not
+outside it. The table's own cost is one row, so an option list is narrowed by
+its scores, never by anticipating them.
+
+`UNKNOWN` is for a cell you cannot call
 even directionally — not for a weak one. A cell you can call, but only from
 plausibility, still gets its value and is graded `assumed` in Step 3; that is
 what makes the weakness readable instead of hidden behind a blank.
@@ -119,6 +129,7 @@ Print the table, then one line per option saying why it was chosen or dropped.
 | Probe 2 returns a precedent | Print it and stop — no table (Step 1) |
 | Every cell on an axis is `UNKNOWN` | Report the axis as undecidable rather than dropping it; a hidden axis reads as a scored one |
 | The fork is about whether to follow a rule | Not a fork. Print the rule and stop |
+| More options than fit one readable table | Still score them all. Split the table by axis, never by dropping options — a table trimmed to fit hides the trim |
 
 ## Limitations
 
