@@ -268,8 +268,9 @@ def _event_tokens(cell: str) -> set[str]:
 
     Parentheticals go first because they hold the matchers and the notes
     (`PostToolUse(Bash)`, `` (`wrapper-name`) ``, `(claude only, issue #1337)`),
-    none of which may open a segment. Longest-first matching is what keeps
-    `PostToolUseFailure` from also reporting a bare `PostToolUse`.
+    none of which may open a segment. What keeps `PostToolUseFailure` from also
+    reporting a bare `PostToolUse` is the token-boundary check below, not the
+    order the names are tried in.
     """
     found: set[str] = set()
     for segment in _without_parentheticals(cell).split("+"):
