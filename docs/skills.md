@@ -33,7 +33,7 @@ than a catalogue, run `/praxis:using-praxis`.
 | `spec-drift` | `spec drift`, `spec-drift`, `스펙 드리프트`, `미구현 요구`, `unmet requirement`, `what does this spec still need`, `requirement status` | To report which requirements in the `~/.praxis/docs/specs/` store the current tree does not yet satisfy, by running each one's `Verify:` command | `/praxis:spec-drift` |
 | `merge-briefing` | `merge briefing`, `pre-merge briefing`, `머지 브리핑`, `머지해도 되나`, `approve merge`, `pre-ask probe`, `merge approval` | To probe all three finding surfaces, grade every finding by its blocking decoration, carry anchor `Unverified` gaps, and surface the six-part briefing before asking for merge approval | `/praxis:merge-briefing` |
 | `worktree-merge-cleanup` | `merge cleanup`, `post-merge cleanup`, `worktree cleanup`, `delete-branch merge`, `squash-ancestry`, `pre-merge worktree`, `머지 후 정리`, `worktree 정리` | To run `gh pr merge --squash --delete-branch` from the right worktree and clean up afterward (submodule `--force`, squash-ancestry guard, no-`&&`-chain) | `/praxis:worktree-merge-cleanup` |
-| `tradeoff` | `tradeoff`, `trade-off`, `비용 분석`, `cost of this choice` | To cost the options at an implementation fork on four axes, with a provenance grade on every cell | `/praxis:tradeoff` |
+| `tradeoff` | `tradeoff`, `trade-off`, `트레이드오프`, `트레이드 오프` | To weigh the options at an implementation fork on four axes, with a provenance grade on every cell | `/praxis:tradeoff` |
 
 ## Discipline
 

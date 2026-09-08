@@ -6,7 +6,7 @@ description: >
   cell so a guess never reads as a measurement. Report-only: no totals, no
   ranking arithmetic, no external-surface writes.
 when_to_use: >
-  Triggers on "tradeoff", "trade-off", "비용 분석", "cost of this choice".
+  Triggers on "tradeoff", "trade-off", "트레이드오프", "트레이드 오프".
   Do NOT activate on "기존 결정의 부채 조회" (that is `debt`) or on "이슈 착수
   가치 판정" (the Issue Review anchor's Judgement table owns that).
 verified-against-runtime: true
