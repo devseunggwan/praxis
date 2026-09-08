@@ -85,9 +85,16 @@ trap 'rm -rf "$TMP_DIR"' EXIT
 make_payload() {
   # make_payload <tool_name> <session_id|__omit__> <exit_code> <mode>
   # mode:
-  #   default => exit + stderr
-  #   output-only => output only
-  #   success => output-only with exit 0
+  #   default => `Exit code N` plus interleaved stderr, the shape the harness
+  #              gives a failed Bash call
+  #   output-only => failure text with no exit-code line (a non-Bash tool)
+  #   success => no PostToolUseFailure is delivered for a successful call, so
+  #              this emits the event a SUCCESS would carry instead
+  #
+  # `PostToolUseFailure` is the only event this hook is registered on, so a
+  # payload without it exercises nothing. The helper used to build the
+  # `tool_response` shape, which is why cases about normalization and
+  # occurrence counting — logic that is still here — died with that path.
   local tool_name="$1"
   local session_id="$2"
   local exit_code="$3"
@@ -98,30 +105,23 @@ import sys
 
 tool_name, session_id, exit_code, mode = sys.argv[1], sys.argv[2], int(sys.argv[3]), sys.argv[4]
 
+payload = {
+    "hook_event_name": "PostToolUseFailure",
+    "session_id": session_id,
+    "tool_name": tool_name,
+    "tool_input": {"file_path": "/tmp/project/src/main.py"},
+}
+
 if mode == "success":
-    payload = {
-        "session_id": session_id,
-        "tool_name": tool_name,
-        "tool_input": {"file_path": "/tmp/project/src/main.py"},
-        "tool_response": {"exit": exit_code, "output": "done"},
-    }
+    payload["hook_event_name"] = "PostToolUse"
+    payload["tool_response"] = {"exit": exit_code, "output": "done"}
 elif mode == "output-only":
-    payload = {
-        "session_id": session_id,
-        "tool_name": tool_name,
-        "tool_input": {"file_path": "/tmp/project/src/main.py"},
-        "tool_response": {"output": "unexpected connection refused"},
-    }
+    payload["error"] = "unexpected connection refused"
 else:
-    payload = {
-        "session_id": session_id,
-        "tool_name": tool_name,
-        "tool_input": {"file_path": "/tmp/project/src/main.py"},
-        "tool_response": {
-            "exit": exit_code,
-            "stderr": "read /tmp/workdir/item_1.log failed request 2026-08-07T10:00:00Z hash=0a1b2c3d4e5f6a7b8",
-        },
-    }
+    payload["error"] = (
+        f"Exit code {exit_code}\n"
+        "read /tmp/workdir/item_1.log failed request 2026-08-07T10:00:00Z hash=0a1b2c3d4e5f6a7b8"
+    )
 
 if session_id == "__omit__":
     payload.pop("session_id", None)
@@ -266,13 +266,11 @@ payload5="$(make_payload Bash sess-944-var 1)"
 payload5b="$(python3 - <<'PY'
 import json
 print(json.dumps({
+    'hook_event_name':'PostToolUseFailure',
     'session_id':'sess-944-var',
     'tool_name':'Bash',
     'tool_input':{'file_path':'/tmp/other/main.py'},
-    'tool_response':{
-      'exit':1,
-      'stderr':'read /var/log/item_99.log failed request 2026-08-07T10:05:00Z hash=1b2c3d4e5f6a7b80',
-    },
+    'error':'Exit code 1\nread /var/log/item_99.log failed request 2026-08-07T10:05:00Z hash=1b2c3d4e5f6a7b80',
 }))
 PY
 )"
@@ -437,7 +435,7 @@ fi
 # ---------------------------------------------------------------------------
 echo "=== case 11: Reference extracted from failure text ==="
 STATE15="$TMP_DIR/c15.json"
-REF_PAYLOAD='{"session_id":"sess-944-ref","tool_name":"Bash","tool_input":{},"tool_response":{"exit":1,"stderr":"BLOCKED: gate fired.\nReference: hooks/preflight-gate/foo/spec.md"}}'
+REF_PAYLOAD='{"hook_event_name":"PostToolUseFailure","session_id":"sess-944-ref","tool_name":"Bash","tool_input":{},"error":"BLOCKED: gate fired.\nReference: hooks/preflight-gate/foo/spec.md"}'
 pipe_hook "$REF_PAYLOAD" "$STATE15" >/dev/null 2>/dev/null
 out_file="$(mktemp)" err_file="$(mktemp)"
 pipe_hook "$REF_PAYLOAD" "$STATE15" >"$out_file" 2>"$err_file"
@@ -500,335 +498,48 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Case 13: an interrupted response counts as a failure
-# ---------------------------------------------------------------------------
-echo "=== case 13: interrupted => failure ==="
-STATE13="$TMP_DIR/c13.json"
-INTERRUPTED='{"session_id":"sess-944-int","tool_name":"Bash","tool_input":{},"tool_response":{"interrupted":true,"stderr":"user cancelled the run"}}'
-pipe_hook "$INTERRUPTED" "$STATE13" >/dev/null 2>/dev/null
-out_file="$(mktemp)" err_file="$(mktemp)"
-pipe_hook "$INTERRUPTED" "$STATE13" >"$out_file" 2>"$err_file"
-rc=$?
-out=$(cat "$out_file"); err=$(cat "$err_file")
-rm -f "$out_file" "$err_file"
-
-if [ "$rc" -eq 0 ] && [ -z "$err" ] && assert_match "2회째" "$out"; then
-  assert_pass "13) interrupted response counts as a failure"
-else
-  assert_fail "13) interrupted response counts as a failure" "rc=$rc out=[$out] err=[$err]"
-fi
-
-# ---------------------------------------------------------------------------
-# Case 14: exit-0 Bash calls whose only `stderr` is the harness's own
-# cwd-reset notice must never advise (issue #1042).
+# Case 19: signature keying over real failure text (issue #1265).
 #
-# `{stdout, stderr, interrupted, isImage, noOutputExpected}` — no `exit`, no
-# `isError` — is the real `tool_response` shape for a Bash call in this
-# harness (verified against live session `toolUseResult` transcripts); every
-# one of those calls carries `"stderr": "\nShell cwd was reset to <cwd>"`
-# regardless of success. Before the fix, five structurally unrelated exit-0
-# commands in a row (a heredoc, `grep -l`, `head`, a heredoc `cat >`, another
-# heredoc) fired the advisory 4 times running, all under the identical
-# signature `ede370078f51` — reproduced byte-for-byte against the pre-fix
-# code in this exact payload shape.
-# ---------------------------------------------------------------------------
-echo "=== case 14: exit-0 Bash call, harness-noise-only stderr => no advisory ==="
-noise_payload() {
-  # noise_payload <session_id> <stdout>
-  python3 - "$1" "$2" <<'PY'
-import json, sys
-session_id, stdout = sys.argv[1], sys.argv[2]
-print(json.dumps({
-    "session_id": session_id,
-    "tool_name": "Bash",
-    "tool_input": {"command": "irrelevant"},
-    "tool_response": {
-        "stdout": stdout,
-        "stderr": "\nShell cwd was reset to /Users/x/projects/praxis",
-        "interrupted": False,
-        "isImage": False,
-        "noOutputExpected": False,
-    },
-}))
-PY
-}
-
-STATE16="$TMP_DIR/c16.json"
-out_file="$(mktemp)" err_file="$(mktemp)"
-for stdout_text in "OK\n" "README.md\n" "line1\nline2\n" "-rw-r--r-- 1 f\n" "index updated\n"; do
-  pipe_hook "$(noise_payload sess-1042-exit0 "$stdout_text")" "$STATE16" >"$out_file" 2>"$err_file"
-done
-rc=$?
-out=$(cat "$out_file"); err=$(cat "$err_file")
-rm -f "$out_file" "$err_file"
-
-if [ "$rc" -eq 0 ] && [ -z "$out" ] && [ -z "$err" ] && [ ! -s "$STATE16" ]; then
-  assert_pass "14) five exit-0 calls with only harness-noise stderr stay silent"
-else
-  assert_fail "14) five exit-0 calls with only harness-noise stderr stay silent" \
-    "rc=$rc out=[$out] err=[$err] state=[$(cat "$STATE16" 2>/dev/null)]"
-fi
-
-# ---------------------------------------------------------------------------
-# Case 15: regression / positive control — two genuine repeats of the SAME
-# real failure pattern must still advise on the 2nd occurrence, even with
-# the harness-noise line appended to `stderr` (the defect-1 fix must not
-# disable the hook outright).
+# These fixtures were captured for the string-shaped `tool_response` surface,
+# which #1265 opened and which no registration reaches any more. What they
+# exercise is not that surface: normalization, the separately-hashed command
+# discriminator, and the bare exit-code collision all sit on the signature
+# path, which every `PostToolUseFailure` still walks. So the texts stay and
+# the envelope moves — each is the same failure, delivered as the event.
 #
-# Issue #1096: a real Bash `tool_response` carries no exit/isError, so stderr
-# text alone can no longer classify a Bash call as failed (a success-with-stderr
-# command is byte-for-byte indistinguishable by its stderr). This genuine
-# failure is therefore marked the only way a real Bash failure can be — with
-# `interrupted: True` (a killed/timed-out run). The harness-noise line is still
-# appended to `stderr`, so this remains the positive control that noise
-# stripping in signature derivation does not break a genuine repeat.
+# The one edit to the texts is the `Error: ` envelope, which the string
+# carried and the event's `error` field does not (the doc's first-line
+# contract for Bash is `Exit code N`). Dropping it here keeps the fixtures
+# what they claim to be: what the harness actually hands this hook.
 # ---------------------------------------------------------------------------
-echo "=== case 15: genuine repeated failure (harness-noise stderr suffix) still advises ==="
-real_failure_payload() {
-  # real_failure_payload <session_id>
-  python3 - "$1" <<'PY'
-import json, sys
-session_id = sys.argv[1]
-print(json.dumps({
-    "session_id": session_id,
-    "tool_name": "Bash",
-    "tool_input": {"command": "python3 script.py"},
-    "tool_response": {
-        "stdout": "",
-        "stderr": "TypeError: unsupported operand type(s)\nShell cwd was reset to /Users/x/projects/praxis",
-        "interrupted": True,
-        "isImage": False,
-        "noOutputExpected": False,
-    },
-}))
-PY
-}
-
-STATE17="$TMP_DIR/c17.json"
-out_file="$(mktemp)" err_file="$(mktemp)"
-pipe_hook "$(real_failure_payload sess-1042-real-fail)" "$STATE17" >/dev/null 2>/dev/null
-pipe_hook "$(real_failure_payload sess-1042-real-fail)" "$STATE17" >"$out_file" 2>"$err_file"
-rc=$?
-out=$(cat "$out_file"); err=$(cat "$err_file")
-rm -f "$out_file" "$err_file"
-
-if [ "$rc" -eq 0 ] && [ -z "$err" ] && [ -n "$out" ] && assert_match "2회째" "$out"; then
-  assert_pass "15) genuine repeated failure still advises past harness-noise stripping"
-else
-  assert_fail "15) genuine repeated failure still advises past harness-noise stripping" \
-    "rc=$rc out=[$out] err=[$err]"
-fi
-
-# ---------------------------------------------------------------------------
-# Case 16: two structurally unrelated FAILING commands whose `stderr` is
-# ONLY the harness noise (distinguishing text lives in `stdout` instead, as
-# with an `interrupted:true` timeout) must get DIFFERENT signatures and not
-# accumulate into one counter (issue #1042 defect 2).
-# ---------------------------------------------------------------------------
-echo "=== case 16: unrelated failures with noise-only stderr get distinct signatures ==="
-interrupted_noise_payload() {
-  # interrupted_noise_payload <session_id> <stdout>
-  python3 - "$1" "$2" <<'PY'
-import json, sys
-session_id, stdout = sys.argv[1], sys.argv[2]
-print(json.dumps({
-    "session_id": session_id,
-    "tool_name": "Bash",
-    "tool_input": {"command": "irrelevant"},
-    "tool_response": {
-        "stdout": stdout,
-        "stderr": "\nShell cwd was reset to /Users/x/projects/praxis",
-        "interrupted": True,
-        "isImage": False,
-        "noOutputExpected": False,
-    },
-}))
-PY
-}
-
-STATE18="$TMP_DIR/c18.json"
-pipe_hook "$(interrupted_noise_payload sess-1042-sig "waiting on lock A ...\n")" "$STATE18" >/dev/null 2>/dev/null
-pipe_hook "$(interrupted_noise_payload sess-1042-sig "waiting on lock B, unrelated command ...\n")" "$STATE18" >/dev/null 2>/dev/null
-
-distinct_sigs="$(python3 -c "
-import json
-state = json.load(open('$STATE18'))
-print(len(state.get('failures', {})))
-")"
-
-if [ "$distinct_sigs" = "2" ]; then
-  assert_pass "16) unrelated noise-only-stderr failures get distinct signatures"
-else
-  assert_fail "16) unrelated noise-only-stderr failures get distinct signatures" \
-    "expected 2 distinct signature keys, got $distinct_sigs: $(cat "$STATE18")"
-fi
-
-# ---------------------------------------------------------------------------
-# Case 17: a NON-Bash tool whose `stderr` legitimately matches the harness
-# cwd-reset line shape must still be treated as a failure — the strip is
-# gated on `tool_name == "Bash"` (PR #1071 review finding). Without the
-# gate, this genuine error text would be deleted and misread as a success.
-# ---------------------------------------------------------------------------
-echo "=== case 17: non-Bash tool with harness-noise-shaped stderr is still a failure ==="
-non_bash_noise_shaped_payload() {
-  # non_bash_noise_shaped_payload <session_id>
-  python3 - "$1" <<'PY'
-import json, sys
-session_id = sys.argv[1]
-print(json.dumps({
-    "session_id": session_id,
-    "tool_name": "Read",
-    "tool_input": {"file_path": "/tmp/whatever"},
-    "tool_response": {
-        "stderr": "Shell cwd was reset to /Users/x/projects/praxis",
-    },
-}))
-PY
-}
-
-STATE19="$TMP_DIR/c19.json"
-out_file="$(mktemp)" err_file="$(mktemp)"
-pipe_hook "$(non_bash_noise_shaped_payload sess-1042-non-bash)" "$STATE19" >/dev/null 2>/dev/null
-pipe_hook "$(non_bash_noise_shaped_payload sess-1042-non-bash)" "$STATE19" >"$out_file" 2>"$err_file"
-rc=$?
-out=$(cat "$out_file"); err=$(cat "$err_file")
-rm -f "$out_file" "$err_file"
-
-if [ "$rc" -eq 0 ] && [ -z "$err" ] && [ -n "$out" ] && assert_match "2회째" "$out"; then
-  assert_pass "17) non-Bash tool with harness-noise-shaped stderr still advises"
-else
-  assert_fail "17) non-Bash tool with harness-noise-shaped stderr still advises" \
-    "rc=$rc out=[$out] err=[$err]"
-fi
-
-# ---------------------------------------------------------------------------
-# Case 18: a *successful* Bash command that writes progress to `stderr`
-# (git fetch/clone/checkout, curl meters, deprecation warnings; all exit 0)
-# must NEVER advise, even when the identical call repeats (issue #1096).
-#
-# Real Bash `tool_response` is `{stdout, stderr, interrupted, isImage,
-# noOutputExpected}` — no `exit`, no `isError` (verified against live session
-# `toolUseResult` transcripts). #1042 stripped only the harness cwd-reset line;
-# any OTHER stderr content (here, `git fetch` branch-progress output) still fell
-# through the back-compat `stderr`-non-empty check and was mislabelled a
-# failure, so the second identical `git fetch origin` injected a false
-# "2회째 실패" advisory. The fix stops treating stderr text alone as failure for
-# Bash: these succeed, so nothing is counted and nothing is emitted — the state
-# file is never even created.
-# ---------------------------------------------------------------------------
-echo "=== case 18: repeated success-with-stderr Bash call => no advisory (issue #1096) ==="
-success_with_stderr_payload() {
-  # success_with_stderr_payload <session_id> <command> <stderr>
-  python3 - "$1" "$2" "$3" <<'PY'
-import json, sys
-session_id, command, stderr = sys.argv[1], sys.argv[2], sys.argv[3]
-print(json.dumps({
-    "session_id": session_id,
-    "tool_name": "Bash",
-    "tool_input": {"command": command},
-    "tool_response": {
-        "stdout": "",
-        # Real progress output on stderr + the harness cwd-reset suffix. No
-        # `exit`, no `isError` — exactly the real exit-0 Bash payload shape.
-        "stderr": stderr + "\nShell cwd was reset to /Users/x/projects/praxis",
-        "interrupted": False,
-        "isImage": False,
-        "noOutputExpected": False,
-    },
-}))
-PY
-}
-
-STATE20="$TMP_DIR/c20.json"
-GIT_FETCH_STDERR="From github.com:acme/repo
-   abc1234..def5678  main       -> origin/main"
-out_file="$(mktemp)" err_file="$(mktemp)"
-# Two identical successful `git fetch origin` calls — the exact "second
-# identical call" scenario the false advisory fired on.
-pipe_hook "$(success_with_stderr_payload sess-1096-git 'git fetch origin' "$GIT_FETCH_STDERR")" "$STATE20" >/dev/null 2>/dev/null
-pipe_hook "$(success_with_stderr_payload sess-1096-git 'git fetch origin' "$GIT_FETCH_STDERR")" "$STATE20" >"$out_file" 2>"$err_file"
-rc=$?
-out=$(cat "$out_file"); err=$(cat "$err_file")
-rm -f "$out_file" "$err_file"
-
-if [ "$rc" -eq 0 ] && [ -z "$out" ] && [ -z "$err" ] && [ ! -s "$STATE20" ]; then
-  assert_pass "18a) two identical git-fetch successes with stderr stay silent"
-else
-  assert_fail "18a) two identical git-fetch successes with stderr stay silent" \
-    "rc=$rc out=[$out] err=[$err] state=[$(cat "$STATE20" 2>/dev/null)]"
-fi
-
-# A second flavour of success-with-stderr: a deprecation warning on exit 0,
-# repeated. Same expectation — no advisory, no state.
-STATE21="$TMP_DIR/c21.json"
-DEPRECATION_STDERR="DeprecationWarning: 'foo' is deprecated and will be removed"
-out_file="$(mktemp)" err_file="$(mktemp)"
-pipe_hook "$(success_with_stderr_payload sess-1096-dep 'python3 build.py' "$DEPRECATION_STDERR")" "$STATE21" >/dev/null 2>/dev/null
-pipe_hook "$(success_with_stderr_payload sess-1096-dep 'python3 build.py' "$DEPRECATION_STDERR")" "$STATE21" >"$out_file" 2>"$err_file"
-rc=$?
-out=$(cat "$out_file"); err=$(cat "$err_file")
-rm -f "$out_file" "$err_file"
-
-if [ "$rc" -eq 0 ] && [ -z "$out" ] && [ -z "$err" ] && [ ! -s "$STATE21" ]; then
-  assert_pass "18b) repeated deprecation-warning-on-stderr success stays silent"
-else
-  assert_fail "18b) repeated deprecation-warning-on-stderr success stays silent" \
-    "rc=$rc out=[$out] err=[$err] state=[$(cat "$STATE21" 2>/dev/null)]"
-fi
-
-# ---------------------------------------------------------------------------
-# Case 19: string-shaped `tool_response` (issue #1265).
-#
-# A FAILED tool call does not reach this hook as a dict at all — it arrives as a
-# plain string, so `_is_failed`'s `isinstance(tool_response, dict)` guard
-# rejected it before any failure marker was ever consulted. Both roads were
-# closed: the dict road by the `tool_name == "Bash"` guard (#1096), the string
-# road by the isinstance check. The hook fired 135,030 times and recorded
-# `decision: pass` on every one.
-#
-# Every fixture below is a VERBATIM string captured from a real session
-# transcript (`toolUseResult` for a `Bash`/MCP `tool_use`), not composed:
-# a census of 10,467 unique Bash results across 120 transcripts found 388
-# string payloads, all carrying `tool_result.is_error == True`, and zero
-# successful Bash call that arrives as a string.
-# ---------------------------------------------------------------------------
-echo "=== case 19: string-shaped failed tool_response (issue #1265) ==="
-string_payload() {
-  # string_payload <session_id> <tool_name> <tool_response-string> [command]
+echo "=== case 19: signature keying over real failure text (issue #1265) ==="
+failure_text_payload() {
+  # failure_text_payload <session_id> <tool_name> <error-text> [command]
   python3 - "$1" "$2" "$3" "${4:-true}" <<'PY'
 import json, sys
 session_id, tool_name, text, command = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
 print(json.dumps({
+    "hook_event_name": "PostToolUseFailure",
     "session_id": session_id,
     "tool_name": tool_name,
     "tool_input": {"command": command},
-    # The whole payload — a bare string, exactly as the harness delivers it.
-    "tool_response": text,
+    "error": text,
 }))
 PY
 }
 
 # Captured verbatim: a shell parse error, exit 1.
-STR_FAIL_A=$'Error: Exit code 1\n(eval):1: == not found'
+STR_FAIL_A=$'Exit code 1\n(eval):1: == not found'
 # Captured verbatim: a different failure — a 2-minute timeout, exit 143.
-STR_FAIL_B=$'Error: Exit code 143\nCommand timed out after 2m 0s'
+STR_FAIL_B=$'Exit code 143\nCommand timed out after 2m 0s'
 # Captured verbatim: a PreToolUse hook block (the family #1265 exists to catch).
-STR_BLOCKED='Error: Blocked: sleep 60 followed by: echo done. To wait for a condition, use Monitor with an until-loop (e.g. `until <check>; do sleep 2; done`).'
-# Captured verbatim: a user-denied call. No `Error: ` prefix at all, so a
-# prefix-only matcher would miss it.
-STR_REJECTED='User rejected tool use'
-# Captured verbatim from an MCP tool_result whose `is_error` was FALSE: the
-# harness's oversized-output notice for a SUCCESSFUL call whose result was
-# spilled to a file. It opens with `Error: ` and is not a failure — the one
-# must-fail case in the string surface. (Absolute path shortened; the notice
-# text itself is unmodified.)
-STR_OVERSIZED='Error: result (104,870 characters across 2,772 lines) exceeds maximum allowed tokens. Output has been saved to /tmp/x/out.txt'
+STR_BLOCKED='Blocked: sleep 60 followed by: echo done. To wait for a condition, use Monitor with an until-loop (e.g. `until <check>; do sleep 2; done`).'
 
 # 19a) positive: the same real string failure twice => advisory on the 2nd.
 STATE22="$TMP_DIR/c22.json"
 out_file="$(mktemp)" err_file="$(mktemp)"
-pipe_hook "$(string_payload sess-1265-a Bash "$STR_FAIL_A")" "$STATE22" >/dev/null 2>/dev/null
-pipe_hook "$(string_payload sess-1265-a Bash "$STR_FAIL_A")" "$STATE22" >"$out_file" 2>"$err_file"
+pipe_hook "$(failure_text_payload sess-1265-a Bash "$STR_FAIL_A")" "$STATE22" >/dev/null 2>/dev/null
+pipe_hook "$(failure_text_payload sess-1265-a Bash "$STR_FAIL_A")" "$STATE22" >"$out_file" 2>"$err_file"
 rc=$?
 out=$(cat "$out_file"); err=$(cat "$err_file")
 rm -f "$out_file" "$err_file"
@@ -845,8 +556,8 @@ fi
 # would collapse onto one pair and the 2nd would fire (issue #1042 defect 2).
 STATE23="$TMP_DIR/c23.json"
 out_file="$(mktemp)" err_file="$(mktemp)"
-pipe_hook "$(string_payload sess-1265-b Bash "$STR_FAIL_A")" "$STATE23" >/dev/null 2>/dev/null
-pipe_hook "$(string_payload sess-1265-b Bash "$STR_FAIL_B")" "$STATE23" >"$out_file" 2>"$err_file"
+pipe_hook "$(failure_text_payload sess-1265-b Bash "$STR_FAIL_A")" "$STATE23" >/dev/null 2>/dev/null
+pipe_hook "$(failure_text_payload sess-1265-b Bash "$STR_FAIL_B")" "$STATE23" >"$out_file" 2>"$err_file"
 rc=$?
 out=$(cat "$out_file"); err=$(cat "$err_file")
 rm -f "$out_file" "$err_file"
@@ -858,64 +569,13 @@ else
     "rc=$rc out=[$out] err=[$err]"
 fi
 
-# 19c) must-fail case: the oversized-output notice is a SUCCESS (`is_error:
-# false`) that happens to open with `Error: `. Repeating it must stay silent and
-# must not even create state — otherwise every large successful result reads as
-# a failure.
-STATE24="$TMP_DIR/c24.json"
-out_file="$(mktemp)" err_file="$(mktemp)"
-pipe_hook "$(string_payload sess-1265-c mcp__x__query "$STR_OVERSIZED")" "$STATE24" >/dev/null 2>/dev/null
-pipe_hook "$(string_payload sess-1265-c mcp__x__query "$STR_OVERSIZED")" "$STATE24" >"$out_file" 2>"$err_file"
-rc=$?
-out=$(cat "$out_file"); err=$(cat "$err_file")
-rm -f "$out_file" "$err_file"
-
-if [ "$rc" -eq 0 ] && [ -z "$out" ] && [ -z "$err" ] && [ ! -s "$STATE24" ]; then
-  assert_pass "19c) repeated oversized-output notice (is_error:false) stays silent"
-else
-  assert_fail "19c) repeated oversized-output notice (is_error:false) stays silent" \
-    "rc=$rc out=[$out] err=[$err] state=[$(cat "$STATE24" 2>/dev/null)]"
-fi
-
-# 19d) `User rejected tool use` carries no `Error: ` prefix, so it is matched by
-# name. A repeated denial is exactly the blind-retry loop this hook exists for.
-STATE25="$TMP_DIR/c25.json"
-out_file="$(mktemp)" err_file="$(mktemp)"
-pipe_hook "$(string_payload sess-1265-d Bash "$STR_REJECTED")" "$STATE25" >/dev/null 2>/dev/null
-pipe_hook "$(string_payload sess-1265-d Bash "$STR_REJECTED")" "$STATE25" >"$out_file" 2>"$err_file"
-rc=$?
-out=$(cat "$out_file"); err=$(cat "$err_file")
-rm -f "$out_file" "$err_file"
-
-if [ "$rc" -eq 0 ] && [ -z "$err" ] && [ -n "$out" ] && assert_match "2회째" "$out"; then
-  assert_pass "19d) repeated user-rejection string advises"
-else
-  assert_fail "19d) repeated user-rejection string advises" "rc=$rc out=[$out] err=[$err]"
-fi
-
-# 19e) an empty / whitespace-only string is not failure evidence -> fail-open.
-STATE26="$TMP_DIR/c26.json"
-out_file="$(mktemp)" err_file="$(mktemp)"
-pipe_hook "$(string_payload sess-1265-e Bash "   ")" "$STATE26" >/dev/null 2>/dev/null
-pipe_hook "$(string_payload sess-1265-e Bash "   ")" "$STATE26" >"$out_file" 2>"$err_file"
-rc=$?
-out=$(cat "$out_file"); err=$(cat "$err_file")
-rm -f "$out_file" "$err_file"
-
-if [ "$rc" -eq 0 ] && [ -z "$out" ] && [ -z "$err" ] && [ ! -s "$STATE26" ]; then
-  assert_pass "19e) whitespace-only string payload stays silent"
-else
-  assert_fail "19e) whitespace-only string payload stays silent" \
-    "rc=$rc out=[$out] err=[$err] state=[$(cat "$STATE26" 2>/dev/null)]"
-fi
-
 # 19f) a repeated PreToolUse hook block — the motivating family. The advisory
 # must carry the running count so the loop gets a stronger signal, not silence.
 STATE27="$TMP_DIR/c27.json"
 out_file="$(mktemp)" err_file="$(mktemp)"
-pipe_hook "$(string_payload sess-1265-f Bash "$STR_BLOCKED")" "$STATE27" >/dev/null 2>/dev/null
-pipe_hook "$(string_payload sess-1265-f Bash "$STR_BLOCKED")" "$STATE27" >/dev/null 2>/dev/null
-pipe_hook "$(string_payload sess-1265-f Bash "$STR_BLOCKED")" "$STATE27" >"$out_file" 2>"$err_file"
+pipe_hook "$(failure_text_payload sess-1265-f Bash "$STR_BLOCKED")" "$STATE27" >/dev/null 2>/dev/null
+pipe_hook "$(failure_text_payload sess-1265-f Bash "$STR_BLOCKED")" "$STATE27" >/dev/null 2>/dev/null
+pipe_hook "$(failure_text_payload sess-1265-f Bash "$STR_BLOCKED")" "$STATE27" >"$out_file" 2>"$err_file"
 rc=$?
 out=$(cat "$out_file"); err=$(cat "$err_file")
 rm -f "$out_file" "$err_file"
@@ -932,12 +592,12 @@ fi
 # that way must stay silent; the control that makes that meaningful is 19h,
 # where the SAME command failing twice still advises. Without 19h, "collision
 # fixed" is indistinguishable from "this shape stopped firing entirely".
-STR_BARE_EXIT='Error: Exit code 1'
+STR_BARE_EXIT='Exit code 1'
 
 STATE28="$TMP_DIR/c28.json"
 out_file="$(mktemp)" err_file="$(mktemp)"
-pipe_hook "$(string_payload sess-1265-g Bash "$STR_BARE_EXIT" 'grep -q needle haystack.txt')" "$STATE28" >/dev/null 2>/dev/null
-pipe_hook "$(string_payload sess-1265-g Bash "$STR_BARE_EXIT" 'git diff --quiet HEAD~1')" "$STATE28" >"$out_file" 2>"$err_file"
+pipe_hook "$(failure_text_payload sess-1265-g Bash "$STR_BARE_EXIT" 'grep -q needle haystack.txt')" "$STATE28" >/dev/null 2>/dev/null
+pipe_hook "$(failure_text_payload sess-1265-g Bash "$STR_BARE_EXIT" 'git diff --quiet HEAD~1')" "$STATE28" >"$out_file" 2>"$err_file"
 rc=$?
 out=$(cat "$out_file"); err=$(cat "$err_file")
 rm -f "$out_file" "$err_file"
@@ -951,8 +611,8 @@ fi
 
 STATE29="$TMP_DIR/c29.json"
 out_file="$(mktemp)" err_file="$(mktemp)"
-pipe_hook "$(string_payload sess-1265-h Bash "$STR_BARE_EXIT" 'grep -q needle haystack.txt')" "$STATE29" >/dev/null 2>/dev/null
-pipe_hook "$(string_payload sess-1265-h Bash "$STR_BARE_EXIT" 'grep -q needle haystack.txt')" "$STATE29" >"$out_file" 2>"$err_file"
+pipe_hook "$(failure_text_payload sess-1265-h Bash "$STR_BARE_EXIT" 'grep -q needle haystack.txt')" "$STATE29" >/dev/null 2>/dev/null
+pipe_hook "$(failure_text_payload sess-1265-h Bash "$STR_BARE_EXIT" 'grep -q needle haystack.txt')" "$STATE29" >"$out_file" 2>"$err_file"
 rc=$?
 out=$(cat "$out_file"); err=$(cat "$err_file")
 rm -f "$out_file" "$err_file"
@@ -978,8 +638,8 @@ fi
 echo "=== case 19i: bare exit code, commands differing only by path => silent ==="
 STATE30="$TMP_DIR/c30.json"
 out_file="$(mktemp)" err_file="$(mktemp)"
-pipe_hook "$(string_payload sess-1265-i Bash "$STR_BARE_EXIT" 'cat /tmp/a')" "$STATE30" >/dev/null 2>/dev/null
-pipe_hook "$(string_payload sess-1265-i Bash "$STR_BARE_EXIT" 'cat /tmp/b')" "$STATE30" >"$out_file" 2>"$err_file"
+pipe_hook "$(failure_text_payload sess-1265-i Bash "$STR_BARE_EXIT" 'cat /tmp/a')" "$STATE30" >/dev/null 2>/dev/null
+pipe_hook "$(failure_text_payload sess-1265-i Bash "$STR_BARE_EXIT" 'cat /tmp/b')" "$STATE30" >"$out_file" 2>"$err_file"
 rc=$?
 out=$(cat "$out_file"); err=$(cat "$err_file")
 rm -f "$out_file" "$err_file"
@@ -994,8 +654,8 @@ fi
 echo "=== case 19j: same path-carrying command twice => advisory (control for 19i) ==="
 STATE31="$TMP_DIR/c31.json"
 out_file="$(mktemp)" err_file="$(mktemp)"
-pipe_hook "$(string_payload sess-1265-j Bash "$STR_BARE_EXIT" 'cat /tmp/a')" "$STATE31" >/dev/null 2>/dev/null
-pipe_hook "$(string_payload sess-1265-j Bash "$STR_BARE_EXIT" 'cat /tmp/a')" "$STATE31" >"$out_file" 2>"$err_file"
+pipe_hook "$(failure_text_payload sess-1265-j Bash "$STR_BARE_EXIT" 'cat /tmp/a')" "$STATE31" >/dev/null 2>/dev/null
+pipe_hook "$(failure_text_payload sess-1265-j Bash "$STR_BARE_EXIT" 'cat /tmp/a')" "$STATE31" >"$out_file" 2>"$err_file"
 rc=$?
 out=$(cat "$out_file"); err=$(cat "$err_file")
 rm -f "$out_file" "$err_file"
@@ -1010,8 +670,8 @@ fi
 echo "=== case 19k: same command, different exit codes => silent ==="
 STATE32="$TMP_DIR/c32.json"
 out_file="$(mktemp)" err_file="$(mktemp)"
-pipe_hook "$(string_payload sess-1265-k Bash 'Error: Exit code 1' 'cat /tmp/a')" "$STATE32" >/dev/null 2>/dev/null
-pipe_hook "$(string_payload sess-1265-k Bash 'Error: Exit code 2' 'cat /tmp/a')" "$STATE32" >"$out_file" 2>"$err_file"
+pipe_hook "$(failure_text_payload sess-1265-k Bash 'Exit code 1' 'cat /tmp/a')" "$STATE32" >/dev/null 2>/dev/null
+pipe_hook "$(failure_text_payload sess-1265-k Bash 'Exit code 2' 'cat /tmp/a')" "$STATE32" >"$out_file" 2>"$err_file"
 rc=$?
 out=$(cat "$out_file"); err=$(cat "$err_file")
 rm -f "$out_file" "$err_file"
@@ -1030,10 +690,11 @@ no_command_payload() {
   python3 - "$1" <<'PY'
 import json, sys
 print(json.dumps({
+    "hook_event_name": "PostToolUseFailure",
     "session_id": sys.argv[1],
     "tool_name": "Bash",
     "tool_input": {},
-    "tool_response": "Error: Exit code 1",
+    "error": "Exit code 1",
 }))
 PY
 }
@@ -1054,7 +715,7 @@ fi
 echo "=== case 19m: whitespace-only command behaves like an absent one ==="
 STATE34="$TMP_DIR/c34.json"
 out_file="$(mktemp)" err_file="$(mktemp)"
-pipe_hook "$(string_payload sess-1265-m Bash "$STR_BARE_EXIT" '   ')" "$STATE34" >/dev/null 2>/dev/null
+pipe_hook "$(failure_text_payload sess-1265-m Bash "$STR_BARE_EXIT" '   ')" "$STATE34" >/dev/null 2>/dev/null
 pipe_hook "$(no_command_payload sess-1265-m)" "$STATE34" >"$out_file" 2>"$err_file"
 rc=$?
 out=$(cat "$out_file"); err=$(cat "$err_file")
@@ -1072,8 +733,8 @@ echo "=== case 19n: leading/trailing whitespace only => same key ==="
 # survives; the internal half is what 19s removes.
 STATE35="$TMP_DIR/c35.json"
 out_file="$(mktemp)" err_file="$(mktemp)"
-pipe_hook "$(string_payload sess-1265-n Bash "$STR_BARE_EXIT" 'cat /tmp/a')" "$STATE35" >/dev/null 2>/dev/null
-pipe_hook "$(string_payload sess-1265-n Bash "$STR_BARE_EXIT" '  cat /tmp/a  ')" "$STATE35" >"$out_file" 2>"$err_file"
+pipe_hook "$(failure_text_payload sess-1265-n Bash "$STR_BARE_EXIT" 'cat /tmp/a')" "$STATE35" >/dev/null 2>/dev/null
+pipe_hook "$(failure_text_payload sess-1265-n Bash "$STR_BARE_EXIT" '  cat /tmp/a  ')" "$STATE35" >"$out_file" 2>"$err_file"
 rc=$?
 out=$(cat "$out_file"); err=$(cat "$err_file")
 rm -f "$out_file" "$err_file"
@@ -1089,8 +750,8 @@ echo "=== case 19o: commands past the 4096 bound ==="
 LONG_PAD="$(python3 -c "print('x' * 5000)")"
 STATE36="$TMP_DIR/c36.json"
 out_file="$(mktemp)" err_file="$(mktemp)"
-pipe_hook "$(string_payload sess-1265-o1 Bash "$STR_BARE_EXIT" "cat /tmp/a $LONG_PAD")" "$STATE36" >/dev/null 2>/dev/null
-pipe_hook "$(string_payload sess-1265-o1 Bash "$STR_BARE_EXIT" "cat /tmp/b $LONG_PAD")" "$STATE36" >"$out_file" 2>"$err_file"
+pipe_hook "$(failure_text_payload sess-1265-o1 Bash "$STR_BARE_EXIT" "cat /tmp/a $LONG_PAD")" "$STATE36" >/dev/null 2>/dev/null
+pipe_hook "$(failure_text_payload sess-1265-o1 Bash "$STR_BARE_EXIT" "cat /tmp/b $LONG_PAD")" "$STATE36" >"$out_file" 2>"$err_file"
 rc=$?
 out=$(cat "$out_file"); err=$(cat "$err_file")
 rm -f "$out_file" "$err_file"
@@ -1105,8 +766,8 @@ fi
 # rather than leaving it untested.
 STATE37="$TMP_DIR/c37.json"
 out_file="$(mktemp)" err_file="$(mktemp)"
-pipe_hook "$(string_payload sess-1265-o2 Bash "$STR_BARE_EXIT" "cat ${LONG_PAD}A")" "$STATE37" >/dev/null 2>/dev/null
-pipe_hook "$(string_payload sess-1265-o2 Bash "$STR_BARE_EXIT" "cat ${LONG_PAD}B")" "$STATE37" >"$out_file" 2>"$err_file"
+pipe_hook "$(failure_text_payload sess-1265-o2 Bash "$STR_BARE_EXIT" "cat ${LONG_PAD}A")" "$STATE37" >/dev/null 2>/dev/null
+pipe_hook "$(failure_text_payload sess-1265-o2 Bash "$STR_BARE_EXIT" "cat ${LONG_PAD}B")" "$STATE37" >"$out_file" 2>"$err_file"
 rc=$?
 out=$(cat "$out_file"); err=$(cat "$err_file")
 rm -f "$out_file" "$err_file"
@@ -1120,8 +781,8 @@ fi
 echo "=== case 19p: unicode commands are discriminated ==="
 STATE38="$TMP_DIR/c38.json"
 out_file="$(mktemp)" err_file="$(mktemp)"
-pipe_hook "$(string_payload sess-1265-p Bash "$STR_BARE_EXIT" 'grep 실패 /tmp/log')" "$STATE38" >/dev/null 2>/dev/null
-pipe_hook "$(string_payload sess-1265-p Bash "$STR_BARE_EXIT" 'grep 성공 /tmp/log')" "$STATE38" >"$out_file" 2>"$err_file"
+pipe_hook "$(failure_text_payload sess-1265-p Bash "$STR_BARE_EXIT" 'grep 실패 /tmp/log')" "$STATE38" >/dev/null 2>/dev/null
+pipe_hook "$(failure_text_payload sess-1265-p Bash "$STR_BARE_EXIT" 'grep 성공 /tmp/log')" "$STATE38" >"$out_file" 2>"$err_file"
 rc=$?
 out=$(cat "$out_file"); err=$(cat "$err_file")
 rm -f "$out_file" "$err_file"
@@ -1137,8 +798,8 @@ echo "=== case 19q: non-bare failures still normalize (the normalizer is untouch
 # two failures whose text differs only by a path must STILL merge and advise.
 STATE39="$TMP_DIR/c39.json"
 out_file="$(mktemp)" err_file="$(mktemp)"
-pipe_hook "$(string_payload sess-1265-q Bash $'Error: Exit code 1\ncannot open /tmp/a' 'cat /tmp/a')" "$STATE39" >/dev/null 2>/dev/null
-pipe_hook "$(string_payload sess-1265-q Bash $'Error: Exit code 1\ncannot open /tmp/b' 'cat /tmp/b')" "$STATE39" >"$out_file" 2>"$err_file"
+pipe_hook "$(failure_text_payload sess-1265-q Bash $'Exit code 1\ncannot open /tmp/a' 'cat /tmp/a')" "$STATE39" >/dev/null 2>/dev/null
+pipe_hook "$(failure_text_payload sess-1265-q Bash $'Exit code 1\ncannot open /tmp/b' 'cat /tmp/b')" "$STATE39" >"$out_file" 2>"$err_file"
 rc=$?
 out=$(cat "$out_file"); err=$(cat "$err_file")
 rm -f "$out_file" "$err_file"
@@ -1150,18 +811,18 @@ else
 fi
 
 echo "=== case 19r: a non-Bash tool with no command key is unaffected ==="
-# `Edit`, not an MCP tool: MCP strings are scoped separately by 19t, and Edit's
-# successful results are dicts (1,135/1,135 built-in-tool successes in the
-# census), so its string payload is failure evidence exactly as Bash's is. The
+# `tool_input` carries no `command`, so the discriminator falls back to the
+# undiscriminated key and the failure text alone has to carry the match. The
 # text is captured verbatim from a real failed Edit.
 non_bash_bare_payload() {
   python3 - "$1" <<'PY'
 import json, sys
 print(json.dumps({
+    "hook_event_name": "PostToolUseFailure",
     "session_id": sys.argv[1],
     "tool_name": "Edit",
     "tool_input": {"file_path": "/tmp/whatever"},
-    "tool_response": "Error: String to replace not found in file.",
+    "error": "String to replace not found in file.",
 }))
 PY
 }
@@ -1199,8 +860,8 @@ ws_case() {
   local state="$TMP_DIR/ws-$sess.json"
   local o e r
   o="$(mktemp)" e="$(mktemp)"
-  pipe_hook "$(string_payload "$sess" Bash "$STR_BARE_EXIT" "$cmd1")" "$state" >/dev/null 2>/dev/null
-  pipe_hook "$(string_payload "$sess" Bash "$STR_BARE_EXIT" "$cmd2")" "$state" >"$o" 2>"$e"
+  pipe_hook "$(failure_text_payload "$sess" Bash "$STR_BARE_EXIT" "$cmd1")" "$state" >/dev/null 2>/dev/null
+  pipe_hook "$(failure_text_payload "$sess" Bash "$STR_BARE_EXIT" "$cmd2")" "$state" >"$o" 2>"$e"
   r=$?
   local out err
   out=$(cat "$o"); err=$(cat "$e")
@@ -1232,57 +893,6 @@ ws_case "19s-e) control: the same command still advises" \
   sess-1265-se 'cat /tmp/a' 'cat /tmp/a' advisory
 
 # ---------------------------------------------------------------------------
-# Case 19t: MCP strings are trusted only when the HARNESS wrote them.
-#
-# Nothing in the hook payload marks a string as an error — `is_error` lives on
-# the transcript's `tool_result` block — so the classifier reads the shape.
-# Censused over 14,652 `toolUseResult` entries: MCP is the only class whose
-# *successful* results ever arrive as a bare string (25 of 1,152; Bash and the
-# other built-ins are 12,927/12,927 dicts). On that channel a leading `Error: `
-# can be the tool's own text, so a tool answering `Error: no rows found` on
-# success accumulated state and advised on its second return. 19t-b/c/d are the
-# controls that keep "scoped" distinguishable from "MCP stopped firing".
-# ---------------------------------------------------------------------------
-echo "=== case 19t: MCP string payloads are scoped to harness-authored text ==="
-mcp_case() {
-  # mcp_case <label> <session> <tool_response> <expect: silent|advisory>
-  local label="$1" sess="$2" text="$3" expect="$4"
-  local state="$TMP_DIR/mcp-$sess.json"
-  local o e r out err
-  o="$(mktemp)" e="$(mktemp)"
-  pipe_hook "$(string_payload "$sess" mcp__db__query "$text")" "$state" >/dev/null 2>/dev/null
-  pipe_hook "$(string_payload "$sess" mcp__db__query "$text")" "$state" >"$o" 2>"$e"
-  r=$?
-  out=$(cat "$o"); err=$(cat "$e")
-  rm -f "$o" "$e"
-  if [ "$expect" = "silent" ]; then
-    if [ "$r" -eq 0 ] && [ -z "$out" ] && [ -z "$err" ]; then
-      assert_pass "$label"
-    else
-      assert_fail "$label" "rc=$r out=[$out] err=[$err]"
-    fi
-  else
-    if [ "$r" -eq 0 ] && [ -z "$err" ] && [ -n "$out" ] && assert_match "2회째" "$out"; then
-      assert_pass "$label"
-    else
-      assert_fail "$label" "rc=$r out=[$out] err=[$err]"
-    fi
-  fi
-}
-
-# The defect: a SUCCESSFUL MCP result whose own text opens with `Error: `.
-mcp_case "19t-a) an MCP success whose text opens with 'Error: ' stays silent" \
-  sess-1265-ta 'Error: no rows found' silent
-# Controls — the harness's own strings still advise on the same channel.
-mcp_case "19t-b) the PreToolUse hook-error envelope still advises" \
-  sess-1265-tb 'Error: PreToolUse:mcp__db__query hook error: blocked by gate' advisory
-mcp_case "19t-c) a repeated user rejection still advises" \
-  sess-1265-tc 'User rejected tool use' advisory
-# The pre-existing must-fail case, on the channel it was actually observed on.
-mcp_case "19t-d) the oversized-output notice still stays silent" \
-  sess-1265-td "$STR_OVERSIZED" silent
-
-# ---------------------------------------------------------------------------
 # Case 20: the PostToolUseFailure event (issue #1337).
 #
 # A real Bash `tool_response` carries no exit status (#1096), so the
@@ -1311,21 +921,6 @@ payload = {
 if interrupt == "interrupt":
     payload["is_interrupt"] = True
 print(json.dumps(payload))
-PY
-}
-posttooluse_event_payload() {
-  # posttooluse_event_payload <session> <tool_use_id> <tool_response-string> [command]
-  python3 - "$1" "$2" "$3" "${4:-true}" <<'PY'
-import json, sys
-session_id, tool_use_id, text, command = sys.argv[1:5]
-print(json.dumps({
-    "session_id": session_id,
-    "hook_event_name": "PostToolUse",
-    "tool_name": "Bash",
-    "tool_use_id": tool_use_id,
-    "tool_input": {"command": command},
-    "tool_response": text,
-}))
 PY
 }
 
@@ -1381,12 +976,13 @@ else
     "rc=$rc out=[$out] err=[$err] state_exists=$([ -f "$STATE52" ] && echo yes || echo no)"
 fi
 
-# 20c) one tool call, both events: PostToolUse string first, then the failure
-# event with the SAME tool_use_id. Counted once, so the second event is silent
-# and the pair's count stays at 1.
+# 20c) one tool call delivered twice: the same tool_use_id must be counted
+# once, so the redelivery is silent and the pair's count stays at 1. This used
+# to cross the two events; with one registration left, a repeated id is the
+# only way a single call can reach the hook twice.
 STATE53="$TMP_DIR/c53.json"
 out_file="$(mktemp)" err_file="$(mktemp)"
-pipe_hook "$(posttooluse_event_payload sess-1337-c toolu_c1 $'Error: Exit code 1\n(eval):1: == not found' 'if [ x == y ]; then :; fi')" "$STATE53" >/dev/null 2>/dev/null
+pipe_hook "$(failure_event_payload sess-1337-c Bash toolu_c1 $'Exit code 1\n(eval):1: == not found' 'if [ x == y ]; then :; fi')" "$STATE53" >/dev/null 2>/dev/null
 pipe_hook "$(failure_event_payload sess-1337-c Bash toolu_c1 $'Exit code 1\n(eval):1: == not found' 'if [ x == y ]; then :; fi')" "$STATE53" >"$out_file" 2>"$err_file"
 rc=$?
 out=$(cat "$out_file"); err=$(cat "$err_file")
@@ -1394,35 +990,15 @@ rm -f "$out_file" "$err_file"
 count_c="$(python3 -c 'import json,sys; s=json.load(open(sys.argv[1])); print(sum(s["failures"].values()))' "$STATE53" 2>/dev/null)"
 
 if [ "$rc" -eq 0 ] && [ -z "$out" ] && [ -z "$err" ] && [ "$count_c" = "1" ]; then
-  assert_pass "20c) same tool_use_id via PostToolUse then PostToolUseFailure counts once"
+  assert_pass "20c) the same tool_use_id delivered twice counts once"
 else
-  assert_fail "20c) same tool_use_id via PostToolUse then PostToolUseFailure counts once" \
+  assert_fail "20c) the same tool_use_id delivered twice counts once" \
     "rc=$rc out=[$out] err=[$err] total_count=[$count_c]"
 fi
 
-# 20c-1) the reverse arrival order dedupes too, and a THIRD event with a new id
-# for the same failure is the real 2nd occurrence -> advisory. This is the
-# control that separates "deduped" from "the failure path stopped counting".
-STATE54="$TMP_DIR/c54.json"
-out_file="$(mktemp)" err_file="$(mktemp)"
-pipe_hook "$(failure_event_payload sess-1337-c1 Bash toolu_c2 $'Exit code 1\n(eval):1: == not found' 'if [ x == y ]; then :; fi')" "$STATE54" >/dev/null 2>/dev/null
-pipe_hook "$(posttooluse_event_payload sess-1337-c1 toolu_c2 $'Error: Exit code 1\n(eval):1: == not found' 'if [ x == y ]; then :; fi')" "$STATE54" >/dev/null 2>/dev/null
-count_c1_mid="$(python3 -c 'import json,sys; s=json.load(open(sys.argv[1])); print(sum(s["failures"].values()))' "$STATE54" 2>/dev/null)"
-pipe_hook "$(failure_event_payload sess-1337-c1 Bash toolu_c3 $'Exit code 1\n(eval):1: == not found' 'if [ x == y ]; then :; fi')" "$STATE54" >"$out_file" 2>"$err_file"
-rc=$?
-out=$(cat "$out_file"); err=$(cat "$err_file")
-rm -f "$out_file" "$err_file"
-
-if [ "$rc" -eq 0 ] && [ -z "$err" ] && [ "$count_c1_mid" = "1" ] && [ -n "$out" ] \
-    && assert_match "Failure #2" "$out"; then
-  assert_pass "20c-1) reverse order dedupes; a new id for the same failure is occurrence #2"
-else
-  assert_fail "20c-1) reverse order dedupes; a new id for the same failure is occurrence #2" \
-    "rc=$rc out=[$out] err=[$err] count_after_pair=[$count_c1_mid]"
-fi
-
 # 20d) a non-Bash MCP tool: the event is the verdict, so the tool's own error
-# text counts without the `Error: ` allowlist the string path needs (19t).
+# text counts with no allowlist over it — the one channel where a successful
+# result could otherwise be read as a failure.
 STATE55="$TMP_DIR/c55.json"
 out_file="$(mktemp)" err_file="$(mktemp)"
 pipe_hook "$(failure_event_payload sess-1337-d mcp__db__query toolu_d1 'The operation timed out.')" "$STATE55" >/dev/null 2>/dev/null
@@ -1467,25 +1043,6 @@ if [ "$rc" -eq 0 ] && [ -z "$out" ] && [ -z "$err" ] && [ ! -f "$STATE56" ]; the
 else
   assert_fail "20e) a PostToolUse success with hook_event_name present stays silent" \
     "rc=$rc out=[$out] err=[$err] state_exists=$([ -f "$STATE56" ] && echo yes || echo no)"
-fi
-
-# 20f) one pair key across the two events: the same failure reaching the hook
-# once as a PostToolUse string (`Error: ` envelope) and once as a failure event
-# (no envelope), under DIFFERENT ids, must be occurrence #2 — otherwise a
-# session alternating between the events never advises.
-STATE57="$TMP_DIR/c57.json"
-out_file="$(mktemp)" err_file="$(mktemp)"
-pipe_hook "$(posttooluse_event_payload sess-1337-f toolu_f1 $'Error: Exit code 1\n(eval):1: == not found' 'if [ x == y ]; then :; fi')" "$STATE57" >/dev/null 2>/dev/null
-pipe_hook "$(failure_event_payload sess-1337-f Bash toolu_f2 $'Exit code 1\n(eval):1: == not found' 'if [ x == y ]; then :; fi')" "$STATE57" >"$out_file" 2>"$err_file"
-rc=$?
-out=$(cat "$out_file"); err=$(cat "$err_file")
-rm -f "$out_file" "$err_file"
-
-if [ "$rc" -eq 0 ] && [ -z "$err" ] && [ -n "$out" ] && assert_match "Failure #2" "$out"; then
-  assert_pass "20f) PostToolUse string and PostToolUseFailure error share one pair key"
-else
-  assert_fail "20f) PostToolUse string and PostToolUseFailure error share one pair key" \
-    "rc=$rc out=[$out] err=[$err]"
 fi
 
 # 20g) a non-string `error` is an unseen shape: fail-open, silent, no state.

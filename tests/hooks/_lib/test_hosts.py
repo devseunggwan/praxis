@@ -61,11 +61,13 @@ def _registrations_by_name() -> dict[str, list[dict]]:
 
 def test_installed_names_apply_the_manifest_whitelist() -> None:
     """A NAME is installed on a host iff at least one of its registrations
-    ships there. `hosts` is per registration, and since #1337 a name can mix
-    them — `second-failure-advisory` ships `PostToolUse` everywhere and
-    `PostToolUseFailure` to claude only, so the name IS installed on codex.
-    A per-entry reading would call that a leak; the name-level one is what
-    the checklist consumers need (the gate's text is present on that host)."""
+    ships there. `hosts` is per registration and a name can mix them —
+    `completion-verify` ships `Stop` everywhere and `SubagentStop` to claude
+    only, so the name IS installed on codex. A per-entry reading would call
+    that a leak; the name-level one is what the checklist consumers need (the
+    gate's text is present on that host). The example is illustrative: the
+    test below derives the mixed names from the manifest rather than naming
+    one, so this sentence going stale cannot make the suite pass falsely."""
     for host in sorted(_declared_hosts()):
         installed = hosts.installed_hook_names(host)
         assert installed is not None

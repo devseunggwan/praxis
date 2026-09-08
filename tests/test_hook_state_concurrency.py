@@ -265,11 +265,15 @@ _SECOND_FAILURE_IMPL = HOOKS / "postuse-correction" / "second-failure-advisory" 
 
 
 def _failure_payload(session_id: str) -> dict:
+    # No `tool_use_id`: the hook dedupes on it, and this test drives the SAME
+    # failure through two concurrent processes on purpose. Giving them one id
+    # would make the second a redelivery and the race would never be reached.
     return {
+        "hook_event_name": "PostToolUseFailure",
         "session_id": session_id,
         "tool_name": "Bash",
         "tool_input": {"file_path": "/tmp/project/run.sh"},
-        "tool_response": {"exit": 1, "error": "connection refused"},
+        "error": "connection refused",
     }
 
 
