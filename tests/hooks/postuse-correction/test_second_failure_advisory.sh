@@ -387,14 +387,20 @@ fi
 # Case 9: a failed state write suppresses the advisory (persist-before-advise)
 # ---------------------------------------------------------------------------
 echo "=== case 9: unwritable state path => silent ==="
-# The first failure is counted normally, then the scratch file `_save_state`
-# writes before renaming is replaced by a directory: open() for write fails with
-# EISDIR for every user including root, while the state file itself stays
-# readable so the count is still loaded. Mode bits would not do this — container
-# CI commonly runs as root, which ignores them.
-STATE9="$TMP_DIR/c9.json"
-pipe_hook "$(make_payload Bash sess-944-ro 1)" "$STATE9" >/dev/null 2>/dev/null
-mkdir -p "$STATE9.tmp"
+# The first failure is counted through a short path, then the state file is
+# moved to a basename exactly NAME_MAX (255) bytes long: the file itself still
+# opens for read and write, so the count is still loaded, while `_save_state`'s
+# `<path>.<pid>.tmp` staging name overflows NAME_MAX and fails with
+# ENAMETOOLONG for every user including root. Mode bits would not do this —
+# container CI commonly runs as root, which ignores them.
+#
+# The blocker used to be `mkdir "<path>.tmp"`, which named the staging file
+# outright. That stopped reaching it once the name gained a pid (issue #1383),
+# and any successor blocker has to hold for a name this test cannot predict.
+STATE9_SEED="$TMP_DIR/c9.json"
+STATE9="$TMP_DIR/c9-$(printf 'x%.0s' $(seq 1 247)).json"
+pipe_hook "$(make_payload Bash sess-944-ro 1)" "$STATE9_SEED" >/dev/null 2>/dev/null
+mv "$STATE9_SEED" "$STATE9"
 out_file="$(mktemp)" err_file="$(mktemp)"
 pipe_hook "$(make_payload Bash sess-944-ro 1)" "$STATE9" >"$out_file" 2>"$err_file"
 rc=$?
