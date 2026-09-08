@@ -52,6 +52,7 @@ NON_HOOK_DOCS: frozenset[str] = frozenset({
 # silent skill proliferation; every intentional surface change is paired
 # with an explicit declaration here.
 EXPECTED_SKILLS: frozenset[str] = frozenset({
+    "bypass-report",
     "cmux-delegate",
     "cmux-recover-sessions",
     "cmux-resume-sessions",
