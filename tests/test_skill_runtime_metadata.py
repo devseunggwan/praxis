@@ -615,6 +615,7 @@ def test_current_repo_runtime_sensitive_skill_set_is_stable():
         ),
         "spec-drift": ("helper-executable",),
         "surface-enumeration": ("external-cli-wrapper",),
+        "tradeoff": ("external-cli-wrapper",),
         "worktree-merge-cleanup": ("external-cli-wrapper",),
         "writing-praxis-skill": (
             "AskUserQuestion",
