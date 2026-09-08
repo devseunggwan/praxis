@@ -93,7 +93,7 @@ Three reading paths, each 3–4 steps. Time estimates are for a first read.
 
 ## Skills
 
-Eighteen skills, grouped as Discovery, Development, Discipline, and Session Management.
+Nineteen skills, grouped as Discovery, Development, Discipline, and Session Management.
 The full table — trigger keywords, when to use each, example invocation — lives in
 [`docs/skills.md`](docs/skills.md).
 
