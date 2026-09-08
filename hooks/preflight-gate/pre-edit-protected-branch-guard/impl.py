@@ -56,6 +56,9 @@ from pathlib import Path as _Path
 _sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
 from _git import repo_root as git_repo_root  # type: ignore[import-not-found]  # noqa: E402
 from _git import run_git  # type: ignore[import-not-found]  # noqa: E402
+from _path_scope import (  # type: ignore[import-not-found]  # noqa: E402
+    contains_fragment,
+)
 from _hook_io import emit_decision  # type: ignore[import-not-found]  # noqa: E402
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
 from _payload import read_payload  # type: ignore[import-not-found]  # noqa: E402
@@ -302,13 +305,15 @@ def is_planning_artifact(path: str) -> bool:
     /tmp/ scratch files are intentionally NOT checked here: a non-repo /tmp/
     file will fail-open at get_repo_root (returns None → exit 0). Only
     project-internal planning paths need an explicit skip rule.
+
+    `contains_fragment` keeps the leading-slash rule this hook needs — the
+    patterns carry a leading "/" so a repo-root-relative path still matches on
+    a component boundary, and `username.omc/plans/` still does not (issue
+    #513, 결함1) — and adds the normalization it was missing: the slash goes on
+    AFTER `..` collapses, so `.omc/plans/../../src/app.py` is the source file
+    it resolves to and does not take the exemption (#1375).
     """
-    # Prepend a leading "/" so PLANNING_PATH_PATTERNS (which carry a leading
-    # "/") force a path-component boundary even for repo-root-relative paths.
-    # Without this, a substring like "username.omc/plans/" would bypass the
-    # protected-branch guard (issue #513, 결함1).
-    norm = "/" + path.replace("\\", "/").lstrip("/")
-    return any(pat in norm for pat in PLANNING_PATH_PATTERNS)
+    return contains_fragment(path, PLANNING_PATH_PATTERNS)
 
 
 def is_docs_file(path: str) -> bool:
