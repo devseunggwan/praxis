@@ -205,6 +205,11 @@ block tier `{"decision": "block", "reason": ...}` (blocks the stop; reason is
 fed to the model). Exit code is 0 in both tiers; stderr is never the signal
 channel.
 
+One documented exception: `bypass-route-signal` is observe-only and emits
+**nothing** on either channel — its only output is a row in its own
+`bypass-route-events-*` ledger. A meter that emitted a tier would be a gate
+(#1338), so the silence is the contract rather than a gap.
+
 | Hook | Trigger | Purpose |
 | ------ | --------- | --------- |
 | [completion-verify](../../hooks/completion-verify/completion-verify/spec.md) | Stop + SubagentStop (claude only, issue #1337) | Block "done / 완료" claims without same-turn Bash verification evidence |
