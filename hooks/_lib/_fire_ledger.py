@@ -315,11 +315,16 @@ def suppress_coarse_duplicate() -> None:
 # anyone actually reads would delete the evidence those audits are scored from.
 _DEFAULT_RETENTION_DAYS = 30
 
-# All three families live in one telemetry_dir and `bypass-review fire-rate`
+# All four families live in one telemetry_dir and `bypass-review fire-rate`
 # joins them, so they age out together — sweeping one alone would leave the
 # report showing fires with no bypasses, or fires whose `pass` counters have
-# already been swept out from under them.
-_SWEEPABLE_PREFIXES = ("fire-events-", "bypass-events-", "fire-counts-")
+# already been swept out from under them. `bypass-route-events-` (issue #1338)
+# is joined against the `fire-events-` denominator the same way, and a family
+# left out of this tuple is a family with no retention and no compression at
+# all, which is the defect #1282 closed for the others.
+_SWEEPABLE_PREFIXES = (
+    "fire-events-", "bypass-events-", "fire-counts-", "bypass-route-events-",
+)
 _DATED_SUFFIX = ".jsonl"
 
 

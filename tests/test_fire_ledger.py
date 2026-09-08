@@ -1332,12 +1332,12 @@ def test_compute_outcome_proxy_joins_fire_sessions_to_strike_state(tmp_path):
     assert result["s1"] == {
         "strike_count": 3, "strike_state_available": True,
         "external_write_revert_count": 0, "reclarification_loop_count": 0,
-        "rework_commit_count": 0,
+        "rework_commit_count": 0, "bypass_route_signal_count": 0,
     }
     assert result["s2"] == {
         "strike_count": 0, "strike_state_available": False,
         "external_write_revert_count": 0, "reclarification_loop_count": 0,
-        "rework_commit_count": 0,
+        "rework_commit_count": 0, "bypass_route_signal_count": 0,
     }
 
 
@@ -1459,11 +1459,80 @@ def test_compute_outcome_proxy_surfaces_reclarification_loop_count(tmp_path):
     assert result["s1"]["reclarification_loop_count"] == 2
 
 
-def test_fire_rate_report_shows_nonzero_reclarification_loop_signal(tmp_path, monkeypatch):
-    """Acceptance criterion (issue #740): a synthetic fixture with 2
-    AskUserQuestion calls in the same session (via the real writer's own
-    askuserquestion-loop-signal RICH fire) shows a nonzero re-clarification-
-    loop value in the Outcome Proxy section."""
+# issue #1338: bypass-route frequency meter. Its own JSONL family, not the
+# fire ledger — a Stop hook that emits nothing cannot leave a distinguishable
+# fire-ledger row, because the dispatcher derives each member's decision from
+# its (rc, stdout, stderr). See compute_bypass_route_signal_counts.
+
+def test_compute_bypass_route_signal_counts_groups_by_session():
+    route_events = [
+        {"hook": "bypass-route-signal", "session_id": "s1", "matched": True},
+        {"hook": "bypass-route-signal", "session_id": "s1", "matched": True},
+        {"hook": "bypass-route-signal", "session_id": "s2", "matched": True},
+    ]
+    assert cli.compute_bypass_route_signal_counts(route_events) == {"s1": 2, "s2": 1}
+
+
+def test_compute_bypass_route_signal_counts_ignores_missing_session():
+    route_events = [
+        {"hook": "bypass-route-signal", "session_id": "", "matched": True},
+        {"hook": "bypass-route-signal", "matched": True},
+    ]
+    assert cli.compute_bypass_route_signal_counts(route_events) == {}
+
+
+def test_compute_outcome_proxy_defaults_bypass_route_count_to_zero(tmp_path):
+    """The family is loaded separately, so a caller that does not pass it must
+    get 0 rather than a KeyError — the four older proxies still have to work
+    when this one has no data."""
+    state_dir = tmp_path / "strikes"
+    state_dir.mkdir()
+    fire_events = [
+        {"hook": "h", "session_id": "s1", "timestamp": "2026-06-26T00:00:00+00:00"},
+    ]
+    result = cli.compute_outcome_proxy(fire_events, state_dir)
+    assert result["s1"]["bypass_route_signal_count"] == 0
+
+
+def test_compute_outcome_proxy_surfaces_bypass_route_signal_count(tmp_path):
+    state_dir = tmp_path / "strikes"
+    state_dir.mkdir()
+    fire_events = [
+        {"hook": "bypass-route-signal", "session_id": "s1",
+         "timestamp": "2026-06-26T00:00:00+00:00"},
+    ]
+    route_events = [{"hook": "bypass-route-signal", "session_id": "s1", "matched": True}]
+    result = cli.compute_outcome_proxy(
+        fire_events, state_dir, route_events=route_events
+    )
+    assert result["s1"]["bypass_route_signal_count"] == 1
+
+
+def test_load_bypass_route_events_reads_its_own_family(tmp_path):
+    """The loader must read `bypass-route-events-*` and nothing else — pointing
+    it at the fire ledger by mistake would silently report every Stop as a
+    match."""
+    today = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d")
+    (tmp_path / f"bypass-route-events-{today}.jsonl").write_text(
+        json.dumps({"hook": "bypass-route-signal", "session_id": "s1", "matched": True}) + "\n"
+    )
+    (tmp_path / f"fire-events-{today}.jsonl").write_text(
+        json.dumps({"hook": "bypass-route-signal", "session_id": "s2",
+                    "decision": "pass", "granularity": "rich"}) + "\n"
+    )
+    events = cli.load_bypass_route_events(tmp_path, 1)
+    assert [e["session_id"] for e in events] == ["s1"]
+
+
+def test_fire_rate_report_shows_nonzero_bypass_route_signal(tmp_path, monkeypatch):
+    """Issue #1338: the meter's rows have to be readable, or the measurement
+    does not exist.
+
+    Exercises the whole join the report performs — a match in the hook's own
+    `bypass-route-events-*` family, the denominator in the fire ledger — and
+    asserts the section names the session and reads as a meter rather than a
+    verdict.
+    """
     today = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d")
     telem_dir = tmp_path / "telemetry"
     telem_dir.mkdir()
@@ -1474,17 +1543,19 @@ def test_fire_rate_report_shows_nonzero_reclarification_loop_signal(tmp_path, mo
     monkeypatch.setenv("PRAXIS_FIRE_TELEMETRY_FILE", str(fire_out))
     monkeypatch.delenv("PRAXIS_FIRE_TELEMETRY_DISABLE", raising=False)
 
-    # Real writer output: askuserquestion-loop-signal fires twice in one
-    # session, as it does when the hook detects 2 AskUserQuestion calls.
-    fl.record_session_fire(
-        "askuserquestion-loop-signal", "postuse-correction", "pass",
-        "s-reclarify", "AskUserQuestion",
+    # The hook's own family carries the match; the fire ledger carries the
+    # denominator (the dispatcher's automatic pass on every Stop).
+    (telem_dir / f"bypass-route-events-{today}.jsonl").write_text(
+        json.dumps({"timestamp": f"{today}T00:00:00+00:00",
+                    "session_id": "s-bypass-route",
+                    "hook": "bypass-route-signal",
+                    "event": "Stop", "matched": True}) + "\n"
     )
     fl.record_session_fire(
-        "askuserquestion-loop-signal", "postuse-correction", "pass",
-        "s-reclarify", "AskUserQuestion",
+        "bypass-route-signal", "completion-verify", "pass",
+        "s-bypass-route", "Stop",
     )
-    fl.flush_pass_counts()  # a pass is counted, not written as a row (#1238)
+    fl.flush_pass_counts()
 
     buf = io.StringIO()
     with redirect_stdout(buf):
@@ -1494,9 +1565,10 @@ def test_fire_rate_report_shows_nonzero_reclarification_loop_signal(tmp_path, mo
     report = buf.getvalue()
 
     assert rc == 0
-    assert "Outcome Proxy" in report
-    assert "Sessions with re-clarification-loop signal (>=2 AskUserQuestion calls) : 1" in report
-    assert "s-reclarify" in report
+    assert "Sessions with bypass-route vocabulary in a final message : 1" in report
+    assert "s-bypass-route" in report
+    # The section must not read as a verdict — it is a frequency meter.
+    assert "FREQUENCY METER" in report
 
 
 def test_default_strike_state_dir_respects_praxis_state_dir_override(tmp_path, monkeypatch):
@@ -2070,11 +2142,17 @@ def test_prune_removes_only_files_past_the_window(tmp_path):
 
 
 def test_prune_ages_both_families_together(tmp_path):
-    """`bypass-review fire-rate` joins the two; sweeping one alone corrupts it."""
+    """`bypass-review fire-rate` joins them; sweeping one alone corrupts it.
+
+    `bypass-route-events-` (issue #1338) is in the sweep for the same reason:
+    it is joined against the `fire-events-` denominator, and a family left out
+    of `_SWEEPABLE_PREFIXES` has no retention and no compression at all.
+    """
     fires = _dated(tmp_path, "fire-events-", 40)
     bypasses = _dated(tmp_path, "bypass-events-", 40)
-    assert fl.prune_telemetry(tmp_path, days=30) == 2
-    assert not fires.exists() and not bypasses.exists()
+    routes = _dated(tmp_path, "bypass-route-events-", 40)
+    assert fl.prune_telemetry(tmp_path, days=30) == 3
+    assert not fires.exists() and not bypasses.exists() and not routes.exists()
 
 
 def test_prune_leaves_unrelated_files_alone(tmp_path):
