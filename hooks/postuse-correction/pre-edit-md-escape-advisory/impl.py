@@ -188,15 +188,32 @@ def load_history(path: str) -> dict:
 
 
 def save_history(path: str, history: dict) -> bool:
-    """Atomically write the history dict. Return True on success."""
+    """Atomically write the history dict through a per-process staging name.
+
+    `main()` holds `state_lock` over this, and that lock is fail-open by
+    contract, so a shared `<path>.tmp` is one unacquired lock away from being
+    live again: two processes writing that one name interleave, and the short
+    write published over a longer one's tail leaves bytes `load_history`
+    answers with an EMPTY dict. The whole read set restarts, so the Edit gate
+    scores a file that WAS read as unread — and denies under
+    `PRAXIS_MD_ESCAPE_MODE=block`. The pid is the floor under that degraded
+    path (issue #970 established the same floor for the sibling
+    `jq-config-empty-dict-advisory`). Return True on success.
+    """
+    tmp_path = f"{path}.{os.getpid()}.tmp"
     try:
         os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-        tmp_path = path + ".tmp"
         with open(tmp_path, "w", encoding="utf-8") as fh:
             json.dump(history, fh, ensure_ascii=False, indent=2)
         os.replace(tmp_path, path)
         return True
     except OSError:
+        # One staging file per pid, so a failed publish leaks an unbounded
+        # number of them rather than reusing one name — unlink it here.
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
         return False
 
 

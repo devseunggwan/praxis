@@ -709,14 +709,31 @@ def _load_state(path: str) -> dict[str, Any]:
 
 
 def _save_state(path: str, state: dict[str, Any]) -> bool:
+    """Publish the counter state, staging through a per-process name.
+
+    `main()` holds `state_lock` over this, and that lock is fail-open by
+    contract, so a shared `<path>.tmp` is one unacquired lock away from being
+    live again: two processes writing that one name interleave, and the short
+    write published over a longer one's tail leaves bytes `_load_state`
+    answers with a FRESH dict — the session's whole failure count restarts
+    rather than one increment going missing. The pid is the floor under that
+    degraded path (issue #970 established the same floor for
+    `jq-config-empty-dict-advisory`).
+    """
+    tmp = f"{path}.{os.getpid()}.tmp"
     try:
         os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-        tmp = f"{path}.tmp"
         with open(tmp, "w", encoding="utf-8") as fh:
             json.dump(state, fh, ensure_ascii=False, indent=2, sort_keys=True)
         os.replace(tmp, path)
         return True
     except OSError:
+        # One staging file per pid, so a failed publish leaks an unbounded
+        # number of them rather than reusing one name — unlink it here.
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
         return False
 
 
