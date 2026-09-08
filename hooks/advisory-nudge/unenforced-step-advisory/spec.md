@@ -39,7 +39,7 @@ separate decision to be made against measured noise.
 
 | Trigger command | Predicate (fires when ALL hold) | Step named |
 | ----------------- | --------------------------------- | ------------ |
-| a content commit (`git commit`; a segment carrying `--amend` **as an option** is skipped) | no `oh-my-claudecode:code-reviewer` Agent dispatch this session **and** `praxis:codex-review-wrap` WAS invoked | `oh-my-claudecode:code-reviewer` before commit |
+| a content commit (`git commit`; a segment carrying `--amend` **as an option** is skipped) | no `oh-my-claudecode:code-reviewer` Agent dispatch this session **and** (`praxis:codex-review-wrap` WAS invoked **or** the sibling commit gate is on its advisory tier) | `oh-my-claudecode:code-reviewer` before commit |
 | `gh pr create` | `HEAD..<base>` is non-empty — the branch is behind | pre-PR rebase |
 | `gh pr merge` | the same, re-measured at the merge point | pre-merge rebase |
 | `git worktree add`, `cmux new-workspace`, `cmux workspace create` | no open-PR enumeration this session | in-flight PR check |
@@ -76,6 +76,17 @@ attached to it. So the advisory requires codex-review-wrap to have *already*
 run: the surviving case is exactly the one the issue observed, where the
 enforced review happened and the unenforced one did not.
 
+That suppression is conditional on the sibling gate actually blocking, which
+since #1187 it does not always do: `PRAXIS_CODEX_REVIEW_STRICT=0` demotes it
+to advisory even with `codex` on PATH, and with neither the env var nor the
+binary it is advisory as well. On those tiers the commit proceeds, so nothing
+would have said anything — suppressing here would silence the one advisory
+this hook exists to emit, which is the shape #1064 records. `_codex_gate_blocks`
+therefore mirrors that gate's tiering (explicit env wins both ways, otherwise
+`shutil.which("codex")`) and the `codex_review` fact is collected only on the
+blocking tier; on a demoted one the fact is dropped and its `"Skill"` line
+scan is not paid for either (#1387).
+
 The row `Code review (general, MANDATORY before commit)` in
 [`model-routing-advisory/spec.md`](../model-routing-advisory/spec.md) names the
 `oh-my-claudecode:code-reviewer` agent, and the row below it names
@@ -107,7 +118,8 @@ sibling worktrees that were on screen and unread become a number.
    nothing.
 3. Only the facts the matched trigger consumes are collected, and the scan
    stops as soon as they are settled. The `review` trigger needs a
-   review-agent dispatch and a codex-review-wrap Skill call; `in-flight` needs
+   review-agent dispatch, plus a codex-review-wrap Skill call only on the
+   blocking gate tier; `in-flight` needs
    an open-PR enumeration; the two rebase triggers need nothing from the
    transcript and never open it. This is a cost decision, not a style one:
    tokenizing every Bash command of a 46MB session costs 1.8s, and all

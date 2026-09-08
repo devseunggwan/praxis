@@ -37,22 +37,30 @@ PASS=0
 FAIL=0
 FAILED_NAMES=()
 
+# $5 pins the sibling commit gate's tier (PRAXIS_CODEX_REVIEW_STRICT): "1" is
+# the blocking tier, "0" the demoted one. It is never inherited — a machine
+# with `codex` on PATH would otherwise decide the review predicate's
+# expectations for us, and both tiers have to be asserted anyway (#1387).
 run_case() {
   local name="$1" expectation="$2" mode="$3" payload="$4"
+  local codex_tier="${5:-1}"
 
   local err_file="$TMP_ROOT/stderr.$$"
   case "$mode" in
     strict)
       echo "$payload" | env -u PRAXIS_UNENFORCED_STEP_SKIP \
+        PRAXIS_CODEX_REVIEW_STRICT="$codex_tier" \
         PRAXIS_UNENFORCED_STEP_STRICT=1 python3 "$HOOK" >/dev/null 2>"$err_file"
       ;;
     skip)
       echo "$payload" | env -u PRAXIS_UNENFORCED_STEP_STRICT \
+        PRAXIS_CODEX_REVIEW_STRICT="$codex_tier" \
         PRAXIS_UNENFORCED_STEP_SKIP=1 python3 "$HOOK" >/dev/null 2>"$err_file"
       ;;
     *)
       echo "$payload" | env -u PRAXIS_UNENFORCED_STEP_STRICT \
-        -u PRAXIS_UNENFORCED_STEP_SKIP python3 "$HOOK" >/dev/null 2>"$err_file"
+        -u PRAXIS_UNENFORCED_STEP_SKIP \
+        PRAXIS_CODEX_REVIEW_STRICT="$codex_tier" python3 "$HOOK" >/dev/null 2>"$err_file"
       ;;
   esac
   local rc=$?
@@ -240,7 +248,15 @@ run_case "review: code-reviewer dispatched (silent)" \
   "silent" "advisory" "$(payload "$COMMIT_CMD" "$REVIEWED" "$CURRENT")"
 
 run_case "review: codex-review-wrap absent defers to the blocking gate (silent)" \
-  "silent" "advisory" "$(payload "$COMMIT_CMD" "$NOCODEX" "$CURRENT")"
+  "silent" "advisory" "$(payload "$COMMIT_CMD" "$NOCODEX" "$CURRENT")" "1"
+
+# On the demoted tier nothing denies the commit, so there is no second message
+# to avoid — the advisory is the only thing that would say anything (#1387).
+run_case "review: codex-review-wrap absent, gate demoted (advise)" \
+  "advise" "advisory" "$(payload "$COMMIT_CMD" "$NOCODEX" "$CURRENT")" "0"
+
+run_case "review: code-reviewer dispatched, gate demoted (silent)" \
+  "silent" "advisory" "$(payload "$COMMIT_CMD" "$REVIEWED" "$CURRENT")" "0"
 
 run_case "review: --amend is a fix-up of an already-gated call (silent)" \
   "silent" "advisory" \
