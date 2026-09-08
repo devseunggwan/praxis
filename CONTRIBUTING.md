@@ -19,12 +19,15 @@ to confirm all `~/.local/bin` entries still resolve to this clone.
 
 ### CLI tools (not skills)
 
-These are shell wrappers installed via `scripts/install.sh` into `~/.local/bin`.
-They are not AI skills — they have no `SKILL.md` and cannot be invoked as `/praxis:*`.
+These are CLI tools installed via `scripts/install.sh` into `~/.local/bin`. The
+language is per tool — `bypass-review` is Python, not a shell wrapper. They are
+not AI skills: they have no `SKILL.md` of their own, and the binary is not
+invocable as `/praxis:*`. A skill may still run one: `/praxis:bypass-report`
+runs `bypass-review`.
 
 | Binary          | Source                               | Purpose                                                                                                                                                     |
 | --------------- | ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `bypass-review` | `skills/bypass-review/bypass-review` | Review bypass-telemetry event logs written by the bypass-telemetry hook — aggregate and inspect JSONL records (no `SKILL.md`; not invocable as `/praxis:*`) |
+| `bypass-review` | `skills/bypass-review/bypass-review` | Review both local ledger families — bypass-telemetry events and the hook fire-rate ledger — as aggregated JSONL records (run via `/praxis:bypass-report`)   |
 
 ### Install / refresh CLI symlinks
 

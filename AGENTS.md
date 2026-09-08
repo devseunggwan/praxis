@@ -31,7 +31,7 @@ Skills are orchestrators with pluggable steps; external integrations (issue trac
 > [`CONTRIBUTING.md` → Anchor revision without `gh`](CONTRIBUTING.md#anchor-revision-without-gh)
 > (issue #1211).
 
-## Skills (19)
+## Skills (20)
 
 > **Invocation**: praxis entries are *skills*, not subagents. Call them
 > via `Skill(skill="praxis:<name>")` — `Agent(subagent_type="praxis:<name>")`
@@ -52,6 +52,7 @@ Skills are orchestrators with pluggable steps; external integrations (issue trac
 | `codex-review-wrap`      | Worktree-aware wrapper for `/codex:review` — forces explicit target selection, premise-verification gate, flip detection across rounds                                                                   |
 | `debt`                   | Deferred-decision ledger — unions commit-trailer markers (`Not-tested:`, `Confidence: low`, `Rejected:`, `Directive:`, `Scope-risk:`) with tree compounding comments (`# [PR #N]`); report-only          |
 | `surface-enumeration`    | Pre-implementation input-surface enumeration — enumerate every input variant before writing a parser/validator/sanitizer/classifier so each becomes a required test case                                 |
+| `bypass-report`          | Bypass-telemetry and hook fire-rate viewer — runs the shipped `bypass-review` CLI over the local event ledgers and reports its output verbatim; user-invoked only, report-only                           |
 | `spec-drift`             | Spec↔code drift report — runs each spec-store requirement's `Verify:` command and reports `implemented` / `missing` / `UNKNOWN`; prose backticks are never executed; report-only                         |
 | `merge-briefing`         | On-demand home for the pre-merge approval procedure — three-surface probe, grading findings by blocking decoration, carrying anchor gaps, six-part approve-ask; chains into `worktree-merge-cleanup`     |
 | `worktree-merge-cleanup` | On-demand home for the pre-merge worktree precondition + unified post-merge cleanup sequence — base-worktree call site, submodule `--force` caveat, squash-ancestry stale-HEAD guard, no-`&&`-chain rule |

@@ -30,6 +30,7 @@ than a catalogue, run `/praxis:using-praxis`.
 | `codex-review-wrap` | `codex review`, `review codex`, `safe review`, `/codex-review-wrap`, `premise verification`, `flip detection`, `sibling defect`, `sibling cross-check`, `diminishing returns`, `broker reap`, `finding approval`, `적용 승인` | To run `/codex:review` safely in multi-worktree setups, with premise verification and flip detection | `/praxis:codex-review-wrap` |
 | `debt` | `praxis:debt`, `debt ledger`, `지연 결정`, `deferred decision`, `기술 부채 원장`, `commit trailer audit` | To harvest commit-trailer and compounding-comment deferred-decision markers into a report-only ledger | `/praxis:debt` |
 | `surface-enumeration` | `surface enumerate`, `input surface enumeration`, `input parser`, `input validation`, `intent classifier`, `정규식 경계`, `입력 표면 열거`, `multi-PR shared state`, `convention guide reflection`, `apply lesson` | To enumerate every input variant before implementing a parser/validator/sanitizer so each becomes a required test case | `/praxis:surface-enumeration` |
+| `bypass-report` | `/praxis:bypass-report`, `bypass telemetry`, `fire rate`, `hook fire rate`, `never-fired hooks`, `bypass 원장`, `훅 발화율` | To read the local bypass-telemetry and fire-rate ledgers through the shipped `bypass-review` CLI and report its output verbatim | `/praxis:bypass-report` |
 | `spec-drift` | `spec drift`, `spec-drift`, `스펙 드리프트`, `미구현 요구`, `unmet requirement`, `what does this spec still need`, `requirement status` | To report which requirements in the `~/.praxis/docs/specs/` store the current tree does not yet satisfy, by running each one's `Verify:` command | `/praxis:spec-drift` |
 | `merge-briefing` | `merge briefing`, `pre-merge briefing`, `머지 브리핑`, `머지해도 되나`, `approve merge`, `pre-ask probe`, `merge approval` | To probe all three finding surfaces, grade every finding by its blocking decoration, carry anchor `Unverified` gaps, and surface the six-part briefing before asking for merge approval | `/praxis:merge-briefing` |
 | `worktree-merge-cleanup` | `merge cleanup`, `post-merge cleanup`, `worktree cleanup`, `delete-branch merge`, `squash-ancestry`, `pre-merge worktree`, `머지 후 정리`, `worktree 정리` | To run `gh pr merge --squash --delete-branch` from the right worktree and clean up afterward (submodule `--force`, squash-ancestry guard, no-`&&`-chain) | `/praxis:worktree-merge-cleanup` |
@@ -54,8 +55,9 @@ than a catalogue, run `/praxis:using-praxis`.
 | `cmux-session-manager` | `cmux session`, `session management`, `session cleanup`, `cmux status`, `cmux cleanup`, `cmux tidy` | To run routine session cleanup or view a status dashboard | `/praxis:cmux-session-manager` |
 | `cmux-delegate` | `cmux delegate`, `delegate issue`, `delegate to new session`, `별도 세션`, `세션에 위임`, `별건으로 빼서` | To hand an existing independent issue that surfaced mid-task to its own session, which runs issue→worktree→PR alone (not for splitting the current task) | `/praxis:cmux-delegate` |
 
-> **CLI tools (not skills):** praxis also ships `bypass-review`, a shell wrapper
-> with no `SKILL.md` — it is **not** invocable as `/praxis:*` and is absent from
-> the skills above. It inspects the review bypass-telemetry event logs.
+> **CLI tools (not skills):** praxis also ships `bypass-review`, a Python CLI with
+> no `SKILL.md` of its own — the binary is not invocable as `/praxis:*`. It reads
+> the bypass-telemetry and fire-rate event ledgers, and `bypass-report` above is
+> the skill that runs it.
 > See [CONTRIBUTING.md → Local development](../CONTRIBUTING.md#local-development) for the full
 > list of shipped CLI wrappers.

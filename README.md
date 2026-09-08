@@ -93,7 +93,7 @@ Three reading paths, each 3–4 steps. Time estimates are for a first read.
 
 ## Skills
 
-Nineteen skills, grouped as Discovery, Development, Discipline, and Session Management.
+Twenty skills, grouped as Discovery, Development, Discipline, and Session Management.
 The full table — trigger keywords, when to use each, example invocation — lives in
 [`docs/skills.md`](docs/skills.md).
 
@@ -108,8 +108,9 @@ on day one:
 | `/praxis:retrospect` | After a session that went badly — find the friction's root cause and act on it |
 | `/praxis:merge-briefing` | Before merging — probe all three finding surfaces, then brief and ask |
 
-Praxis also ships `bypass-review`, a shell wrapper with no `SKILL.md`. It is **not**
-invocable as `/praxis:*`; it reads the review bypass-telemetry event logs. See
+Praxis also ships `bypass-review`, a Python CLI with no `SKILL.md` of its own. It
+reads the bypass-telemetry and fire-rate event ledgers; `/praxis:bypass-report` is
+the skill that runs it for you. See
 [CONTRIBUTING.md → Local development](CONTRIBUTING.md#local-development) for every
 shipped CLI wrapper.
 

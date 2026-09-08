@@ -27,6 +27,7 @@ Tools for code quality and review workflow.
 | `surface-enumeration`    | Before writing a parser/validator/sanitizer — every input variant becomes a test case    |
 | `spec-drift`             | Wondering what a spec still needs — runs each requirement's `Verify:` command, reports   |
 | `debt`                   | Audit deferred markers (commit trailers, `# [PR #N]`) before "later" becomes "never"     |
+| `bypass-report`          | Reading the bypass-telemetry / hook fire-rate ledgers — which hooks fire, which never do |
 | `merge-briefing`         | Before asking to merge a PR — probe all three finding surfaces, grade, brief, then ask   |
 | `worktree-merge-cleanup` | Merging from a worktree and cleaning up after — right call site, safe teardown           |
 | `tradeoff`               | Tradeoff between implementation options, or whether a review finding blocks              |
