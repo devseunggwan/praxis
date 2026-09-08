@@ -575,6 +575,23 @@ def test_the_checker_holds_no_second_copy_of_the_event_vocabulary():
     )
 
 
+def test_an_escaped_pipe_does_not_cut_the_trigger_cell_short():
+    # A matcher alternation is written `PreToolUse(Edit\|Write)` so the table
+    # renders; the escaped pipe is cell content, not a column break. Reading it
+    # as a break truncates the cell and the registrations after it vanish, which
+    # Rule 29 then reports as events the row failed to document.
+    row = (
+        "| [x](../../hooks/preflight-gate/x/spec.md) "
+        "| PreToolUse(Edit\\|Write) + PostToolUseFailure(Bash) | note |"
+    )
+    match = check._INDEX_ROW_RE.match(row)
+    assert match, "the row no longer parses as a hook row"
+    assert check._event_tokens(match.group("trigger")) == {
+        "PreToolUse",
+        "PostToolUseFailure",
+    }
+
+
 def test_review_by_and_observe_only_never_reach_hooks_json(manifest):
     rendered = json.dumps(build.expand_to_hooks_json(manifest))
     assert "review_by" not in rendered

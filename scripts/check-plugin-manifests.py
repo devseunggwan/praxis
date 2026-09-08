@@ -186,9 +186,14 @@ CLAUDE_ONLY_EVENTS = (
     "SubagentStart",
 )
 
+# The Trigger cell runs to the next UNESCAPED `|`. A cell may hold a matcher
+# alternation (`PreToolUse(Edit\|Write)`), and markdown escapes that pipe so the
+# table still renders; read it as a column break and the cell is truncated mid
+# matcher, dropping every registration after it — so a correctly documented row
+# reports the events it does not name as missing.
 _INDEX_ROW_RE = re.compile(
     r"^\|\s*\[[^\]]*\]\(\.\./\.\./hooks/[^/]+/(?P<name>[^/)]+)/spec\.md\)\s*"
-    r"\|(?P<trigger>[^|]*)\|"
+    r"\|(?P<trigger>(?:\\.|[^|\\])*)\|"
 )
 
 
