@@ -7,9 +7,9 @@
 # could go on naming an event whose registration was removed — which is what
 # #1365 did. This suite mutates a real row in both directions and restores it.
 #
-# NOTE: this suite edits docs/hook/INDEX.md in place and restores it on EXIT.
-# Do not run it while another suite or scripts/run-tests.sh is running in the
-# same checkout — concurrent mutation corrupts both runs (#1377).
+# This suite edits docs/hook/INDEX.md in place and restores it on EXIT; the
+# lock sourced below keeps a concurrent run from snapshotting a mutated file
+# as its baseline (#1377).
 #
 # Usage: bash tests/test_check_index_events.sh
 # Exit:  0 = all pass; 1 = at least one fail
@@ -17,6 +17,7 @@
 set +e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+. "$SCRIPT_DIR/_tree_mutation_lock.sh"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 CHECK="$ROOT_DIR/scripts/check-plugin-manifests.py"
 INDEX="$ROOT_DIR/docs/hook/INDEX.md"
