@@ -491,6 +491,12 @@ _CONSUMERS = {
     HOOKS / "completion-verify" / "merge-state-claim-gate" / "impl.py":
         ["load_recent_events", "get_current_turn", "resolve_stop_transcript",
          "stop_last_assistant_text"],
+    # Scans only the first paragraph of the final message, and clears on the
+    # most recent user message asking for routing — hence the user-message
+    # reader alongside the Stop-turn ones (#1391).
+    HOOKS / "completion-verify" / "joint-liability-attribution-gate" / "impl.py":
+        ["load_stop_turn", "read_last_user_message", "resolve_stop_transcript",
+         "stop_last_assistant_text"],
     HOOKS / "completion-verify" / "negative-existence-verdict-gate" / "impl.py":
         ["load_current_turn", "extract_last_assistant_text"],
     HOOKS / "completion-verify" / "proposal-premise-gate" / "impl.py":

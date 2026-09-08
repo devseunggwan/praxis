@@ -24,6 +24,7 @@ in [`../SECURITY.md`](../SECURITY.md).
 
 | Variable | Hook | Effect when set |
 | ---------- | ------ | ----------------- |
+| `PRAXIS_JOINT_LIABILITY_BYPASS` | `joint-liability-attribution-gate` | Skip the opening-move attribution check. Exact value `1` |
 | `PRAXIS_HOOK_BYPASS_PROTECTED_PATHS` | `protected-paths-guard` | Skip the sensitive-file write guard |
 | `PRAXIS_HOOK_BYPASS_SETTINGS_PATH` | `settings-path-advisory` | Skip the Claude Code settings-file write advisory |
 | `PRAXIS_HOOK_BYPASS_PARALLEL_MUTATION` | `parallel-gated-mutation-gate` | Skip the repeated-mutation check on a resolved parallel batch. Exact value `1` after stripping — `true` / `yes` / `0` leave the gate active |
@@ -76,6 +77,7 @@ in [`../SECURITY.md`](../SECURITY.md).
 
 | Variable | Hook | Note |
 | ---------- | ------ | ------ |
+| `PRAXIS_JOINT_LIABILITY_STRICT` | `joint-liability-attribution-gate` | Exact value `1` only. The advisory tier reaches the user but not the model, so this is the tier that makes the finding actionable in-session (#1265) |
 | `PRAXIS_PROTECTED_PATHS_STRICT` | `protected-paths-guard` | |
 | `PRAXIS_SETTINGS_PATH_STRICT` | `settings-path-advisory` | Exact value `1` only |
 | `PRAXIS_DESTRUCTIVE_BASH_STRICT` | `destructive-bash-guard` | |
