@@ -497,6 +497,12 @@ _CONSUMERS = {
     HOOKS / "completion-verify" / "joint-liability-attribution-gate" / "impl.py":
         ["load_stop_turn", "read_last_user_message", "resolve_stop_transcript",
          "stop_last_assistant_text"],
+    # Turn-scopes a session-wide rejection scan by intersecting it with the
+    # turn's own tool_result ids — the cursor resumes an offset while the
+    # reducer state accumulates, so it cannot supply that scope (#1392).
+    HOOKS / "completion-verify" / "denied-action-report-gate" / "impl.py":
+        ["load_stop_turn", "resolve_stop_transcript", "scan_cursor_path",
+         "scan_user_rejections", "stop_last_assistant_text"],
     HOOKS / "completion-verify" / "negative-existence-verdict-gate" / "impl.py":
         ["load_current_turn", "extract_last_assistant_text"],
     HOOKS / "completion-verify" / "proposal-premise-gate" / "impl.py":

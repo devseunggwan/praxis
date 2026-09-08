@@ -51,6 +51,7 @@ in [`../SECURITY.md`](../SECURITY.md).
 | `PRAXIS_PR_ANCHOR_BYPASS` | `pr-anchor-existence-gate` | Skip the PR-anchor existence gate entirely |
 | `PRAXIS_PR_ANCHOR_ADVISORY` | `pr-anchor-existence-gate` | Pin the PR-anchor existence gate to advisory forever — no escalation to block on repeat fires this session |
 | `PRAXIS_PROPOSAL_PREMISE_BYPASS` | `proposal-premise-gate` | Skip the prose-proposal premise advisory |
+| `PRAXIS_DENIED_ACTION_BYPASS` | `denied-action-report-gate` | Skip the denied-action report advisory |
 | `PRAXIS_HOOK_BYPASS_PR_REPORT_DESTINATION_GATE` | `pr-report-destination-gate` | Skip the PR-report-destination advisory (local report not posted to the PR) |
 | `PRAXIS_NEGATIVE_EXISTENCE_ADVISORY` | `negative-existence-verdict-gate` | Demote the negative-existence verdict gate from block to advisory (systemMessage, non-blocking). Set to any non-falsey value (`1` / `true` / `yes`); `0` / `false` / empty keep block mode (mirrors `PRAXIS_ASK_END_ADVISORY`) |
 | `PRAXIS_PUSH_VERIFY_BYPASS` | `push-remote-ref-verify` | Skip the post-push remote-ref verification |
@@ -87,6 +88,7 @@ in [`../SECURITY.md`](../SECURITY.md).
 | `PRAXIS_EXCLUSION_PROBE_STRICT` | `exclusion-probe-gate` | |
 | `PRAXIS_PHANTOM_PATH_STRICT` | `external-write-path-existence-check` | |
 | `PRAXIS_MERGE_CLAIM_STRICT` | `merge-state-claim-gate` | |
+| `PRAXIS_DENIED_ACTION_STRICT` | `denied-action-report-gate` | |
 | `PRAXIS_RUNTIME_CLAIM_STRICT` | `runtime-state-claim-gate` | |
 | `PRAXIS_PUSH_VERIFY_STRICT` | `push-remote-ref-verify` | |
 | `PRAXIS_PR_THREAD_ADVISORY_STRICT` | `pr-thread-resolve-advisory` | Exit 2 only when a needs-a-reply thread is open |
