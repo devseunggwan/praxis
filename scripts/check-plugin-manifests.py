@@ -186,10 +186,10 @@ CLAUDE_ONLY_EVENTS = (
     "SubagentStart",
 )
 
-# Every event name the manifest schema allows, longest first. Rule 29 reads
-# INDEX.md's Trigger cell for these, and `PostToolUse` is a prefix of
-# `PostToolUseFailure` — matching the longer name first is what keeps a
-# `PostToolUseFailure` cell from also reporting a bare `PostToolUse`.
+# Every event name the manifest schema allows. Rule 29 reads INDEX.md's Trigger
+# cell for these. Order is presentational: `PostToolUse` is a prefix of
+# `PostToolUseFailure`, but what stops the shorter name from matching is the
+# token-boundary check in `_event_tokens`, not the position in this tuple.
 _KNOWN_EVENTS = (
     "PostToolUseFailure",
     "PostToolBatch",
