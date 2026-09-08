@@ -121,13 +121,14 @@ EDIT_WRITE_MEMBERS = {
     "advisory-wrapper-signature-verify",
     "exclusion-probe-gate",
 }
-# The three completion gates that also grade a subagent's final turn (#1337).
+# The completion gates that also grade a subagent's final turn (#1337).
 # Claude-only, so the pin is the canonical (unfiltered) view; the per-host
 # filter is `test_hosts.py`'s.
 SUBAGENT_STOP_MEMBERS = (
     "completion-verify",
     "completion-signal-gate",
     "merge-state-claim-gate",
+    "joint-liability-attribution-gate",
 )
 EDIT_NOTEBOOK_WRITE_MEMBERS = {
     "protected-paths-guard",
@@ -1614,7 +1615,7 @@ def test_real_stop_group_keeps_strike_counter_standalone():
     names = [n for _r, n, _i in _dispatch.group_members("Stop", None, host="claude")]
     assert "strike-counter" not in names
     assert names[:2] == ["completion-verify", "retrospect-mix-check"]  # shell members
-    assert len(names) == 12
+    assert len(names) == 13
 
 
 # --------------------------------------------------------------------------- #
