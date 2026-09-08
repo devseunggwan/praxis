@@ -112,7 +112,20 @@ mutate_trigger "PostToolUse(Bash) + PostToolUseFailure — see issue #1337 and t
 python3 "$CHECK" >/dev/null 2>&1
 run_case "matchers_and_prose_ignored" "$?" "0"
 
-# 6. Restored tree passes.
+# 6. Prose that names an event does not declare it. A cell may explain a
+#    registration change in words, and those words are not a registration —
+#    scanning the whole cell read them as one and failed the row as naming an
+#    unregistered event.
+cp "$BACKUP" "$INDEX"
+mutate_trigger "PostToolUse + PostToolUseFailure — SessionStart was never registered for this hook"
+OUT="$(python3 "$CHECK" 2>&1)"
+run_case "prose_mention_is_not_a_declaration" "$?" "0"
+case "$OUT" in
+  *"names SessionStart"*) run_case "prose_mention_no_stray_report" "no ($OUT)" "yes" ;;
+  *) run_case "prose_mention_no_stray_report" "yes" "yes" ;;
+esac
+
+# 7. Restored tree passes.
 cp "$BACKUP" "$INDEX"
 python3 "$CHECK" >/dev/null 2>&1
 run_case "restored_check_clean" "$?" "0"

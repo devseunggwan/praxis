@@ -186,8 +186,8 @@ CLAUDE_ONLY_EVENTS = (
     "SubagentStart",
 )
 
-# Every event name the manifest schema allows, longest first. Rule 29 scans
-# INDEX.md's free-form Trigger cell for these, and `PostToolUse` is a prefix of
+# Every event name the manifest schema allows, longest first. Rule 29 reads
+# INDEX.md's Trigger cell for these, and `PostToolUse` is a prefix of
 # `PostToolUseFailure` — matching the longer name first is what keeps a
 # `PostToolUseFailure` cell from also reporting a bare `PostToolUse`.
 _KNOWN_EVENTS = (
@@ -222,19 +222,32 @@ def _index_trigger_cells(index_md: str) -> dict[str, tuple[str, int]]:
     return rows
 
 
-def _event_tokens(cell: str) -> set[str]:
-    """Event names named in a Trigger cell.
+_PARENTHETICAL_RE = re.compile(r"\([^()]*\)")
 
-    Longest-first with the matched text blanked out, so `PostToolUseFailure`
-    is not also read as `PostToolUse`. Everything else in the cell — matchers,
-    wrapper names, issue refs, prose — is ignored by construction.
+
+def _event_tokens(cell: str) -> set[str]:
+    """Event names a Trigger cell *declares*, as opposed to merely mentions.
+
+    A cell is a `+`-joined list of registrations, each opening with its event
+    name and carrying its matcher and notes after it — every one of the
+    distinct cell shapes in INDEX.md has that form. So an event counts when it
+    opens a segment, and text further into the segment is prose whatever words
+    it uses. Scanning the whole cell instead reads `PostToolUseFailure — the
+    PostToolUse registration was removed` as declaring both, and the row then
+    fails as naming an unregistered event.
+
+    Parentheticals go first because they hold the matchers and the notes
+    (`PostToolUse(Bash)`, `` (`wrapper-name`) ``, `(claude only, issue #1337)`),
+    none of which may open a segment. Longest-first matching is what keeps
+    `PostToolUseFailure` from also reporting a bare `PostToolUse`.
     """
-    remaining = cell
     found: set[str] = set()
-    for event in _KNOWN_EVENTS:
-        if event in remaining:
-            found.add(event)
-            remaining = remaining.replace(event, " " * len(event))
+    for segment in _PARENTHETICAL_RE.sub(" ", cell).split("+"):
+        text = segment.strip()
+        for event in _KNOWN_EVENTS:
+            if text.startswith(event):
+                found.add(event)
+                break
     return found
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
 
