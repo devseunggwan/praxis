@@ -266,27 +266,49 @@ def _event_tokens(cell: str) -> set[str]:
     PostToolUse registration was removed` as declaring both, and the row then
     fails as naming an unregistered event.
 
+    A segment that opens with something else declares nothing and is reported
+    by Rule 29 rather than ignored: a cell listing every expected event and
+    then adding a typo'd segment compares equal to the manifest.
+
     Parentheticals go first because they hold the matchers and the notes
     (`PostToolUse(Bash)`, `` (`wrapper-name`) ``, `(claude only, issue #1337)`),
     none of which may open a segment. What keeps `PostToolUseFailure` from also
     reporting a bare `PostToolUse` is the token-boundary check below, not the
     order the names are tried in.
     """
-    found: set[str] = set()
+    return {event for _, event in _cell_segments(cell) if event is not None}
+
+
+def _cell_segments(cell: str) -> list[tuple[str, str | None]]:
+    """Each non-empty `+`-segment of a Trigger cell, with the event it declares.
+
+    `None` for the event means the segment opens with something that is not a
+    registered event name. `_event_tokens` drops those; Rule 29 reports them,
+    because a cell that names every expected event and then adds a typo'd
+    fourth segment compares equal to the manifest and passes.
+    """
+    segments: list[tuple[str, str | None]] = []
     for segment in _without_parentheticals(cell).split("+"):
         text = segment.strip()
-        for event in _KNOWN_EVENTS:
-            if not text.startswith(event):
-                continue
-            rest = text[len(event):]
-            # The name has to END there too, or `Stopper` declares `Stop` and a
-            # typo like `PostToolUseFailureNote` declares the event it is a typo
-            # of — which is the drift this rule exists to catch, waved through.
-            if rest and (rest[0].isalnum() or rest[0] == "_"):
-                continue
-            found.add(event)
-            break
-    return found
+        if not text:
+            continue
+        segments.append((text, _leading_event(text)))
+    return segments
+
+
+def _leading_event(text: str) -> str | None:
+    """The event name a segment opens with, or None."""
+    for event in _KNOWN_EVENTS:
+        if not text.startswith(event):
+            continue
+        rest = text[len(event):]
+        # The name has to END there too, or `Stopper` declares `Stop` and a
+        # typo like `PostToolUseFailureNote` declares the event it is a typo
+        # of — which is the drift this rule exists to catch, waved through.
+        if rest and (rest[0].isalnum() or rest[0] == "_"):
+            continue
+        return event
+    return None
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
 
 _spec = importlib.util.spec_from_file_location(
@@ -2692,12 +2714,22 @@ def main() -> int:
             # stub sweep owns that direction; this rule only grades rows whose
             # hook the manifest registers.
             continue
-        cell_events = _event_tokens(trigger_cell)
-        if cell_events == expected:
+        segments = _cell_segments(trigger_cell)
+        cell_events = {event for _, event in segments if event is not None}
+        undeclared = [text for text, event in segments if event is None]
+        if cell_events == expected and not undeclared:
             continue
         absent_events = sorted(expected - cell_events)
         stray_events = sorted(cell_events - expected)
         cell_problems: list[str] = []
+        if undeclared:
+            # A misspelt event name is the case this catches: it declares
+            # nothing, so without this the cell can name every registered
+            # event, carry the typo alongside, and still compare equal.
+            cell_problems.append(
+                "has a segment declaring no registered event: "
+                + ", ".join(repr(t) for t in undeclared)
+            )
         if absent_events:
             cell_problems.append(f"missing {', '.join(absent_events)}")
         if stray_events:

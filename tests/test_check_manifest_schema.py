@@ -621,6 +621,33 @@ def test_a_nested_parenthetical_declares_nothing():
     }
 
 
+def test_a_segment_declaring_no_registered_event_is_surfaced():
+    # The escape this closes: name every expected event, then add a misspelt
+    # segment. `_event_tokens` drops it, the sets compare equal, and the cell
+    # passes while disagreeing with the manifest.
+    cell = "PostToolUse + PostToolUseFailure + PostToolUseFaliure"
+    assert check._event_tokens(cell) == {"PostToolUse", "PostToolUseFailure"}
+    assert [t for t, e in check._cell_segments(cell) if e is None] == [
+        "PostToolUseFaliure"
+    ]
+    # Controls: a correct cell and a matcher-carrying one surface nothing.
+    for clean in ("PostToolUse + PostToolUseFailure", "PreToolUse(Edit) + Stop"):
+        assert [t for t, e in check._cell_segments(clean) if e is None] == []
+
+
+def test_every_real_trigger_segment_opens_with_a_registered_event():
+    # The rule change above only holds if INDEX.md already writes cells this
+    # way — otherwise it turns correct rows red. Measured, not assumed.
+    index = (REPO_ROOT / "docs" / "hook" / "INDEX.md").read_text()
+    offenders = [
+        (cell.strip(), text)
+        for _, cell, _ in check._index_trigger_cells(index)
+        for text, event in check._cell_segments(cell)
+        if event is None
+    ]
+    assert offenders == [], offenders
+
+
 def test_review_by_and_observe_only_never_reach_hooks_json(manifest):
     rendered = json.dumps(build.expand_to_hooks_json(manifest))
     assert "review_by" not in rendered

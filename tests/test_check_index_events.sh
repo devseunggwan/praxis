@@ -268,7 +268,30 @@ case "$OUT" in
   *) run_case "retargeted_row_named" "no ($OUT)" "yes" ;;
 esac
 
-# 13. Restored tree passes.
+# 13. A cell that names every registered event and then adds a misspelt segment
+#     used to compare equal to the manifest and pass. The segment declares
+#     nothing, so without reporting it the typo is invisible to both directions.
+restore_index || exit 1
+python3 - "$INDEX" "$TARGET_HOOK" <<'TYPO'
+import sys
+path, hook = sys.argv[1], sys.argv[2]
+out = []
+for line in open(path).read().splitlines(keepends=True):
+    if f"[{hook}](" in line:
+        cells = line.split("|")
+        cells[2] = cells[2].rstrip() + " + PostToolUseFaliure "
+        line = "|".join(cells)
+    out.append(line)
+open(path, "w").write("".join(out))
+TYPO
+OUT="$(python3 "$CHECK" 2>&1)"
+run_case "typo_segment_nonzero" "$?" "1"
+case "$OUT" in
+  *"declaring no registered event"*"PostToolUseFaliure"*) run_case "typo_segment_named" "yes" "yes" ;;
+  *) run_case "typo_segment_named" "no ($OUT)" "yes" ;;
+esac
+
+# 14. Restored tree passes.
 restore_index || exit 1
 python3 "$CHECK" >/dev/null 2>&1
 run_case "restored_check_clean" "$?" "0"

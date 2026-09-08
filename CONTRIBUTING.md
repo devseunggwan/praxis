@@ -522,10 +522,10 @@ To regenerate after changing `manifests/*.json` or `VERSION`:
 `check-plugin-manifests.py` also verifies (a) every hook in
 `hooks/manifest.json` appears in `docs/hook/INDEX.md`, (b) every row for it
 names in its **Trigger** cell exactly the events the manifest registers —
-write the cell as a `+`-joined list whose segments each open with their
-event name, because an event counts only where it opens one; matchers,
-wrapper names and any prose after the name are not graded (Rule 29,
-issue #1376) — and (c) each hook spec's `Supported hosts:` line
+write the cell as a `+`-joined list in which **every** segment opens with a
+registered event name, because an event counts only where it opens one and a
+segment opening with anything else is reported; matchers, wrapper names and
+any prose after the name are not graded (Rule 29, issue #1376) — and (c) each hook spec's `Supported hosts:` line
 agrees with the `hosts` array in `hooks/manifest.json` (`all` = no `hosts`
 field; explicit list = exact set match).
 
