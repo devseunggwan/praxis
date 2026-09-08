@@ -5,7 +5,7 @@ when_to_use: Use when the user types "/praxis:bypass-report", or asks about "byp
 disable-model-invocation: true
 verified-against-runtime: true
 runtime-verified-at: 2026-09-08
-runtime-verified-note: "bypass-review (7.16.0 checkout, no --version flag) — `bypass --days 7` printed `Total events : 0` and exited 0; `fire-rate --days 7` printed `Hooks fired : 99 (12 coarse, 40 mixed)` with per-hook rows"
+runtime-verified-note: "CLI round-trip only, no /praxis: dispatch (installed build is 7.14.0) — bypass-review (7.16.0 checkout, no --version flag): `bypass --days 7` printed `Total events : 0` and exited 0; `fire-rate --days 7` printed `Hooks fired : 99 (12 coarse, 40 mixed)` with per-hook rows"
 ---
 
 # Praxis Bypass & Fire-Rate Report
