@@ -100,7 +100,7 @@ mutate_trigger "PostToolUseFailure (claude only, issue #1337)"
 OUT="$(python3 "$CHECK" 2>&1)"
 run_case "prefix_not_double_counted_nonzero" "$?" "1"
 case "$OUT" in
-  *"missing PostToolUse "*|*"missing PostToolUse —"*) run_case "prefix_not_double_counted_named" "yes" "yes" ;;
+  *"missing PostToolUse "*) run_case "prefix_not_double_counted_named" "yes" "yes" ;;
   *) run_case "prefix_not_double_counted_named" "no ($OUT)" "yes" ;;
 esac
 
