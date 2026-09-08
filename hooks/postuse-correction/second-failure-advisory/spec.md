@@ -2,9 +2,10 @@
 
 Supported hosts: claude
 
-`PostToolUseFailure` is raised by Claude Code only, so the single registration
-carries `hosts: ["claude"]`. The `PostToolUse` registration this hook also
-carried was removed once the parallel run ended (issue #1337) — history in
+`PostToolUseFailure` is raised by Claude Code only, so the single
+registration carries `hosts: ["claude"]`. The `PostToolUse` registration this
+hook also carried was removed once the parallel run ended, and the code that
+read its payload was deleted after it — history in
 [Registration history](#registration-history-issue-1337) below.
 
 `hooks/second-failure-advisory` is an advisory hook registered on
@@ -28,8 +29,8 @@ announces the repeat.
 ## Covered surface
 
 - Event: `PostToolUseFailure` (`claude` only, issue #1337). One manifest
-  entry. `impl.py` still branches on the payload's `hook_event_name`, so a
-  `PostToolUse` payload delivered by anything else is still read correctly.
+  entry. `impl.py` reads the payload's `hook_event_name` and returns on
+  anything else, an absent field included.
 - Matcher: `all tools` — the `hooks/manifest.json` entry carries no
   `matcher` key. An explicit list would drop, at the matcher stage, every
   repeated failure of a tool whose name is not enumerated (MCP tools,
@@ -39,8 +40,8 @@ announces the repeat.
 
 ### Why
 
-The `PostToolUse` sections below describe a payload that cannot say whether
-a Bash command failed. Quoting the #1096 finding they rest on:
+The hook was first registered on `PostToolUse`, whose payload cannot say
+whether a Bash command failed. Quoting the #1096 finding that path rested on:
 
 > Real Bash `tool_response` payloads carry no exit status and no error field
 > — verified as `{stdout, stderr, interrupted, isImage, noOutputExpected}`
@@ -50,9 +51,9 @@ a Bash command failed. Quoting the #1096 finding they rest on:
 > "error"`/`error` marker.
 
 Issue #1265 then found the failed calls arriving as strings rather than
-dicts and opened that road, but the road is an allowlist over undocumented
-harness text (`Error:` plus a space), which its own section says will fail
-silent the day the text changes.
+dicts and opened that road, but the road was an allowlist over undocumented
+harness text (`Error:` plus a space) that would fail silent the day the text
+changed.
 
 The harness ships an event for exactly this case. Per the Claude Code hooks
 reference (verified 2026-09-06), `PostToolUseFailure` "runs when a tool that
@@ -72,8 +73,10 @@ harness has already ruled.
 
 ### Decision, in order
 
-1. `hook_event_name != "PostToolUseFailure"` → the `PostToolUse` path below,
-   unchanged. An absent field is the pre-#1337 shape and takes that path.
+1. `hook_event_name != "PostToolUseFailure"` → not a failure report.
+   Silent, no state written. An absent or malformed field lands here: a
+   payload that does not name its event cannot be answered under one, since
+   the harness matches the reply's `hookEventName` against what it delivered.
 2. `is_interrupt: true` → **not a failure of the command**. The run was
    aborted before it could fail on its own; counting it would advise on the
    user's interruptions. Silent, no state written.
@@ -85,39 +88,34 @@ harness has already ruled.
    under it takes the command digest (`_command_discriminator`) so two
    commands dying the same way stay on separate pairs.
 
-### Why the two events share one pair key
+### Why the `Error:` envelope is stripped
 
 Signature material is the failure text with one leading `Error:` removed
-(`_signature_material`). The `PostToolUse` string carries the harness
-envelope — `Error: Exit code 1\n(eval):1: == not found` — and the
-`PostToolUseFailure` `error` field carries the same lines without it. They
-describe one failure, and a session whose failures reached this hook by
-alternating events would otherwise hold two counters at 1 and never advise.
-The prefix is dropped from the *material* only; the `PostToolUse` failure
-decision still reads it. `_BARE_EXIT_CODE_RE` therefore matches the
-unwrapped form (`^Exit code \d+$`) and covers both shapes with one pattern.
+(`_signature_material`). The event's `error` field does not carry that
+envelope — for Bash it opens `Exit code 1` — but a tool's own message can,
+and one failure written both ways must land on one pair key rather than hold
+two counters at 1 and never advise. `_BARE_EXIT_CODE_RE` therefore matches
+the unwrapped form (`^Exit code \d+$`).
 
-### Dedupe — one call, two events, one count
+### Dedupe — one call, one count
 
-While both registrations are live, one tool call can reach the hook twice.
-Each counted failure appends its `tool_use_id` to `recent_tool_use_ids` in
-the state file (bounded to the last 16, ordered), and an event whose id is
-already there returns before the count moves. The check sits inside the
-state lock, so two events for one call cannot both read "unseen". The first
-event to arrive counts and — from the second occurrence — advises; the
-second is silent, so the model's context receives one advisory per failure,
-not two. A bounded *window* rather than the single last id: parallel calls
-interleave (`A-post, B-post, A-fail`), and a last-id-only check would count
-`A` twice. Payloads without a `tool_use_id` (synthetic, pre-#1337 tests)
-skip the dedupe and count as before.
+One tool call can reach the hook more than once. Each counted failure
+appends its `tool_use_id` to `recent_tool_use_ids` in the state file
+(bounded to the last 16, ordered), and an event whose id is already there
+returns before the count moves. The check sits inside the state lock, so two
+deliveries of one call cannot both read "unseen". The first counts and —
+from the second occurrence — advises; the redelivery is silent, so the
+model's context receives one advisory per failure, not two. A bounded
+*window* rather than the single last id: parallel calls interleave (`A`,
+`B`, `A` again), and a last-id-only check would count `A` twice. Payloads
+without a `tool_use_id` skip the dedupe and count as before.
 
 ### Host filter
 
 The event is documented for Claude Code only, so the manifest entry carries
-`hosts: ["claude"]`; Codex and Cursor keep the `PostToolUse` registration
-alone. Rule 8 reads a hook's hosts from its **first** registration, which is
-the all-hosts `PostToolUse` one — hence `Supported hosts: all` in the header
-with the per-event note beneath it.
+`hosts: ["claude"]`, and Codex and Cursor register this hook not at all.
+Rule 8 reads a hook's hosts from its first registration, which is now that
+same entry — hence `Supported hosts: claude` in the header.
 
 ### Emitted event name
 
@@ -151,166 +149,25 @@ that run. What the removal rests on, and what it does not:
   rests on the reference and on the dedupe argument above, not on observation.
   Live verification is tracked separately.
 
-`impl.py`'s `tool_response` detection path is now unreachable through any
-registration. It is retained, not yet deleted: it is the larger half of this
-hook and its own tests, and removing it is a separate change.
-
-## Deciding what counts as a failure (`PostToolUse`)
-
-Everything in this section and the ones that follow — string allowlist,
-harness-noise filter, dict markers — applies to the `PostToolUse` path. The
-`PostToolUseFailure` path above needs none of it: the event is the verdict.
-
-`tool_response` arrives in two shapes, and **failures arrive as strings**
-(issue #1265).
-
-### String payload (issue #1265)
-
-A failed tool call is delivered as a plain string, not a dict. A full survey
-of 10,467 Bash `toolUseResult` records across 120 real session transcripts
-found 388 strings, **every one** with `tool_result.is_error == True`, and
-zero cases of a successful Bash call arriving as a string.
-
-The decision is an allowlist (`_string_failure_text`).
-
-- Starts with `Error:` plus a space → failure (`Error: Exit code N`,
-  `Error: Blocked: …`, `Error: Permission …`,
-  `Error: PreToolUse:Bash hook error: …`)
-- Exactly `User rejected tool use` → failure (no prefix, so matched by name)
-- `Error: result (…) exceeds maximum allowed tokens …` is **not** a failure.
-  It is the notice of a *successful* call whose result was spilled to a file
-  because it was large, and carries `is_error == False` (27 observed, all MCP
-  tools). Excluded by name.
-- Any other string (the empty string included) is treated as success — the
-  list is an allowlist, so a shape never observed as a failure cannot start
-  firing on its own.
-
-#### MCP tools: only harness-written strings count as failures (PR #1270)
-
-The hook payload carries **no** failure flag. `is_error` lives on the
-transcript's `tool_result` block and never reaches `tool_response`, so the
-decision reads shape, not text. Widening the survey to all 14,652
-`toolUseResult` records, **MCP is the only tool class** whose *successful*
-results arrive as bare strings.
-
-| Class | is_error=False | is_error=True |
-| --- | --- | --- |
-| Bash | dict 11,792 / str 0 | str 446 |
-| other built-in tools | dict 1,135 / str 0 | str 37 |
-| MCP | list 1,127 / **str 25** (all oversized-output notices) | str 90 |
-
-On the MCP channel, then, a leading `"Error: "` may be **the tool's own
-text** rather than the harness's failure envelope. A tool that succeeded
-while returning `Error: no rows found` accumulated state and produced a false
-advisory on the second call (case 19t-a). For MCP tools, therefore, only
-strings the harness itself wrote count as failures:
-
-- the `Error: PreToolUse:` / `Error: PostToolUse:` hook-error envelope
-  (case 19t-b)
-- the fixed sentence `User rejected tool use` (case 19t-c)
-
-Bash and the other built-in tools have zero cases of success arriving as a
-string, so their `"Error: "`-prefix decision is unchanged (case 19r).
-
-**Cost**: MCP failures that carry the tool's own error text
-(`Error: Error: query: …`, `Error: The operation timed out.`, and so on —
-about 50 of the 573 observed string failures) no longer produce an advisory.
-Narrowing the scope was chosen over growing an exclusion list one phrase at
-a time: a phrase list keeps trusting tool text, so the same defect would
-recur under a different phrase.
-
-This decision is made **before, and independently of,** the
-`tool_name == "Bash"` gate below. That gate exists because a *dict*
-payload's `stderr` cannot tell an exit-0 success from a failure (#1042 and
-#1096 were both dict + non-empty `stderr` on an exit-0 success), and a string
-payload has no `stderr` field to be ambiguous about. With both paths blocked,
-the result was silence: **135,030 fires, `decision: pass` 100%**.
-
-### This decision depends on the harness output format — re-measure (issue #1265)
-
-The `Error:`-plus-space prefix and `User rejected tool use` are **not a
-documented contract; they are the strings Claude Code actually emits**. If
-they change, the whole allowlist misses and the hook returns to
-**never firing** — the exact failure this issue set out to fix — and because
-the allowlist breaks in the safe direction (no fire), it looks identical the
-second time. The ledger shows only rising fire counts with zero advisories.
-
-So **if any string-payload test breaks, or fire counts rise with zero
-advisories, re-measure the format first**. The survey below is the one that
-produced the numbers above; its first column is tool, `is_error`, first
-line.
-
-```bash
-python3 - <<'PY'
-import collections, glob, json, os
-seen, files = set(), sorted(glob.glob(os.path.expanduser("~/.claude*/projects/*/*.jsonl")), key=os.path.getmtime, reverse=True)[:120]
-names, shape = {}, collections.Counter()
-for f in files:
-    for ln in open(f, errors="replace"):
-        try: o = json.loads(ln)
-        except Exception: continue
-        for b in (o.get("message") or {}).get("content") or []:
-            if not isinstance(b, dict): continue
-            if b.get("type") == "tool_use": names[b["id"]] = b.get("name")
-            if b.get("type") == "tool_result" and (o.get("uuid"), b.get("tool_use_id")) not in seen:
-                seen.add((o.get("uuid"), b.get("tool_use_id")))
-                t = o.get("toolUseResult")
-                if isinstance(t, str):
-                    shape[(names.get(b.get("tool_use_id")), bool(b.get("is_error")), t.split("\n")[0][:34])] += 1
-for (tool, err, head), n in shape.most_common(15):
-    print(f"{n:5d}  is_error={str(err):5s} {tool}  {head!r}")
-PY
-```
-
-Check: (1) do `is_error=True` strings still start with `Error:` plus a
-space; (2) have new `is_error=False` strings appeared beyond the
-oversized-output notice; (3) if there is a new failure phrase, update
-`_STRING_FAILURE_PREFIX` / `_STRING_REJECTION_TEXT` /
-`_STRING_OVERSIZED_OUTPUT_RE` and add a fixture to case 19.
-
-### Dict payload
-
-- `isError is True` → failure
-- `interrupted is True` → failure
-- `exit` present and not the integer 0 → failure
-- none of the above, and `error`/`stderr` holds non-empty text → failure
-  (`stderr` is judged after the harness-noise filter below)
-- a response with only `output`/`stdout` → success
-
-## Harness-noise filter (issue #1042)
-
-The `exit` key this hook assumed is absent from real Bash `tool_response`
-payloads. Verified against real session transcripts (`toolUseResult` of
-`Bash` tool uses in `~/.claude/projects/.../*.jsonl`), the actual shape is
-`{stdout, stderr, interrupted, isImage, noOutputExpected}` — no `exit`, no
-`isError`. Every Bash call therefore falls straight through to the
-`error`/`stderr` fallback, and this harness resets the shell cwd between
-calls while appending `"\nShell cwd was reset to <cwd>"` to `stderr` on every
-call, success or failure. That one line is not evidence of failure, but the
-fallback could not tell.
-
-- An exit-0 command whose `stderr` held only that line was counted as a
-  failure (68 fires in one real session; the last 5 in a row were all exit-0
-  commands).
-- After normalisation the sentence is the same string regardless of the
-  command, so unrelated calls converged on one `(tool_name, signature)` pair
-  and one fixed signature (`ede370078f51`) — confirmed as the identical hash
-  in 6 independent real-session state files.
-
-`_strip_harness_noise` removes that line (and only that line) from `stderr`
-before both the failure decision and the signature computation. Real content
-on other lines of the same `stderr` is preserved.
+The `tool_response` detection path was deleted after the registration, in
+its own change (issue #1366 item 3): the classifier, the string allowlist and
+the harness-noise filter went with it, along with the 16 test cases that
+exercised them. What survived is the signature path — normalisation, the
+command discriminator, the bare exit-code rule, Reference extraction — which
+every `PostToolUseFailure` still walks, and whose cases moved onto the event.
+The sections those deletions emptied are gone from this spec; what they
+recorded about #1042, #1096 and #1265 stays above, in this history.
 
 ## Signature derivation
 
-For a string payload the string itself is the signature material — it is the
-only evidence of failure, and this property is also what keeps two different
-string failures from merging into one pair (the shape of issue #1042
-defect 2).
+The `error` text is the signature material — it is the only evidence of
+failure the payload carries, and that is also what keeps two different
+failures from merging into one pair (the shape of issue #1042 defect 2).
 
-A single string, however, may carry no discriminating information at all:
-`Error: Exit code N` with no output (6 of the 388 observed) is byte-identical
-whichever command died. For that shape only (`_BARE_EXIT_CODE_RE`), the
+A single text, however, may carry no discriminating information at all:
+`Exit code N` with no output under it (6 of the 388 observed on the string
+surface this rule was measured on) is byte-identical whichever command
+died. For that shape only (`_BARE_EXIT_CODE_RE`), the
 `command` from `tool_input` is folded into the key as a **separate digest**
 (`_command_discriminator`). It is a field of the same payload being judged,
 so the signature does not depend on external state. Result: two different
@@ -356,18 +213,8 @@ distinct command has its own. Measured: 1,000 distinct commands produce
 and no eviction; per-session files are cleaned by the shared 7-day TTL in
 `hooks/_lib/_paths.py`, so accumulation is bounded to one session.
 
-A dict payload extracts its failure-text candidate in this order:
-
-1. `error`
-2. `stderr` (after the harness-noise filter)
-3. `output`
-4. `stdout`
-
-When extraction fails, the empty string is used and the failure key is
-adjusted. If `stderr` held only harness noise it becomes empty after the
-filter and the search falls through to `output`/`stdout`, so a failure whose
-real discriminating information is only in `stdout` (e.g. `interrupted:true`
-with noise-only `stderr`) still gets a per-command signature.
+An `error` that is empty after stripping normalises to `<empty>` and keys on
+that, so a failure the harness reported with no text still counts.
 
 To estimate "the same failure", the following tokens are normalised:
 
@@ -537,15 +384,7 @@ Required coverage:
 - a `Reference:` path in the failure text appears in the advisory and in the
   restatement instruction
 - non-failure / malformed input: fail-open
-- an exit-0 Bash call whose `stderr` is only the harness cwd-reset note:
-  silent across 5 repeats and no state file is created (issue #1042)
-- a genuine identical failure repeated with the same harness noise mixed into
-  `stderr`: still advises from the second occurrence (positive control —
-  the defect-1 fix did not neuter the hook)
-- two different failures with noise-only `stderr` and discriminating
-  information only in `stdout` get different signatures and separate
-  counters (issue #1042 defect 2)
-- output-less `Error: Exit code N` from two different commands: silent
+- output-less `Exit code N` from two different commands: silent
   (signature-collision guard); the same command failing the same way twice:
   still advises (issue #1265, cases 19g/19h — the latter is the former's
   control)
@@ -559,25 +398,19 @@ Required coverage:
 - two commands differing in shell-significant internal whitespace (newline,
   tab, a run of spaces inside quotes, NBSP): different keys → silent; the
   same command twice still advises (case 19s, both directions)
-- MCP tools: a *successful* text starting with `"Error: "` is silent; the
-  hook-error envelope and the rejection sentence still advise; the
-  oversized-output notice is silent (case 19t, both directions)
-- string payload: the same failure twice → advisory; two different string
-  failures → silent (signature separation); repeated `User rejected tool use`
-  → advisory; repeated oversized-output notice (`is_error:false`) → silent and
-  no state file; whitespace-only string → silent (issue #1265, case 19; every
-  fixture is captured verbatim from a real transcript)
+- the same failure text twice → advisory; two different failure texts →
+  silent (signature separation) (case 19; every fixture is captured verbatim
+  from a real transcript, with the `Error:` envelope the string surface
+  carried and the event's `error` field does not)
 - two processes running concurrently: without the lock an increment is lost;
   under the lock the count goes 1→2→3 and two advisories are emitted (2nd
   and 3rd) (`tests/test_hook_state_concurrency.py`)
 - `PostToolUseFailure` (issue #1337, case 20): the same Bash `Exit code 1`
   plus `npm ERR!` error twice → advisory on the second, with
   `hookEventName: "PostToolUseFailure"` (20a); `is_interrupt: true` → silent
-  and no state file (20b); one `tool_use_id` arriving via `PostToolUse` then
-  `PostToolUseFailure` → counted once, and the reverse order too (20c); a
-  non-Bash MCP tool's error string twice → advisory (20d); a `PostToolUse`
-  success payload with the field present → silent (20e, negative control);
-  a `PostToolUse` string failure and a `PostToolUseFailure` for the same
-  failure text, different ids → one pair, advisory on the second (20f);
-  non-string `error` → silent (20g); a bare `Exit code 1` from two different
-  commands → silent, same command → advisory (20h, both directions)
+  and no state file (20b); one `tool_use_id` delivered twice → counted once
+  (20c); a non-Bash MCP tool's error string twice → advisory (20d); a
+  `PostToolUse` payload → silent, no state (20e — the control on the event
+  guard, and the only case left that sends the retired event); non-string
+  `error` → silent (20g); a bare `Exit code 1` from two different commands →
+  silent, same command → advisory (20h, both directions)
