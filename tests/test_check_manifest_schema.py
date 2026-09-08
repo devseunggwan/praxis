@@ -521,6 +521,45 @@ def test_schema_events_enum_backs_rule29_event_vocabulary():
     assert len(check._KNOWN_EVENTS) == len(build.manifest_events_enum()) > 0
 
 
+@pytest.mark.parametrize(
+    "accessor, path",
+    [
+        ("manifest_events_enum", ("event",)),
+        ("manifest_hosts_enum", ("hosts", "items")),
+    ],
+)
+def test_a_missing_enum_node_names_itself_instead_of_raising_KeyError(
+    monkeypatch, accessor, path
+):
+    # `_KNOWN_EVENTS` binds at import time, before main()'s
+    # `manifest_schema_drifts()` gate can run, so a schema missing this node
+    # used to abort the checker's import with a bare KeyError — no file, no
+    # path, none of the location diagnostics the schema gate exists to give.
+    schema = copy.deepcopy(build.load_schema())
+    node = schema["properties"]["hooks"]["items"]["properties"]
+    for key in path:
+        node = node[key]
+    del node["enum"]
+    monkeypatch.setattr(build, "load_schema", lambda: schema)
+
+    with pytest.raises(ValueError) as excinfo:
+        getattr(build, accessor)()
+    message = str(excinfo.value)
+    assert "hooks/manifest.schema.json" in message
+    assert "/".join(("properties", "hooks", "items", "properties") + path + ("enum",)) in message
+
+
+def test_a_non_list_enum_is_a_named_diagnostic_too(monkeypatch):
+    # An empty or wrong-typed enum reaches the caller as a silently empty
+    # vocabulary, which makes Rule 29 grade nothing while still passing.
+    schema = copy.deepcopy(build.load_schema())
+    schema["properties"]["hooks"]["items"]["properties"]["event"]["enum"] = []
+    monkeypatch.setattr(build, "load_schema", lambda: schema)
+
+    with pytest.raises(ValueError, match="must be a non-empty array"):
+        build.manifest_events_enum()
+
+
 def test_the_checker_holds_no_second_copy_of_the_event_vocabulary():
     # The equality above is only a guard while the vocabulary stays derived:
     # re-introduce a literal tuple and it passes on the day it is written,

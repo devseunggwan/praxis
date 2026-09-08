@@ -438,10 +438,35 @@ def manifest_hosts_enum() -> list[str]:
     cross-checks the reverse direction (no stale enum value without a
     platform file).
     """
-    schema = load_schema()
-    return schema["properties"]["hooks"]["items"]["properties"]["hosts"][
-        "items"
-    ]["enum"]
+    return _hooks_property_enum("hosts", ("items",))
+
+
+def _hooks_property_enum(prop: str, subpath: tuple[str, ...] = ()) -> list[str]:
+    """One closed value set under hooks.items.properties, with checked access.
+
+    Raw indexing here reaches the schema BEFORE main()'s
+    `manifest_schema_drifts()` gate can run — `_KNOWN_EVENTS` binds at import
+    time — so a schema missing the node surfaced as a bare KeyError traceback,
+    which is precisely the diagnostic-free failure the gate exists to remove.
+    Same ValueError precedent as load_platform's checked access.
+    """
+    node = load_schema()
+    walked = ["properties", "hooks", "items", "properties", prop, *subpath, "enum"]
+    for i, key in enumerate(walked):
+        if not isinstance(node, dict) or key not in node:
+            at = "/".join(walked[:i] + [key])
+            raise ValueError(
+                f"hooks/manifest.schema.json: missing or non-object node at "
+                f"{at!r} — the {prop!r} enum is the single source for this "
+                "value set and cannot be read"
+            )
+        node = node[key]
+    if not isinstance(node, list) or not node:
+        raise ValueError(
+            f"hooks/manifest.schema.json: {'/'.join(walked)!r} must be a "
+            f"non-empty array, got {type(node).__name__}"
+        )
+    return node
 
 
 def manifest_events_enum() -> list[str]:
@@ -451,8 +476,7 @@ def manifest_events_enum() -> list[str]:
     prose (Rule 29's Trigger-cell check) cannot fall behind the schema and
     report a correctly documented new registration as drift.
     """
-    schema = load_schema()
-    return schema["properties"]["hooks"]["items"]["properties"]["event"]["enum"]
+    return _hooks_property_enum("event")
 
 
 def load_platform(platform_file: Path) -> dict:
