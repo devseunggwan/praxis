@@ -12,11 +12,19 @@ runtime-verified-note: "CLI round-trip only, no /praxis: dispatch (installed bui
 
 ## Overview
 
-The bypass-telemetry hook and the fire ledger write two JSONL families under
-`$PRAXIS_HOME/telemetry`, and praxis ships one CLI that reads them. Until this
+The bypass-telemetry hook and the fire ledger write two JSONL families, and
+praxis ships one CLI that reads them. Until this
 skill existed the CLI's only entry point was a `~/.local/bin` symlink that a
 person had to type, so the ledgers accumulated with no reachable reader — the
 data behind `docs/hook-prune-audit.md` (#713) included.
+
+**Where those files live is not a single path.** The ledger writers resolve it
+in precedence order (`hooks/_lib/_fire_ledger.py`): a `PRAXIS_*_TELEMETRY_FILE`
+override first, then `<checkout>/.praxis-dev-telemetry/` when the module sits
+inside a git checkout (#934), and only otherwise `$PRAXIS_HOME/telemetry`. So a
+praxis dev reads a different directory than a plugin user. Never name a
+directory from this list in the report — the CLI prints the one it actually
+read on its `Source :` line, and that line is the answer.
 
 **Core principle:** this skill is a viewer. It runs one read-only command and
 reports what came back; it never edits the ledgers and never decides what the
