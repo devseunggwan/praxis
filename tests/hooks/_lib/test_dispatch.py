@@ -1616,7 +1616,7 @@ def test_real_stop_group_keeps_strike_counter_standalone():
     names = [n for _r, n, _i in _dispatch.group_members("Stop", None, host="claude")]
     assert "strike-counter" not in names
     assert names[:2] == ["completion-verify", "retrospect-mix-check"]  # shell members
-    assert len(names) == 14
+    assert len(names) == 15
 
 
 # --------------------------------------------------------------------------- #

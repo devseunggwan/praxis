@@ -30,6 +30,7 @@ in [`../SECURITY.md`](../SECURITY.md).
 | `PRAXIS_HOOK_BYPASS_PARALLEL_MUTATION` | `parallel-gated-mutation-gate` | Skip the repeated-mutation check on a resolved parallel batch. Exact value `1` after stripping — `true` / `yes` / `0` leave the gate active |
 | `PRAXIS_HOOK_BYPASS_DELEGATION_CONTEXT` | `delegation-context-inject` | Skip the subagent shared-state isolation contract injection. Exact value `1` after stripping — `true` / `yes` / `0` leave the injection active |
 | `PRAXIS_HOOK_BYPASS_DESTRUCTIVE_BASH` | `destructive-bash-guard` | Skip the destructive-command guard |
+| `PRAXIS_HOOK_BYPASS_ROUTE_SIGNAL` | `bypass-route-signal` | Skip the bypass-route frequency meter. The hook emits nothing on any path, so setting this changes only whether the turn is counted — it silences no output and relaxes no gate |
 | `PRAXIS_HOOK_BYPASS_SKILL_GATE` | `skill-gate-commands` | Skip the skill-gated-command preflight |
 | `PRAXIS_HOOK_BYPASS_WORKTREE_GATE` | `worktree-edit-gate` | Skip the worktree-edit preflight |
 | `PRAXIS_HOOK_BYPASS_DECISION_CONSISTENCY_GATE` | `write-decision-consistency-gate` | Skip the Decisions-block consistency preflight |
@@ -143,6 +144,7 @@ in [`../SECURITY.md`](../SECURITY.md).
 | `PRAXIS_HOOK_ERROR_STDERR` | unset | shared — also print swallowed-exception note to stderr |
 | `PRAXIS_HOOK_ERROR_LOG_MAX_BYTES` | `5242880` | shared (`@fail_open`) — error-log rotation cap in bytes, `0` disables (#1282) |
 | `PRAXIS_BYPASS_TELEMETRY_FILE` | `~/.praxis/telemetry/bypass-events-<date>.jsonl` | `bypass-telemetry` |
+| `PRAXIS_BYPASS_ROUTE_SIGNAL_FILE` | `~/.praxis/telemetry/bypass-route-events-<date>.jsonl` | `bypass-route-signal` |
 | `PRAXIS_MEMORY_DIR` | memory store dir | `memory-hint`, `momentum-rule-retrieval-gate` |
 | `PRAXIS_GH_LABEL_CACHE_PATH` | `~/.praxis/cache/gh-label-cache.json` | `gh-label-verify` |
 | `PRAXIS_GH_LABEL_CACHE_TTL_SEC` | `300` | `gh-label-verify` |
