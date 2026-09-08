@@ -59,7 +59,7 @@ summarises what each root holds so a reader can judge its sensitivity.
 | `~/.praxis/state/`      | Durable state: strike counts and the reasons the agent declared for them; phantom-path dedup markers | `PRAXIS_STATE_DIR`, `PRAXIS_HOME`        |
 | `~/.praxis/cache/`      | Session-scoped flags, counters and dedup sets: detected intent, retrospect marker and candidate hints, Read-file path sets, approval-premise acks, poll-loop waiter registry, command-repetition stamps, `gh` field-name and label caches | `PRAXIS_HOME`; swept after `PRAXIS_CACHE_TTL_DAYS` (7) |
 | `~/.praxis/logs/`       | `hook-errors.jsonl` (hook name and Python traceback of a hook that failed open) and Stop-gate block logs (timestamp, session id, reason code) | `PRAXIS_HOOK_ERROR_LOG`, `PRAXIS_HOME`   |
-| `~/.praxis/telemetry/`  | The two local ledgers described under [Telemetry](#telemetry)                                        | `PRAXIS_*_TELEMETRY_FILE`, `PRAXIS_HOME` |
+| `~/.praxis/telemetry/`  | The three local ledgers described under [Telemetry](#telemetry)                                      | `PRAXIS_*_TELEMETRY_FILE`, `PRAXIS_HOME` |
 | `~/.praxis/docs/specs/` | Feature specs a person writes; praxis only reads them                                                | `PRAXIS_HOME`                            |
 
 `PRAXIS_HOME` relocates the whole tree. When the home directory is not
@@ -97,18 +97,22 @@ the hook's in-process execution. Third-party CLI privacy policies apply.
 ## Telemetry
 
 Praxis includes no analytics, no error reporting to a remote service, and no
-phone-home. It does keep two **local, append-only ledgers** under
+phone-home. It does keep three **local, append-only ledgers** under
 `~/.praxis/telemetry/`, so a reader who finds that directory should know what
 is in it:
 
-| Ledger                           | One line per                                   | Fields                                                      | Off switch                       |
-| -------------------------------- | ---------------------------------------------- | ----------------------------------------------------------- | -------------------------------- |
-| `fire-events-YYYY-MM-DD.jsonl`   | hook invocation                                | timestamp, hook name, role, decision (block/ask/advise/pass), granularity, session id, tool name | `PRAXIS_FIRE_TELEMETRY_DISABLE=1` |
-| `bypass-events-YYYY-MM-DD.jsonl` | tool call made while a `PRAXIS_*` bypass variable was set | timestamp, session id, tool name, the variables set, the first 200 characters of the command with leading `NAME=value` secrets redacted, result status | `PRAXIS_BYPASS_TELEMETRY_DISABLE=1` |
+| Ledger                                 | One line per                                                       | Fields                                                                                                                                                 | Off switch                          |
+| -------------------------------------- | ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------- |
+| `fire-events-YYYY-MM-DD.jsonl`         | hook invocation                                                    | timestamp, hook name, role, decision (block/ask/advise/pass), granularity, session id, tool name                                                       | `PRAXIS_FIRE_TELEMETRY_DISABLE=1`   |
+| `bypass-events-YYYY-MM-DD.jsonl`       | tool call made while a `PRAXIS_*` bypass variable was set          | timestamp, session id, tool name, the variables set, the first 200 characters of the command with leading `NAME=value` secrets redacted, result status | `PRAXIS_BYPASS_TELEMETRY_DISABLE=1` |
+| `bypass-route-events-YYYY-MM-DD.jsonl` | assistant turn whose final message carried bypass-route vocabulary | timestamp, session id, hook name, event, a `matched` flag — **no excerpt of the message**                                                              | `PRAXIS_HOOK_BYPASS_ROUTE_SIGNAL=1` |
 
 The fire ledger records no command text. The bypass ledger keeps a redacted,
-200-character prefix of the command so a bypass can be reviewed later; neither
-records file contents or transcript text. Files rotate daily, are gzipped on rollover, and are deleted after
+200-character prefix of the command so a bypass can be reviewed later. The
+bypass-route ledger records that a turn matched and nothing about what it said —
+a final assistant message is the least redactable thing in a session, so no
+excerpt is kept. None of the three records file contents or transcript text.
+Files rotate daily, are gzipped on rollover, and are deleted after
 `PRAXIS_TELEMETRY_RETENTION_DAYS` (default 30). Their only readers are the
 `bypass-review` CLI wrapper and the evidence-based audits under `docs/`, both
 of which run locally. See [`docs/bypass-telemetry.md`](docs/bypass-telemetry.md).
