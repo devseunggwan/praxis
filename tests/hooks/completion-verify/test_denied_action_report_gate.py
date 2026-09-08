@@ -23,6 +23,9 @@ def _load():
 
 gate = _load()
 
+_STRICT_ENV = "PRAXIS_DENIED_ACTION_STRICT"
+_BYPASS_ENV = "PRAXIS_DENIED_ACTION_BYPASS"
+
 
 def _rej(tool_use_id="toolu_1", tool_name="Bash", text="git push origin main"):
     return {"tool_use_id": tool_use_id, "tool_name": tool_name, "text": text}
@@ -193,6 +196,13 @@ def test_bodies_reference_the_spec():
 
 def _run(payload, env=None, tmp_path=None):
     e = dict(os.environ)
+    # Drop the gate's own knobs before applying `env`. Measured: with STRICT=1
+    # inherited the advisory test fails on the missing `systemMessage` key, and
+    # with BYPASS=1 that test and the strict one both fail on empty stdout — so
+    # the leak turns working code red rather than hiding a defect. Unreproducible
+    # failures cost a debugging session either way.
+    e.pop(_STRICT_ENV, None)
+    e.pop(_BYPASS_ENV, None)
     if tmp_path is not None:
         e["PRAXIS_FIRE_TELEMETRY_FILE"] = str(tmp_path / "fires.jsonl")
     e.update(env or {})
@@ -328,6 +338,9 @@ def test_e2e_advisory_fires_on_a_silent_report(tmp_path):
     out = json.loads(proc.stdout)
     assert "systemMessage" in out
     assert "Bash" in out["systemMessage"]
+    # The tier is part of the claim: a default run that blocked would also carry
+    # a body, so asserting the body alone cannot tell advisory from block.
+    assert out.get("decision") != "block"
 
 
 def test_e2e_strict_escalates_to_block(tmp_path):
