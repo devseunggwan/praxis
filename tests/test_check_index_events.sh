@@ -151,7 +151,20 @@ case "$OUT" in
   *) run_case "duplicate_row_named" "no ($OUT)" "yes" ;;
 esac
 
-# 8. Restored tree passes.
+# 8. A name the event is only a PREFIX of does not declare it. Matching on
+#    "the segment opens with this event" alone accepted `PostToolUseFailureNote`
+#    as `PostToolUseFailure`, so a typo would have declared the event it is a
+#    typo of — the drift this rule exists to catch, waved through.
+cp "$BACKUP" "$INDEX"
+mutate_trigger "PostToolUse + PostToolUseFailureNote"
+OUT="$(python3 "$CHECK" 2>&1)"
+run_case "near_match_is_not_the_event_nonzero" "$?" "1"
+case "$OUT" in
+  *"INDEX EVENTS"*"missing PostToolUseFailure"*) run_case "near_match_is_not_the_event_named" "yes" "yes" ;;
+  *) run_case "near_match_is_not_the_event_named" "no ($OUT)" "yes" ;;
+esac
+
+# 9. Restored tree passes.
 cp "$BACKUP" "$INDEX"
 python3 "$CHECK" >/dev/null 2>&1
 run_case "restored_check_clean" "$?" "0"

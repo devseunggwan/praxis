@@ -251,9 +251,16 @@ def _event_tokens(cell: str) -> set[str]:
     for segment in _PARENTHETICAL_RE.sub(" ", cell).split("+"):
         text = segment.strip()
         for event in _KNOWN_EVENTS:
-            if text.startswith(event):
-                found.add(event)
-                break
+            if not text.startswith(event):
+                continue
+            rest = text[len(event):]
+            # The name has to END there too, or `Stopper` declares `Stop` and a
+            # typo like `PostToolUseFailureNote` declares the event it is a typo
+            # of — which is the drift this rule exists to catch, waved through.
+            if rest and (rest[0].isalnum() or rest[0] == "_"):
+                continue
+            found.add(event)
+            break
     return found
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
 
