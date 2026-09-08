@@ -6,16 +6,16 @@ Skills are orchestrators with pluggable steps; external integrations (issue trac
 
 ## Documentation map
 
-| File                                                               | Purpose                                                                                                                                                 |
-| ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [`ETHOS.md`](ETHOS.md)                                             | Why praxis exists — the values that gate every skill, hook, and manifest; [Autonomy vs Convention](ETHOS.md#autonomy-vs-convention) boundary table      |
-| [`DESIGN.md`](DESIGN.md)                                           | How hooks are built — structural-tokenization, session_id keying, compound-bash-cascade, ordering, and add-a-new-hook flow                              |
-| [`ARCHITECTURE.md`](ARCHITECTURE.md)                               | Skill/hook/manifest dependency graph — provider routing, hook index, multi-platform packaging                                                           |
-| [`RUNTIME_CONSTRAINTS.md`](RUNTIME_CONSTRAINTS.md)                 | Fixed Claude Code runtime limits every skill must respect                                                                                               |
-| [`CONTRIBUTING.md`](CONTRIBUTING.md)                               | Skill/hook contribution conventions, live-runtime verification gate, local development setup                                                            |
-| [`docs/spec-store.md`](docs/spec-store.md)                         | Feature-spec convention — specs at `~/.praxis/docs/specs/NNNN-slug.md` (`PRAXIS_HOME`-relocated, outside any checkout); when one is required or skipped |
-| [`docs/hook-prune-audit.md`](docs/hook-prune-audit.md)             | Keep/merge/drop verdict per hook, scored from the fire-rate ledger (issue #713)                                                                         |
-| [`docs/retrospect-prune-audit.md`](docs/retrospect-prune-audit.md) | Same lens on retrospect's gates/fences/stages, scored from retrospective transcript mining (issue #776)                                                 |
+| File | Purpose |
+| ---- | ------- |
+| [`ETHOS.md`](ETHOS.md) | Why praxis exists; [Autonomy vs Convention](ETHOS.md#autonomy-vs-convention) boundary |
+| [`DESIGN.md`](DESIGN.md) | How hooks are built; add-a-new-hook flow |
+| [`ARCHITECTURE.md`](ARCHITECTURE.md) | Skill/hook/manifest graph; provider routing |
+| [`RUNTIME_CONSTRAINTS.md`](RUNTIME_CONSTRAINTS.md) | Claude Code runtime limits |
+| [`CONTRIBUTING.md`](CONTRIBUTING.md) | Contribution conventions; local setup |
+| [`docs/spec-store.md`](docs/spec-store.md) | Feature-spec convention |
+| [`docs/hook-prune-audit.md`](docs/hook-prune-audit.md) | Keep/merge/drop verdict per hook |
+| [`docs/retrospect-prune-audit.md`](docs/retrospect-prune-audit.md) | Same lens on retrospect |
 
 ## Prerequisites
 
