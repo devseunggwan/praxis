@@ -31,9 +31,11 @@ is also silent on a freshly-cut branch where the rebase would be a no-op. All
 probes are local reads; nothing here touches the network.
 
 The `review` predicate stands down when `praxis:codex-review-wrap` is missing
-too. That case already belongs to `block-commit-without-codex-review`, which
-denies the call outright — adding a second message to a turn that is being
-blocked anyway buys nothing and spends the advisory's credibility.
+*and* the sibling gate is on its blocking tier. That case belongs to
+`block-commit-without-codex-review`, which denies the call outright — adding a
+second message to a turn that is being blocked anyway buys nothing and spends
+the advisory's credibility. On a demoted tier nothing denies the commit, so
+the suppression would silence the one advisory this hook exists to emit.
 
 Exits 0 always. `PRAXIS_UNENFORCED_STEP_STRICT=1` converts a fire into a hard
 block (exit 2) for a session that wants the stronger signal;
@@ -42,6 +44,7 @@ block (exit 2) for a session that wants the stronger signal;
 from __future__ import annotations
 
 import os
+import shutil
 import sys
 import sys as _sys
 from pathlib import Path as _Path
@@ -80,6 +83,7 @@ _HOOK_NAME = "unenforced-step-advisory"
 
 _REVIEW_AGENT = "code-reviewer"
 _CODEX_SKILL = "praxis:codex-review-wrap"
+_CODEX_STRICT_ENV = "PRAXIS_CODEX_REVIEW_STRICT"
 
 # Consulted in this order when `origin/HEAD` is unset, matching the repo's own
 # branch-base preference (praxis cuts every branch from main).
@@ -347,6 +351,35 @@ _TRIGGER_FACTS = {
     "in-flight": frozenset({"open_pr_scan"}),
 }
 
+
+def _codex_gate_blocks() -> bool:
+    """True when `block-commit-without-codex-review` denies this commit.
+
+    Mirrors that gate's capability tiering (#1187): an explicit
+    `PRAXIS_CODEX_REVIEW_STRICT` wins both ways, and otherwise the codex
+    binary on PATH is the attestation. Read here rather than imported so the
+    two hooks stay independently loadable; the contract lives in that gate's
+    spec and this probe has to move with it.
+    """
+    strict = os.environ.get(_CODEX_STRICT_ENV, "").strip()
+    if strict:
+        return strict != "0"
+    return shutil.which("codex") is not None
+
+
+def _wanted_facts(trigger: str) -> frozenset:
+    """Facts `trigger` consumes, minus the ones the live gate tier makes moot.
+
+    `codex_review` only ever justifies silence, and only while the sibling
+    gate blocks the commit on its own. On a demoted tier the answer changes
+    nothing, so the fact is dropped and its `"Skill"` line scan is not paid
+    for either.
+    """
+    wanted = _TRIGGER_FACTS[trigger]
+    if trigger == "review" and not _codex_gate_blocks():
+        return wanted - {"codex_review"}
+    return wanted
+
 # `gh pr list` defaults to open. Both spellings have to be read: skipping the
 # short one lets `gh pr list -s merged` clear the in-flight predicate, and a
 # `--state merged` enumeration is the exact miss the issue records.
@@ -509,7 +542,7 @@ def _scan_session(transcript_path: str, trigger: str, session_id=None) -> _Sessi
     `in-flight` cursor past them. Without a `session_id` the scan runs
     without persistence, under the same per-call budget.
     """
-    facts = _SessionFacts(_TRIGGER_FACTS[trigger])
+    facts = _SessionFacts(_wanted_facts(trigger))
     if facts.settled():
         return facts  # this trigger reads nothing from the transcript
 
@@ -671,7 +704,9 @@ def main() -> int:
         return 0
 
     if trigger == "review":
-        if facts.review_agent or not facts.codex_review:
+        if facts.review_agent:
+            return 0
+        if facts.wants("codex_review") and not facts.codex_review:
             return 0
         return _advise(
             "content commit → oh-my-claudecode:code-reviewer (MANDATORY)",
