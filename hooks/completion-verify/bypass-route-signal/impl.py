@@ -117,10 +117,16 @@ _BYPASS_ENV = "PRAXIS_HOOK_BYPASS_ROUTE_SIGNAL"
 # dropped before anything else runs, so relaying either one cannot register as
 # an originated route — while a paragraph that relays AND originates keeps its
 # other lines and still counts.
+#
+# The `VAR=1` tail is what makes this a carve-out rather than a blind spot: a
+# line reading `Bypass: 권한 규칙을 추가하면 됩니다` is an originated route that
+# merely opens with the word, and stripping it would delete the one shape this
+# hook exists to count.
 # ---------------------------------------------------------------------------
 _RELAY_LINE_RE = re.compile(
-    r"^.*\bBypass\b\s*(?:\(if truly needed\))?\s*:.*$",
-    re.MULTILINE | re.IGNORECASE,
+    r"^.*(?<![A-Za-z])(?i:Bypass)(?:\s*\(if truly needed\))?\s*:\s*"
+    r"[A-Z][A-Z0-9_]*=1(?![A-Za-z0-9_]).*$",
+    re.MULTILINE,
 )
 
 

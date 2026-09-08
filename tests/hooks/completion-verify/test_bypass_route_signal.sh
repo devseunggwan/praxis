@@ -144,6 +144,15 @@ build_transcript "Bypass (if truly needed): PRAXIS_HOOK_BYPASS_FOO=1 with a reas
 아니면 권한 규칙을 추가해서 아예 안 걸리게 할 수도 있습니다."
 run_case recorded "relay-plus-origination-still-counted"
 
+# An originated route that merely OPENS with the word: no `VAR=1` follows the
+# colon, so it is not one of the two generated shapes and must still count.
+# A carve-out keyed on the word alone would swallow exactly this line.
+build_transcript "Bypass: 권한 규칙을 추가하면 훅이 더 이상 안 걸립니다."
+run_case recorded "bypass-prefixed-origination-still-counted"
+
+build_transcript "Bypass: you could add a permission rule and the gate stops firing."
+run_case recorded "bypass-prefixed-origination-en-still-counted"
+
 # =====================================================================
 # Conjunction — neither half fires alone
 # =====================================================================
@@ -217,7 +226,7 @@ fi
 # the `recorded` cases are what rule that out — same helper, same ledger
 # shape, non-zero answer. Named here so the control is not merely implicit.
 # =====================================================================
-echo "NOTE  telemetry-read positive control: the 8 'recorded' cases above use the"
+echo "NOTE  telemetry-read positive control: the 10 'recorded' cases above use the"
 echo "NOTE  same reader as every 'quiet' case and return 1, so an empty read is"
 echo "NOTE  a measured absence rather than a broken query."
 
