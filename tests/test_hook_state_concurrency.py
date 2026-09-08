@@ -551,6 +551,80 @@ def test_jq_config_staging_file_is_unlinked_on_failure(tmp_path, monkeypatch):
     assert list(tmp_path.iterdir()) == [], "staging file survived a failed replace"
 
 
+# The same deterministic pair for the two locked writers that kept the shared
+# `<path>.tmp` name until issue #1383. The race arms above cannot stand in for
+# these: at N=16 the corruption they look for showed 0 in 100 unpatched trials,
+# so a regression to the shared name passes them on almost every run. What one
+# process can overwrite under another's feet is the staging NAME, so that is
+# what gets asserted.
+@pytest.mark.parametrize(
+    "impl_path,save_fn,state_name,payloads",
+    [
+        (
+            _MD_ESCAPE_IMPL,
+            "save_history",
+            "md-read-history-race-session.json",
+            [{"read": ["/tmp/alpha.md"]}, {"read": ["/tmp/beta.md"]}],
+        ),
+        (
+            _SECOND_FAILURE_IMPL,
+            "_save_state",
+            "second-failure-advisory-race-session.json",
+            [{"failures": {"Bash\0a": 1}}, {"failures": {"Bash\0b": 1}}],
+        ),
+    ],
+    ids=["md-read-history", "second-failure"],
+)
+def test_locked_writer_staging_name_is_per_process(
+    tmp_path, monkeypatch, impl_path, save_fn, state_name, payloads
+):
+    impl = _load_impl(impl_path)
+    staged: list[str] = []
+    real_replace = os.replace
+
+    def _recording_replace(src, dst):
+        staged.append(str(src))
+        real_replace(src, dst)
+
+    monkeypatch.setattr(os, "replace", _recording_replace)
+    state = tmp_path / state_name
+
+    monkeypatch.setattr(os, "getpid", lambda: 4242)
+    getattr(impl, save_fn)(str(state), payloads[0])
+    monkeypatch.setattr(os, "getpid", lambda: 5353)
+    getattr(impl, save_fn)(str(state), payloads[1])
+
+    assert len(staged) == 2
+    assert staged[0] != staged[1], "both processes staged through one filename"
+    assert json.loads(state.read_text(encoding="utf-8")) == payloads[1]
+
+
+@pytest.mark.parametrize(
+    "impl_path,save_fn,state_name,payload",
+    [
+        (_MD_ESCAPE_IMPL, "save_history", "md-read-history-race-session.json",
+         {"read": ["/tmp/alpha.md"]}),
+        (_SECOND_FAILURE_IMPL, "_save_state",
+         "second-failure-advisory-race-session.json", {"failures": {"Bash\0a": 1}}),
+    ],
+    ids=["md-read-history", "second-failure"],
+)
+def test_locked_writer_staging_file_is_unlinked_on_failure(
+    tmp_path, monkeypatch, impl_path, save_fn, state_name, payload
+):
+    impl = _load_impl(impl_path)
+
+    def _failing_replace(src, dst):
+        raise OSError("replace failed")
+
+    monkeypatch.setattr(os, "replace", _failing_replace)
+    state = tmp_path / state_name
+    assert getattr(impl, save_fn)(str(state), payload) is False
+
+    assert not state.exists()
+    assert list(tmp_path.iterdir()) == [], "staging file survived a failed replace"
+
+
 # ---------------------------------------------------------------------------
 # Q0 re-grade of the unlocked `resolve_cache_file` consumers (issue #1034)
 # ---------------------------------------------------------------------------
