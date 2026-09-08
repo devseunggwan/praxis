@@ -444,6 +444,17 @@ def manifest_hosts_enum() -> list[str]:
     ]["enum"]
 
 
+def manifest_events_enum() -> list[str]:
+    """The closed `event` value set declared in hooks/manifest.schema.json.
+
+    Single source for valid event names, so that a rule reading them out of
+    prose (Rule 29's Trigger-cell check) cannot fall behind the schema and
+    report a correctly documented new registration as drift.
+    """
+    schema = load_schema()
+    return schema["properties"]["hooks"]["items"]["properties"]["event"]["enum"]
+
+
 def load_platform(platform_file: Path) -> dict:
     """Parse one manifests/platforms/*.json declaration with checked access.
 

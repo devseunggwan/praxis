@@ -24,6 +24,7 @@ import copy
 import importlib.util
 import io
 import json
+import re
 from contextlib import redirect_stdout
 from datetime import date
 from pathlib import Path
@@ -507,6 +508,32 @@ def test_main_reports_overdue_once_the_clock_passes_review_by(monkeypatch):
     assert rc == 1
     assert "REVIEW_BY OVERDUE" in out
     assert "docs/hook-prune-audit.md" in out
+
+
+# ---------------------------------------------------------------------------
+# events enum — Rule 29's event vocabulary is derived, not restated
+# ---------------------------------------------------------------------------
+
+def test_schema_events_enum_backs_rule29_event_vocabulary():
+    assert set(check._KNOWN_EVENTS) == set(build.manifest_events_enum())
+    # A set equality alone would also hold if both sides were empty, and an
+    # empty vocabulary makes Rule 29 silently grade nothing.
+    assert len(check._KNOWN_EVENTS) == len(build.manifest_events_enum()) > 0
+
+
+def test_the_checker_holds_no_second_copy_of_the_event_vocabulary():
+    # The equality above is only a guard while the vocabulary stays derived:
+    # re-introduce a literal tuple and it passes on the day it is written,
+    # then goes stale the next time the schema gains an event. So the source
+    # shape is asserted too. `CLAUDE_ONLY_EVENTS` is deliberately still a
+    # literal — it states a different fact (which events Claude alone raises),
+    # not a copy of the vocabulary — so the check is scoped to the binding.
+    src = (REPO_ROOT / "scripts" / "check-plugin-manifests.py").read_text()
+    assert "_KNOWN_EVENTS = tuple(_build.manifest_events_enum())" in src
+    assert re.search(r"^_KNOWN_EVENTS\s*=\s*\(", src, re.M) is None, (
+        "the event vocabulary is spelled out in the checker again — it has to "
+        "come from the schema, not a second copy"
+    )
 
 
 def test_review_by_and_observe_only_never_reach_hooks_json(manifest):

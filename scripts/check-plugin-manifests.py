@@ -186,21 +186,6 @@ CLAUDE_ONLY_EVENTS = (
     "SubagentStart",
 )
 
-# Every event name the manifest schema allows. Rule 29 reads INDEX.md's Trigger
-# cell for these. Order is presentational: `PostToolUse` is a prefix of
-# `PostToolUseFailure`, but what stops the shorter name from matching is the
-# token-boundary check in `_event_tokens`, not the position in this tuple.
-_KNOWN_EVENTS = (
-    "PostToolUseFailure",
-    "PostToolBatch",
-    "SubagentStart",
-    "SubagentStop",
-    "UserPromptSubmit",
-    "SessionStart",
-    "PreToolUse",
-    "PostToolUse",
-    "Stop",
-)
 _INDEX_ROW_RE = re.compile(
     r"^\|\s*\[[^\]]*\]\(\.\./\.\./hooks/[^/]+/(?P<name>[^/)]+)/spec\.md\)\s*"
     r"\|(?P<trigger>[^|]*)\|"
@@ -270,6 +255,15 @@ _spec = importlib.util.spec_from_file_location(
 assert _spec and _spec.loader
 _build = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_build)
+
+# Derived, not restated: a hand-kept copy of the schema enum drifts silently in
+# the one direction that matters, since Rule 29 would put a newly allowed event
+# in `expected` while `_event_tokens` could not find it in INDEX.md — reporting
+# a correctly documented registration as missing. Read after `_build` loads,
+# which is why this sits here rather than beside `_INDEX_ROW_RE`. Order is
+# presentational; the token-boundary check in `_event_tokens` is what keeps
+# `PostToolUse` from matching inside `PostToolUseFailure`.
+_KNOWN_EVENTS = tuple(_build.manifest_events_enum())
 
 # ADR-0002 (#617): the runtime dispatch resolver. Rule 14 cross-checks that the
 # build collapse (filter_hooks_for_host → committed hooks.json) and the runtime
