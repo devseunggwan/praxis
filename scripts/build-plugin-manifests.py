@@ -466,6 +466,14 @@ def _hooks_property_enum(prop: str, subpath: tuple[str, ...] = ()) -> list[str]:
             f"hooks/manifest.schema.json: {'/'.join(walked)!r} must be a "
             f"non-empty array, got {type(node).__name__}"
         )
+    bad = [v for v in node if not isinstance(v, str)]
+    if bad:
+        raise ValueError(
+            f"hooks/manifest.schema.json: {'/'.join(walked)!r} holds a "
+            f"non-string value ({bad[0]!r}) — every element is a name callers "
+            "compare against, and one that is not a string reaches them "
+            "unchecked and fails far from here"
+        )
     return node
 
 

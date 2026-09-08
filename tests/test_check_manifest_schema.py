@@ -560,6 +560,19 @@ def test_a_non_list_enum_is_a_named_diagnostic_too(monkeypatch):
         build.manifest_events_enum()
 
 
+def test_a_non_string_enum_element_is_a_named_diagnostic_too(monkeypatch):
+    # The length and emptiness checks let `[None, "Stop"]` through, and the
+    # value then travels to `_event_tokens`, where `startswith` raises a
+    # TypeError at the checker's IMPORT — a bare traceback naming neither the
+    # schema nor the key, which is the failure this accessor exists to replace.
+    schema = copy.deepcopy(build.load_schema())
+    schema["properties"]["hooks"]["items"]["properties"]["event"]["enum"] = [None, "Stop"]
+    monkeypatch.setattr(build, "load_schema", lambda: schema)
+
+    with pytest.raises(ValueError, match="holds a non-string value"):
+        build.manifest_events_enum()
+
+
 def test_the_checker_holds_no_second_copy_of_the_event_vocabulary():
     # The equality above is only a guard while the vocabulary stays derived:
     # re-introduce a literal tuple and it passes on the day it is written,
