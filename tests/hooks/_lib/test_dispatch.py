@@ -129,6 +129,7 @@ SUBAGENT_STOP_MEMBERS = (
     "completion-signal-gate",
     "merge-state-claim-gate",
     "joint-liability-attribution-gate",
+    "denied-action-report-gate",
 )
 EDIT_NOTEBOOK_WRITE_MEMBERS = {
     "protected-paths-guard",
@@ -1615,7 +1616,7 @@ def test_real_stop_group_keeps_strike_counter_standalone():
     names = [n for _r, n, _i in _dispatch.group_members("Stop", None, host="claude")]
     assert "strike-counter" not in names
     assert names[:2] == ["completion-verify", "retrospect-mix-check"]  # shell members
-    assert len(names) == 13
+    assert len(names) == 14
 
 
 # --------------------------------------------------------------------------- #

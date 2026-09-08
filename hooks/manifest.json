@@ -1417,6 +1417,33 @@
       }
     },
     {
+      "name": "denied-action-report-gate",
+      "role": "completion-verify",
+      "event": "Stop",
+      "timeout": 10,
+      "review_by": "2026-12-04",
+      "mode": {
+        "strict_env": "PRAXIS_DENIED_ACTION_STRICT",
+        "bypass_env": [
+          "PRAXIS_DENIED_ACTION_BYPASS"
+        ]
+      }
+    },
+    {
+      "name": "denied-action-report-gate",
+      "role": "completion-verify",
+      "event": "SubagentStop",
+      "hosts": [
+        "claude"
+      ],
+      "timeout": 10,
+      "mode": {
+        "bypass_env": [
+          "PRAXIS_DENIED_ACTION_BYPASS"
+        ]
+      }
+    },
+    {
       "name": "strike-counter",
       "role": "completion-verify",
       "body": "impl.sh",

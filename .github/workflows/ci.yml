@@ -121,7 +121,13 @@ jobs:
 
   test:
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    # 15 was not headroom, it was the wall: the suite ran 13m13s and 13m41s on
+    # the two PRs before this one, then hit 15m16s and was cancelled the moment
+    # a branch carried two hooks' tests at once. The shell suite spawns a
+    # process per case, so every added hook buys minutes, not seconds. This
+    # buys room; the fix is to split the shell suite into its own job so it
+    # runs beside the python one instead of after it.
+    timeout-minutes: 25
     steps:
       # fetch-depth:0 — what needs it is run-tests.sh's markdownlint step: it
       # diffs against `git merge-base HEAD origin/main` to lint only the
