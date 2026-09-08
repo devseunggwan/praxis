@@ -27,7 +27,7 @@ runs `bypass-review`.
 
 | Binary          | Source                               | Purpose                                                                                                                                                     |
 | --------------- | ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `bypass-review` | `skills/bypass-review/bypass-review` | Review bypass-telemetry event logs written by the bypass-telemetry hook — aggregate and inspect JSONL records (run via `/praxis:bypass-report`)             |
+| `bypass-review` | `skills/bypass-review/bypass-review` | Review both local ledger families — bypass-telemetry events and the hook fire-rate ledger — as aggregated JSONL records (run via `/praxis:bypass-report`)   |
 
 ### Install / refresh CLI symlinks
 
