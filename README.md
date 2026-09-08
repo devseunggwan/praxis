@@ -127,7 +127,7 @@ promoted into blocking:
 | Role | Count | What it does |
 | ------ | ------- | -------------- |
 | `preflight-gate` | 37 | Inspects a tool call before it runs and can deny it |
-| `completion-verify` | 15 | Fires at `Stop` — can block a response that claims completion without evidence |
+| `completion-verify` | 15 | Fires at `Stop`; selected hooks also run at `SubagentStop` — can block a response that claims completion without evidence |
 | `advisory-nudge` | 44 | Prints a warning to stderr and lets the call through — 18 read a `PRAXIS_*_STRICT` variable that makes them stop the call instead |
 | `postuse-correction` | 5 | Reacts after a tool call — telemetry, follow-up signals |
 
