@@ -50,8 +50,24 @@ if ! grep -q "^| \[$TARGET_HOOK\]" "$INDEX"; then
 fi
 
 BACKUP="$(mktemp)" || exit 1
-cp "$INDEX" "$BACKUP"
-trap 'cp "$BACKUP" "$INDEX"; rm -f "$BACKUP"' EXIT
+# `set +e` is on, so an unchecked copy here fails silently and the EXIT trap
+# then restores an EMPTY backup over a tracked file. Both directions are
+# checked, and the backup is removed only once the restore succeeded.
+if ! cp "$INDEX" "$BACKUP"; then
+  echo "FAIL  [backup_created] expected=yes got=no (could not copy $INDEX)"
+  rm -f "$BACKUP"
+  exit 1
+fi
+restore_index() {
+  if ! cp "$BACKUP" "$INDEX"; then
+    echo "FAIL  [index_restored] expected=yes got=no — $INDEX is left mutated;"
+    echo "      the backup is kept at $BACKUP. Restore it by hand, or"
+    echo "      \`git checkout -- $INDEX\`."
+    return 1
+  fi
+  return 0
+}
+trap 'restore_index && rm -f "$BACKUP"' EXIT
 
 mutate_trigger() {
   # Rewrite the Trigger cell (2nd column) of the target row.
@@ -84,7 +100,7 @@ esac
 # 3. A row naming an event the manifest does not register fails too — the
 #    reverse direction, which a one-way "is every event mentioned" check
 #    would miss.
-cp "$BACKUP" "$INDEX"
+restore_index || exit 1
 mutate_trigger "PostToolUse + PostToolUseFailure + SessionStart (claude only)"
 OUT="$(python3 "$CHECK" 2>&1)"
 run_case "extra_event_nonzero" "$?" "1"
@@ -96,7 +112,7 @@ esac
 # 4. PostToolUse is a prefix of PostToolUseFailure. A cell naming only the
 #    longer event must NOT also read as the shorter one — otherwise the rule
 #    would silently accept a row that dropped PostToolUse.
-cp "$BACKUP" "$INDEX"
+restore_index || exit 1
 mutate_trigger "PostToolUseFailure (claude only, issue #1337)"
 OUT="$(python3 "$CHECK" 2>&1)"
 run_case "prefix_not_double_counted_nonzero" "$?" "1"
@@ -107,7 +123,7 @@ esac
 
 # 5. Matchers and prose around the event names are not graded: the same event
 #    set written with a matcher and extra notes still passes.
-cp "$BACKUP" "$INDEX"
+restore_index || exit 1
 mutate_trigger "PostToolUse(Bash) + PostToolUseFailure — see issue #1337 and the operating matrix"
 python3 "$CHECK" >/dev/null 2>&1
 run_case "matchers_and_prose_ignored" "$?" "0"
@@ -116,7 +132,7 @@ run_case "matchers_and_prose_ignored" "$?" "0"
 #    registration change in words, and those words are not a registration —
 #    scanning the whole cell read them as one and failed the row as naming an
 #    unregistered event.
-cp "$BACKUP" "$INDEX"
+restore_index || exit 1
 mutate_trigger "PostToolUse + PostToolUseFailure — SessionStart was never registered for this hook"
 OUT="$(python3 "$CHECK" 2>&1)"
 run_case "prose_mention_is_not_a_declaration" "$?" "0"
@@ -129,7 +145,7 @@ esac
 #    name dropped all but the last, and Rule 7 only asks whether the name
 #    appears somewhere in the file — so a stale duplicate left by an edit
 #    could keep declaring a registration that no longer exists.
-cp "$BACKUP" "$INDEX"
+restore_index || exit 1
 python3 - "$INDEX" "$TARGET_HOOK" <<'DUP'
 import re, sys
 path, hook = sys.argv[1], sys.argv[2]
@@ -155,7 +171,7 @@ esac
 #    "the segment opens with this event" alone accepted `PostToolUseFailureNote`
 #    as `PostToolUseFailure`, so a typo would have declared the event it is a
 #    typo of — the drift this rule exists to catch, waved through.
-cp "$BACKUP" "$INDEX"
+restore_index || exit 1
 mutate_trigger "PostToolUse + PostToolUseFailureNote"
 OUT="$(python3 "$CHECK" 2>&1)"
 run_case "near_match_is_not_the_event_nonzero" "$?" "1"
@@ -165,7 +181,7 @@ case "$OUT" in
 esac
 
 # 9. Restored tree passes.
-cp "$BACKUP" "$INDEX"
+restore_index || exit 1
 python3 "$CHECK" >/dev/null 2>&1
 run_case "restored_check_clean" "$?" "0"
 
