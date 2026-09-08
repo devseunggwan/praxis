@@ -29,7 +29,7 @@ Tools for code quality and review workflow.
 | `debt`                   | Audit deferred markers (commit trailers, `# [PR #N]`) before "later" becomes "never"     |
 | `merge-briefing`         | Before asking to merge a PR — probe all three finding surfaces, grade, brief, then ask   |
 | `worktree-merge-cleanup` | Merging from a worktree and cleaning up after — right call site, safe teardown           |
-| `tradeoff`               | Tradeoff between the ways to implement something — four axes, graded by source           |
+| `tradeoff`               | Tradeoff between implementation options, or whether a review finding blocks              |
 
 ### Discipline
 
@@ -74,6 +74,7 @@ Recover, save, and orchestrate Claude Code sessions.
 | "Which requirements in the spec store are still unimplemented?"        | `spec-drift`                                                |
 | "What did we mark 'later' in commit trailers and never revisit?"       | `debt`                                                      |
 | "Several ways to build this — what's the tradeoff between them?"       | `tradeoff`                                                  |
+| "Should I act on this review finding, and does it block the merge?"    | `tradeoff`                                                  |
 | "I want to add a new skill to praxis"                                  | `writing-praxis-skill`                                      |
 
 ## Hook System

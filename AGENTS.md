@@ -55,7 +55,7 @@ Skills are orchestrators with pluggable steps; external integrations (issue trac
 | `spec-drift`             | Spec↔code drift report — runs each spec-store requirement's `Verify:` command and reports `implemented` / `missing` / `UNKNOWN`; prose backticks are never executed; report-only                         |
 | `merge-briefing`         | On-demand home for the pre-merge approval procedure — three-surface probe, grading findings by blocking decoration, carrying anchor gaps, six-part approve-ask; chains into `worktree-merge-cleanup`     |
 | `worktree-merge-cleanup` | On-demand home for the pre-merge worktree precondition + unified post-merge cleanup sequence — base-worktree call site, submodule `--force` caveat, squash-ancestry stale-HEAD guard, no-`&&`-chain rule |
-| `tradeoff`               | Decision-fork tradeoff report — scores each option on reversibility / blast radius / cost-if-wrong / process cost, graded by source; no table when a convention precedent is found; report-only          |
+| `tradeoff`               | Tradeoff report — options at an implementation fork, or whether a review finding blocks; reversibility / blast radius / cost-if-wrong / process cost, graded by source; stops at a precedent; report-only|
 
 ### Discipline
 
