@@ -152,6 +152,11 @@
                 "type": "string",
                 "minLength": 1
               },
+              "rewrite_env": {
+                "description": "Env var that switches the hook from blocking to correcting the tool input in place (#1334). Same bare-string shape as strict_env: a hook has one such arm or none.",
+                "type": "string",
+                "minLength": 1
+              },
               "bypass_env": {
                 "type": "array",
                 "minItems": 1,

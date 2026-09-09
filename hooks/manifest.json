@@ -148,7 +148,10 @@
       "event": "PreToolUse",
       "matcher": "Bash",
       "timeout": 5,
-      "review_by": "2026-12-04"
+      "review_by": "2026-12-04",
+      "mode": {
+        "rewrite_env": "PRAXIS_BLOCK_GH_STATE_ALL_REWRITE"
+      }
     },
     {
       "name": "block-unmatched-glob",
