@@ -397,6 +397,40 @@ the environment.
 
 ---
 
+## 10. Hook `if` filters on the hook entry only — on the matcher group it is ignored
+
+**Constraint**: a hook registration's `if` field (permission-rule syntax, e.g.
+`Bash(git *)`) suppresses the hook process when it does not match. The harness
+reads it **on the individual hook entry** inside `hooks`. The same field
+written one level up, beside `matcher`, is accepted and has no effect — the
+group runs on every call.
+
+**Why it bites hooks**: `matcher` *is* a group-level field, so the group is
+where a reader naturally puts a second filter next to it. Nothing objects:
+settings load, the schema is satisfied, and every member still fires, so no
+test goes red either. A dispatch-group split built on the group-level spelling
+would deliver none of its speed-up while looking correct — and the mirror
+failure is worse, because an `if` that silently *does* apply where it was not
+meant to leaves a gate registered and never run.
+
+**Workaround**: put `if` on each hook entry, and assert that placement in
+whatever generates the settings rather than asserting only that an `if` was
+emitted.
+
+| Wrong | Right |
+| ------- | ------- |
+| `{"matcher": "Bash", "if": "Bash(git *)", "hooks": [{"type": "command", "command": "…"}]}` | `{"matcher": "Bash", "hooks": [{"type": "command", "if": "Bash(git *)", "command": "…"}]}` |
+
+**Verified**: 2026-09-09 / Claude Code 2.1.266 / Issue #1335 — two canary
+sessions, each running `echo …` then `git status --porcelain` with dumper hooks
+installed through a session-scoped `--settings` file. Group-level: the filtered
+dumper fired on the `echo` as well (2 fires, filter not applied). Entry-level:
+the unfiltered dumper fired twice, the filtered one once, on the `git` call
+only. The unfiltered entry in the same session and the same dump file is the
+positive control.
+
+---
+
 ## Adding a new entry
 
 1. Observe a constraint that is **fixed by the runtime** (not a project
