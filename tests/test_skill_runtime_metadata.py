@@ -572,7 +572,10 @@ def test_current_repo_runtime_sensitive_skill_set_is_stable():
         if check._skill_runtime_verification_reasons(skill_dir)
     }
     assert actual == {
-        "cmux-delegate": ("external-cli-wrapper",),
+        # AskUserQuestion joined the reasons with Step 2.6's tier-3 escalation:
+        # a question neither the orchestrator nor the worker can settle is put
+        # to the user before the workspace opens.
+        "cmux-delegate": ("AskUserQuestion", "external-cli-wrapper"),
         "cmux-recover-sessions": (
             "AskUserQuestion",
             "external-cli-wrapper",
