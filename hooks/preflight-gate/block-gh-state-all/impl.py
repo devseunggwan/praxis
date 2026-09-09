@@ -121,8 +121,8 @@ def is_blocked_gh_search(seg: list[Token]) -> bool:
     return False
 
 
-# Rewrite arm switch (issue #1334). Exact value "1" only, mirroring
-# `PRAXIS_PIPEFAIL_ADVISORY_CONTEXT` and the other opt-in arms.
+# Rewrite arm switch (issue #1334). Exact value "1" after stripping,
+# mirroring `PRAXIS_DENIED_ACTION_STRICT` and the other opt-in arms.
 _REWRITE_ENV = "PRAXIS_BLOCK_GH_STATE_ALL_REWRITE"
 
 # `--state all`, in either spelling, with the value optionally quoted. Anchored
@@ -144,8 +144,13 @@ def corrected(command: str) -> str | None:
 
     None is the fail-closed answer: the caller then blocks, which is what this
     hook did before the arm existed. A correction is only returned when the
-    result re-tokenizes to the original tokens minus exactly the `--state` and
-    `all` entries, and no longer trips the detector.
+    result re-tokenizes to the original tokens minus exactly the ONE flag
+    occurrence, and no longer trips the detector.
+
+    The removal is located by POSITION, not by token text. `all` is a perfectly
+    ordinary search term — `gh search issues all --state all` is a real call —
+    so dropping every token that reads `all` would leave the query word out of
+    the expected list and refuse a command this hook can correct.
     """
     fixed, n = _STATE_ALL_RE.subn("", command)
     if n != 1 or not fixed.strip():
@@ -153,9 +158,18 @@ def corrected(command: str) -> str | None:
     before, after = _argv_texts(command), _argv_texts(fixed)
     if len(before) != 1 or len(after) != 1:
         return None
-    expected = [t for t in before[0] if t not in ("--state", "all", "--state=all")]
-    dropped = [t for t in before[0] if t in ("--state", "all", "--state=all")]
-    if after[0] != expected or dropped not in (["--state", "all"], ["--state=all"]):
+    cuts = [
+        (i, 1) if t == "--state=all"
+        else (i, 2)
+        for i, t in enumerate(before[0])
+        if t == "--state=all"
+        or (t == "--state" and i + 1 < len(before[0]) and before[0][i + 1] == "all")
+    ]
+    if len(cuts) != 1:
+        return None
+    start, width = cuts[0]
+    expected = before[0][:start] + before[0][start + width:]
+    if after[0] != expected:
         return None
     if any(is_blocked_gh_search(seg) for seg in tokenize_with_roles(fixed, _FLAG_VALUE_SPEC)):
         return None

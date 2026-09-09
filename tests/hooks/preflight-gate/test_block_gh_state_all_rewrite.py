@@ -110,3 +110,17 @@ def test_corrected_refuses_what_it_cannot_certify():
     # command with two `--state all` occurrences is not a single-flag removal.
     assert hook.corrected("gh search issues x --state all --state all") is None
     assert hook.corrected("gh search issues x") is None
+
+
+@pytest.mark.parametrize("command,expected", [
+    ("gh search issues all --state all", "gh search issues all"),
+    ("gh search issues all --state=all", "gh search issues all"),
+    ("gh search prs all all --state all", "gh search prs all all"),
+])
+def test_all_as_a_query_term_survives_the_correction(monkeypatch, capsys, command, expected):
+    # `all` is an ordinary search word. Locating the removal by token TEXT
+    # dropped the query term from the expected list, so the readback refused a
+    # command the hook can correct and it blocked instead.
+    rc, out, _err = _run(monkeypatch, capsys, command)
+    assert rc == 0
+    assert json.loads(out)["hookSpecificOutput"]["updatedInput"]["command"] == expected
