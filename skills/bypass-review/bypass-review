@@ -39,10 +39,14 @@ Options:
   -h, --help             Show this message and exit
 
 OUTCOME PROXY LIMITATIONS (issue #710 item 3 / issue #737 / issue #740 /
-issue #741, fire-rate mode):
+issue #741 / issue #1338, fire-rate mode):
   strike_count, external_write_revert_count, reclarification_loop_count, and
   rework_commit_count are all computed — every item from the original issue
-  text (issue #737) now has a telemetry source.
+  text (issue #737) now has a telemetry source. bypass_route_signal_count
+  (issue #1338) was added later, on a different footing: the four above are
+  outcome proxies for how a session went, while this one is a FREQUENCY
+  METER for one specific shape in a final message, taken before deciding
+  whether that shape deserves a gate at all.
   Strike state itself is a lower bound: the strike-counter TTL-deletes state
   after 7 days and `/praxis:reset-strikes` deletes it immediately on reset,
   so a session's true historical strike count may already be gone by the
@@ -74,6 +78,20 @@ issue #741, fire-rate mode):
   true same-topic loop spread across 2 separate sessions (e.g. after a
   compaction) is invisible to this proxy since counting is session-scoped
   (false negative).
+  bypass_route_signal_count (issue #1338) counts Stop turns whose final
+  assistant message paired a bypass-route noun (permission rule, allow list,
+  a Claude Code settings file, disableAllHooks, a guarded path) with a
+  proposal frame, in the same paragraph, after the gate's own
+  `Bypass (if truly needed): ...` relay lines were stripped
+  (hooks/completion-verify/bypass-route-signal/impl.py). It is NOT a
+  violation count. The hook judges nothing and blocks nothing, and it
+  deliberately leaves three false-positive families unsuppressed: prose
+  about this very rule (a retrospect, a PR body, praxis' own docs), a
+  past-tense report of a bypass the user themselves chose, and a relayed
+  third-party suggestion. Whether those dominate is precisely what the
+  measurement is for — suppressing them on a guess would decide it in
+  advance and the guess would be invisible in the number. The denominator
+  is the same hook's coarse `pass` stream, which lands on every Stop.
   rework_commit_count (issue #741) is trailer-first + timestamp-heuristic,
   mirroring bypass_count's exact-map + heuristic-fallback structure:
     - Trailer: a `Session-Id: <session_id>` commit trailer is parsed exactly
@@ -281,6 +299,7 @@ DESTRUCTIVE_BASH_GUARD_HOOK = "destructive-bash-guard"
 # outcome-proxy signal — cited verbatim from
 # hooks/postuse-correction/askuserquestion-loop-signal's manifest `name`.
 ASKUSERQUESTION_LOOP_SIGNAL_HOOK = "askuserquestion-loop-signal"
+BYPASS_ROUTE_SIGNAL_HOOK = "bypass-route-signal"
 
 # issue #740: minimum per-session AskUserQuestion call count to surface as a
 # re-clarification-loop signal in the report (>=2 calls — see module
@@ -1362,14 +1381,61 @@ def compute_reclarification_loop_counts(fire_events: list[dict]) -> dict[str, in
     return counts
 
 
+def load_bypass_route_events(telemetry_dir: Path, days: int) -> list[dict]:
+    """Load the last `days` of `bypass-route-events-*` records (issue #1338).
+
+    Its own family, not the fire ledger: a Stop hook that emits nothing cannot
+    leave a distinguishable fire-ledger row, because the dispatcher derives a
+    member's decision from its `(rc, stdout, stderr)` and a silent member
+    classifies as `pass`. The hook's spec records the measurement.
+    """
+    events: list[dict] = []
+    for date_str in date_range(days):
+        for path in _dated_files(telemetry_dir, "bypass-route-events", date_str):
+            for record in _iter_jsonl_records(path):
+                if is_test_session(str(record.get(FIELD_SESSION_ID) or "")):
+                    continue
+                events.append(record)
+    return events
+
+
+def compute_bypass_route_signal_counts(route_events: list[dict]) -> dict[str, int]:
+    """Return dict[session_id] -> turns whose final message carried the shape.
+
+    Issue #1338, `docs/hook/RULE-BACKSTOP-GAPS.md` gap #4 prose lane. The hook
+    is a meter, not a gate: it records one row per Stop whose last assistant
+    message pairs a bypass-route noun with a proposal frame, and judges
+    nothing. A nonzero count is a count of *turns carrying the vocabulary*,
+    never a count of violations — the hook's spec names three false-positive
+    families it deliberately does not suppress (prose about the rule itself,
+    past-tense reports, relayed third-party suggestions).
+
+    The DENOMINATOR is not in this family. The dispatcher records the hook's
+    automatic `pass` on every Stop under its own name, so the hook's `Fires`
+    row in the per-hook table above is the turn count these matches divide by.
+    """
+    counts: dict[str, int] = {}
+    for ev in route_events:
+        sid = ev.get(F_FIRE_SESSION)
+        if not isinstance(sid, str) or not sid:
+            continue
+        counts[sid] = counts.get(sid, 0) + 1
+    return counts
+
+
 def compute_outcome_proxy(
     fire_events: list[dict],
     state_dir: Path,
     rework_counts: dict[str, int] | None = None,
+    route_events: list[dict] | None = None,
 ) -> dict[str, dict]:
     """Return dict[session_id] -> {strike_count, strike_state_available,
     external_write_revert_count, reclarification_loop_count,
-    rework_commit_count}.
+    rework_commit_count, bypass_route_signal_count}.
+
+    `route_events` (issue #1338) is loaded separately by the caller because it
+    is a different JSONL family, not a subset of `fire_events` — see
+    load_bypass_route_events.
 
     Only covers sessions that appear in the fire-events window. Sessions
     whose strike state already expired (7-day TTL) or was reset show
@@ -1388,6 +1454,7 @@ def compute_outcome_proxy(
     })
     revert_counts = compute_external_write_revert_counts(fire_events)
     reclarification_counts = compute_reclarification_loop_counts(fire_events)
+    bypass_route_counts = compute_bypass_route_signal_counts(route_events or [])
     rework_counts = rework_counts or {}
     result: dict[str, dict] = {}
     for sid in sessions:
@@ -1397,6 +1464,7 @@ def compute_outcome_proxy(
             "strike_state_available": state is not None,
             "external_write_revert_count": revert_counts.get(sid, 0),
             "reclarification_loop_count": reclarification_counts.get(sid, 0),
+            "bypass_route_signal_count": bypass_route_counts.get(sid, 0),
             "rework_commit_count": rework_counts.get(sid, 0),
         }
     return result
@@ -1755,6 +1823,10 @@ def _render_outcome_proxy_section(lines: list[str], outcome_proxy: dict[str, dic
         sid: r for sid, r in outcome_proxy.items()
         if r.get("rework_commit_count", 0) > 0
     }
+    with_bypass_route = {
+        sid: r for sid, r in outcome_proxy.items()
+        if r.get("bypass_route_signal_count", 0) > 0
+    }
     available = sum(1 for r in outcome_proxy.values() if r["strike_state_available"])
     lines.append(
         f"  Sessions in window : {len(outcome_proxy)}  "
@@ -1767,6 +1839,10 @@ def _render_outcome_proxy_section(lines: list[str], outcome_proxy: dict[str, dic
         f"AskUserQuestion calls) : {len(with_reclarify)}"
     )
     lines.append(f"  Sessions with rework-commit signal : {len(with_rework)}")
+    lines.append(
+        "  Sessions with bypass-route vocabulary in a final message : "
+        f"{len(with_bypass_route)}"
+    )
     if with_strikes:
         lines.append("")
         col = 40
@@ -1795,11 +1871,19 @@ def _render_outcome_proxy_section(lines: list[str], outcome_proxy: dict[str, dic
         lines.append(f"  {'─' * col}  {'─' * 14}")
         for sid in sorted(with_rework, key=lambda s: with_rework[s]["rework_commit_count"], reverse=True):
             lines.append(f"  {sid:<{col}}  {with_rework[sid]['rework_commit_count']:>14}")
+    if with_bypass_route:
+        lines.append("")
+        col = 40
+        lines.append(f"  {'Session':<{col}}  {'Bypass-route turns':>18}")
+        lines.append(f"  {'─' * col}  {'─' * 18}")
+        for sid in sorted(with_bypass_route, key=lambda s: with_bypass_route[s]["bypass_route_signal_count"], reverse=True):
+            lines.append(f"  {sid:<{col}}  {with_bypass_route[sid]['bypass_route_signal_count']:>18}")
     lines.append("")
     lines.append(
         "  strike_count, external_write_revert_count,\n"
-        "  reclarification_loop_count, and rework_commit_count are all\n"
-        "  implemented (see module docstring 'OUTCOME PROXY LIMITATIONS').\n"
+        "  reclarification_loop_count, rework_commit_count and\n"
+        "  bypass_route_signal_count are all implemented (see module\n"
+        "  docstring 'OUTCOME PROXY LIMITATIONS').\n"
         "  strike_count itself is a lower bound: state is TTL-deleted after 7\n"
         "  days and cleared on /praxis:reset-strikes, so a session showing 0\n"
         "  may have had strikes that already expired.\n"
@@ -1816,7 +1900,14 @@ def _render_outcome_proxy_section(lines: list[str], outcome_proxy: dict[str, dic
         "  rework_commit_count (issue #741) is trailer-first (`Session-Id:`\n"
         "  commit trailer, manual convention, NOT retroactive) +\n"
         "  timestamp-heuristic fallback (nearest session activity within 15\n"
-        "  minutes, lossy like the other proxies) — see module docstring."
+        "  minutes, lossy like the other proxies) — see module docstring.\n"
+        "  bypass_route_signal_count (issue #1338) counts turns whose final\n"
+        "  message paired a bypass-route noun with a proposal frame. It is a\n"
+        "  FREQUENCY METER, not a violation count: the hook judges nothing,\n"
+        "  and deliberately does not suppress prose about the rule itself,\n"
+        "  past-tense reports of a user-chosen bypass, or a relayed\n"
+        "  third-party suggestion. Sessions working on praxis itself will\n"
+        "  over-count — segment on that before reading the ratio."
     )
 
 
@@ -2026,7 +2117,10 @@ def run_fire_rate(args: argparse.Namespace, telemetry_dir: Path) -> int:
     repo_path = Path(args.repo_path) if args.repo_path else Path.cwd()
     commits = load_git_commits(repo_path, args.days)
     rework_counts = compute_rework_commit_counts(commits, events)
-    outcome_proxy = compute_outcome_proxy(events, state_dir, rework_counts=rework_counts)
+    route_events = load_bypass_route_events(telemetry_dir, args.days)
+    outcome_proxy = compute_outcome_proxy(
+        events, state_dir, rework_counts=rework_counts, route_events=route_events
+    )
 
     print(render_fire_report(
         by_hook, args.days, telemetry_dir, roster,

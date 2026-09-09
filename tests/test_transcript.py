@@ -505,6 +505,8 @@ _CONSUMERS = {
          "scan_user_rejections", "stop_last_assistant_text"],
     HOOKS / "completion-verify" / "negative-existence-verdict-gate" / "impl.py":
         ["load_current_turn", "extract_last_assistant_text"],
+    HOOKS / "completion-verify" / "bypass-route-signal" / "impl.py":
+        ["load_current_turn", "extract_last_assistant_text"],
     HOOKS / "completion-verify" / "proposal-premise-gate" / "impl.py":
         ["load_current_turn", "extract_last_assistant_text"],
     HOOKS / "completion-verify" / "pr-claim-mutation-gate" / "impl.py":

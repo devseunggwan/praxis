@@ -1177,6 +1177,7 @@ def main() -> int:
                      "completion-signal-gate", "readonly-verify-deferral-gate",
                      "merge-state-claim-gate", "runtime-state-claim-gate",
                      "negative-existence-verdict-gate",
+                     "bypass-route-signal",
                      "artifact-verdict-evidence-gate",
                      "pr-report-destination-gate",
                      "pr-claim-mutation-gate",

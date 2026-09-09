@@ -107,6 +107,20 @@ carries the ranking: #4 is a HIGH-cost row sitting after the LOW-MED #3.
   route that merely quotes similar words, and the two are textually
   indistinguishable in prose. Recorded here as an open backstop gap so the
   prose clause is not mistaken for enforcement.
+- **Gap #4, prose lane → `bypass-route-signal`, a meter rather than a backstop** ([#1338](https://github.com/devseunggwan/praxis/issues/1338)):
+  the row above and the `#1009` bullet both stand. This Stop hook does **not**
+  attempt the separation they call textually indistinguishable — it strips the
+  relay lines principle 5 permits, counts what remains, and judges nothing. It
+  never blocks, never advises, and emits no output on any path; its only
+  effect is one row in its own `bypass-route-events-*` family per matching
+  turn, read back through
+  `bypass-review fire-rate`. The gap stays open, because a count is not
+  enforcement. What it buys is the number `#1338`'s own `type: "prompt"`
+  proposal needs before it can be priced: gap #4 records exactly one observed
+  occurrence, and setting a tier, a strict mode and a per-turn model call
+  against a frequency of one is what this defers. The hook's spec names three
+  false-positive families it deliberately leaves unsuppressed, so the audit
+  measures the noise floor rather than a floor already flattened by guesses.
 - Gaps **#2** and **#3** are surfaced here but **not yet issue-tracked** — open
   them if/when the cost is judged worth a dedicated hook.
 - Gap **#5** is deliberately unhooked. `#1009` measured this same axis and chose a
