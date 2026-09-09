@@ -661,6 +661,46 @@ def _masked_gating_advisory(tokens: list[str]) -> str | None:
     return scan(run) if run else None
 
 
+def _has_pipefail(tokens: list[str]) -> bool:
+    """True iff `tokens` already turn pipefail on with a `set` builtin.
+
+    Matches every spelling that reaches the option: `set -o pipefail` and the
+    combined short forms (`set -eo pipefail`, `set -euo pipefail`), which are
+    `-e`/`-u` bundled ahead of the `-o` that consumes the next word. The `set`
+    has to sit in command position, so `echo set -o pipefail` is not a match.
+
+    zsh's own `setopt pipefail` is deliberately NOT matched: the harness runs
+    commands through a shell where `set -o pipefail` is the portable spelling,
+    and widening this predicate would suppress the advisory on a command that
+    only mentions the option in passing.
+    """
+    at_command_start = True
+    i = 0
+    n = len(tokens)
+    while i < n:
+        tok = tokens[i]
+        if tok in SHELL_SEPARATORS or tok == "|&":
+            at_command_start = True
+            i += 1
+            continue
+        if at_command_start and tok == "set":
+            j = i + 1
+            while j < n and tokens[j] not in SHELL_SEPARATORS and tokens[j] != "|&":
+                if (
+                    tokens[j].startswith("-")
+                    and tokens[j].endswith("o")
+                    and j + 1 < n
+                    and tokens[j + 1] == "pipefail"
+                ):
+                    return True
+                j += 1
+            i = j
+            continue
+        at_command_start = False
+        i += 1
+    return False
+
+
 def _scan_tokens_for_advisory(tokens: list[str]) -> str | None:
     """Return the advisory text for the first mutating-piped-to-sink chain
     found in `tokens`, else None."""
@@ -769,6 +809,10 @@ def main() -> int:
         return 0
 
     tokens = _merge_fd_dup_redirects(tokens)
+    # Nothing to advise when the option is already on: the advisory's own
+    # headline reads "piped without `set -o pipefail`", which is false there.
+    if _has_pipefail(tokens):
+        return 0
     advisory = _scan_tokens_for_advisory(tokens)
     if advisory is None:
         advisory = _masked_gating_advisory(tokens)
