@@ -79,6 +79,51 @@ def emit_decision(
     out.write("\n")
 
 
+# --- PreToolUse input rewrite (issue #1334) ---------------------------------
+#
+# A PreToolUse hook may hand the harness a corrected tool input instead of
+# blocking: `hookSpecificOutput.updatedInput` replaces the input and the call
+# proceeds. Measured on Claude Code 2.1.266 — the harness ran the hook's
+# command, not the model's.
+#
+# `context` is not optional in this API. The measurement also showed the
+# `tool_use` record keeps the ORIGINAL command, so a rewrite with no
+# additionalContext is invisible to everyone downstream: the actor, a reviewer
+# reading the transcript, and the praxis hooks that scan prior calls all see a
+# command that never ran. The context line is what makes the correction
+# legible, which is why it rides in the same object.
+
+
+def format_updated_input(
+    updated_input: dict,
+    context: str,
+    event_name: str = "PreToolUse",
+) -> dict:
+    """Return the `hookSpecificOutput` input-rewrite dict (no I/O)."""
+    return {
+        "hookSpecificOutput": {
+            "hookEventName": event_name,
+            "updatedInput": updated_input,
+            "additionalContext": context,
+        }
+    }
+
+
+def emit_updated_input(
+    updated_input: dict,
+    context: str,
+    event_name: str = "PreToolUse",
+    stream: Optional[TextIO] = None,
+) -> None:
+    """Write the `updatedInput` JSON to stdout (+ trailing newline).
+
+    Does NOT exit — the caller returns 0, since a rewrite lets the call through.
+    """
+    out = stream if stream is not None else sys.stdout
+    json.dump(format_updated_input(updated_input, context, event_name), out)
+    out.write("\n")
+
+
 # --- Stop-event emitters (issue #647 H3) ------------------------------------
 #
 # completion-verify Stop hooks signal in two tiers, both as stdout JSON so the
