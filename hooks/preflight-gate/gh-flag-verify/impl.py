@@ -563,11 +563,12 @@ def unique_near_miss(
     if len(candidates) != 1:
         return None
     replacement = candidates[0]
-    # A value-taking flag corrected without a value leaves a command that gh
-    # still rejects, just with a different message. Swapping one error for
-    # another is not a correction, so the deny stands and the actor supplies
-    # both halves in one turn.
-    if allowed[replacement] and not supplied_a_value:
+    # The arity has to match in BOTH directions. A value-taking flag corrected
+    # without a value leaves a command gh still rejects; so does a value-less
+    # flag that inherits the value the offender carried — `--wed open` becomes
+    # `--web open`, and `open` is then a positional gh does not accept. Either
+    # way the swap trades one error for another, which is not a correction.
+    if allowed[replacement] != supplied_a_value:
         return None
     return replacement
 

@@ -8,7 +8,8 @@ covers only what the arm adds, and the input surface it has to survive:
   must NOT fire two or more candidates one edit away
                 no candidate at all
                 a short flag (every single letter is one edit from every other)
-                a value-taking replacement with no value supplied
+                a value-taking replacement with no value supplied, and a
+                value-less replacement handed the offender's value
                 a compound command
                 a command carrying a line continuation
   arm switch    unset / "0" / "1"
@@ -98,6 +99,26 @@ def test_a_value_taking_flag_with_no_value_still_denies(monkeypatch, capsys):
     rc, out = _run(monkeypatch, capsys, "gh pr list --stat")
     assert rc == 2
     assert _hso(out)["permissionDecision"] == "deny"
+
+
+@pytest.mark.parametrize("command", [
+    "gh pr list --wed open",
+    "gh pr list --wed=open",
+])
+def test_a_value_less_replacement_given_a_value_still_denies(
+    monkeypatch, capsys, command
+):
+    # `--web` takes no value, so inheriting the offender's would leave `open`
+    # as a positional gh does not accept.
+    rc, out = _run(monkeypatch, capsys, command)
+    assert rc == 2
+    assert _hso(out)["permissionDecision"] == "deny"
+
+
+def test_a_value_less_replacement_with_no_value_is_corrected(monkeypatch, capsys):
+    # The mirror of the case above: the arity matches, so the swap is clean.
+    _, out = _run(monkeypatch, capsys, "gh pr list --wed")
+    assert _hso(out)["updatedInput"]["command"] == "gh pr list --web"
 
 
 def test_a_flag_with_no_near_miss_still_denies(monkeypatch, capsys):

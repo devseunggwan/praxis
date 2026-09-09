@@ -98,7 +98,7 @@ deny:
 | ----- | --- |
 | exactly one candidate one edit away | `--stat` sits one edit from both `--state` and `--stats`; with two candidates the hook has no basis to pick, and guessing replaces a round-trip the actor resolves in one turn with a wrong flag they never chose |
 | long flags only | `-b` is one edit from `-B`, `-a`, and every other single letter the subcommand accepts, so uniqueness carries no information about intent at that length |
-| the value arity has to work out | correcting a value-taking flag that was given no value leaves a command gh still rejects, just with a different message — trading one error for another is not a correction |
+| the value arity has to match in both directions | a value-taking flag given no value leaves a command gh still rejects; so does a value-less flag inheriting the offender's value (`--wed open` → `--web open`, where `open` becomes a positional gh does not accept). Either way the swap trades one error for another |
 | single segment, no line continuation | same reasoning as the sibling arm: the correction must change exactly the one thing it claims to change |
 
 The swap is textual (the tokenizer keeps no offsets, so rebuilding the command
