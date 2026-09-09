@@ -61,7 +61,8 @@ Performs 3-phase cleanup. Use `--dry-run` flag to preview the plan without execu
 1. User requests `cmux-session cleanup` or `cmux cleanup`
 2. Check dry-run preference, then execute:
 ```bash
-bash "${CLAUDE_SKILL_DIR}/cmux-session-cleanup" [--dry-run]
+bash "${CLAUDE_SKILL_DIR}/cmux-session-cleanup"             # execute
+bash "${CLAUDE_SKILL_DIR}/cmux-session-cleanup" --dry-run   # preview only
 ```
 3. The script outputs 3 JSON blocks separated by `---PHASE_SEPARATOR---`
 4. Parse each phase's JSON and process according to the Data Handoff Protocol below
