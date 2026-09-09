@@ -49,9 +49,9 @@ The session running this script (the manager session) is excluded by default —
 1. User requests "save sessions", "session save", etc.
 2. Execute:
 
-```bash
-bash "${CLAUDE_SKILL_DIR}/cmux-save-sessions"
-```
+   ```bash
+   bash "${CLAUDE_SKILL_DIR}/cmux-save-sessions"
+   ```
 
 3. Show output to the user
 4. **Post-save close prompt** — ask via `AskUserQuestion`:
