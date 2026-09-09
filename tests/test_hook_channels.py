@@ -32,7 +32,9 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
 
 from hook_channels import (  # noqa: E402
+    CHANNEL_LITERALS,
     CHANNEL_ORDER,
+    CHANNEL_PATTERNS,
     NO_CHANNEL,
     channels_for_hook,
     channels_for_source,
@@ -171,3 +173,72 @@ def test_a_known_hook_of_each_channel_classifies_as_expected() -> None:
     }
     for name, channels in expected.items():
         assert channels_for_hook(REPO_ROOT, by_name[name]) == channels, name
+
+
+# --- the literal prefilter --------------------------------------------------
+
+
+def test_the_prefilter_never_changes_a_verdict_on_the_shipped_corpus() -> None:
+    """Parity oracle: prefiltered classification == regex-only classification.
+
+    The prefilter exists to skip work, so its only failure mode is skipping a
+    body the pattern would have matched. That failure is silent — it reports a
+    hook as emitting less than it does, which is the direction that hides the
+    #1265 failure rather than inventing one.
+    """
+    for entries in _entries_by_name().values():
+        path = (
+            REPO_ROOT
+            / "hooks"
+            / entries[0]["role"]
+            / entries[0]["name"]
+            / (entries[0].get("body") or "impl.py")
+        )
+        source = path.read_text()
+        regex_only = [
+            name
+            for name in CHANNEL_ORDER
+            if CHANNEL_PATTERNS[name].search(source)
+        ]
+        assert channels_for_source(source) == regex_only, path
+
+
+def test_every_pattern_alternative_survives_its_prefilter() -> None:
+    """A pattern form the literals do not cover would be unreachable.
+
+    The corpus parity test above only covers forms the corpus happens to
+    contain; these are the forms the patterns claim to accept.
+    """
+    forms = {
+        "decision": [
+            "emit_decision(a, b)", "emit_ask(r)", "emit_deny(r)",
+            "format_decision(d, r)", '{"permissionDecision": "deny"}',
+        ],
+        "context": [
+            "emit_additional_context(x)", '{"additionalContext": note}',
+        ],
+        "rewrite": [
+            "emit_updated_input(a, b)", "format_updated_input(a, b)",
+            '{"updatedInput": patched}',
+        ],
+        "stop-block": [
+            "emit_stop_block(r)", "format_stop_block(r)",
+            '{"decision": "block", "reason": r}', 'jq -n \'{decision: "block"}\'',
+        ],
+        "system-msg": [
+            "emit_stop_advisory(m)", "format_stop_advisory(m)",
+            '{"systemMessage": m}',
+        ],
+        "stderr": [
+            "sys.stderr.write(x)", "print(x, file=sys.stderr)",
+            "emit_block(msg)", 'echo "note" >&2',
+        ],
+    }
+    assert set(forms) == set(CHANNEL_ORDER)
+    for channel, sources in forms.items():
+        for source in sources:
+            assert CHANNEL_PATTERNS[channel].search(source), (channel, source)
+            assert any(lit in source for lit in CHANNEL_LITERALS[channel]), (
+                f"{channel}: prefilter rejects a form its pattern accepts: {source}"
+            )
+            assert channel in channels_for_source(source), (channel, source)

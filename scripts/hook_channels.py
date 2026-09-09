@@ -81,13 +81,39 @@ CHANNEL_PATTERNS: dict[str, re.Pattern[str]] = {
 #: Rendered when a hook emits nothing — a ledger-only recorder, by design.
 NO_CHANNEL = "-"
 
+# Literal prefilter, one tuple per channel.
+#
+# The patterns above are alternations over word boundaries and quote classes,
+# and running six of them across every body scans the corpus six times: 2.1 MB
+# of hook source became 12.6 MB of regex input, which measured at 321 ms of the
+# matrix build's 358 ms. A body that cannot contain a channel is the common
+# case, and `str.__contains__` settles that far faster than a regex can.
+#
+# Soundness requirement, checked by the parity test: EVERY alternative of a
+# channel's pattern must contain at least one of its literals, so a body the
+# prefilter rejects is one the pattern could not have matched either. The
+# prefilter only skips work — it never decides a channel on its own.
+CHANNEL_LITERALS: dict[str, tuple[str, ...]] = {
+    "decision": ("emit_decision", "emit_ask", "emit_deny", "format_decision",
+                 "permissionDecision"),
+    "context": ("additional_context", "additionalContext"),
+    "rewrite": ("updated_input", "updatedInput"),
+    # A bare "block" passes 95 of 101 bodies for 12 real hits — the word is
+    # everywhere in this repo's prose. Every alternative of the pattern ends
+    # the word against a quote, so the quote comes into the literal.
+    "stop-block": ("stop_block", 'block"', "block'"),
+    "system-msg": ("stop_advisory", "systemMessage"),
+    "stderr": ("stderr", "emit_block", ">&2"),
+}
+
 
 def channels_for_source(source: str) -> list[str]:
     """Return the channel tokens `source` can emit, in `CHANNEL_ORDER`."""
     return [
         name
         for name in CHANNEL_ORDER
-        if CHANNEL_PATTERNS[name].search(source)
+        if any(lit in source for lit in CHANNEL_LITERALS[name])
+        and CHANNEL_PATTERNS[name].search(source)
     ]
 
 
@@ -109,10 +135,13 @@ def channels_for_hook(repo_root: Path, entries: list[dict]) -> list[str]:
     first-entry read, because a multi-event hook may ship one body per event.
     """
     found: set[str] = set()
+    seen: set[Path] = set()
     for entry in entries:
         path = hook_body_path(repo_root, entry)
-        if path.exists():
-            found.update(channels_for_source(path.read_text()))
+        if path in seen or not path.exists():
+            continue
+        seen.add(path)
+        found.update(channels_for_source(path.read_text()))
     return [name for name in CHANNEL_ORDER if name in found]
 
 
