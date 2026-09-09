@@ -660,7 +660,16 @@ def _masked_gating_advisory(tokens: list[str]) -> str | None:
                 masked = unit
         return None
 
+    pipefail_on = False
     for unit, sep in units:
+        if _sets_pipefail(unit):
+            pipefail_on = True
+        if pipefail_on:
+            # The masking this predicate reports is the pipeline's exit code
+            # being the sink's; with pipefail on it is the real one, so the
+            # `&&` gates on something that was actually checked.
+            run = []
+            continue
         run.append(unit)
         if sep == "&&":
             continue
@@ -671,43 +680,32 @@ def _masked_gating_advisory(tokens: list[str]) -> str | None:
     return scan(run) if run else None
 
 
-def _has_pipefail(tokens: list[str]) -> bool:
-    """True iff `tokens` already turn pipefail on with a `set` builtin.
+def _sets_pipefail(unit: list[list[str]]) -> bool:
+    """True iff `unit` turns pipefail on for the commands that FOLLOW it.
 
     Matches every spelling that reaches the option: `set -o pipefail` and the
     combined short forms (`set -eo pipefail`, `set -euo pipefail`), which are
-    `-e`/`-u` bundled ahead of the `-o` that consumes the next word. The `set`
-    has to sit in command position, so `echo set -o pipefail` is not a match.
+    `-e`/`-u` bundled ahead of the `-o` that consumes the next word. `set` has
+    to be the segment's first word, so `echo set -o pipefail` is not a match.
+
+    A multi-segment unit is rejected outright. Every segment of a pipeline runs
+    in a subshell, so `set -o pipefail | cat` changes the subshell's option and
+    leaves the parent exactly as it was — reading it as "pipefail is now on"
+    silences the advisory on a pipeline that really is unguarded.
 
     zsh's own `setopt pipefail` is deliberately NOT matched: the harness runs
     commands through a shell where `set -o pipefail` is the portable spelling,
     and widening this predicate would suppress the advisory on a command that
     only mentions the option in passing.
     """
-    at_command_start = True
-    i = 0
-    n = len(tokens)
-    while i < n:
-        tok = tokens[i]
-        if tok in SHELL_SEPARATORS or tok == "|&":
-            at_command_start = True
-            i += 1
-            continue
-        if at_command_start and tok == "set":
-            j = i + 1
-            while j < n and tokens[j] not in SHELL_SEPARATORS and tokens[j] != "|&":
-                if (
-                    tokens[j].startswith("-")
-                    and tokens[j].endswith("o")
-                    and j + 1 < n
-                    and tokens[j + 1] == "pipefail"
-                ):
-                    return True
-                j += 1
-            i = j
-            continue
-        at_command_start = False
-        i += 1
+    if len(unit) != 1:
+        return False
+    seg = strip_prefix(unit[0])
+    if not seg or seg[0] != "set":
+        return False
+    for i, tok in enumerate(seg[1:], start=1):
+        if tok.startswith("-") and tok.endswith("o") and seg[i + 1 : i + 2] == ["pipefail"]:
+            return True
     return False
 
 
@@ -715,13 +713,21 @@ def _scan_tokens_for_advisory(tokens: list[str]) -> str | None:
     """Return the advisory text for the first mutating-piped-to-sink chain
     found in `tokens`, else None."""
     tokens = _merge_fd_dup_redirects(tokens)
-    for chain in _pipe_chains(tokens):
-        if not _is_truncating_sink(chain[-1]):
+    pipefail_on = False
+    for unit, _sep in _command_units(tokens):
+        # Order matters: a `set -o pipefail` cannot retroactively unmask a
+        # pipeline that already ran, so only units seen BEFORE this one count.
+        if _sets_pipefail(unit):
+            pipefail_on = True
             continue
-        for seg in chain[:-1]:
+        if pipefail_on or len(unit) < 2:
+            continue
+        if not _is_truncating_sink(unit[-1]):
+            continue
+        for seg in unit[:-1]:
             desc = _mutating_description(seg)
             if desc:
-                return _advisory_text(chain, desc)
+                return _advisory_text(unit, desc)
     return None
 
 
@@ -839,10 +845,6 @@ def main() -> int:
         return 0
 
     tokens = _merge_fd_dup_redirects(raw_tokens)
-    # Nothing to advise when the option is already on: the advisory's own
-    # headline reads "piped without `set -o pipefail`", which is false there.
-    if _has_pipefail(tokens):
-        return 0
     advisory = _scan_tokens_for_advisory(tokens)
     # Only the pipe scan produces a finding `set -o pipefail` actually fixes.
     # `_masked_gating_advisory` is about `&&` gating on a masked exit code,

@@ -7,6 +7,8 @@ the advisory now share.
   fires         a mutating command piped into tail / head / grep
   must NOT fire the `&&` masked-gating path (the hook's own primary remedy
                 there is a restructuring it cannot perform)
+  pipefail state ordering (a `set` after the pipeline does not count) and
+                subshell scope (a `set` inside a pipeline does not count)
                 a command carrying a line continuation
                 a command that already sets pipefail
                 a non-mutating pipeline
@@ -147,6 +149,12 @@ def test_an_existing_pipefail_silences_the_hook(monkeypatch, capsys, command):
 
 
 @pytest.mark.parametrize("command", [
+    # Ordering: the option cannot retroactively unmask a pipeline that has
+    # already run, so a `set` AFTER the pipeline leaves the finding standing.
+    "git commit -m x | tail -3; set -o pipefail",
+    # Every segment of a pipeline runs in a subshell, so this turns the option
+    # on in the subshell and leaves the parent exactly as it was.
+    "set -o pipefail | cat; git commit -m x | tail -3",
     # `set` is not in command position, so this only mentions the option.
     "echo set -o pipefail; git commit -m x | tail -3",
     # `-o` without the option word after it does not turn pipefail on.
@@ -154,7 +162,7 @@ def test_an_existing_pipefail_silences_the_hook(monkeypatch, capsys, command):
     # the word alone, with no `set` builtin
     "grep pipefail notes.txt; git commit -m x | tail -3",
 ])
-def test_a_mention_of_pipefail_is_not_the_option_being_set(
+def test_only_a_pipefail_that_precedes_the_pipeline_silences_it(
     monkeypatch, capsys, command
 ):
     rc, out, err = _run(monkeypatch, capsys, command, arm=None)

@@ -71,11 +71,18 @@ pipe chain. Predicate 2's criteria are in
   next command runs (or does not) regardless — so there is no
   precondition to have been skipped. `&&` is the exception and is
   covered by the second predicate below.
-- **`pipefail` already set**: `set -o pipefail; git commit -m x | tail -3`,
-  and the bundled short forms (`set -eo pipefail`, `set -euo pipefail`).
-  The advisory's own headline reads "piped without `set -o pipefail`", so
-  firing here stated something false. `set` has to sit in command position —
-  `echo set -o pipefail` only mentions the option and stays a finding.
+- **`pipefail` already set BEFORE the pipeline**: `set -o pipefail; git
+  commit -m x | tail -3`, and the bundled short forms (`set -eo pipefail`,
+  `set -euo pipefail`). The advisory's own headline reads "piped without
+  `set -o pipefail`", so firing here stated something false.
+
+  Three things do NOT count as the option being on, and each stays a finding:
+  `echo set -o pipefail` (not command position, only a mention);
+  `git commit -m x | tail -3; set -o pipefail` (the option cannot
+  retroactively unmask a pipeline that already ran); and
+  `set -o pipefail | cat` (every segment of a pipeline runs in a subshell, so
+  the parent's option is untouched). The state is tracked per command unit in
+  order, not by scanning the whole token list.
 - **Quoted-string literal**: a pipe character inside a quoted argument
   (e.g. `gh issue create --body "example: git commit -m x | tail -3"`)
   tokenizes as a single token, not a `|` separator — never reaches
@@ -311,7 +318,7 @@ The arm is narrower than the advisory, and deliberately so:
 | Guard | Why |
 | ----- | --- |
 | predicate 1 only | predicate 2's own first remedy is "run the left side as its own Bash call", a restructuring no rewrite can express; picking its second remedy for the actor is a judgement, not a correction |
-| `pipefail` not already set | the exclusion above — there is nothing to prepend |
+| `pipefail` not already on at that point | the exclusion above — there is nothing to prepend. Tracked per unit in order, so a later or subshell-scoped `set` does not count |
 | token-level readback | the prepend is textual (rebuilding from tokens would lose the caller's quoting), then certified: the result must re-tokenize to exactly `set -o pipefail ;` followed by the original tokens |
 | no line continuation | the tokenizer normalizes `\<newline>` away, and a correction must change exactly the one thing it claims to change |
 
