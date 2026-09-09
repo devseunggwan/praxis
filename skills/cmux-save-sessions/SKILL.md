@@ -48,15 +48,12 @@ The session running this script (the manager session) is excluded by default —
 **How to run:**
 1. User requests "save sessions", "session save", etc.
 2. Execute:
-```bash
-bash "${CLAUDE_PLUGIN_ROOT:?praxis plugin root not set — run via the installed plugin or export CLAUDE_PLUGIN_ROOT}/skills/cmux-save-sessions/cmux-save-sessions"
-```
-3. Show output to the user
 
-If `CLAUDE_PLUGIN_ROOT` is unset the `:?` guard aborts with `praxis plugin root
-not set`; resolve it from the installed-plugins manifest
-(`jq -r '.plugins["praxis@praxis"][0].installPath // empty' "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/plugins/installed_plugins.json"`),
-export it, and re-run — do not fall back to a relative path.
+```bash
+bash "${CLAUDE_SKILL_DIR}/cmux-save-sessions"
+```
+
+3. Show output to the user
 4. **Post-save close prompt** — ask via `AskUserQuestion`:
 
 > "N sessions saved. Would you like to close the saved sessions?"

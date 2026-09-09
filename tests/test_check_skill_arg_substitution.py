@@ -167,24 +167,43 @@ def test_cmux_delegate_step_5b_regression():
     assert '[ "${TARGET#workspace:}" = "$TARGET" ]' in body
 
 
-def test_cmux_wrapper_snippets_resolve_via_plugin_root():
+def test_cmux_wrapper_snippets_resolve_via_skill_dir():
     """The four wrapper snippets the widening exposed.
 
     They once read ``dirname "${0}"`` — braced so the loader's ``\\$(\\d+)``
     could not rewrite it — but inside a skill body ``$0`` is the shell, not
-    the SKILL.md, so the path never resolved (#1290). They now resolve through
-    ``CLAUDE_PLUGIN_ROOT`` like every other helper-invoking skill; this pins
-    that no ``$0`` form comes back in either spelling.
+    the SKILL.md, so the path never resolved (#1290). Each tool sits in its
+    own skill directory, so they now take ``${CLAUDE_SKILL_DIR}`` like the
+    recover skills below; this pins that no ``$0`` form comes back in either
+    spelling.
     """
-    for rel in (
-        "skills/cmux-resume-sessions/SKILL.md",
-        "skills/cmux-save-sessions/SKILL.md",
-        "skills/cmux-session-manager/SKILL.md",
+    for rel, tool in (
+        ("skills/cmux-resume-sessions/SKILL.md", "cmux-resume-sessions"),
+        ("skills/cmux-save-sessions/SKILL.md", "cmux-save-sessions"),
+        ("skills/cmux-session-manager/SKILL.md", "cmux-session-status"),
     ):
         body = (_REPO / rel).read_text(encoding="utf-8")
         assert 'dirname "$0"' not in body, rel
         assert 'dirname "${0}"' not in body, rel
-        assert "${CLAUDE_PLUGIN_ROOT:?" in body, rel
+        assert "${CLAUDE_SKILL_DIR}/" + tool in body, rel
+
+
+def test_no_skill_body_uses_a_bash_default_guard_on_a_placeholder():
+    """``${CLAUDE_PLUGIN_ROOT:?...}`` is not substituted, so it must not appear.
+
+    The loader replaces the literal placeholder text and nothing else: a body
+    written with a bash parameter-expansion guard reaches the shell verbatim,
+    the variable is not exported to the Bash tool either, and the guard then
+    fires on every single call (#1342). Measured against a live plugin load —
+    two skills in one build, differing only in the guard: the plain form came
+    back as an absolute path, the guarded form came back as its own source
+    text. ``RUNTIME_CONSTRAINTS.md`` holds the record.
+    """
+    for path in sorted((_REPO / "skills").glob("*/SKILL.md")):
+        body = path.read_text(encoding="utf-8")
+        rel = path.relative_to(_REPO)
+        assert "${CLAUDE_PLUGIN_ROOT:?" not in body, rel
+        assert "${CLAUDE_SKILL_DIR:?" not in body, rel
 
 
 def test_recover_skill_snippets_resolve_via_skill_dir():
