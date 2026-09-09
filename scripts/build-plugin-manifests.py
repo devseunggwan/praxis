@@ -74,6 +74,7 @@ SECURITY_DOC = REPO_ROOT / "SECURITY.md"
 
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
 from constants import NON_HOOK_DOCS, OPT_IN_HOOKS  # noqa: E402
+from hook_channels import channels_for_hook, render_channels  # noqa: E402
 MANIFEST_PATH = HOOKS_DIR / "manifest.json"
 
 # Agent Plugins portable manifest schema, pinned to the only published spec
@@ -1165,12 +1166,18 @@ def _hook_review_by(entries: list[dict]) -> str:
 def render_hook_operating_matrix(manifest: dict) -> str:
     """Render a generated hook operating-surface matrix.
 
-    The matrix is sourced entirely from structured metadata in
+    Every column but one is sourced from structured metadata in
     hooks/manifest.json: registration shape (role, event, matcher, hosts) plus
     the per-hook `mode` block (strict env, bypass env, state-path vars, read-only
     external commands). docs/bypass-vars.md and SECURITY.md are human-readable
     views that check-plugin-manifests.py validates against this manifest, so a
     value can live in exactly one canonical place (#688).
+
+    `Channels` is the exception: which channel a hook's output travels is a
+    property of its body, not of its registration, so it is derived from the
+    body by `scripts/hook_channels.py` rather than declared (#1265). Declaring
+    it would put 100+ hand-written values beside the code that decides them,
+    and the value the reader needs is precisely the one the code decides.
     """
     by_name: dict[str, list[dict]] = {}
     for entry in manifest["hooks"]:
@@ -1197,7 +1204,7 @@ def render_hook_operating_matrix(manifest: dict) -> str:
     header = [
         "Hook", "Role", "Events", "Hosts", "Default", "Review by",
         "Strict env", "Bypass env", "Rewrites input", "State/path vars",
-        "External commands",
+        "External commands", "Channels",
     ]
     table_rows = []
     for name in sorted(by_name):
@@ -1216,6 +1223,7 @@ def render_hook_operating_matrix(manifest: dict) -> str:
             _md_cell(_compact_join(rewrite_vars.get(name, []))),
             _md_cell(_compact_join(state_vars.get(name, []))),
             _md_cell(_compact_join(external_commands.get(name, []))),
+            _md_cell(render_channels(channels_for_hook(REPO_ROOT, entries))),
         ])
 
     lines = [
@@ -1232,11 +1240,24 @@ def render_hook_operating_matrix(manifest: dict) -> str:
         "- `hooks/manifest.json` -> role, event, matcher, hosts, the sunset-review",
         "  date `review_by` (#1300), and the per-hook `mode` block (strict env,",
         "  bypass env, state/path vars, read-only external commands).",
+        "- each hook body -> the `Channels` column (#1265), derived by",
+        "  `scripts/hook_channels.py`. Which channel carries a hook's output is a",
+        "  property of the body, so it is read from the body rather than declared.",
         "",
         "`docs/bypass-vars.md` and `SECURITY.md` are human-readable views of the",
         "same `mode` metadata; the check script validates them against the manifest",
-        "so the two cannot drift. A `-` in a column means the hook declares no",
-        "value for it in its manifest `mode` block.",
+        "so the two cannot drift. A `-` in a manifest-sourced column means the hook",
+        "declares no value for it in its `mode` block; a `-` under `Channels` means",
+        "the body emits nothing at all, which is what a ledger-only recorder does.",
+        "",
+        "Reading the `Channels` column: `decision`, `context`, `rewrite` and",
+        "`stop-block` reach the model. `system-msg` reaches the user's transcript",
+        "only -- `_hook_io.py` records it as \"NOT fed to the model\". `stderr`",
+        "reaches the model on a block path, and on the exit-0 path of an",
+        "`advisory-nudge` hook (ADR-0001: \"PreToolUse stderr nudges (never",
+        "block)\") it reaches only the debug log. A hook whose sole channel is",
+        "`stderr` under that role therefore fires without the actor seeing it,",
+        "which is the failure #1265 opened on.",
         "",
         *_render_aligned_table(header, table_rows),
     ]
