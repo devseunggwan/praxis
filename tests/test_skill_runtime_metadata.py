@@ -566,6 +566,8 @@ def test_multiple_runtime_signals_are_all_reported(tmp_path):
 
 
 def test_current_repo_runtime_sensitive_skill_set_is_stable():
+    """Freeze the live tree's per-skill reason set: a skill that acquires — or
+    loses — a runtime dependency declares it here in the same change."""
     actual = {
         skill_dir.name: tuple(check._skill_runtime_verification_reasons(skill_dir))
         for skill_dir in check._skill_dirs()

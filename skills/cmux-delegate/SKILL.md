@@ -394,10 +394,11 @@ Prompt file structure:
 
 ## Socratic interview (quantified)
 
-{Q3 is dropped for review/audit/fresh-eyes; every answer carries a command,
- path, count, issue number, or file:line — see Step 2.6}
+{Q3 is dropped for review/audit/fresh-eyes and Q1 takes its coverage form
+ there; every answer carries a command, path, count, issue number, or
+ file:line — see Step 2.6}
 
-- **Q1 · Done when:** {judging command → expected output}
+- **Q1 · Done when:** {implement/debug: judging command → expected output · review/audit: the surfaces that must be read, with their count}
 - **Q2 · Scope:** in `{paths/globs}` / out `{paths/globs}`
 - **Q3 · Procedure:** {numbered steps, each with its confirming command} — continue-work/implement/debug only
 - **Q4 · Evidence:** {file:line, #issue, or the command whose output was read}
