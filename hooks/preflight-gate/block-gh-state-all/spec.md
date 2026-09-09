@@ -53,7 +53,8 @@ should not assume the partial side-effects landed.
 
 ### Rewrite arm — `PRAXIS_BLOCK_GH_STATE_ALL_REWRITE=1` (issue #1334)
 
-Off by default. Exported as exactly `1`, the hook stops blocking this case and
+Off by default. Exported as `1` (surrounding whitespace is stripped before
+the comparison), the hook stops blocking this case and
 instead hands the harness the corrected command through
 `hookSpecificOutput.updatedInput`, letting the call proceed. Nothing else about
 the detection changes — a command this hook did not block is still untouched.

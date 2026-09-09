@@ -127,7 +127,7 @@ with decision `rewrite` — the count the promotion-to-default is judged on.
 
 | Variable | Hook | Correction |
 | ---------- | ------ | ------------ |
-| `PRAXIS_BLOCK_GH_STATE_ALL_REWRITE` | `block-gh-state-all` | Exact value `1` only. Drops `--state all`, which `gh search` rejects and whose omission returns every state. Single-segment commands only; the result is re-tokenized and must match the original minus that flag |
+| `PRAXIS_BLOCK_GH_STATE_ALL_REWRITE` | `block-gh-state-all` | Exact value `1` after stripping. Drops `--state all`, which `gh search` rejects and whose omission returns every state. Single-segment commands only; the result is re-tokenized and must match the original minus that flag |
 
 ## Config (tune behaviour)
 
