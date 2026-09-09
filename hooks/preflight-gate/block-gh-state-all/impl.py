@@ -14,9 +14,28 @@ token `--state=all`).
 
 Exits 2 (PreToolUse blocking code) when the command is a live `gh search`
 call with `--state all`. Exits 0 otherwise (transparent pass-through).
+
+Rewrite arm (issue #1334, opt-in via `PRAXIS_BLOCK_GH_STATE_ALL_REWRITE=1`).
+The fix here is not a judgement call: `--state all` is invalid for `gh search`
+and omitting it returns every state, so the corrected command is the one the
+caller meant. Under the arm the hook drops the flag and lets the call through
+with an `updatedInput`, instead of costing a turn for the model to retype it.
+
+Two guards keep the arm from correcting something it did not understand:
+
+  • **Single segment only.** `--state all` is VALID for `gh issue list`, so in
+    `gh search issues x --state all && gh issue list --state all` a textual
+    removal would break the second half. A compound command keeps the block.
+  • **Token-level readback.** The removal is textual (the tokenizer keeps no
+    offsets, so rebuilding the command from tokens would lose the original
+    quoting), then verified: the corrected command must re-tokenize to exactly
+    the original tokens minus the `--state` / `all` pair, and must no longer
+    trip the detector. Anything else falls back to the block.
 """
 from __future__ import annotations
 
+import os
+import re
 import sys
 import sys as _sys
 from pathlib import Path as _Path
@@ -30,6 +49,7 @@ from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
     filter_argv,
     tokenize_with_roles,
 )
+from _hook_io import emit_updated_input  # type: ignore[import-not-found]  # noqa: E402
 from _payload import read_bash_payload  # type: ignore[import-not-found]  # noqa: E402
 from block_message import format_block  # type: ignore[import-not-found]  # noqa: E402
 
@@ -101,6 +121,61 @@ def is_blocked_gh_search(seg: list[Token]) -> bool:
     return False
 
 
+# Rewrite arm switch (issue #1334). Exact value "1" after stripping,
+# mirroring `PRAXIS_DENIED_ACTION_STRICT` and the other opt-in arms.
+_REWRITE_ENV = "PRAXIS_BLOCK_GH_STATE_ALL_REWRITE"
+
+# `--state all`, in either spelling, with the value optionally quoted. Anchored
+# on surrounding whitespace so `--state allowed` and `--no-state all` are not
+# touched; the readback below is what actually certifies the result.
+_STATE_ALL_RE = re.compile(r"""\s+--state(?:=|\s+)(?P<q>['"]?)all(?P=q)(?=\s|$)""")
+
+
+def _argv_texts(command: str) -> list[list[str]]:
+    """Token texts per segment — the readback's unit of comparison."""
+    return [
+        [tok.text for tok in filter_argv(seg)]
+        for seg in tokenize_with_roles(command, _FLAG_VALUE_SPEC)
+    ]
+
+
+def corrected(command: str) -> str | None:
+    """Return `command` without `--state all`, or None when it cannot be certified.
+
+    None is the fail-closed answer: the caller then blocks, which is what this
+    hook did before the arm existed. A correction is only returned when the
+    result re-tokenizes to the original tokens minus exactly the ONE flag
+    occurrence, and no longer trips the detector.
+
+    The removal is located by POSITION, not by token text. `all` is a perfectly
+    ordinary search term — `gh search issues all --state all` is a real call —
+    so dropping every token that reads `all` would leave the query word out of
+    the expected list and refuse a command this hook can correct.
+    """
+    fixed, n = _STATE_ALL_RE.subn("", command)
+    if n != 1 or not fixed.strip():
+        return None
+    before, after = _argv_texts(command), _argv_texts(fixed)
+    if len(before) != 1 or len(after) != 1:
+        return None
+    cuts = [
+        (i, 1) if t == "--state=all"
+        else (i, 2)
+        for i, t in enumerate(before[0])
+        if t == "--state=all"
+        or (t == "--state" and i + 1 < len(before[0]) and before[0][i + 1] == "all")
+    ]
+    if len(cuts) != 1:
+        return None
+    start, width = cuts[0]
+    expected = before[0][:start] + before[0][start + width:]
+    if after[0] != expected:
+        return None
+    if any(is_blocked_gh_search(seg) for seg in tokenize_with_roles(fixed, _FLAG_VALUE_SPEC)):
+        return None
+    return fixed
+
+
 STDERR_MESSAGE = format_block(
     rule_name="gh search --state all",
     why="`gh search` subcommands only accept --state {open|closed}, not 'all' "
@@ -122,18 +197,39 @@ def main() -> int:
         return 0
 
     # Backslash line continuation → single space so tokenizer sees one line
+    continued = "\\\n" in command
     command = command.replace("\\\n", " ")
 
     segments = tokenize_with_roles(command, _FLAG_VALUE_SPEC)
     if not segments:
         return 0
 
-    for seg in segments:
-        if is_blocked_gh_search(seg):
-            sys.stderr.write(STDERR_MESSAGE + "\n" + compound_cascade_hint(command))
-            return 2
+    if not any(is_blocked_gh_search(seg) for seg in segments):
+        return 0
 
-    return 0
+    # `continued` keeps the arm off a command the tokenizer had to normalize:
+    # the correction would then also silently join the caller's line breaks,
+    # and a rewrite must change exactly the one thing it claims to change.
+    if (
+        os.environ.get(_REWRITE_ENV, "").strip() == "1"
+        and len(segments) == 1
+        and not continued
+    ):
+        fixed = corrected(command)
+        if fixed is not None:
+            # The context line is not decoration: the transcript's tool_use
+            # record keeps the command the model wrote, so without this the
+            # correction is invisible to every later reader.
+            base = payload.get("tool_input")
+            emit_updated_input(
+                {**(base if isinstance(base, dict) else {}), "command": fixed},
+                f"[praxis:block-gh-state-all] dropped `--state all`, which "
+                f"`gh search` rejects:\n  {command}\n-> {fixed}",
+            )
+            return 0
+
+    sys.stderr.write(STDERR_MESSAGE + "\n" + compound_cascade_hint(command))
+    return 2
 
 
 if __name__ == "__main__":

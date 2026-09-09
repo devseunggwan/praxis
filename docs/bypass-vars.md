@@ -2,12 +2,15 @@
 
 A single place to answer **"is this gate active, and how do I tune or disable
 it?"** Praxis hooks read a growing set of `PRAXIS_*` (and a few legacy
-`CLAUDE_HOOK_BYPASS_*`) environment variables. They fall into four kinds:
+`CLAUDE_HOOK_BYPASS_*`) environment variables. They fall into five kinds:
 
 - **Opt-out** — stop a gate from blocking: either disable it entirely (skip before
   any logic) or demote it to advisory (hook still runs and emits a message, but
   returns exit 0 instead of blocking).
 - **Strict** — escalate an advisory hook to a hard block (`return 2`).
+- **Rewrite** — let a gate correct the tool input and pass, instead of
+  blocking and costing a turn (issue #1334). Opt-in, and only where the
+  correction is deterministic — one right answer, no judgement.
 - **Config** — tune behaviour (regexes, allowlists, modes).
 - **Path / test** — relocate state/cache/log files (also used for test isolation).
 
@@ -113,6 +116,18 @@ in [`../SECURITY.md`](../SECURITY.md).
 | `PRAXIS_COMPOSED_COMMAND_STRICT` | `composed-command-gate` | |
 | `PRAXIS_CALLER_PROBE_STRICT` | `caller-probe-gate` | |
 | `PRAXIS_UNENFORCED_STEP_STRICT` | `unenforced-step-advisory` | |
+
+## Rewrite (correct the input instead of blocking)
+
+Off by default. Set to exactly `1`, the hook hands the harness a corrected
+tool input (`hookSpecificOutput.updatedInput`) and lets the call through,
+announcing the change as `additionalContext`. Only gates whose fix is
+deterministic are eligible, and each firing is recorded in the fire ledger
+with decision `rewrite` — the count the promotion-to-default is judged on.
+
+| Variable | Hook | Correction |
+| ---------- | ------ | ------------ |
+| `PRAXIS_BLOCK_GH_STATE_ALL_REWRITE` | `block-gh-state-all` | Exact value `1` after stripping. Drops `--state all`, which `gh search` rejects and whose omission returns every state. Single-segment commands only; the result is re-tokenized and must match the original minus that flag |
 
 ## Config (tune behaviour)
 

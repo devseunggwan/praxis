@@ -1913,3 +1913,167 @@ def test_stop_lane_stays_scoped_to_its_two_events(tmp_path, monkeypatch, capsys)
     rc = _dispatch.run_group("PostToolUse", "Bash", STOP_PAYLOAD)
     assert rc == 0
     assert "decision" not in capsys.readouterr().out
+
+
+# --------------------------------------------------------------------------- #
+# updatedInput lane (issue #1334)
+# --------------------------------------------------------------------------- #
+
+def _fake_rewrite(new_command: str, context: str = "orig -> fixed") -> str:
+    """A member that rewrites `command` and says so in additionalContext."""
+    return (
+        "import json, sys\n"
+        "def main():\n"
+        "    json.dump({'hookSpecificOutput': {'hookEventName': 'PreToolUse',"
+        " 'updatedInput': {'command': %r}, 'additionalContext': %r}}, sys.stdout)\n"
+        "    sys.stdout.write('\\n')\n"
+        "    return 0\n"
+    ) % (new_command, context)
+
+
+_FAKE_ECHO_COMMAND = (
+    "import json, pathlib, sys\n"
+    "def main():\n"
+    "    payload = json.load(sys.stdin)\n"
+    "    pathlib.Path(%r).write_text(payload['tool_input']['command'])\n"
+    "    return 0\n"
+)
+
+
+def test_rewrite_reaches_the_host_with_the_whole_tool_input(tmp_path, monkeypatch, capsys):
+    payload = json.dumps(
+        {
+            "tool_name": "Bash",
+            "tool_input": {"command": "gh search issues x --state all", "description": "d"},
+            "cwd": str(REPO_ROOT),
+            "session_id": "test-rewrite",
+        }
+    )
+    members = [
+        ("preflight-gate", "fix",
+         _write_fake(tmp_path, "fix", _fake_rewrite("gh search issues x"))),
+    ]
+    _patch_members(monkeypatch, members)
+    rc = _dispatch.run_group("PreToolUse", "Bash", payload)
+    assert rc == 0
+    hso = json.loads(capsys.readouterr().out)["hookSpecificOutput"]
+    # The whole input, not just the field the hook touched: `description` would
+    # be dropped if the harness replaces rather than merges.
+    assert hso["updatedInput"] == {"command": "gh search issues x", "description": "d"}
+    assert hso["additionalContext"] == "orig -> fixed"
+
+
+def test_second_member_reads_the_first_members_correction(tmp_path, monkeypatch):
+    seen = tmp_path / "seen.txt"
+    members = [
+        ("preflight-gate", "fix",
+         _write_fake(tmp_path, "fix", _fake_rewrite("corrected"))),
+        ("advisory-nudge", "reader",
+         _write_fake(tmp_path, "reader", _FAKE_ECHO_COMMAND % str(seen))),
+    ]
+    _patch_members(monkeypatch, members)
+    _dispatch.run_group("PreToolUse", "Bash", NOOP_PAYLOAD)
+    # Composition, not last-writer-wins: the later member judges the corrected
+    # command, which is the whole reason this lane lives in the dispatcher.
+    assert seen.read_text() == "corrected"
+
+
+def test_two_rewrites_compose_in_manifest_order(tmp_path, monkeypatch, capsys):
+    members = [
+        ("preflight-gate", "first",
+         _write_fake(tmp_path, "first", _fake_rewrite("one", "a"))),
+        ("preflight-gate", "second",
+         _write_fake(tmp_path, "second", _fake_rewrite("two", "b"))),
+    ]
+    _patch_members(monkeypatch, members)
+    rc = _dispatch.run_group("PreToolUse", "Bash", NOOP_PAYLOAD)
+    assert rc == 0
+    hso = json.loads(capsys.readouterr().out)["hookSpecificOutput"]
+    assert hso["updatedInput"]["command"] == "two"
+    assert hso["additionalContext"] == "a\n\nb"
+
+
+def test_deny_discards_the_rewrite(tmp_path, monkeypatch, capsys):
+    members = [
+        ("preflight-gate", "fix",
+         _write_fake(tmp_path, "fix", _fake_rewrite("corrected"))),
+        ("preflight-gate", "deny", _write_fake(tmp_path, "deny", _FAKE_DENY_EXIT)),
+    ]
+    _patch_members(monkeypatch, members)
+    rc = _dispatch.run_group("PreToolUse", "Bash", NOOP_PAYLOAD)
+    assert rc == 2
+    assert "updatedInput" not in capsys.readouterr().out
+
+
+def test_ask_discards_the_rewrite(tmp_path, monkeypatch, capsys):
+    members = [
+        ("preflight-gate", "fix",
+         _write_fake(tmp_path, "fix", _fake_rewrite("corrected"))),
+        ("preflight-gate", "ask", _write_fake(tmp_path, "ask", _FAKE_ASK)),
+    ]
+    _patch_members(monkeypatch, members)
+    rc = _dispatch.run_group("PreToolUse", "Bash", NOOP_PAYLOAD)
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert '"permissionDecision": "ask"' in out
+    assert "updatedInput" not in out
+
+
+def test_rewrite_lane_is_pretooluse_only(tmp_path, monkeypatch, capsys):
+    # The tool has already run on any other event, so a rewrite there would
+    # answer a question the event never asked — same scoping as the Stop lane.
+    members = [
+        ("postuse-correction", "fix",
+         _write_fake(tmp_path, "fix", _fake_rewrite("corrected"))),
+    ]
+    _patch_members(monkeypatch, members)
+    rc = _dispatch.run_group("PostToolUse", "Bash", NOOP_PAYLOAD)
+    assert rc == 0
+    assert "updatedInput" not in capsys.readouterr().out
+
+
+def test_rewrite_with_the_wrong_event_name_is_dropped(tmp_path, monkeypatch, capsys):
+    body = (
+        "import json, sys\n"
+        "def main():\n"
+        "    json.dump({'hookSpecificOutput': {'hookEventName': 'PostToolUse',"
+        " 'updatedInput': {'command': 'corrected'}}}, sys.stdout)\n"
+        "    return 0\n"
+    )
+    members = [("preflight-gate", "fix", _write_fake(tmp_path, "fix", body))]
+    _patch_members(monkeypatch, members)
+    rc = _dispatch.run_group("PreToolUse", "Bash", NOOP_PAYLOAD)
+    assert rc == 0
+    assert "updatedInput" not in capsys.readouterr().out
+
+
+def test_a_group_with_no_rewrite_writes_nothing(tmp_path, monkeypatch, capsys):
+    # Negative control for the four assertions above: this lane must not turn a
+    # silent allow into a JSON object.
+    members = [("advisory-nudge", "adv", _write_fake(tmp_path, "adv", _FAKE_ADVISORY))]
+    _patch_members(monkeypatch, members)
+    rc = _dispatch.run_group("PreToolUse", "Bash", NOOP_PAYLOAD)
+    assert rc == 0
+    assert capsys.readouterr().out == ""
+
+
+@pytest.mark.parametrize("decision", ["ask", "deny"])
+def test_a_compact_decision_object_cannot_smuggle_a_rewrite(tmp_path, monkeypatch, capsys, decision):
+    # The deny/ask lanes probe for the SPACED marker `_hook_io.emit_decision`
+    # writes. A member emitting compact JSON misses both probes, and before the
+    # structural check its rewrite was accepted anyway — the one member that
+    # said "do not run this" would have had its correction run instead.
+    body = (
+        "import json, sys\n"
+        "def main():\n"
+        "    sys.stdout.write(json.dumps({'hookSpecificOutput': {"
+        "'hookEventName': 'PreToolUse', 'permissionDecision': %r,"
+        " 'permissionDecisionReason': 'r',"
+        " 'updatedInput': {'command': 'corrected'}}}, separators=(',', ':')))\n"
+        "    return 0\n"
+    ) % decision
+    members = [("preflight-gate", "sneaky", _write_fake(tmp_path, "sneaky", body))]
+    _patch_members(monkeypatch, members)
+    rc = _dispatch.run_group("PreToolUse", "Bash", NOOP_PAYLOAD)
+    assert rc == 0
+    assert "updatedInput" not in capsys.readouterr().out

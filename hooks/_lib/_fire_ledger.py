@@ -89,9 +89,11 @@ Record fields (JSONL, one line per hook fire):
   tool         tool_name from payload (rich only; "" for coarse)
   hook         hook name (manifest `name`)
   role         hook role (manifest `role`)
-  decision     "block" | "ask" | "advise" | "pass" | "skip"
+  decision     "block" | "ask" | "rewrite" | "advise" | "pass" | "skip"
                ("skip" = dispatcher budget-skip, issue #1167: the member was
-               never run because the group budget could not cover it)
+               never run because the group budget could not cover it;
+               "rewrite" = the member corrected the tool input instead of
+               blocking, issue #1334)
   granularity  "rich" | "coarse"
 
 Storage (precedence order — see `resolve_path`):
@@ -144,6 +146,11 @@ DECISION_ASK = "ask"
 DECISION_ADVISE = "advise"
 DECISION_PASS = "pass"
 DECISION_SKIP = "skip"
+# A PreToolUse member that corrected the tool input instead of blocking
+# (issue #1334). Its own outcome is neither a block nor a bare advisory:
+# the call went through, but not as the model wrote it, and the opt-in
+# rollout of the rewriting hooks is judged on exactly this count.
+DECISION_REWRITE = "rewrite"
 
 # Decision markers — kept in sync with _dispatch.py run_group aggregation.
 # (The invariant canary planned in issue #712 will pin this pairing.)
@@ -207,6 +214,34 @@ def _is_stop_advisory(stdout: str) -> bool:
     return isinstance(message, str) and bool(message)
 
 
+def _is_input_rewrite(stdout: str) -> bool:
+    """True iff `stdout` carries a PreToolUse `updatedInput` (issue #1334).
+
+    Parsed, not substring-matched, and kept in sync with
+    `_dispatch._updated_input` — the dispatcher accepts the rewrite only when
+    it parses, names PreToolUse, and carries no `permissionDecision`, so
+    recording one on any looser test would count a correction the dispatcher
+    never forwarded. The decision guard is what the marker lanes above cannot
+    do: they probe for the spaced form, so a member writing compact JSON slips
+    its decision past them and would otherwise be filed as a pure rewrite.
+    """
+    if not stdout:
+        return False
+    try:
+        obj = json.loads(stdout)
+    except ValueError:
+        return False
+    hso = obj.get("hookSpecificOutput") if isinstance(obj, dict) else None
+    if not isinstance(hso, dict):
+        return False
+    if hso.get("hookEventName") != "PreToolUse":
+        return False
+    if hso.get("permissionDecision") is not None:
+        return False
+    updated = hso.get("updatedInput")
+    return isinstance(updated, dict) and bool(updated)
+
+
 def classify_decision(
     rc: int, stdout: str, stderr: str, event: str | None = None
 ) -> str:
@@ -215,8 +250,8 @@ def classify_decision(
     Mirrors `_dispatch.run_group`'s PER-MEMBER decision precedence (this is one
     member's own outcome, not the cross-member aggregate the dispatcher emits):
     block (exit 2 / deny marker / Stop-lane `{"decision": "block"}` JSON) >
-    ask (ask marker) > advise (any stderr, or a Stop-lane `{"systemMessage":
-    ...}` at exit 0) > pass.
+    ask (ask marker) > rewrite (a PreToolUse `updatedInput`) > advise (any
+    stderr, or a Stop-lane `{"systemMessage": ...}` at exit 0) > pass.
     A dispatcher budget-skip record (never actually run) is decision "skip".
 
     `event` is the dispatcher's own event, not a payload field: run_group has it
@@ -243,6 +278,11 @@ def classify_decision(
         return DECISION_ASK
     if stderr.startswith(_SKIP_MARKER):
         return DECISION_SKIP
+    # Above the stderr lane on purpose: a rewriting hook that also nudges on
+    # stderr did something stronger than advise — it changed what runs — and
+    # that is the fact the opt-in rollout is measured on.
+    if rc == 0 and is_pretooluse and _is_input_rewrite(stdout):
+        return DECISION_REWRITE
     if stderr.strip():
         return DECISION_ADVISE
     if rc == 0 and event in STOP_LANE_EVENTS and _is_stop_advisory(stdout):

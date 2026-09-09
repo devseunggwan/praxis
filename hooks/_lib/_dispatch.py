@@ -39,6 +39,12 @@ every hook event; exactly these lanes are aggregated:
   additionalContext lane (issue #874, any event, event-name-checked):
     - non-decision `hookSpecificOutput.additionalContext` objects merge into
       ONE `hookSpecificOutput` object
+  updatedInput lane (issue #1334, PreToolUse only):
+    - a member's `hookSpecificOutput.updatedInput` is folded into the payload
+      the REMAINING members read, so the group composes corrections in
+      manifest order instead of racing for last-writer-wins; the accumulated
+      input rides out on the same `hookSpecificOutput` as the contexts
+    - any deny or ask in the group discards the whole accumulation
   - else -> allow (silent pass; no JSON written)
 
   stderr from every hook (advisory nudges AND deny/block reasons) is always
@@ -520,6 +526,16 @@ def _run_group(
     # bypass-telemetry's record). Remember the first blocking output and
     # keep going; the group still returns 2 once every member has spoken.
     blocking_stdout: Optional[str] = None
+    # updatedInput lane (issue #1334). `pending_input` accumulates the members'
+    # corrections and `current_payload` is what the members after them read, so
+    # a later gate judges the CORRECTED command rather than the one the model
+    # wrote. The docs warn that with N separate hook processes "the last one to
+    # finish takes effect" and the order is non-deterministic; running the group
+    # in one process, sequentially, in manifest order is what turns that race
+    # into a composition. PreToolUse only — on any other event the tool has
+    # already run and there is no input left to rewrite.
+    pending_input: dict = {}
+    current_payload = payload_raw
     for role, name, impl in members:
         member = (role, name)
         remaining = deadline - time.monotonic()
@@ -542,13 +558,16 @@ def _run_group(
             runnable = remaining >= _MEMBER_SKIP_FLOOR_SEC
             member_deadline = min(time.monotonic() + member_timeout, deadline)
         if runnable:
-            result = run_one(role, name, impl, payload_raw, deadline=member_deadline)
+            result = run_one(role, name, impl, current_payload, deadline=member_deadline)
         else:
             result = _skip_result(role, name, remaining, budget, event)
         results.append(result)
         # Fire telemetry (issue #710): observe-only and fail-open — the
-        # dispatcher's decision is unaffected.
-        _record_fires([(role, name, impl)], [result], payload_raw, event)
+        # dispatcher's decision is unaffected. The payload recorded is the one
+        # THIS member read, which is the rewritten one once an earlier member
+        # corrected it — a ledger row naming a command the member never saw
+        # would misattribute every downstream fire-rate reading.
+        _record_fires([(role, name, impl)], [result], current_payload, event)
         # Forward this member's stderr (advisory nudges and deny reasons alike)
         # as it resolves rather than after the loop, for the same reason the
         # deny return above is immediate: it shortens the window, and a kill at
@@ -563,6 +582,12 @@ def _run_group(
                 return 2
             if blocking_stdout is None:
                 blocking_stdout = member_so
+            continue
+        if is_pretooluse and member_rc == 0 and _ASK_MARKER not in member_so:
+            updated = _updated_input(member_so, event)
+            if updated:
+                pending_input.update(updated)
+                current_payload = _with_updated_input(current_payload, updated)
     if blocking_stdout is not None:
         if blocking_stdout:
             sys.stdout.write(blocking_stdout)
@@ -583,7 +608,7 @@ def _run_group(
     # Stop decision lane (issue #1169): a Stop hook blocks via a top-level
     # `{"decision": "block", "reason": ...}` JSON at exit 0 — no exit-2, no
     # permissionDecision marker — so without this branch a member's block would
-    # fall through to the context-merge below, `_merge_additional_context`
+    # fall through to the context-merge below, `_merge_hook_specific_output`
     # would find no `hookSpecificOutput`, and the block would be silently
     # swallowed (all 13 completion gates disabled errorlessly the day Stop is
     # grouped). Recognition PARSES each member's stdout (`_stop_block_reason`)
@@ -646,10 +671,22 @@ def _run_group(
         # of being dropped as a mistaken decision payload.
         and (not is_pretooluse or (_DENY_MARKER not in so and _ASK_MARKER not in so))
     ]
-    if contexts:
-        merged = _merge_additional_context(contexts, event)
-        if merged:
-            sys.stdout.write(merged)
+    # The accumulated rewrite rides on the SAME object as the contexts: the host
+    # reads one JSON object from stdout, so an updatedInput written separately
+    # would either be invalid JSON or silently drop every member's context.
+    # Reached only after deny and ask have both missed, which is what discards
+    # the accumulation when either won — most-restrictive still wins, and a
+    # corrected command must never be the thing that slips past a gate.
+    # The emitted rewrite is the WHOLE corrected `tool_input`, not just the
+    # fields a hook touched. The measurement behind this lane only exercised a
+    # partial `{"command": …}`, so whether the harness merges or replaces is
+    # unverified — sending the full input is correct under either reading,
+    # while a partial one silently drops `description` under the replace one.
+    merged = _merge_hook_specific_output(
+        contexts, event, _payload_tool_input(current_payload) if pending_input else None
+    )
+    if merged:
+        sys.stdout.write(merged)
     return 0
 
 
@@ -716,13 +753,81 @@ def _stop_block_reason(stdout: str) -> Optional[str]:
     return _stop_output(stdout)[0]
 
 
-def _merge_additional_context(payloads: list[str], event: str) -> str:
-    """Fold several members' `additionalContext` into ONE hookSpecificOutput.
+def _updated_input(stdout: str, event: str) -> dict:
+    """Return a member's `hookSpecificOutput.updatedInput`, or `{}` (issue #1334).
+
+    Parsed, never substring-probed, and the member's `hookEventName` must match
+    the group's own — the same two guards the context merge below applies, for
+    the same reason: a member that names the wrong event produces an object the
+    host discards, and adopting its rewrite would corrupt the one the group
+    does emit. A non-dict `updatedInput` is dropped rather than propagated;
+    fail-open here means the original command runs, which is always the safe
+    direction for a correction lane.
+    """
+    if not stdout:
+        return {}
+    try:
+        obj = json.loads(stdout)
+    except ValueError:
+        return {}
+    hso = obj.get("hookSpecificOutput") if isinstance(obj, dict) else None
+    if not isinstance(hso, dict):
+        return {}
+    if str(hso.get("hookEventName") or "") != event:
+        return {}
+    # A member that DECIDED is not a member that merely corrected, and the
+    # caller's guard against that is a substring probe for the spaced
+    # `"permissionDecision": "ask"` form that `_hook_io.emit_decision`
+    # produces. Every member emits that form today, so the probe holds — but it
+    # holds by convention, and a member writing compact JSON would slip an ask
+    # or a deny past it and have its rewrite accepted anyway. This function
+    # already has the parsed object in hand, so the structural check is free.
+    if hso.get("permissionDecision") is not None:
+        return {}
+    updated = hso.get("updatedInput")
+    return updated if isinstance(updated, dict) and updated else {}
+
+
+def _with_updated_input(payload_raw: str, updated: dict) -> str:
+    """Fold `updated` into the payload's `tool_input` for the remaining members.
+
+    Merged field-by-field rather than replacing `tool_input` wholesale: a hook
+    that corrects only `command` must not drop `description` and the other
+    fields the harness sent. An unparseable payload is returned unchanged —
+    the members after this one then read the original, which is the same
+    fail-open the rest of this module takes.
+    """
+    try:
+        obj = json.loads(payload_raw)
+    except ValueError:
+        return payload_raw
+    if not isinstance(obj, dict):
+        return payload_raw
+    tool_input = obj.get("tool_input")
+    obj["tool_input"] = {**tool_input, **updated} if isinstance(tool_input, dict) else dict(updated)
+    return json.dumps(obj)
+
+
+def _payload_tool_input(payload_raw: str) -> dict:
+    """Return the payload's `tool_input` dict, or `{}` when it has none."""
+    try:
+        obj = json.loads(payload_raw)
+    except ValueError:
+        return {}
+    tool_input = obj.get("tool_input") if isinstance(obj, dict) else None
+    return tool_input if isinstance(tool_input, dict) else {}
+
+
+def _merge_hook_specific_output(
+    payloads: list[str], event: str, updated_input: Optional[dict]
+) -> str:
+    """Fold the members' `additionalContext` and rewrite into ONE object.
 
     Claude Code reads a single JSON object from a hook's stdout, so concatenating
-    N objects is invalid JSON and would lose all of them. Their context strings are
-    joined instead. Fail-open: an unparseable or differently-shaped payload is
-    dropped rather than corrupting the object the other members produced — the
+    N objects is invalid JSON and would lose all of them. The context strings are
+    joined instead, and the accumulated `updatedInput` rides on the same object
+    for the same reason. Fail-open: an unparseable or differently-shaped payload
+    is dropped rather than corrupting the object the other members produced — the
     advisory's stderr line is emitted separately and is unaffected.
 
     A member's `hookEventName` is checked against the group's own event instead of
@@ -730,6 +835,9 @@ def _merge_additional_context(payloads: list[str], event: str) -> str:
     member's wrong event name label the merged object, and Claude Code discards an
     object whose event does not match the hook it invoked — losing every member's
     context, which is the same silent drop this forwarding exists to fix.
+
+    An empty result (no contexts, no rewrite) returns "" so the caller writes
+    nothing at all, which is what a silent allow looks like on this channel.
     """
     chunks: list[str] = []
     for raw in payloads:
@@ -745,12 +853,13 @@ def _merge_additional_context(payloads: list[str], event: str) -> str:
         text = hso.get("additionalContext")
         if isinstance(text, str) and text:
             chunks.append(text)
-    if not chunks:
+    if not chunks and not updated_input:
         return ""
-    out: dict = {
-        "hookEventName": event,
-        "additionalContext": "\n\n".join(chunks),
-    }
+    out: dict = {"hookEventName": event}
+    if updated_input:
+        out["updatedInput"] = updated_input
+    if chunks:
+        out["additionalContext"] = "\n\n".join(chunks)
     return json.dumps({"hookSpecificOutput": out})
 
 

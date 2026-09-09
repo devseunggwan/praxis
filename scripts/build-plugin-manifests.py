@@ -1131,8 +1131,9 @@ def hook_mode(entries: list[dict]) -> dict:
         mode = entry.get("mode")
         if not mode:
             continue
-        if "strict_env" in mode and "strict_env" not in merged:
-            merged["strict_env"] = mode["strict_env"]
+        for scalar in ("strict_env", "rewrite_env"):
+            if scalar in mode and scalar not in merged:
+                merged[scalar] = mode[scalar]
         for key in ("bypass_env", "state_paths", "external_commands"):
             if mode.get(key):
                 merged.setdefault(key, [])
@@ -1179,6 +1180,7 @@ def render_hook_operating_matrix(manifest: dict) -> str:
     bypass_vars: dict[str, list[str]] = {}
     state_vars: dict[str, list[str]] = {}
     external_commands: dict[str, list[str]] = {}
+    rewrite_vars: dict[str, list[str]] = {}
     for name, entries in by_name.items():
         mode = hook_mode(entries)
         if mode.get("strict_env"):
@@ -1189,10 +1191,13 @@ def render_hook_operating_matrix(manifest: dict) -> str:
             state_vars[name] = mode["state_paths"]
         if mode.get("external_commands"):
             external_commands[name] = mode["external_commands"]
+        if mode.get("rewrite_env"):
+            rewrite_vars[name] = [mode["rewrite_env"]]
 
     header = [
         "Hook", "Role", "Events", "Hosts", "Default", "Review by",
-        "Strict env", "Bypass env", "State/path vars", "External commands",
+        "Strict env", "Bypass env", "Rewrites input", "State/path vars",
+        "External commands",
     ]
     table_rows = []
     for name in sorted(by_name):
@@ -1208,6 +1213,7 @@ def render_hook_operating_matrix(manifest: dict) -> str:
             _md_cell(_hook_review_by(entries)),
             _md_cell(_compact_join(strict_vars.get(name, []))),
             _md_cell(_compact_join(bypass_vars.get(name, []))),
+            _md_cell(_compact_join(rewrite_vars.get(name, []))),
             _md_cell(_compact_join(state_vars.get(name, []))),
             _md_cell(_compact_join(external_commands.get(name, []))),
         ])

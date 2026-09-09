@@ -2075,6 +2075,7 @@ def main() -> int:
     all_hook_names = sorted(manifest_by_name)
     doc_strict = _build.parse_doc_env_table("Strict", all_hook_names)
     doc_bypass = _build.parse_doc_env_table("Opt-out", all_hook_names)
+    doc_rewrite = _build.parse_doc_env_table("Rewrite", all_hook_names)
     doc_state = _build.parse_doc_state_vars(all_hook_names)
     doc_external = _build.parse_doc_external_commands()
 
@@ -2089,6 +2090,7 @@ def main() -> int:
     field_specs = [
         ("strict_env", doc_strict, "strict env", "docs/bypass-vars.md (## Strict)"),
         ("bypass_env", doc_bypass, "bypass env", "docs/bypass-vars.md (## Opt-out)"),
+        ("rewrite_env", doc_rewrite, "rewrite env", "docs/bypass-vars.md (## Rewrite)"),
         ("state_paths", doc_state, "state/path var", "docs/bypass-vars.md (## Path / test)"),
         ("external_commands", doc_external, "external command", "SECURITY.md"),
     ]
