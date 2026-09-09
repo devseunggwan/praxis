@@ -77,6 +77,16 @@ INVARIANTS: list[dict] = [
         "scan": "hooks/postuse-correction/bypass-telemetry/impl.py",
         "doc": "hooks/postuse-correction/bypass-telemetry/spec.md",
     },
+    {
+        # The rewrite arm's switch (issue #1334). An arm nobody can turn on is
+        # the same defect as a documented token the hook stopped matching: the
+        # spec names the variable a user exports, the hook reads it, and the
+        # rollout is measured on fires that only happen when the two agree.
+        "token": "PRAXIS_BLOCK_GH_STATE_ALL_REWRITE",
+        "scan_pattern": "PRAXIS_BLOCK_GH_STATE_ALL_REWRITE",
+        "scan": "hooks/preflight-gate/block-gh-state-all/impl.py",
+        "doc": "hooks/preflight-gate/block-gh-state-all/spec.md",
+    },
 ]
 
 

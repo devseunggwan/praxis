@@ -51,13 +51,50 @@ should not assume the partial side-effects landed.
 - Omit `--state` entirely — `gh search` returns results regardless of state by default.
 - Run two calls: `--state open` then `--state closed`, then merge results.
 
+### Rewrite arm — `PRAXIS_BLOCK_GH_STATE_ALL_REWRITE=1` (issue #1334)
+
+Off by default. Exported as exactly `1`, the hook stops blocking this case and
+instead hands the harness the corrected command through
+`hookSpecificOutput.updatedInput`, letting the call proceed. Nothing else about
+the detection changes — a command this hook did not block is still untouched.
+
+The fix is deterministic, which is what makes it eligible: `--state all` is
+invalid for `gh search`, and omitting `--state` returns every state, so there
+is exactly one correction and no judgement to make.
+
+Two guards bound it, and both fall back to the ordinary block:
+
+| Guard | Why |
+| ----- | --- |
+| single segment only | `--state all` is valid for `gh issue list`, so removing it textually across `gh search … && gh issue list --state all` would break the half that was correct |
+| token-level readback | the removal is textual (the tokenizer keeps no offsets), then certified: the result must re-tokenize to the original tokens minus exactly the `--state` / `all` pair, and must no longer trip the detector |
+
+A command carrying a backslash line continuation also keeps the block: the
+tokenizer normalizes it away, and a correction must change exactly the one
+thing it claims to change.
+
+The corrected call is announced on the same object, as
+`additionalContext` — `original -> corrected`. Not decoration: the transcript's
+`tool_use` record keeps the command the model wrote (measured on Claude Code
+2.1.266), so an unannounced rewrite is invisible to the actor, to a reviewer
+reading the transcript, and to the praxis hooks that scan prior calls.
+
+Each firing is recorded in the fire ledger with decision `rewrite`
+(`_fire_ledger.DECISION_REWRITE`), which is what the promotion-to-default
+decision is measured on.
+
 ### Tests
 
 ```bash
 bash tests/hooks/preflight-gate/test_block_gh_state_all.sh
+pytest tests/hooks/preflight-gate/test_block_gh_state_all_rewrite.py
 ```
 
-Covers 29 cases: 10 block paths (including env-prefix, sudo wrapper, chained
-segments), 17 pass paths (legitimate gh list, echo/grep/commit/pr-body false-positive
-regressions, non-gh commands), non-Bash tool passthrough, and malformed stdin
-fail-open.
+The shell file covers 29 cases: 10 block paths (including env-prefix, sudo
+wrapper, chained segments), 17 pass paths (legitimate gh list,
+echo/grep/commit/pr-body false-positive regressions, non-gh commands), non-Bash
+tool passthrough, and malformed stdin fail-open.
+
+The pytest file covers only what the arm adds: every spelling and position of
+the flag, the arm switch off / `0` / a non-`1` truthy value, the two guards
+above, and four lookalikes the arm must leave alone.
