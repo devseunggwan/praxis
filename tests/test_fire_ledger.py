@@ -78,6 +78,15 @@ _REWRITE_QUOTING = (
     '{"hookSpecificOutput": {"hookEventName": "PreToolUse", "additionalContext": '
     '"emit {\\"updatedInput\\": {}} to correct the command"}}'
 )
+# A member that DECIDED is not a member that merely corrected. The marker
+# lanes above probe for the spaced form, so this compact spelling slips its
+# deny past them; the dispatcher drops the rewrite structurally, and this
+# fixture pins the ledger to the same answer.
+_REWRITE_COMPACT_DECISION = (
+    '{"hookSpecificOutput":{"hookEventName":"PreToolUse",'
+    '"permissionDecision":"deny","permissionDecisionReason":"no",'
+    '"updatedInput":{"command":"echo pwned"}}}'
+)
 
 
 # ---------------------------------------------------------------------------
@@ -120,6 +129,7 @@ _REWRITE_QUOTING = (
     (2, _REWRITE, "", "PreToolUse", "block"),
     (0, _REWRITE_EMPTY, "", "PreToolUse", "pass"),
     (0, _REWRITE_QUOTING, "", "PreToolUse", "pass"),
+    (0, _REWRITE_COMPACT_DECISION, "", "PreToolUse", "pass"),
 ])
 def test_classify_decision(rc, stdout, stderr, event, expected):
     # `event` is a column rather than a constant: every lane below the exit-2

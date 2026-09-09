@@ -219,8 +219,11 @@ def _is_input_rewrite(stdout: str) -> bool:
 
     Parsed, not substring-matched, and kept in sync with
     `_dispatch._updated_input` — the dispatcher accepts the rewrite only when
-    it parses and names PreToolUse, so recording one on any looser test would
-    count a correction the dispatcher never forwarded.
+    it parses, names PreToolUse, and carries no `permissionDecision`, so
+    recording one on any looser test would count a correction the dispatcher
+    never forwarded. The decision guard is what the marker lanes above cannot
+    do: they probe for the spaced form, so a member writing compact JSON slips
+    its decision past them and would otherwise be filed as a pure rewrite.
     """
     if not stdout:
         return False
@@ -232,6 +235,8 @@ def _is_input_rewrite(stdout: str) -> bool:
     if not isinstance(hso, dict):
         return False
     if hso.get("hookEventName") != "PreToolUse":
+        return False
+    if hso.get("permissionDecision") is not None:
         return False
     updated = hso.get("updatedInput")
     return isinstance(updated, dict) and bool(updated)
