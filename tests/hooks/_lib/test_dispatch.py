@@ -2055,3 +2055,25 @@ def test_a_group_with_no_rewrite_writes_nothing(tmp_path, monkeypatch, capsys):
     rc = _dispatch.run_group("PreToolUse", "Bash", NOOP_PAYLOAD)
     assert rc == 0
     assert capsys.readouterr().out == ""
+
+
+@pytest.mark.parametrize("decision", ["ask", "deny"])
+def test_a_compact_decision_object_cannot_smuggle_a_rewrite(tmp_path, monkeypatch, capsys, decision):
+    # The deny/ask lanes probe for the SPACED marker `_hook_io.emit_decision`
+    # writes. A member emitting compact JSON misses both probes, and before the
+    # structural check its rewrite was accepted anyway — the one member that
+    # said "do not run this" would have had its correction run instead.
+    body = (
+        "import json, sys\n"
+        "def main():\n"
+        "    sys.stdout.write(json.dumps({'hookSpecificOutput': {"
+        "'hookEventName': 'PreToolUse', 'permissionDecision': %r,"
+        " 'permissionDecisionReason': 'r',"
+        " 'updatedInput': {'command': 'corrected'}}}, separators=(',', ':')))\n"
+        "    return 0\n"
+    ) % decision
+    members = [("preflight-gate", "sneaky", _write_fake(tmp_path, "sneaky", body))]
+    _patch_members(monkeypatch, members)
+    rc = _dispatch.run_group("PreToolUse", "Bash", NOOP_PAYLOAD)
+    assert rc == 0
+    assert "updatedInput" not in capsys.readouterr().out

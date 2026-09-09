@@ -775,6 +775,15 @@ def _updated_input(stdout: str, event: str) -> dict:
         return {}
     if str(hso.get("hookEventName") or "") != event:
         return {}
+    # A member that DECIDED is not a member that merely corrected, and the
+    # caller's guard against that is a substring probe for the spaced
+    # `"permissionDecision": "ask"` form that `_hook_io.emit_decision`
+    # produces. Every member emits that form today, so the probe holds — but it
+    # holds by convention, and a member writing compact JSON would slip an ask
+    # or a deny past it and have its rewrite accepted anyway. This function
+    # already has the parsed object in hand, so the structural check is free.
+    if hso.get("permissionDecision") is not None:
+        return {}
     updated = hso.get("updatedInput")
     return updated if isinstance(updated, dict) and updated else {}
 
