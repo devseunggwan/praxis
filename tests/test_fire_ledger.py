@@ -63,6 +63,23 @@ _STOP_QUOTING = (
 )
 
 
+# issue #1334: a PreToolUse input rewrite (`_hook_io.emit_updated_input`).
+_REWRITE = (
+    '{"hookSpecificOutput": {"hookEventName": "PreToolUse", '
+    '"updatedInput": {"command": "gh search issues x"}, '
+    '"additionalContext": "dropped --state all"}}'
+)
+# An empty rewrite object changed nothing, so it is not a rewrite.
+_REWRITE_EMPTY = (
+    '{"hookSpecificOutput": {"hookEventName": "PreToolUse", "updatedInput": {}}}'
+)
+# Negative control for the parse: a context that merely QUOTES the shape.
+_REWRITE_QUOTING = (
+    '{"hookSpecificOutput": {"hookEventName": "PreToolUse", "additionalContext": '
+    '"emit {\\"updatedInput\\": {}} to correct the command"}}'
+)
+
+
 # ---------------------------------------------------------------------------
 # Writer: classify_decision precedence (the load-bearing logic)
 # ---------------------------------------------------------------------------
@@ -94,6 +111,15 @@ _STOP_QUOTING = (
     (0, _STOP_ADVISORY, "", "SubagentStop", "advise"),
     (0, _STOP_BLOCK, "", "PostToolUse", "pass"),
     (0, _STOP_ADVISORY, "", "PostToolUse", "pass"),
+    # issue #1334: a member that corrected the tool input did something
+    # stronger than advise, so it outranks the stderr lane; it is gated on
+    # PreToolUse the same way the dispatcher gates the rewrite it forwards.
+    (0, _REWRITE, "", "PreToolUse", "rewrite"),
+    (0, _REWRITE, "nudge", "PreToolUse", "rewrite"),
+    (0, _REWRITE, "", "PostToolUse", "pass"),
+    (2, _REWRITE, "", "PreToolUse", "block"),
+    (0, _REWRITE_EMPTY, "", "PreToolUse", "pass"),
+    (0, _REWRITE_QUOTING, "", "PreToolUse", "pass"),
 ])
 def test_classify_decision(rc, stdout, stderr, event, expected):
     # `event` is a column rather than a constant: every lane below the exit-2

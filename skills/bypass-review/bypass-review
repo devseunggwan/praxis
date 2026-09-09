@@ -281,7 +281,13 @@ F_FIRE_GRANULARITY = "granularity"
 F_FIRE_COUNT = "count"          # issue #1238: a folded run of `pass` fires
 F_FIRE_FIRST = "first_timestamp"  # issue #1238: the other end of that run
 
-_FIRE_DECISIONS = ("block", "ask", "advise", "pass")
+_FIRE_DECISIONS = ("block", "ask", "rewrite", "advise", "pass")
+
+# issue #1334: a PreToolUse member that corrected the tool input instead of
+# blocking (cited verbatim from hooks/_lib/_fire_ledger.py DECISION_REWRITE).
+# It IS a fire — the hook ran and changed what executed — so unlike a skip it
+# stays in the fire counts; it gets its own column because the opt-in rollout
+# of the rewriting hooks is judged on this count against their false positives.
 
 # issue #1167: the dispatcher writes decision="skip" for a Bash-group member
 # it never RAN because the group budget could not cover it (cited verbatim
@@ -1046,7 +1052,7 @@ def fire_count(event: dict) -> int:
 def aggregate_fires(events: list[dict]) -> dict[str, dict]:
     """Per-hook fire aggregation: counts by decision, sessions, last seen.
 
-    Returns dict[hook_name] -> {role, fires, block, ask, advise, pass, skip,
+    Returns dict[hook_name] -> {role, fires, block, ask, rewrite, advise, pass, skip,
     sessions: set[str], last_seen: str}.
 
     `skip` (issue #1167) counts dispatcher budget-skips SEPARATELY from
@@ -1062,7 +1068,7 @@ def aggregate_fires(events: list[dict]) -> dict[str, dict]:
             continue
         row = by_hook.setdefault(hook, {
             "role": ev.get(F_FIRE_ROLE) or UNKNOWN,
-            "fires": 0, "block": 0, "ask": 0, "advise": 0, "pass": 0,
+            "fires": 0, "block": 0, "ask": 0, "rewrite": 0, "advise": 0, "pass": 0,
             "skip": 0,
             "sessions": set(), "last_seen": "", "coarse": False, "rich": False,
         })
@@ -1941,7 +1947,7 @@ def render_fire_report(
             f"  Skip-only hooks : {skip_only_count}  (only budget-skip records "
             "— never ran in this window; see Skip column)"
         )
-    lines.append("  Scope  : Bash dispatch group = rich (block/ask/advise/pass/skip);")
+    lines.append("  Scope  : Bash dispatch group = rich (block/ask/rewrite/advise/pass/skip);")
     lines.append("           other @fail_open hooks = coarse (block/pass only);")
     lines.append("           single-event-rich Stop hooks = mixed (rich escalations")
     lines.append("           + coarse passes)")
@@ -1956,11 +1962,11 @@ def render_fire_report(
     col = 34
     lines.append(
         f"  {'Hook':<{col}}  {'G':>1}  {'Fires':>5}  {'Block':>5}  {'Ask':>4}  "
-        f"{'Advise':>6}  {'Pass':>5}  {'Skip':>4}  {'Sess':>4}  Last Seen"
+        f"{'Rwrt':>4}  {'Advise':>6}  {'Pass':>5}  {'Skip':>4}  {'Sess':>4}  Last Seen"
     )
     lines.append(
-        f"  {'─' * col}  {'─' * 1}  {'─' * 5}  {'─' * 5}  {'─' * 4}  {'─' * 6}  "
-        f"{'─' * 5}  {'─' * 4}  {'─' * 4}  {'─' * 10}"
+        f"  {'─' * col}  {'─' * 1}  {'─' * 5}  {'─' * 5}  {'─' * 4}  {'─' * 4}  "
+        f"{'─' * 6}  {'─' * 5}  {'─' * 4}  {'─' * 4}  {'─' * 10}"
     )
     for hook in sorted(by_hook, key=lambda h: by_hook[h]["fires"], reverse=True):
         r = by_hook[hook]
@@ -1973,7 +1979,7 @@ def render_fire_report(
             g = "R"
         lines.append(
             f"  {hook:<{col}}  {g:>1}  {r['fires']:>5}  {r['block']:>5}  {r['ask']:>4}  "
-            f"{r['advise']:>6}  {r['pass']:>5}  {r.get('skip', 0):>4}  "
+            f"{r.get('rewrite', 0):>4}  {r['advise']:>6}  {r['pass']:>5}  {r.get('skip', 0):>4}  "
             f"{len(r['sessions']):>4}  {last_seen}"
         )
     lines.append("")
