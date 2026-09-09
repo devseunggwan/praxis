@@ -3,8 +3,8 @@ name: cmux-delegate
 description: Hand off an existing independent issue that surfaced mid-task to its own Claude Code session in a new cmux workspace, with auto-collected context; that session runs issue→worktree→PR alone. Not for splitting the current task.
 when_to_use: Triggers on "cmux delegate", "delegate issue", "delegate to new session", "별도 세션", "세션에 위임", "별건으로 빼서".
 verified-against-runtime: true
-runtime-verified-at: 2026-09-04
-runtime-verified-note: "cmux 0.64.22 — the selected workspace's `list-workspaces` row is prefixed `* `, so field 1 without the strip is `*` and `cmux send --workspace '*'` fails with `Invalid workspace handle`; stripped, `--session` resolves and `send` returns `OK`. The legacy-alias notice goes to stderr, so it cannot reach the grep."
+runtime-verified-at: 2026-09-09
+runtime-verified-note: "cmux 0.64.22 (2026-09-04) — the selected workspace's `list-workspaces` row is prefixed `* `, so field 1 without the strip is `*` and `cmux send --workspace '*'` fails with `Invalid workspace handle`; stripped, `--session` resolves and `send` returns `OK`. The legacy-alias notice goes to stderr, so it cannot reach the grep. AskUserQuestion (2026-09-09) — a single 4-option question round-tripped and came back as the user's own sentence rather than any listed label, so Step 2.6's escalation reads the answer as text instead of branching on an option label."
 ---
 
 # cmux-delegate
@@ -27,6 +27,9 @@ separate account profiles, and parallel multi-issue distribution are supported.
 - **The unit of delegation is one independent issue.** If it can stand as an
   issue, delegate it; if it cannot, it is not a delegation target but a piece
   to finish in this session.
+- **Ambiguity is removed before launch, not after.** Nothing comes back to ask
+  with, so the done-condition, the scope, and the procedure go into the prompt
+  as commands, paths, and numbers (Step 2.6).
 - **Fire-and-forget.** Delegating is the end — the worker reports nothing back
   to the delegator, and the delegator neither monitors nor judges the worker.
   The user sees the result directly in that cmux tab.
@@ -222,6 +225,112 @@ modes consume the same `.md`.
 direct delegation with no prior context), skip the synthesis and omit the
 `## Handoff` section entirely.
 
+### Step 2.6: Socratic Interview (quantify the purpose and the method)
+
+Step 2.5 hands over *what happened before*, and `## Instructions` carries the
+user's task text as written. Neither states, in a form anything can check,
+**what makes this task done** or **how it is to be run**. Delegation is
+fire-and-forget, so every ambiguity left in the prompt is resolved by the
+worker guessing, and the delegator never learns which way it guessed.
+
+The interview closes that at compose time: the orchestrator asks the questions
+a worker would have asked and answers each one in a **quantified** form. It is
+the fixed-question form of the Step 3 rule *any question answerable before
+delegating gets its answer baked into the prompt* — one rule, and the question
+set below is the only place it is enumerated.
+
+**The quantification rule.** Every answer carries at least one of:
+
+| Carrier | Example |
+| --- | --- |
+| A runnable command + its expected result | `pytest tests/test_x.py -q` → `0 failed` |
+| A path or glob | `hooks/preflight-gate/**/impl.py` |
+| A count, threshold, or bound | 3 surfaces, ≤ 50 chars, 2 call sites |
+| An issue / PR number | `#1140`, PR `#1372` |
+| A `file:line` citation | `skills/<name>/SKILL.md:120` |
+
+An answer left at "적절히", "필요하면", "가능한 한" carries none of them and is
+not an answer — move it to Q5 as an UNKNOWN. Writing a sentence there instead
+is the failure this section exists to prevent, and it is the
+[`ETHOS.md` → Claims that terminate in prose](../../ETHOS.md#claims-that-terminate-in-prose)
+class: the answer emits no tool call, nothing downstream can intercept it, and
+compose time is the only surface left.
+
+**Question set:**
+
+| # | Question | Quantified answer |
+| --- | --- | --- |
+| Q1 | What must be true for this to be done? | The judging command and its expected output, in the shape the spec store's `Verify:` line requires ([`docs/spec-store.md` → Verification lines](../../docs/spec-store.md#verification-lines)): it fails when its subject is gone, and its exit code reports the work rather than the environment |
+| Q2 | Which paths are in scope, and which are explicitly out? | Both lists as paths or globs. An empty out-of-scope list is an answer too, and it says the worker may touch anything |
+| Q3 | What is the procedure, step by step? | Numbered steps, each with the command that confirms the step landed |
+| Q4 | What is each answer above based on? | `file:line`, `#issue`, or the command whose output was read |
+| Q5 | What cannot be answered here, and how does the worker settle it? | The UNKNOWN plus the command or file that settles it — never a guess dressed as an answer. With no such command or file, it is not a Q5 item at all: escalate it to the user below |
+
+**Gate — Q1 carries no UNKNOWN.** The done-condition has to be checkable by
+someone who was not in this conversation: a command with its expected output
+for implement/debug work, an enumerated surface list with its count for a
+review. If neither can be written, do not delegate — an item with no completion
+criteria is the second row of the `When to Use` eligibility table, a piece of
+this session's work rather than an issue that stands alone, so finish it here.
+Q2–Q5 may carry UNKNOWNs; that is what Q5 is for.
+
+**Escalation — when neither side can answer, ask the user.** The interview has
+three tiers, and an answer belongs to the first one that can produce it:
+
+| Tier | Condition | Where the answer goes |
+| --- | --- | --- |
+| 1. The orchestrator answers | The conversation, the repository, or a standing convention already settles it | Into that question's answer line. Looking it up rather than putting it to the user is the *Look Up the Answer Before You Offer a Menu* rule ([`ETHOS.md` → Rules praxis carries](../../ETHOS.md#rules-praxis-carries)) |
+| 2. The worker resolves it | Not answerable here, but a **named** command or file settles it at the worker's end | Q5 — the UNKNOWN plus that resolver |
+| 3. **Ask the user** | Neither: no answer here, and no command or file the worker could be pointed at | `AskUserQuestion`, **before** Step 5. The answer is written into the question it belongs to, and Q5 no longer carries it |
+
+Tier 3 cannot be deferred to the worker. Delegation is fire-and-forget, so a
+worker that meets the question mid-run has no channel back: it guesses, the
+guess becomes the decision, and the delegator never learns which way it went —
+the failure this interview exists to prevent, moved one process later. A
+question that is ambiguous to *both* sides is therefore the user's to answer,
+and it is answered before the workspace opens, not after.
+
+Rules for that ask:
+
+- **Only tier-3 questions.** Anything tier 1 or 2 covers is looked up or handed
+  to the worker; a menu built from questions the repo already answers is the
+  rule above being broken with extra steps.
+- **Runtime caps:** at most 4 options and at most 4 questions per call
+  ([`RUNTIME_CONSTRAINTS.md` §1, §1a](../../RUNTIME_CONSTRAINTS.md)) — more than
+  four questions goes out as consecutive calls, never one oversized one. The
+  fourth option slot is the escape hatch (`Other (직접 입력)`); an end option
+  (`여기서 종료`) belongs there only when the user's own last message carried a
+  stop signal, since `block-ask-end-option` blocks the call otherwise.
+- **The answer can arrive off-menu.** Measured 2026-09-09: a four-option
+  question came back as the user's own sentence rather than any listed label.
+  So never branch on an option label — read the answer as text and re-express
+  it in the quantified form the question asked for.
+- **An unquantified answer is not resolution.** If what comes back is itself
+  "적당히 해주세요", that question is still open: ask once more, naming the
+  missing piece (the command, the path, the number). If it stays open after
+  that, do not delegate — that is the `When to Use` eligibility verdict
+  arriving late.
+- **If the user cannot be asked** (an unattended run, nobody at the terminal),
+  do not launch. A prompt shipped with a guess in Q1 costs more than a
+  delegation that has not happened yet.
+
+The user's answer is recorded in its own question's line, and Q4 names the ask
+(`asked the user, YYYY-MM-DD`) as provenance. Provenance is not a carrier: the
+answer itself still has to be a command, a path, a count, an issue number, or a
+`file:line`.
+
+**Fresh-eyes branching**, mirroring the Step 2.5 table:
+
+| Delegation type | Interview |
+| --- | --- |
+| review / audit / fresh-eyes | Q1 (as *coverage*: which surfaces must be read for the review to be complete), Q2, Q4, Q5. **Q3 is excluded** — handing a reviewer the procedure prescribes what they will find, the same bias injection that keeps `### Decisions` out of the handoff |
+| continue-work / implement / debug | All five |
+
+**Budget: ≤ 3 lines per answer, ≤ 40 lines for the section.** The binding
+constraint is attention, not size — Step 4's `ARG_LIMIT`
+(`min(ARG_MAX/4, 32 × PAGE_SIZE)`) sits far above the measured 6–10KB prompt.
+An interview longer than the `## Instructions` it introduces buries the task.
+
 ### Step 3: Generate Prompt File
 
 Synthesize the collected context and the user prompt, and save it to
@@ -239,7 +348,9 @@ prompt.** A worker asking mid-run costs one round-trip and a human's
 attention, no matter how good the channel is. While authoring, whenever "would
 the worker ask about this" comes to mind, write the answer in on the spot —
 things like which branch to cut from, which account to push with, and how far
-to run the tests.
+to run the tests. Step 2.6 is that rule's fixed question set — its five answers
+go into the prompt below verbatim, and anything the set does not cover is
+written in here on the spot.
 
 Prompt file structure:
 
@@ -281,6 +392,21 @@ Prompt file structure:
 ### Next task  — continue-work/implement/debug only
 {a self-contained next task}
 
+## Socratic interview (quantified)
+
+{Q3 is dropped for review/audit/fresh-eyes and Q1 takes its coverage form
+ there; every answer carries a command, path, count, issue number, or
+ file:line — see Step 2.6}
+
+- **Q1 · Done when:** {implement/debug: judging command → expected output · review/audit: the surfaces that must be read, with their count}
+- **Q2 · Scope:** in `{paths/globs}` / out `{paths/globs}`
+- **Q3 · Procedure:** {numbered steps, each with its confirming command} — continue-work/implement/debug only
+- **Q4 · Evidence:** {file:line, #issue, or the command whose output was read}
+- **Q5 · UNKNOWN:** {open question → the command or file that settles it}
+
+{An answer settled by asking the user is written into its own Q line, with
+ `asked the user, YYYY-MM-DD` recorded under Q4 — it never stays in Q5}
+
 ## Instructions
 
 {task description from user}
@@ -318,7 +444,12 @@ N issues that are already mutually independent, each on its own.
    `/tmp/cmux-delegate-{timestamp}-{n}.md` with `{n}` counting from 1. A
    section header is not itself a boundary — if one issue is written under
    several headers, those headers are bundled into one file
-2. The Context section is included in every split file
+2. The Context section is included in every split file. The Socratic
+   interview is **not** copied that way — Q1 and Q2 are the issue's own
+   done-condition and scope, so each split file carries the interview run
+   for its own issue. One block copied into N files gives N workers the
+   same done-condition, which is only correct when the items are the same
+   issue — and then they should not have been split
 3. Generate an individual wrapper .sh for each file, named
    `/tmp/cmux-delegate-{timestamp}-{n}.sh` for the same `{n}`. Item `{n}`'s
    pair is what `{prompt_file}` and `{script_file}` mean for that worker;
@@ -609,6 +740,11 @@ user: /cmux-delegate "#1140 auth 토큰 갱신 실패" --model claude:opus --acc
   │     └── Findings / Relevant files (+ Decisions / Next task if continue-work)
   │           (thin context → omit entirely)
   │
+  ├── Step 2.6: Socratic interview (Q1 done-condition … Q5 UNKNOWN, quantified)
+  │     ├── orchestrator answers → into the Q  |  worker resolves → Q5 + resolver
+  │     ├── neither can answer → AskUserQuestion before launch (≤ 4 opts / ≤ 4 qs)
+  │     └── Q1 still UNKNOWN → do not delegate; finish it in this session
+  │
   ├── Step 3: Prompt .md generation (Write tool)
   │     └── /tmp/cmux-delegate-{ts}.md
   │
@@ -632,6 +768,8 @@ user: /cmux-delegate "에러 조사" --session claude-2
   │
   ├── Step 2.5: Conversation-synthesis handoff (rich if continuing work)
   │
+  ├── Step 2.6: Socratic interview (quantified Q1~Q5)
+  │
   ├── Step 3: Prompt .md generation
   │
   └── Step 5b: cmux send --workspace {matched} "prompt file path"
@@ -645,7 +783,10 @@ user: /cmux-delegate "작업 중 나온 별건 3개: #1140 토큰 갱신 실패,
   │
   ├── Step 2.5: Conversation-synthesis handoff (once) → included in the shared Context block
   │
-  ├── Step 3.5: Distribute — split at issue granularity (Handoff copied into every split)
+  ├── Step 2.6: Socratic interview — run per issue, not once (Q1/Q2 differ per item)
+  │
+  ├── Step 3.5: Distribute — split at issue granularity (Handoff copied into every split,
+  │     each split carrying its own interview)
   │     ├── /tmp/cmux-delegate-{ts}-1.md (#1140)
   │     ├── /tmp/cmux-delegate-{ts}-2.md (#1141)
   │     └── /tmp/cmux-delegate-{ts}-3.md (#1142)
@@ -701,6 +842,16 @@ That was equally true in the pipe era, so it is not a regression.
 - The delegation-unit test (does it stand as an issue) is not structurally
   enforced — nothing prevents violations beyond reading and following this
   document
+- **The tier-3 ask needs a user present** (Step 2.6) — a question neither the
+  orchestrator nor the worker can settle has no unattended path: the skill
+  stops instead of guessing, so an unattended delegation of an
+  under-specified issue simply does not happen
+- **The interview's quantification is not structurally enforced** (Step 2.6) —
+  nothing reads the prompt file before it reaches the worker, so an answer that
+  carries no command, path, count, issue number, or `file:line` ships as
+  written. Compose time is the only check, which is the
+  [`ETHOS.md` → Claims that terminate in prose](../../ETHOS.md#claims-that-terminate-in-prose)
+  class rather than a gap awaiting a hook
 - **Handoff synthesis quality depends on the orchestrator conversation**
   (Step 2.5) — with thin conversation context only raw git context is
   delivered, and for fresh-eyes delegation it is deliberately minimized to
