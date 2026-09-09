@@ -109,6 +109,7 @@ from pathlib import Path
 _HOOK_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HOOK_DIR.parent.parent / "_lib"))
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
+from _hook_io import emit_updated_input  # type: ignore[import-not-found]  # noqa: E402
 from _payload import read_bash_payload  # type: ignore[import-not-found]  # noqa: E402
 from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
     ENV_ASSIGN_RE,
@@ -156,6 +157,15 @@ _TRUNCATING_BINS = frozenset({"tail", "head", "grep"})
 # ADVISE-channel experiment arm switch (issue #874). Exact value "1" only,
 # mirroring `PRAXIS_ANCHOR_GATE_ADVISORY`'s convention.
 _CONTEXT_ENV = "PRAXIS_PIPEFAIL_ADVISORY_CONTEXT"
+
+# Rewrite arm switch (issue #1334). Exact value "1" after stripping, matching
+# the sibling arms. Off by default: unlike `block-gh-state-all`'s arm, which
+# removes a flag the CLI rejects outright, this one changes the exit-code
+# semantics of a command that runs perfectly well today.
+_REWRITE_ENV = "PRAXIS_PIPEFAIL_ADVISORY_REWRITE"
+
+_PIPEFAIL_PREFIX = "set -o pipefail; "
+_PIPEFAIL_PREFIX_TOKENS = ["set", "-o", "pipefail", ";"]
 
 
 def _git_subcommand(argv: list[str]) -> str | None:
@@ -795,6 +805,25 @@ def _emit_additional_context(advisory: str) -> None:
     sys.stdout.write("\n")
 
 
+def corrected(command: str, tokens: list[str]) -> str | None:
+    """Return `command` with `set -o pipefail;` prepended, or None.
+
+    None is the fail-closed answer: the caller then advises exactly as it did
+    before the arm existed. `tokens` is the caller's already-tokenized command
+    so the readback compares against the same list the advisory was derived
+    from, rather than a second tokenization that could differ.
+
+    The correction is textual — prepending keeps the caller's own quoting,
+    which rebuilding from tokens would lose — and is then certified by
+    re-tokenizing: the result must be exactly the prefix tokens followed by
+    the original ones.
+    """
+    fixed = _PIPEFAIL_PREFIX + command
+    if safe_tokenize(fixed) != _PIPEFAIL_PREFIX_TOKENS + tokens:
+        return None
+    return fixed
+
+
 @fail_open
 def main() -> int:
     parsed = read_bash_payload()
@@ -804,16 +833,22 @@ def main() -> int:
     if not command.strip():
         return 0
 
-    tokens = safe_tokenize(command.replace("\\\n", " "))
-    if not tokens:
+    continued = "\\\n" in command
+    raw_tokens = safe_tokenize(command.replace("\\\n", " "))
+    if not raw_tokens:
         return 0
 
-    tokens = _merge_fd_dup_redirects(tokens)
+    tokens = _merge_fd_dup_redirects(raw_tokens)
     # Nothing to advise when the option is already on: the advisory's own
     # headline reads "piped without `set -o pipefail`", which is false there.
     if _has_pipefail(tokens):
         return 0
     advisory = _scan_tokens_for_advisory(tokens)
+    # Only the pipe scan produces a finding `set -o pipefail` actually fixes.
+    # `_masked_gating_advisory` is about `&&` gating on a masked exit code,
+    # which the option does not touch, and the substitution path below reaches
+    # a pipeline the outer prefix would not obviously govern.
+    piped = advisory is not None
     if advisory is None:
         advisory = _masked_gating_advisory(tokens)
     if advisory is None:
@@ -836,13 +871,34 @@ def main() -> int:
             if advisory:
                 break
 
-    if advisory:
-        # Control arm, always on: stderr is what `_fire_ledger` reads to
-        # classify this fire as `advise`, and the only channel the dispatcher
-        # forwards unconditionally. See the module docstring (issue #874).
-        sys.stderr.write(advisory + "\n")
-        if os.environ.get(_CONTEXT_ENV, "").strip() == "1":
-            _emit_additional_context(advisory)
+    if not advisory:
+        return 0
+
+    # `continued` keeps the arm off a command the tokenizer had to normalize:
+    # prepending would also silently join the caller's line breaks, and a
+    # rewrite must change exactly the one thing it claims to change.
+    if (
+        piped
+        and os.environ.get(_REWRITE_ENV, "").strip() == "1"
+        and not continued
+    ):
+        fixed = corrected(command, raw_tokens)
+        if fixed is not None:
+            base = payload.get("tool_input")
+            emit_updated_input(
+                {**(base if isinstance(base, dict) else {}), "command": fixed},
+                f"[praxis:pipefail-advisory] prepended `set -o pipefail;` so the "
+                f"pipeline reports the mutating command's exit code:\n  {command}\n"
+                f"-> {fixed}",
+            )
+            return 0
+
+    # Control arm, always on: stderr is what `_fire_ledger` reads to classify
+    # this fire as `advise`, and the only channel the dispatcher forwards
+    # unconditionally. See the module docstring (issue #874).
+    sys.stderr.write(advisory + "\n")
+    if os.environ.get(_CONTEXT_ENV, "").strip() == "1":
+        _emit_additional_context(advisory)
 
     return 0
 

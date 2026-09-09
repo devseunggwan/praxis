@@ -71,6 +71,11 @@ pipe chain. Predicate 2's criteria are in
   next command runs (or does not) regardless — so there is no
   precondition to have been skipped. `&&` is the exception and is
   covered by the second predicate below.
+- **`pipefail` already set**: `set -o pipefail; git commit -m x | tail -3`,
+  and the bundled short forms (`set -eo pipefail`, `set -euo pipefail`).
+  The advisory's own headline reads "piped without `set -o pipefail`", so
+  firing here stated something false. `set` has to sit in command position —
+  `echo set -o pipefail` only mentions the option and stays a finding.
 - **Quoted-string literal**: a pipe character inside a quoted argument
   (e.g. `gh issue create --body "example: git commit -m x | tail -3"`)
   tokenizes as a single token, not a `|` separator — never reaches
@@ -292,6 +297,41 @@ which read as a decision about the first rather than an omission.
 looked for in every segment of the gated unit, not only the first:
 `... | tail -1 && echo x | gh pr merge 1264` advises.
 
+## Rewrite arm — `PRAXIS_PIPEFAIL_ADVISORY_REWRITE=1` (issue #1334)
+
+Off by default. Exported as `1` (surrounding whitespace is stripped before the
+comparison), a predicate-1 finding stops being written to stderr and is instead
+handed to the harness as the corrected command through
+`hookSpecificOutput.updatedInput`, letting the call proceed with
+`set -o pipefail; ` prepended. Nothing else about the detection changes.
+
+The arm is narrower than the advisory, and deliberately so:
+
+| Guard | Why |
+| ----- | --- |
+| predicate 1 only | predicate 2's own first remedy is "run the left side as its own Bash call", a restructuring no rewrite can express; picking its second remedy for the actor is a judgement, not a correction |
+| `pipefail` not already set | the exclusion above — there is nothing to prepend |
+| token-level readback | the prepend is textual (rebuilding from tokens would lose the caller's quoting), then certified: the result must re-tokenize to exactly `set -o pipefail ;` followed by the original tokens |
+| no line continuation | the tokenizer normalizes `\<newline>` away, and a correction must change exactly the one thing it claims to change |
+
+This arm differs from `block-gh-state-all`'s in a way worth stating plainly:
+`--state all` is *invalid*, so that command could never have run, and the
+correction restores an intent the CLI rejected. A pipeline without `pipefail`
+is valid and runs today — prepending the option changes the command's
+exit-code semantics, which is the point, but it can also make a call that
+used to report success report failure instead. That is why the arm is opt-in
+and why its rollout is measured rather than assumed.
+
+The corrected call is announced on the same object, as `additionalContext` —
+`original -> corrected`. Not decoration: the transcript's `tool_use` record
+keeps the command the model wrote (measured on Claude Code 2.1.266), so an
+unannounced rewrite is invisible to the actor, to a reviewer reading the
+transcript, and to the praxis hooks that scan prior calls.
+
+Each firing is recorded in the fire ledger with decision `rewrite`
+(`_fire_ledger.DECISION_REWRITE`), which is what the promotion-to-default
+decision is measured on.
+
 ## Response format
 
 Predicate 1:
@@ -429,7 +469,16 @@ cost dominates:
 
 ```bash
 bash tests/hooks/advisory-nudge/test_pipefail_advisory.sh
+python3 -m pytest tests/hooks/advisory-nudge/test_pipefail_advisory_rewrite.py
 ```
+
+The pytest file covers the rewrite arm and the `pipefail`-already-set
+exclusion: the four mutating-pipeline spellings the arm corrects, the other
+`tool_input` fields surviving, the context naming both commands, the corrected
+command no longer tripping the hook, the arm switch across
+unset/`0`/`""`/`true`/`11`/`" 1 "`, and the four cases that must advise rather
+than rewrite (predicate 2, a line continuation, an existing `pipefail`, and a
+mention of the option that never sets it).
 
 Cases cover: advisory firing on gen-1/gen-2 patterns, git push, 3-segment
 chains, gh mutating verbs, assignment/subshell/`\|&` prefix recovery
