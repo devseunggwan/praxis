@@ -357,6 +357,46 @@ worktree workflow, which uses the Bash form, cannot be built on it.
 
 ---
 
+## 9. Skill-body placeholder substitution replaces only the bare `${CLAUDE_PLUGIN_ROOT}`
+
+**Constraint**: The runtime substitutes `${CLAUDE_PLUGIN_ROOT}` and
+`${CLAUDE_SKILL_DIR}` in a `SKILL.md` body by **literal string match**. Any
+shell-parameter form around the name — `${CLAUDE_PLUGIN_ROOT:?msg}`,
+`${CLAUDE_PLUGIN_ROOT:-fallback}` — is not the literal, so it reaches the
+model unchanged. The variable is not exported into the `Bash` tool
+environment either, so the surviving `:?` guard aborts on every call with the
+message it was written to print only in the unreachable case.
+
+**Why it bites skills**: the guard reads as defensive — it looks like it
+turns a silent `/hooks/strike-counter.sh` into a clear error. In fact it
+converts a working command into an unconditional failure, and the failure
+message states the opposite of what happened ("plugin root not set" while the
+runtime was ready to substitute a real path). Nothing in the skill body shows
+which of the two forms the substituter will honour.
+
+**Workaround**: write the bare placeholder and nothing else. For a tool that
+lives inside the skill's own directory use `${CLAUDE_SKILL_DIR}/<tool>`; for a
+path elsewhere in the plugin use `${CLAUDE_PLUGIN_ROOT}/<path>`.
+`tests/test_check_skill_arg_substitution.py` fails the suite if a guard form
+reappears in any `skills/*/SKILL.md`.
+
+| Wrong | Right |
+| ------- | ------- |
+| `"${CLAUDE_PLUGIN_ROOT:?not set}/hooks/strike-counter.sh"` | `"${CLAUDE_PLUGIN_ROOT}/hooks/strike-counter.sh"` |
+| `"${CLAUDE_SKILL_DIR:-.}/codex-broker-reaper.sh"` | `"${CLAUDE_SKILL_DIR}/codex-broker-reaper.sh"` |
+
+**Verified**: 2026-09-09 / Claude Code (Opus 5) / Issue #1342 — two skills
+from the same installed build, both loaded into one session. The body of
+`codex-review-wrap`, which wrote the bare placeholder, arrived with an
+absolute plugin path substituted in its place — `<plugin
+root>/skills/codex-review-wrap/codex-broker-reaper.sh`, home path redacted.
+The body of `strikes`, which wrote `${CLAUDE_PLUGIN_ROOT:?praxis plugin root not set …}`,
+arrived with that text byte-for-byte unchanged. Same session, same build, one
+form substituted and the other not — so the discriminator is the `:?`, not
+the environment.
+
+---
+
 ## Adding a new entry
 
 1. Observe a constraint that is **fixed by the runtime** (not a project

@@ -63,7 +63,7 @@ Invoke it through the plugin root with the Bash tool. Pass the mode as the
 positional argument; omit it for the default `bypass` report.
 
 ```bash
-"${CLAUDE_PLUGIN_ROOT:?praxis plugin root not set — run via the installed plugin or export CLAUDE_PLUGIN_ROOT}/skills/bypass-review/bypass-review" fire-rate --days 7
+"${CLAUDE_PLUGIN_ROOT}/skills/bypass-review/bypass-review" fire-rate --days 7
 ```
 
 Useful flags, all read-only: `-d N` window in days, `--errors-only` to keep
@@ -105,7 +105,6 @@ report printed, and offer a longer `-d` before concluding anything is wrong.
 
 | Error | Recovery |
 | --- | --- |
-| `CLAUDE_PLUGIN_ROOT` unset — the `:?` guard aborts with `praxis plugin root not set` | Resolve it from the installed-plugins manifest: `jq -r '.plugins["praxis@praxis"][0].installPath // empty' "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/plugins/installed_plugins.json"`, export it, re-run. Still unresolved → report the failure verbatim and stop |
 | Telemetry directory missing | Report the path the CLI printed. It is created by the first hook write, so an absent directory means no hook has recorded yet — not a failure |
 | `fire-rate` roster incomplete | The never-fired roster comes from `hooks/manifest.json`, resolved relative to the CLI's own de-symlinked path. Outside a checkout, pass `--manifest PATH` |
 | Report is empty and the user expected data | Step 4. Do not retry the same window; widen `-d` or check `--dir` |
