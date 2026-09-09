@@ -303,7 +303,8 @@ Off by default. Exported as `1` (surrounding whitespace is stripped before the
 comparison), a predicate-1 finding stops being written to stderr and is instead
 handed to the harness as the corrected command through
 `hookSpecificOutput.updatedInput`, letting the call proceed with
-`set -o pipefail; ` prepended. Nothing else about the detection changes.
+`set -o pipefail;` and one space prepended. Nothing else about the detection
+changes.
 
 The arm is narrower than the advisory, and deliberately so:
 

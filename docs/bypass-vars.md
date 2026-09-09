@@ -134,7 +134,7 @@ per-hook `spec.md` before promoting any of them.
 | Variable | Hook | Correction |
 | ---------- | ------ | ------------ |
 | `PRAXIS_BLOCK_GH_STATE_ALL_REWRITE` | `block-gh-state-all` | Exact value `1` after stripping. Drops `--state all`, which `gh search` rejects and whose omission returns every state. Single-segment commands only; the result is re-tokenized and must match the original minus that flag |
-| `PRAXIS_PIPEFAIL_ADVISORY_REWRITE` | `pipefail-advisory` | Exact value `1` after stripping. Prepends `set -o pipefail; ` to a mutating command piped into a truncating sink. The `&&` masked-gating finding is out of scope — its own first remedy is splitting the chain, which no rewrite can express |
+| `PRAXIS_PIPEFAIL_ADVISORY_REWRITE` | `pipefail-advisory` | Exact value `1` after stripping. Prepends `set -o pipefail;` and one space to a mutating command piped into a truncating sink. The `&&` masked-gating finding is out of scope — its own first remedy is splitting the chain, which no rewrite can express |
 | `PRAXIS_GH_FLAG_VERIFY_REWRITE` | `gh-flag-verify` | Exact value `1` after stripping. Swaps a misspelled long flag for the ONE accepted flag one edit away, and only when the replacement's value arity works out. Two candidates, a short flag, or a missing value all keep the deny |
 
 ## Config (tune behaviour)
