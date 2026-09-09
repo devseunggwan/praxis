@@ -17,6 +17,7 @@ model corrupted. These tests cover:
 from __future__ import annotations
 
 import importlib.util
+import re
 import subprocess
 from pathlib import Path
 
@@ -188,8 +189,8 @@ def test_cmux_wrapper_snippets_resolve_via_skill_dir():
         assert "${CLAUDE_SKILL_DIR}/" + tool in body, rel
 
 
-def test_no_skill_body_uses_a_bash_default_guard_on_a_placeholder():
-    """``${CLAUDE_PLUGIN_ROOT:?...}`` is not substituted, so it must not appear.
+def test_no_skill_body_wraps_a_placeholder_in_parameter_expansion():
+    """A placeholder carrying any bash suffix is not substituted, so it must not appear.
 
     The loader replaces the literal placeholder text and nothing else: a body
     written with a bash parameter-expansion guard reaches the shell verbatim,
@@ -199,11 +200,12 @@ def test_no_skill_body_uses_a_bash_default_guard_on_a_placeholder():
     back as an absolute path, the guarded form came back as its own source
     text. ``RUNTIME_CONSTRAINTS.md`` holds the record.
     """
+    wrapped = re.compile(r"\$\{(?:CLAUDE_PLUGIN_ROOT|CLAUDE_SKILL_DIR)(?!\})")
     for path in sorted((_REPO / "skills").glob("*/SKILL.md")):
         body = path.read_text(encoding="utf-8")
         rel = path.relative_to(_REPO)
-        assert "${CLAUDE_PLUGIN_ROOT:?" not in body, rel
-        assert "${CLAUDE_SKILL_DIR:?" not in body, rel
+        hits = sorted({body[m.start() : m.end() + 12] for m in wrapped.finditer(body)})
+        assert not hits, f"{rel}: {hits}"
 
 
 def test_recover_skill_snippets_resolve_via_skill_dir():
