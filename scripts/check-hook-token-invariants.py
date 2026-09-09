@@ -87,6 +87,19 @@ INVARIANTS: list[dict] = [
         "scan": "hooks/preflight-gate/block-gh-state-all/impl.py",
         "doc": "hooks/preflight-gate/block-gh-state-all/spec.md",
     },
+    {
+        # Same pairing for the second and third arms (issue #1334, PR 2).
+        "token": "PRAXIS_PIPEFAIL_ADVISORY_REWRITE",
+        "scan_pattern": "PRAXIS_PIPEFAIL_ADVISORY_REWRITE",
+        "scan": "hooks/advisory-nudge/pipefail-advisory/impl.py",
+        "doc": "hooks/advisory-nudge/pipefail-advisory/spec.md",
+    },
+    {
+        "token": "PRAXIS_GH_FLAG_VERIFY_REWRITE",
+        "scan_pattern": "PRAXIS_GH_FLAG_VERIFY_REWRITE",
+        "scan": "hooks/preflight-gate/gh-flag-verify/impl.py",
+        "doc": "hooks/preflight-gate/gh-flag-verify/spec.md",
+    },
 ]
 
 
