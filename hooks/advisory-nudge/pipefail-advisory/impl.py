@@ -109,6 +109,7 @@ from pathlib import Path
 _HOOK_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HOOK_DIR.parent.parent / "_lib"))
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
+from _hook_io import emit_updated_input  # type: ignore[import-not-found]  # noqa: E402
 from _payload import read_bash_payload  # type: ignore[import-not-found]  # noqa: E402
 from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
     ENV_ASSIGN_RE,
@@ -156,6 +157,15 @@ _TRUNCATING_BINS = frozenset({"tail", "head", "grep"})
 # ADVISE-channel experiment arm switch (issue #874). Exact value "1" only,
 # mirroring `PRAXIS_ANCHOR_GATE_ADVISORY`'s convention.
 _CONTEXT_ENV = "PRAXIS_PIPEFAIL_ADVISORY_CONTEXT"
+
+# Rewrite arm switch (issue #1334). Exact value "1" after stripping, matching
+# the sibling arms. Off by default: unlike `block-gh-state-all`'s arm, which
+# removes a flag the CLI rejects outright, this one changes the exit-code
+# semantics of a command that runs perfectly well today.
+_REWRITE_ENV = "PRAXIS_PIPEFAIL_ADVISORY_REWRITE"
+
+_PIPEFAIL_PREFIX = "set -o pipefail; "
+_PIPEFAIL_PREFIX_TOKENS = ["set", "-o", "pipefail", ";"]
 
 
 def _git_subcommand(argv: list[str]) -> str | None:
@@ -650,7 +660,16 @@ def _masked_gating_advisory(tokens: list[str]) -> str | None:
                 masked = unit
         return None
 
+    pipefail_on = False
     for unit, sep in units:
+        if _sets_pipefail(unit):
+            pipefail_on = True
+        if pipefail_on:
+            # The masking this predicate reports is the pipeline's exit code
+            # being the sink's; with pipefail on it is the real one, so the
+            # `&&` gates on something that was actually checked.
+            run = []
+            continue
         run.append(unit)
         if sep == "&&":
             continue
@@ -661,17 +680,54 @@ def _masked_gating_advisory(tokens: list[str]) -> str | None:
     return scan(run) if run else None
 
 
+def _sets_pipefail(unit: list[list[str]]) -> bool:
+    """True iff `unit` turns pipefail on for the commands that FOLLOW it.
+
+    Matches every spelling that reaches the option: `set -o pipefail` and the
+    combined short forms (`set -eo pipefail`, `set -euo pipefail`), which are
+    `-e`/`-u` bundled ahead of the `-o` that consumes the next word. `set` has
+    to be the segment's first word, so `echo set -o pipefail` is not a match.
+
+    A multi-segment unit is rejected outright. Every segment of a pipeline runs
+    in a subshell, so `set -o pipefail | cat` changes the subshell's option and
+    leaves the parent exactly as it was — reading it as "pipefail is now on"
+    silences the advisory on a pipeline that really is unguarded.
+
+    zsh's own `setopt pipefail` is deliberately NOT matched: the harness runs
+    commands through a shell where `set -o pipefail` is the portable spelling,
+    and widening this predicate would suppress the advisory on a command that
+    only mentions the option in passing.
+    """
+    if len(unit) != 1:
+        return False
+    seg = strip_prefix(unit[0])
+    if not seg or seg[0] != "set":
+        return False
+    for i, tok in enumerate(seg[1:], start=1):
+        if tok.startswith("-") and tok.endswith("o") and seg[i + 1 : i + 2] == ["pipefail"]:
+            return True
+    return False
+
+
 def _scan_tokens_for_advisory(tokens: list[str]) -> str | None:
     """Return the advisory text for the first mutating-piped-to-sink chain
     found in `tokens`, else None."""
     tokens = _merge_fd_dup_redirects(tokens)
-    for chain in _pipe_chains(tokens):
-        if not _is_truncating_sink(chain[-1]):
+    pipefail_on = False
+    for unit, _sep in _command_units(tokens):
+        # Order matters: a `set -o pipefail` cannot retroactively unmask a
+        # pipeline that already ran, so only units seen BEFORE this one count.
+        if _sets_pipefail(unit):
+            pipefail_on = True
             continue
-        for seg in chain[:-1]:
+        if pipefail_on or len(unit) < 2:
+            continue
+        if not _is_truncating_sink(unit[-1]):
+            continue
+        for seg in unit[:-1]:
             desc = _mutating_description(seg)
             if desc:
-                return _advisory_text(chain, desc)
+                return _advisory_text(unit, desc)
     return None
 
 
@@ -755,6 +811,25 @@ def _emit_additional_context(advisory: str) -> None:
     sys.stdout.write("\n")
 
 
+def corrected(command: str, tokens: list[str]) -> str | None:
+    """Return `command` with `set -o pipefail;` prepended, or None.
+
+    None is the fail-closed answer: the caller then advises exactly as it did
+    before the arm existed. `tokens` is the caller's already-tokenized command
+    so the readback compares against the same list the advisory was derived
+    from, rather than a second tokenization that could differ.
+
+    The correction is textual — prepending keeps the caller's own quoting,
+    which rebuilding from tokens would lose — and is then certified by
+    re-tokenizing: the result must be exactly the prefix tokens followed by
+    the original ones.
+    """
+    fixed = _PIPEFAIL_PREFIX + command
+    if safe_tokenize(fixed) != _PIPEFAIL_PREFIX_TOKENS + tokens:
+        return None
+    return fixed
+
+
 @fail_open
 def main() -> int:
     parsed = read_bash_payload()
@@ -764,12 +839,18 @@ def main() -> int:
     if not command.strip():
         return 0
 
-    tokens = safe_tokenize(command.replace("\\\n", " "))
-    if not tokens:
+    continued = "\\\n" in command
+    raw_tokens = safe_tokenize(command.replace("\\\n", " "))
+    if not raw_tokens:
         return 0
 
-    tokens = _merge_fd_dup_redirects(tokens)
+    tokens = _merge_fd_dup_redirects(raw_tokens)
     advisory = _scan_tokens_for_advisory(tokens)
+    # Only the pipe scan produces a finding `set -o pipefail` actually fixes.
+    # `_masked_gating_advisory` is about `&&` gating on a masked exit code,
+    # which the option does not touch, and the substitution path below reaches
+    # a pipeline the outer prefix would not obviously govern.
+    piped = advisory is not None
     if advisory is None:
         advisory = _masked_gating_advisory(tokens)
     if advisory is None:
@@ -792,13 +873,34 @@ def main() -> int:
             if advisory:
                 break
 
-    if advisory:
-        # Control arm, always on: stderr is what `_fire_ledger` reads to
-        # classify this fire as `advise`, and the only channel the dispatcher
-        # forwards unconditionally. See the module docstring (issue #874).
-        sys.stderr.write(advisory + "\n")
-        if os.environ.get(_CONTEXT_ENV, "").strip() == "1":
-            _emit_additional_context(advisory)
+    if not advisory:
+        return 0
+
+    # `continued` keeps the arm off a command the tokenizer had to normalize:
+    # prepending would also silently join the caller's line breaks, and a
+    # rewrite must change exactly the one thing it claims to change.
+    if (
+        piped
+        and os.environ.get(_REWRITE_ENV, "").strip() == "1"
+        and not continued
+    ):
+        fixed = corrected(command, raw_tokens)
+        if fixed is not None:
+            base = payload.get("tool_input")
+            emit_updated_input(
+                {**(base if isinstance(base, dict) else {}), "command": fixed},
+                f"[praxis:pipefail-advisory] prepended `set -o pipefail;` so the "
+                f"pipeline reports the mutating command's exit code:\n  {command}\n"
+                f"-> {fixed}",
+            )
+            return 0
+
+    # Control arm, always on: stderr is what `_fire_ledger` reads to classify
+    # this fire as `advise`, and the only channel the dispatcher forwards
+    # unconditionally. See the module docstring (issue #874).
+    sys.stderr.write(advisory + "\n")
+    if os.environ.get(_CONTEXT_ENV, "").strip() == "1":
+        _emit_additional_context(advisory)
 
     return 0
 

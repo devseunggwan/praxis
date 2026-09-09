@@ -38,12 +38,17 @@ Design notes:
 """
 from __future__ import annotations
 
+import os
+import re
 import sys
 import sys as _sys
 from pathlib import Path as _Path
 _sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
-from _hook_io import emit_decision  # type: ignore[import-not-found]  # noqa: E402
+from _hook_io import (  # type: ignore[import-not-found]  # noqa: E402
+    emit_decision,
+    emit_updated_input,
+)
 from _payload import read_bash_payload  # type: ignore[import-not-found]  # noqa: E402
 from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
     Token,
@@ -388,10 +393,18 @@ def _is_valid_flag_form(text: str) -> bool:
     return False
 
 
-def check_gh_flags(seg: list[Token]) -> tuple[bool, str]:
+def _global_flag_arity() -> dict[str, bool]:
+    """gh's inherited flags, mapped to whether each consumes a value token."""
+    return {f: f in GH_GLOBAL_FLAGS_WITH_ARG for f in GH_GLOBAL_FLAGS}
+
+
+def check_gh_flags(seg: list[Token]) -> tuple[bool, str, str, dict[str, bool]]:
     """Check a single command segment for gh flag compatibility.
 
-    Returns (is_invalid, reason_message). is_invalid=True means deny.
+    Returns (is_invalid, reason_message, offending_flag, allowed).
+    is_invalid=True means deny. `allowed` maps each accepted flag to whether it
+    consumes a value token — the rewrite arm needs both halves, and deriving
+    them again would mean repeating the walk this function already did.
 
     Walk strategy (typed Token):
       1. argv[0] must be COMMAND `gh`.
@@ -408,7 +421,7 @@ def check_gh_flags(seg: list[Token]) -> tuple[bool, str]:
     """
     argv = filter_argv(seg)
     if not argv or not _is_gh_binary(argv[0].text):
-        return False, ""
+        return False, "", "", {}
 
     n = len(argv)
     i = 1
@@ -430,12 +443,12 @@ def check_gh_flags(seg: list[Token]) -> tuple[bool, str]:
                     f"Allowed: {allowed_list}. "
                     f"Note: --hostname and --color are not accepted by gh subcommands."
                 )
-                return True, reason
+                return True, reason, bare, _global_flag_arity()
         # FLAG_VALUE / SUBST_RUN / etc. — skip.
         i += 1
 
     if i >= n:
-        return False, ""  # no subcommand present
+        return False, "", "", {}  # no subcommand present
 
     subcommand = argv[i].text
     i += 1
@@ -455,11 +468,11 @@ def check_gh_flags(seg: list[Token]) -> tuple[bool, str]:
         j += 1
 
     if sub_idx is None:
-        return False, ""  # unknown subcommand shape — pass through
+        return False, "", "", {}  # unknown subcommand shape — pass through
 
     key = (subcommand, sub_subcommand)
     if key not in COMPAT:
-        return False, ""  # unknown subcommand — pass through
+        return False, "", "", {}  # unknown subcommand — pass through
 
     subcommand_flags = COMPAT[key]
     allowed: frozenset[str] = frozenset(subcommand_flags) | GH_GLOBAL_FLAGS
@@ -491,9 +504,121 @@ def check_gh_flags(seg: list[Token]) -> tuple[bool, str]:
                 + (f" {sub_subcommand}" if sub_subcommand else "")
                 + " --help' to see accepted flags."
             )
-            return True, reason
+            return True, reason, bare, {**subcommand_flags, **_global_flag_arity()}
 
-    return False, ""
+    return False, "", "", {}
+
+
+# Rewrite arm switch (issue #1334). Exact value "1" after stripping, matching
+# the sibling arms.
+_REWRITE_ENV = "PRAXIS_GH_FLAG_VERIFY_REWRITE"
+
+
+def _edit_distance_1(a: str, b: str) -> bool:
+    """True iff `a` becomes `b` with one insert, delete, or substitution."""
+    la, lb = len(a), len(b)
+    if abs(la - lb) > 1:
+        return False
+    if la == lb:
+        return sum(x != y for x, y in zip(a, b)) == 1
+    shorter, longer = (a, b) if la < lb else (b, a)
+    i = j = 0
+    skipped = False
+    while i < len(shorter) and j < len(longer):
+        if shorter[i] != longer[j]:
+            if skipped:
+                return False
+            skipped = True
+            j += 1
+            continue
+        i += 1
+        j += 1
+    return True
+
+
+def unique_near_miss(
+    offender: str, allowed: dict[str, bool], supplied_a_value: bool
+) -> str | None:
+    """Return the ONE allowed flag one edit away from `offender`, else None.
+
+    Two or more candidates is the case this returns None for, and it is not a
+    corner: `--stat` sits one edit from both `--state` and `--stats`, and the
+    hook has no way to know which was meant. Guessing there would replace a
+    round-trip the actor can resolve in one turn with a silently wrong flag
+    they never chose.
+
+    Short flags never participate. `-b` is one edit from `-B`, `-a`, and every
+    other single letter the subcommand accepts, so "one candidate" carries no
+    information about intent at that length.
+
+    `supplied_a_value` says whether the offending token carried one — either
+    inline (`--stat=x`) or as the following token. A flag that needs a value
+    and did not get one is not correctable here.
+    """
+    if not offender.startswith("--"):
+        return None
+    candidates = [
+        f for f in allowed if f.startswith("--") and _edit_distance_1(offender, f)
+    ]
+    if len(candidates) != 1:
+        return None
+    replacement = candidates[0]
+    # The arity has to match in BOTH directions. A value-taking flag corrected
+    # without a value leaves a command gh still rejects; so does a value-less
+    # flag that inherits the value the offender carried — `--wed open` becomes
+    # `--web open`, and `open` is then a positional gh does not accept. Either
+    # way the swap trades one error for another, which is not a correction.
+    if allowed[replacement] != supplied_a_value:
+        return None
+    return replacement
+
+
+def offender_has_value(seg: list[Token], offender: str) -> bool:
+    """True iff the `offender` token carried a value in `seg`.
+
+    Two spellings count: inline (`--stat=main`) and a following word that is
+    not itself a flag (`--stat main`). The role API cannot answer this — its
+    FLAG_VALUE assignment is driven by `_FLAG_VALUE_SPEC`, which only knows the
+    flags gh actually accepts, and the offender by definition is not one.
+    """
+    argv = filter_argv(seg)
+    for i, tok in enumerate(argv):
+        if tok.text.split("=", 1)[0] != offender:
+            continue
+        if "=" in tok.text:
+            return True
+        return i + 1 < len(argv) and not argv[i + 1].text.startswith("-")
+    return False
+
+
+_FLAG_TOKEN_RE_TMPL = r"(?<![\w-]){flag}(?=[\s=]|$)"
+
+
+def corrected(command: str, offender: str, replacement: str) -> str | None:
+    """Return `command` with `offender` swapped for `replacement`, or None.
+
+    None is the fail-closed answer: the caller then denies exactly as it did
+    before the arm existed. The swap is textual — the tokenizer keeps no
+    offsets, so rebuilding the command from tokens would lose the caller's
+    quoting — and is then certified by re-tokenizing: the result must match the
+    original tokens with exactly one position changed, and that position must
+    be the offending flag.
+    """
+    pattern = re.compile(_FLAG_TOKEN_RE_TMPL.format(flag=re.escape(offender)))
+    fixed, n = pattern.subn(replacement, command)
+    if n != 1:
+        return None
+    before = [t.text for seg in tokenize_with_roles(command, _FLAG_VALUE_SPEC) for t in filter_argv(seg)]
+    after = [t.text for seg in tokenize_with_roles(fixed, _FLAG_VALUE_SPEC) for t in filter_argv(seg)]
+    if len(before) != len(after):
+        return None
+    changed = [i for i, (b, a) in enumerate(zip(before, after)) if b != a]
+    if len(changed) != 1:
+        return None
+    i = changed[0]
+    if before[i].split("=", 1)[0] != offender or after[i].split("=", 1)[0] != replacement:
+        return None
+    return fixed
 
 
 # ---------------------------------------------------------------------------
@@ -521,6 +646,7 @@ def main() -> int:
 
     # Collapse backslash line continuations so multi-line invocations parse
     # as a single command segment (same pre-processing as sibling hooks).
+    continued = "\\\n" in command
     command = command.replace("\\\n", " ")
 
     segments = tokenize_with_roles(command, _FLAG_VALUE_SPEC)
@@ -528,10 +654,35 @@ def main() -> int:
         return 0
 
     for seg in segments:
-        is_invalid, reason = check_gh_flags(seg)
-        if is_invalid:
-            _emit_deny(reason)
-            return 2  # deny exit code
+        is_invalid, reason, offender, allowed = check_gh_flags(seg)
+        if not is_invalid:
+            continue
+        # `continued` keeps the arm off a command the tokenizer had to
+        # normalize: the correction would then also silently join the caller's
+        # line breaks, and a rewrite must change exactly the one thing it
+        # claims to change.
+        if (
+            os.environ.get(_REWRITE_ENV, "").strip() == "1"
+            and len(segments) == 1
+            and not continued
+        ):
+            replacement = unique_near_miss(
+                offender, allowed, offender_has_value(seg, offender)
+            )
+            if replacement is not None:
+                fixed = corrected(command, offender, replacement)
+                if fixed is not None:
+                    base = payload.get("tool_input")
+                    emit_updated_input(
+                        {**(base if isinstance(base, dict) else {}),
+                         "command": fixed},
+                        f"[praxis:gh-flag-verify] `{offender}` is not accepted "
+                        f"here and `{replacement}` is the only flag one edit "
+                        f"away:\n  {command}\n-> {fixed}",
+                    )
+                    return 0
+        _emit_deny(reason)
+        return 2  # deny exit code
 
     return 0
 

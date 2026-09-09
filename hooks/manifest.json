@@ -437,7 +437,10 @@
         "codex"
       ],
       "timeout": 5,
-      "review_by": "2026-12-04"
+      "review_by": "2026-12-04",
+      "mode": {
+        "rewrite_env": "PRAXIS_GH_FLAG_VERIFY_REWRITE"
+      }
     },
     {
       "name": "gh-label-verify",
@@ -496,7 +499,10 @@
       "event": "PreToolUse",
       "matcher": "Bash",
       "timeout": 5,
-      "review_by": "2026-12-04"
+      "review_by": "2026-12-04",
+      "mode": {
+        "rewrite_env": "PRAXIS_PIPEFAIL_ADVISORY_REWRITE"
+      }
     },
     {
       "name": "fallback-negative-warn",

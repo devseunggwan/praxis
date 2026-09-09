@@ -78,11 +78,59 @@ hook does not break the other.
 }
 ```
 
+### Rewrite arm — `PRAXIS_GH_FLAG_VERIFY_REWRITE=1` (issue #1334)
+
+Off by default. Exported as `1` (surrounding whitespace is stripped before the
+comparison), a deny whose offending flag has exactly one plausible correction
+is replaced by that correction, handed to the harness through
+`hookSpecificOutput.updatedInput` so the call proceeds. Nothing else about the
+detection changes.
+
+This arm makes a **guess**, which the sibling `block-gh-state-all` arm does
+not. `--state all` is invalid for `gh search` and omitting it returns every
+state, so that correction restores an intent the CLI rejected — there is one
+answer and no judgement. A misspelled flag has no such property: the hook is
+inferring what the caller meant to type. Four guards keep the inference narrow
+enough to be worth making, and every one of them falls back to the ordinary
+deny:
+
+| Guard | Why |
+| ----- | --- |
+| exactly one candidate one edit away | `--stat` sits one edit from both `--state` and `--stats`; with two candidates the hook has no basis to pick, and guessing replaces a round-trip the actor resolves in one turn with a wrong flag they never chose |
+| long flags only | `-b` is one edit from `-B`, `-a`, and every other single letter the subcommand accepts, so uniqueness carries no information about intent at that length |
+| the value arity has to match in both directions | a value-taking flag given no value leaves a command gh still rejects; so does a value-less flag inheriting the offender's value (`--wed open` → `--web open`, where `open` becomes a positional gh does not accept). Either way the swap trades one error for another |
+| single segment, no line continuation | same reasoning as the sibling arm: the correction must change exactly the one thing it claims to change |
+
+The swap is textual (the tokenizer keeps no offsets, so rebuilding the command
+from tokens would lose the caller's quoting) and then certified by
+re-tokenizing: the result must match the original tokens with exactly one
+position changed, and that position must be the offending flag.
+
+The corrected call is announced on the same object, as `additionalContext` —
+naming both flags and both commands. Not decoration: the transcript's
+`tool_use` record keeps the command the model wrote (measured on Claude Code
+2.1.266), so an unannounced rewrite is invisible to the actor, to a reviewer
+reading the transcript, and to the praxis hooks that scan prior calls.
+
+Each firing is recorded in the fire ledger with decision `rewrite`
+(`_fire_ledger.DECISION_REWRITE`), which is what the promotion-to-default
+decision is measured on — and for an arm that guesses, that measurement is the
+whole basis for ever promoting it.
+
 ### Tests
 
 ```bash
 bash tests/hooks/preflight-gate/test_gh_flag_verify.sh
+python3 -m pytest tests/hooks/preflight-gate/test_gh_flag_verify_rewrite.py
 ```
+
+The pytest file covers the rewrite arm: the two value spellings it corrects,
+the other `tool_input` fields surviving, the context naming both flags, the
+corrected command no longer denying, the arm switch across
+unset/`0`/`""`/`true`/`11`, and each guard's fallback to the deny (two
+candidates, no candidate, a short flag, a missing value, a compound command, a
+line continuation) plus `_edit_distance_1`'s own insert/delete/substitute
+table.
 
 Covers 26 cases: known-good calls per subcommand (silent), known-bad
 single-flag deny paths (`--base` on issue list, `--include-prs` on pr list,
