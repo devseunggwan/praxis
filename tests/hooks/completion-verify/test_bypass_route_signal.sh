@@ -65,6 +65,7 @@ run_case() {
   rows=$(python3 - "$ledger" "$sid" <<'PY'
 import json, sys
 path, sid = sys.argv[1], sys.argv[2]
+EXPECTED_KEYS = {"timestamp", "session_id", "hook", "event", "matched"}
 n = 0
 try:
     with open(path, encoding="utf-8") as f:
@@ -75,6 +76,13 @@ try:
             try:
                 rec = json.loads(line)
             except ValueError:
+                continue
+            # The key set is asserted, not just the three fields read below:
+            # a writer that added an excerpt of the matched message would pass
+            # every count-only check while breaking the no-excerpt contract
+            # PRIVACY.md publishes.
+            if set(rec) != EXPECTED_KEYS:
+                print(f"unexpected record keys: {sorted(rec)}", file=sys.stderr)
                 continue
             if (rec.get("hook") == "bypass-route-signal"
                     and rec.get("matched") is True
