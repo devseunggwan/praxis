@@ -100,9 +100,10 @@ run_case "relative glob matching nothing" block Bash \
   "cat *.nonexistent-xyz"
 run_case "unquoted find -name (aborts before find runs)" block Bash \
   "find $FIXTURE -maxdepth 1 -name *.nonexistent-xyz"
-# Deliberate false negative: a pipeline is compound, so the gate passes it
-# through rather than guess which segment runs where. zsh does abort this.
-run_case "compound command passes through (known miss)" pass Bash \
+# A pipeline is cut at the `|` and each side judged as its own simple command
+# (#1405). Verified against live zsh: `no matches found`, rc=1 — the abort the
+# gate now reports rather than passing through.
+run_case "pipeline segment with an unmatched glob blocks" block Bash \
   "echo start | cat $FIXTURE/nope/*.txt"
 run_case "intermediate directory component unmatched" block Bash \
   "ls $FIXTURE/*/absent-leaf"
@@ -159,12 +160,33 @@ run_case "flag-attached glob is expanded by the shell" block Bash \
   "grep -r --include=*.nonexistent-xyz needle $FIXTURE"
 run_case "mixed quoting inside one word" block Bash \
   "echo $FIXTURE/logs/alpha*\".nonexistent-xyz\""
-# Same trade-off: `;` makes this compound. The per-occurrence qualifier logic
-# is still exercised by the single-command case below.
-run_case "sequenced command passes through (known miss)" pass Bash \
+# A semicolon is cut the same way, so the qualifier on the FIRST segment no
+# longer shields the bare pattern in the second. Verified against live zsh: rc=1.
+run_case "qualifier does not carry across a semicolon" block Bash \
   "print *.nonexistent-xyz(N); print *.nonexistent-xyz"
 run_case "qualifier applies to its own occurrence only" pass Bash \
   "print *.nonexistent-xyz(N)"
+
+# --- segmentation boundary (#1405) -----------------------------------------
+# `&&` / `||` / `&` / heredocs still pass through whole: cutting them would
+# judge a segment that may never run, or a heredoc body that is data.
+run_case "&& still passes through" pass Bash \
+  "true && echo *.nonexistent-xyz"
+run_case "background & still passes through" pass Bash \
+  "echo *.nonexistent-xyz &"
+# `noglob` is a prefix, so only its own segment is dropped — the neighbour in
+# the same line is still judged.
+run_case "noglob shields its own segment only" block Bash \
+  "noglob print *.nonexistent-xyz; print *.nonexistent-xyz"
+# ...while `setopt` outlives its command, so the whole line passes through.
+run_case "unsetopt anywhere passes the whole line through" pass Bash \
+  "print ok; unsetopt nomatch; print *.nonexistent-xyz"
+# A separator inside quotes is not a separator, so the word stays one span.
+# The quote character goes in via a variable: written inline, the nested
+# escaping reads to shellcheck as a command name ending in an apostrophe.
+SQ="'"
+run_case "quoted separator does not split the command" pass Bash \
+  "print ${SQ}a;b${SQ}"
 
 # --- regression: word position decides meaning (round 6) --------------------
 # Every case below was verified against live zsh before being asserted here.

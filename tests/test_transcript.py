@@ -509,6 +509,8 @@ _CONSUMERS = {
         ["load_current_turn", "extract_last_assistant_text"],
     HOOKS / "completion-verify" / "proposal-premise-gate" / "impl.py":
         ["load_current_turn", "extract_last_assistant_text"],
+    HOOKS / "completion-verify" / "prose-option-menu-advisory" / "impl.py":
+        ["load_current_turn", "extract_last_assistant_text"],
     HOOKS / "completion-verify" / "pr-claim-mutation-gate" / "impl.py":
         ["load_current_turn", "extract_last_assistant_text"],
     # Also streams the turns BEFORE the current one, reusing the shared boundary

@@ -47,6 +47,7 @@ from typing import Optional, TextIO
 # directory is added here too rather than relied on from the caller.
 sys.path.insert(0, str(_Path(__file__).resolve().parent))
 from _hosts import installed_hook_names  # type: ignore[import-not-found]  # noqa: E402
+from _block_repeat import record as _record_block  # type: ignore[import-not-found]  # noqa: E402
 
 
 def format_block(
@@ -289,7 +290,16 @@ def emit_block(
     Same args as `format_block`. `stream` is injectable for testing; defaults
     to sys.stderr. Does NOT exit — the caller owns the exit code (2 for a
     PreToolUse block).
+
+    From the second block of the same `rule_name` in one session, a repeat
+    notice is appended (issue #1405). It lives here rather than in
+    `format_block` because this is the exit-2 path — the one a denial actually
+    takes — and because counting in both would double-count every gate that
+    renders through `format_block` and writes the result itself. `PostToolUse-
+    Failure` cannot see a denial at all, so nothing else in the repo is
+    positioned to notice the repetition.
     """
     out = stream if stream is not None else sys.stderr
     out.write(format_block(rule_name, why, correct_path, bypass_env, reference, bypass_reason_hint))
+    out.write(_record_block(rule_name))
     out.write("\n")

@@ -1183,6 +1183,7 @@ def main() -> int:
                      "pr-claim-mutation-gate",
                      "pr-anchor-existence-gate",
                      "proposal-premise-gate",
+                     "prose-option-menu-advisory",
                      "joint-liability-attribution-gate",
                      "denied-action-report-gate",
                      "strike-counter"]

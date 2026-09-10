@@ -96,6 +96,15 @@ _DYNAMIC_MARKERS = ("$", "`")
 # position: `echo noglob *.missing` still aborts, `noglob echo *.missing` does not.
 _NOMATCH_DISABLERS = {"noglob", "setopt", "unsetopt", "eval"}
 
+# The subset of those whose effect OUTLIVES their own command. `noglob` and
+# `eval` are prefixes — they shield the words they are given and nothing else,
+# so dropping their segment is the whole remedy. `setopt` / `unsetopt` change
+# the running shell's options, so `setopt nullglob; print *.x` leaves the
+# second segment expanding under rules this hook cannot see from the text. A
+# line containing one is therefore passed through whole, not segment by
+# segment.
+_STATE_CHANGING_DISABLERS = {"setopt", "unsetopt"}
+
 # Executing-shell options under which an unmatched glob does not abort.
 _NOMATCH_SUPPRESSORS = {"nullglob", "nonomatch", "noglob", "cshnullglob"}
 
@@ -112,7 +121,18 @@ _GLOB_OPTIONS = {
 # grammar the hook does not model — which branch runs, what the cwd is by the
 # time a later segment executes, whether the text is a heredoc body. The gate
 # only judges a single simple command; anything else passes through.
-_COMPOUND_MARKERS = ("&&", "||", "|", ";", "&", "\n", "<<")
+# Grammar this hook still refuses to reason about. `&&` / `||` gate whether the
+# next command runs at all, `&` detaches, a newline can open any construct, and
+# `<<` starts a heredoc whose body is data — none of those survive being cut
+# into pieces and judged piece by piece.
+_UNSPLITTABLE_MARKERS = ("&&", "||", "&", "\n", "<<")
+
+# Separators that DO survive it. Each of `a ; b` and `a | b` is an ordinary
+# simple command whose own words expand under the same `nomatch`, so a glob in
+# either one aborts the whole line exactly as it would alone. Ordering matters:
+# `&&` and `||` contain `&` and `|`, so they are ruled out by the tuple above
+# before anything is split.
+_SEGMENT_SEPARATORS = (";", "|")
 _CONTROL_WORDS = {
     "if", "then", "else", "elif", "fi", "for", "while", "until", "do", "done",
     "case", "esac", "select", "repeat", "function", "{", "}", "cd",
@@ -290,14 +310,52 @@ def should_pass_through(command: str) -> bool:
     """True when the command's glob behaviour is not statically decidable.
 
     Two reasons, both of which make a word-level verdict unsound: unresolved
-    expansion, and any grammar beyond a single simple command (branches,
-    sequencing, heredocs). Command-position words that disable the failure are
-    handled in `candidate_spans`, where their position is known.
+    expansion, and grammar that cutting into segments cannot preserve
+    (branches, backgrounding, heredocs, newlines). Command-position words that
+    disable the failure are handled in `candidate_spans`, where their position
+    is known.
+
+    Sequencing with `;` and piping with `|` used to land here too, and that is
+    what made this gate silent on the shape it most needed to see: measured
+    across the local transcript corpus, 129 of 144 `no matches found` aborts
+    (90%) came from a compound command, because a chained investigation line is
+    exactly what an agent writes. `segments()` now cuts those instead.
     """
     skeleton = unquoted_skeleton(command)
     if any(marker in skeleton for marker in _DYNAMIC_MARKERS):
         return True
-    return any(marker in skeleton for marker in _COMPOUND_MARKERS)
+    return any(marker in skeleton for marker in _UNSPLITTABLE_MARKERS)
+
+
+def leading_command_word(segment: str) -> str | None:
+    """The word in command position, skipping prefix assignments; None if bare."""
+    for word in scan_words(segment):
+        if _is_assignment(word.span):
+            continue
+        return word.span
+    return None
+
+
+def segments(command: str) -> list[str]:
+    """`command` cut into simple commands at unquoted `;` and `|`.
+
+    The skeleton is index-aligned with the source — quoted regions are masked
+    in place, never removed — so a separator found in it slices the original
+    text at the same offset, and a `;` inside quotes is invisible here exactly
+    as it is to the shell.
+
+    Callers reach this only after `should_pass_through` has ruled the command
+    splittable, so no separator here can be part of a `&&` or `||`.
+    """
+    skeleton = unquoted_skeleton(command)
+    out: list[str] = []
+    start = 0
+    for index, char in enumerate(skeleton):
+        if char in _SEGMENT_SEPARATORS:
+            out.append(command[start:index])
+            start = index + 1
+    out.append(command[start:])
+    return [segment for segment in out if segment.strip()]
 
 
 def candidate_spans(command: str) -> list[str] | None:
@@ -428,7 +486,18 @@ def find_unmatched_globs(command: str, cwd: str) -> list[str]:
     if should_pass_through(command):
         return []
 
-    spans = candidate_spans(command)
+    parts = segments(command)
+    if any(leading_command_word(part) in _STATE_CHANGING_DISABLERS for part in parts):
+        return []  # a later segment expands under options set by an earlier one
+
+    spans: list[str] = []
+    for segment in parts:
+        # A segment whose command word disables the failure (`noglob ls *.x`)
+        # or opens a construct returns None, and only that segment is dropped —
+        # its neighbours in the same line still expand under `nomatch`.
+        segment_spans = candidate_spans(segment)
+        if segment_spans:
+            spans.extend(segment_spans)
     if not spans:
         return []
 
