@@ -942,6 +942,22 @@
       }
     },
     {
+      "name": "memory-distillation-fields-gate",
+      "role": "preflight-gate",
+      "event": "PreToolUse",
+      "matcher": "Write",
+      "timeout": 5,
+      "review_by": "2026-12-04",
+      "mode": {
+        "bypass_env": [
+          "PRAXIS_HOOK_BYPASS_MEMORY_FIELDS"
+        ],
+        "state_paths": [
+          "PRAXIS_MEMORY_DIR"
+        ]
+      }
+    },
+    {
       "name": "worktree-edit-gate",
       "role": "preflight-gate",
       "event": "PreToolUse",

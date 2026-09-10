@@ -125,6 +125,16 @@
         ]
       },
       {
+        "matcher": "Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/memory-distillation-fields-gate.sh",
+            "timeout": 5
+          }
+        ]
+      },
+      {
         "matcher": "Edit",
         "hooks": [
           {
