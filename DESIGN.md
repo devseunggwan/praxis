@@ -168,6 +168,7 @@ around it were deleted — the #1034 measurement of the old write
 | `preflight-gate/retrospect-active-marker` | marker existence | whole-file write and `unlink`, no read-modify-write to lose | no — Q0 PASS(live), 0/100 (#1034) |
 | `preflight-gate/foreground-poll-loop-guard` | per-session registry of background waiters (start time, armed flag, command display string) | one advisory does not fire — Q3; stages through a per-pid name, so Q0 does not apply | no — classified from the impl, not measured |
 | `preflight-gate/approval-premise-reread-gate` | single-use premise ack file | consumed by an atomic `os.rename` claim; no read-modify-write to lose | no — classified from the impl, not measured |
+| `_lib/block_message` (counting in `_lib/_block_repeat`) | per-session, per-`rule_name` gate-block count | the repeat notice fires on the `count >= 2` boundary — Q1 | yes — classified from the impl, not measured; per-pid staging floor |
 
 ### Q0, measured (issue #1034)
 
