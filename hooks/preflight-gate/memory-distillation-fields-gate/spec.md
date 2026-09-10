@@ -40,7 +40,7 @@ session memory:
 
 The promotion queue is a two-stage grep keyed on the nested form:
 
-```
+```bash
 grep -l '^  enforcement: none$' *.md | xargs -r grep -l '^  recurrence: [3-9]'
 ```
 
