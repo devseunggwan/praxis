@@ -160,9 +160,9 @@ run_case "flag-attached glob is expanded by the shell" block Bash \
   "grep -r --include=*.nonexistent-xyz needle $FIXTURE"
 run_case "mixed quoting inside one word" block Bash \
   "echo $FIXTURE/logs/alpha*\".nonexistent-xyz\""
-# `;` is cut the same way, so the qualifier on the FIRST segment no longer
-# shields the bare pattern in the second. Verified against live zsh: rc=1.
-run_case "qualifier does not carry across a `;`" block Bash \
+# A semicolon is cut the same way, so the qualifier on the FIRST segment no
+# longer shields the bare pattern in the second. Verified against live zsh: rc=1.
+run_case "qualifier does not carry across a semicolon" block Bash \
   "print *.nonexistent-xyz(N); print *.nonexistent-xyz"
 run_case "qualifier applies to its own occurrence only" pass Bash \
   "print *.nonexistent-xyz(N)"
@@ -182,8 +182,11 @@ run_case "noglob shields its own segment only" block Bash \
 run_case "unsetopt anywhere passes the whole line through" pass Bash \
   "print ok; unsetopt nomatch; print *.nonexistent-xyz"
 # A separator inside quotes is not a separator, so the word stays one span.
+# The quote character goes in via a variable: written inline, the nested
+# escaping reads to shellcheck as a command name ending in an apostrophe.
+SQ="'"
 run_case "quoted separator does not split the command" pass Bash \
-  "print '"'"'a;b'"'"'"
+  "print ${SQ}a;b${SQ}"
 
 # --- regression: word position decides meaning (round 6) --------------------
 # Every case below was verified against live zsh before being asserted here.
