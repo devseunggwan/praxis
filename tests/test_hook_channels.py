@@ -1,0 +1,292 @@
+"""Tests for the per-hook output-channel derivation (#1265).
+
+The census exists because a hook that fires and a hook that does not exist
+look the same to the actor unless the output travels a channel the actor can
+read. What that makes fragile is not the classification of a hook that calls
+the shared emitter — that is one grep — but three cases where a plausible
+implementation quietly reports the wrong channel:
+
+  * a hook that hand-rolls the payload instead of calling `_hook_io.py`.
+    Several predate the extraction and `builtin-task-postuse` is documented
+    there as a deliberate non-caller, so a helper-only matcher reports them as
+    having no channel at all — which reads as "emits nothing", the one verdict
+    that hides the failure this census is looking for.
+  * `emit_block`, whose own docstring says it "writes the formatted string to
+    stderr". Treating it as a channel of its own would put the repo's most
+    common block path outside the stderr column.
+  * a body registered on several events, where a first-entry read answers for
+    one registration and silently drops the rest.
+
+The real corpus is asserted too: the classification is only as good as its
+agreement with the bodies actually shipped, and a regex that stops matching
+degrades to "every hook emits nothing" without failing anything else.
+"""
+
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO_ROOT / "scripts"))
+
+from hook_channels import (  # noqa: E402
+    CHANNEL_LITERALS,
+    CHANNEL_ORDER,
+    CHANNEL_PATTERNS,
+    NO_CHANNEL,
+    strip_comments,
+    channels_for_hook,
+    channels_for_source,
+    render_channels,
+)
+
+
+def _manifest() -> dict:
+    return json.loads((REPO_ROOT / "hooks" / "manifest.json").read_text())
+
+
+def _entries_by_name() -> dict[str, list[dict]]:
+    by_name: dict[str, list[dict]] = {}
+    for entry in _manifest()["hooks"]:
+        by_name.setdefault(entry["name"], []).append(entry)
+    return by_name
+
+
+# --- the shared emitters ----------------------------------------------------
+
+
+def test_each_shared_emitter_maps_to_its_channel() -> None:
+    assert channels_for_source("emit_decision(a, b)") == ["decision"]
+    assert channels_for_source("emit_additional_context(x)") == ["context"]
+    assert channels_for_source("emit_updated_input(a, b)") == ["rewrite"]
+    assert channels_for_source("emit_stop_block(r)") == ["stop-block"]
+    assert channels_for_source("emit_stop_advisory(m)") == ["system-msg"]
+
+
+def test_the_ask_and_deny_wrappers_are_decisions() -> None:
+    assert channels_for_source("emit_ask(reason)") == ["decision"]
+    assert channels_for_source("emit_deny(reason)") == ["decision"]
+
+
+# --- the three cases a plausible implementation gets wrong -------------------
+
+
+def test_a_hand_rolled_payload_is_not_reported_as_channel_less() -> None:
+    """A body that dumps the field itself never calls the helper."""
+    hand_rolled = (
+        'json.dump({"hookSpecificOutput": {"hookEventName": "PreToolUse", '
+        '"permissionDecision": "deny"}}, sys.stdout)'
+    )
+    assert channels_for_source(hand_rolled) == ["decision"]
+    assert channels_for_source('{"additionalContext": note}') == ["context"]
+    assert channels_for_source('{"decision": "block", "reason": r}') == [
+        "stop-block"
+    ]
+
+
+def test_emit_block_is_a_stderr_channel() -> None:
+    """`emit_block` writes to stderr, per its docstring in block_message.py."""
+    assert channels_for_source("emit_block(msg)") == ["stderr"]
+
+
+def test_a_multi_event_hook_unions_every_registration(tmp_path: Path) -> None:
+    """A first-entry read would answer for one body and drop the other."""
+    for name, body, text in (
+        ("pre.py", "pre.py", "emit_decision(a, b)"),
+        ("post.py", "post.py", "emit_additional_context(x)"),
+    ):
+        target = tmp_path / "hooks" / "advisory-nudge" / "two-event" / body
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(text)
+        del name
+    entries = [
+        {"name": "two-event", "role": "advisory-nudge", "body": "pre.py"},
+        {"name": "two-event", "role": "advisory-nudge", "body": "post.py"},
+    ]
+    assert channels_for_hook(tmp_path, entries) == ["decision", "context"]
+
+
+# --- shape ------------------------------------------------------------------
+
+
+def test_channels_render_in_a_fixed_order() -> None:
+    """A set's iteration order would make the generated cell unstable."""
+    source = "emit_stop_advisory(m); emit_decision(a, b); sys.stderr.write(x)"
+    assert channels_for_source(source) == ["decision", "system-msg", "stderr"]
+    assert render_channels(channels_for_source(source)) == (
+        "decision, system-msg, stderr"
+    )
+
+
+def test_a_body_that_emits_nothing_renders_as_the_placeholder() -> None:
+    assert channels_for_source("ledger.record(row)") == []
+    assert render_channels([]) == NO_CHANNEL
+
+
+# --- the shipped corpus -----------------------------------------------------
+
+
+def test_every_manifest_hook_has_a_readable_body() -> None:
+    """A missing body would silently classify as emitting nothing."""
+    missing = [
+        entry["name"]
+        for entry in _manifest()["hooks"]
+        if not (
+            REPO_ROOT
+            / "hooks"
+            / entry["role"]
+            / entry["name"]
+            / (entry.get("body") or "impl.py")
+        ).exists()
+    ]
+    assert missing == []
+
+
+def test_the_corpus_does_not_collapse_to_one_verdict() -> None:
+    """A dead regex degrades to "everything emits nothing" and nothing else."""
+    by_name = _entries_by_name()
+    derived = {
+        name: channels_for_hook(REPO_ROOT, entries)
+        for name, entries in by_name.items()
+    }
+    channel_less = [name for name, ch in derived.items() if not ch]
+    assert len(channel_less) < len(derived) // 4, (
+        "most hooks classified as emitting nothing — the patterns are dead"
+    )
+    seen = {channel for channels in derived.values() for channel in channels}
+    assert seen == set(CHANNEL_ORDER), (
+        f"channels never observed in the corpus: {set(CHANNEL_ORDER) - seen}"
+    )
+
+
+def test_a_known_hook_of_each_channel_classifies_as_expected() -> None:
+    """Anchors the derivation to bodies a reader can open and check."""
+    by_name = _entries_by_name()
+    expected = {
+        # opt-in rewrite arm plus its deny fallback (#1399)
+        "gh-flag-verify": ["decision", "rewrite"],
+        # a Stop advisory with no block path: reaches the user, not the model
+        "completion-signal-gate": ["system-msg"],
+        # the exit-0 stderr advisory class this census was opened for
+        "pytest-direct-exec-advisory": ["stderr"],
+    }
+    for name, channels in expected.items():
+        assert channels_for_hook(REPO_ROOT, by_name[name]) == channels, name
+
+
+# --- the literal prefilter --------------------------------------------------
+
+
+def test_the_prefilter_never_changes_a_verdict_on_the_shipped_corpus() -> None:
+    """Parity oracle: prefiltered classification == regex-only classification.
+
+    The prefilter exists to skip work, so its only failure mode is skipping a
+    body the pattern would have matched. That failure is silent — it reports a
+    hook as emitting less than it does, which is the direction that hides the
+    #1265 failure rather than inventing one.
+    """
+    for entries in _entries_by_name().values():
+        path = (
+            REPO_ROOT
+            / "hooks"
+            / entries[0]["role"]
+            / entries[0]["name"]
+            / (entries[0].get("body") or "impl.py")
+        )
+        source = path.read_text()
+        code = strip_comments(source, path.suffix)
+        regex_only = [
+            name
+            for name in CHANNEL_ORDER
+            if CHANNEL_PATTERNS[name].search(code)
+        ]
+        assert channels_for_source(source, path.suffix) == regex_only, path
+
+
+def test_every_pattern_alternative_survives_its_prefilter() -> None:
+    """A pattern form the literals do not cover would be unreachable.
+
+    The corpus parity test above only covers forms the corpus happens to
+    contain; these are the forms the patterns claim to accept.
+    """
+    forms = {
+        "decision": [
+            "emit_decision(a, b)", "emit_ask(r)", "emit_deny(r)",
+            "format_decision(d, r)", '{"permissionDecision": "deny"}',
+        ],
+        "context": [
+            "emit_additional_context(x)", '{"additionalContext": note}',
+        ],
+        "rewrite": [
+            "emit_updated_input(a, b)", "format_updated_input(a, b)",
+            '{"updatedInput": patched}',
+        ],
+        "stop-block": [
+            "emit_stop_block(r)", "format_stop_block(r)",
+            '{"decision": "block", "reason": r}', 'jq -n \'{decision: "block"}\'',
+        ],
+        "system-msg": [
+            "emit_stop_advisory(m)", "format_stop_advisory(m)",
+            '{"systemMessage": m}',
+        ],
+        "stderr": [
+            "sys.stderr.write(x)", "print(x, file=sys.stderr)",
+            "emit_block(msg)", 'echo "note" >&2',
+        ],
+    }
+    assert set(forms) == set(CHANNEL_ORDER)
+    for channel, sources in forms.items():
+        for source in sources:
+            assert CHANNEL_PATTERNS[channel].search(source), (channel, source)
+            assert any(lit in source for lit in CHANNEL_LITERALS[channel]), (
+                f"{channel}: prefilter rejects a form its pattern accepts: {source}"
+            )
+            assert channel in channels_for_source(source), (channel, source)
+
+
+# --- comments are prose, not channels --------------------------------------
+
+
+def test_a_comment_naming_a_channel_is_not_a_channel() -> None:
+    """The defect this guard exists for, in both comment positions.
+
+    One shipped hook was classified `system-msg` because line 238 of its body
+    says "The three ways out were: emit a user-visible `systemMessage`, emit a
+    stderr ..." — a sentence about the design, in a file that emits neither.
+    """
+    assert channels_for_source("# emit_stop_advisory(message)\n") == []
+    assert channels_for_source("x = 1  # emit_stop_advisory(m)\n") == []
+    assert channels_for_source("# a user-visible `systemMessage`\n") == []
+    assert channels_for_source("# sys.stderr.write(x) used to live here\n") == []
+
+
+def test_a_string_literal_naming_a_channel_still_counts() -> None:
+    """Stripping literals too would trade this bug for a quieter one.
+
+    The hand-rolled payloads live in literals, and several hooks predate the
+    shared emitter, so a literal-stripping pass would report them as emitting
+    nothing — the direction that hides a missing channel instead of inventing
+    one.
+    """
+    assert channels_for_source('json.dump({"additionalContext": n}, out)') == [
+        "context"
+    ]
+    assert channels_for_source('REASON = "permissionDecision"') == ["decision"]
+
+
+def test_a_shell_comment_line_is_not_a_channel() -> None:
+    assert channels_for_source("# echo hi >&2\n", ".sh") == []
+    assert channels_for_source('echo hi >&2\n', ".sh") == ["stderr"]
+
+
+def test_a_body_that_does_not_tokenize_falls_back_to_raw_text() -> None:
+    """Reporting no channels for an unparseable body would be worse.
+
+    The fallback keeps the pre-guard answer rather than inventing an empty one,
+    so a syntax error in a hook shows up as a test or lint failure elsewhere
+    instead of silently emptying its matrix cell.
+    """
+    broken = "def f(:\n    emit_decision(a, b)\n"
+    assert channels_for_source(broken) == ["decision"]

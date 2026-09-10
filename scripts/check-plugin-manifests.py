@@ -2261,10 +2261,13 @@ def main() -> int:
     # ------------------------------------------------------------------
     # Rule 21 — hook operating matrix byte-identity (#672)
     #
-    # The matrix is intentionally generated from structured sources only:
-    # manifest registration shape, bypass-vars registry, and SECURITY.md
-    # external-command declarations. This keeps Track 1 behavior-preserving
-    # while still giving users a drift-checked operating surface.
+    # The matrix is intentionally generated: manifest registration shape,
+    # bypass-vars registry, SECURITY.md external-command declarations, and —
+    # since #1265 — the `Channels` column derived from each hook body by
+    # scripts/hook_channels.py. This keeps Track 1 behavior-preserving while
+    # still giving users a drift-checked operating surface. The byte-identity
+    # comparison below re-derives that column rather than reading it back, so
+    # editing a hook's emit path without regenerating is caught here.
     # (Renumbered from a duplicate "Rule 16" in #1172 — that label collided
     # with the @fail_open rule above, so this one took the next free number.)
     # ------------------------------------------------------------------
