@@ -37,6 +37,7 @@ import sys as _sys
 from pathlib import Path as _Path
 _sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
 from _git import repo_root as git_repo_root  # type: ignore[import-not-found]  # noqa: E402
+from _hook_io import emit_additional_context  # type: ignore[import-not-found]  # noqa: E402
 from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
     _is_gh_binary,
     iter_command_starts,
@@ -367,7 +368,7 @@ def main() -> int:
         if phantom:
             _mark_reported(dk)
             lines = "\n".join(f"  • {p}" for p in phantom)
-            sys.stderr.write(
+            advisory = (
                 f"[phantom-path] {len(phantom)} referenced path(s) do not exist "
                 f"in repo root ({repo_root}):\n{lines}\n"
                 "Verify paths before posting — phantom links confuse readers and "
@@ -375,7 +376,14 @@ def main() -> int:
                 "Set PRAXIS_PHANTOM_PATH_STRICT=1 to convert this advisory into "
                 "a hard block (exit 2).\n"
             )
-            if os.environ.get("PRAXIS_PHANTOM_PATH_STRICT") == "1":
+            strict = os.environ.get("PRAXIS_PHANTOM_PATH_STRICT") == "1"
+            if not strict:
+                # At exit 0 stderr reaches only the debug log, so the advisory
+                # needs the one channel the model reads. At exit 2 the harness
+                # feeds stderr to the model itself.
+                emit_additional_context(advisory)
+            sys.stderr.write(advisory)
+            if strict:
                 return 2
 
     return 0

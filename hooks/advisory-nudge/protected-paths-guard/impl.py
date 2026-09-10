@@ -52,6 +52,7 @@ import os
 import sys
 from pathlib import Path, PurePosixPath
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "_lib"))
+from _hook_io import emit_additional_context  # type: ignore[import-not-found]  # noqa: E402
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
 from _path_scope import (  # type: ignore[import-not-found]  # noqa: E402
     contains_fragment,
@@ -315,7 +316,13 @@ def main() -> int:
         return 0
 
     strict = os.environ.get("PRAXIS_PROTECTED_PATHS_STRICT", "").strip() == "1"
-    sys.stderr.write(_advisory_text(file_path, reason, strict) + "\n")
+    advisory = _advisory_text(file_path, reason, strict)
+    if not strict:
+        # At exit 0 stderr reaches only the debug log, so the advisory needs the
+        # one channel the model reads. At exit 2 the harness feeds stderr to the
+        # model itself, so a second copy would only duplicate it.
+        emit_additional_context(advisory)
+    sys.stderr.write(advisory + "\n")
     return 2 if strict else 0
 
 

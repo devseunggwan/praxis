@@ -66,6 +66,7 @@ from pathlib import Path as _Path
 
 sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
 from _git import run_git  # type: ignore[import-not-found]  # noqa: E402
+from _hook_io import emit_additional_context  # type: ignore[import-not-found]  # noqa: E402
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
 from _payload import read_payload  # type: ignore[import-not-found]  # noqa: E402
 from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
@@ -527,10 +528,15 @@ def main() -> int:
     if not dot_markers and not owner_markers:
         return 0
 
-    sys.stderr.write(_render_advisory(dot_markers, owner_markers))
-    if os.environ.get("PRAXIS_PERSONAL_LEAK_STRICT") == "1":
-        return 2
-    return 0
+    advisory = _render_advisory(dot_markers, owner_markers)
+    strict = os.environ.get("PRAXIS_PERSONAL_LEAK_STRICT") == "1"
+    if not strict:
+        # At exit 0 stderr reaches only the debug log, so the advisory needs the
+        # one channel the model reads. At exit 2 the harness feeds stderr to the
+        # model itself, so a second copy would only duplicate it.
+        emit_additional_context(advisory)
+    sys.stderr.write(advisory)
+    return 2 if strict else 0
 
 
 if __name__ == "__main__":

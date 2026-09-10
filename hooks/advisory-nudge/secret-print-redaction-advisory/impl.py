@@ -77,6 +77,7 @@ from pathlib import Path
 
 _HOOK_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HOOK_DIR.parent.parent / "_lib"))
+from _hook_io import emit_additional_context  # type: ignore[import-not-found]  # noqa: E402
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
 from _payload import read_payload  # type: ignore[import-not-found]  # noqa: E402
 
@@ -393,7 +394,10 @@ def main() -> int:
         return 0
 
     if findings:
-        sys.stderr.write(_advisory_text(findings) + "\n")
+        advisory = _advisory_text(findings)
+        # This hook only ever exits 0, where stderr reaches the debug log alone.
+        emit_additional_context(advisory)
+        sys.stderr.write(advisory + "\n")
     return 0
 
 

@@ -52,8 +52,12 @@ print(json.dumps({
   local ok=1
   case "$expected" in
     advisory)
+      # exit 0 carries the advisory on BOTH channels (#1265): stderr, which the
+      # fire ledger grades the fire on, and additionalContext, which is the only
+      # exit-0 PreToolUse channel the model reads.
       [ "$rc" -eq 0 ] || ok=0
-      [ -z "$out" ]   || ok=0
+      echo "$out" | grep -q '"additionalContext"' || ok=0
+      echo "$out" | grep -q "\[secret-print-redaction-advisory\]" || ok=0
       echo "$err" | grep -q "\[secret-print-redaction-advisory\]" || ok=0
       ;;
     silent)
