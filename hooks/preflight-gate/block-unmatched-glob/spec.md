@@ -72,7 +72,9 @@ segment executes, whether the text is a heredoc body:
 | No glob metacharacters in the command | Silent — pass |
 | Metacharacters were quoted (`-name '*.log'`) | Silent — never expanded |
 | Unquoted `$` / `` ` `` (variable, arithmetic, substitution) | Silent — prefix unresolvable |
-| Unquoted compound structure: `&&`, `\|\|`, `\|`, `;`, `&`, newline, `<<` | Silent — segment context unknown |
+| Unquoted `&&`, `\|\|`, `&`, newline, `<<` | Silent — segment context unknown |
+| Unquoted `;` or `\|` | **Cut into segments; each simple command judged on its own** |
+| `setopt` / `unsetopt` **in command position of any segment** | Silent — a later segment expands under options set earlier |
 | Control-flow word or `cd` **in command position** | Silent — same reason |
 | Assignment word **before the command word** (`FOO=*.x cmd`) | Silent — values are not glob-expanded |
 | `noglob` / `setopt` / `unsetopt` / `eval` **in command position** | Silent — failure disabled by the command |
@@ -87,6 +89,27 @@ abort in zsh and the gate lets it through — a blocking gate that halts a valid
 command is worse than one that misses a case. The original incident
 (`ls -d <path> <glob> 2>/dev/null`) is a single simple command and is still
 caught.
+
+`;` and `\|` were on the pass-through side of that trade until #1405, and they
+are where the misses actually were: across the local transcript corpus, 129 of
+144 `no matches found` aborts (90%) came from a compound command, because a
+chained investigation line is exactly what an agent writes. Neither separator
+changes how the words around it expand — each side of `a ; b` and `a \| b` is an
+ordinary simple command whose own words expand under the same `nomatch` — so
+each segment is now judged alone. `&&` and `\|\|` stay out: they decide whether
+the next command runs at all, and blocking a command that would never have run
+is the false positive this gate is most careful about. `&`, a newline, and `<<`
+stay out for their own reasons (detaching, arbitrary constructs, heredoc bodies
+that are data rather than words).
+
+The separator split is index-aligned with the *unquoted skeleton*, so a `;`
+inside quotes is invisible here exactly as it is to the shell. Two disabler
+scopes are distinguished, because segmentation makes the difference observable
+for the first time: `noglob` and `eval` are prefixes that shield their own
+command, so only their segment is dropped and a neighbour on the same line is
+still judged — while `setopt` / `unsetopt` change the running shell's options
+and therefore outlive their command, so a line containing one passes through
+whole.
 
 Position, not mere presence, decides the pass-through rows above. All three of
 these abort in zsh and are all caught: `LC_ALL=C ls *.missing` (the assignment
