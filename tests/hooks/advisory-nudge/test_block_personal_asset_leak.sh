@@ -53,24 +53,35 @@ run_case() {
   else
     env_unsets+=(-u PRAXIS_PERSONAL_LEAK_STRICT)
   fi
-  echo "$payload" | env "${env_unsets[@]}" "${env_sets[@]}" python3 "$HOOK" >/dev/null 2>"$err_file"
+  local out_file
+  out_file=$(mktemp)
+  echo "$payload" | env "${env_unsets[@]}" "${env_sets[@]}" python3 "$HOOK" >"$out_file" 2>"$err_file"
   local rc=$?
-  local err
+  local err out
   err=$(cat "$err_file")
-  rm -f "$err_file"
+  out=$(cat "$out_file")
+  rm -f "$err_file" "$out_file"
 
   local ok=1
   case "$expectation" in
     silent)
       [ "$rc" -eq 0 ] || ok=0
       [ -z "$err" ]   || ok=0
+      [ -z "$out" ]   || ok=0
       ;;
     warn)
+      # exit 0 carries the advisory on BOTH channels (#1265): stderr, which the
+      # fire ledger grades the fire on, and additionalContext, which is the only
+      # exit-0 PreToolUse channel the model reads.
       [ "$rc" -eq 0 ] || ok=0
       echo "$err" | grep -q "REMINDER" || ok=0
+      echo "$out" | grep -q '"additionalContext"' || ok=0
+      echo "$out" | grep -q "REMINDER" || ok=0
       ;;
     block)
+      # exit 2 feeds stderr to the model itself, so no stdout copy is emitted.
       [ "$rc" -eq 2 ] || ok=0
+      [ -z "$out" ]   || ok=0
       echo "$err" | grep -q "REMINDER" || ok=0
       ;;
     *)

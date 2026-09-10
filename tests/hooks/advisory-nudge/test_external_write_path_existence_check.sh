@@ -41,21 +41,30 @@ run_case() {
   local err_file
   err_file=$(mktemp)
   # Unset strict env so advisory vs pass tests are not affected by environment.
-  echo "$payload" | env -u PRAXIS_PHANTOM_PATH_STRICT python3 "$HOOK" >/dev/null 2>"$err_file"
+  local out_file
+  out_file=$(mktemp)
+  echo "$payload" | env -u PRAXIS_PHANTOM_PATH_STRICT python3 "$HOOK" >"$out_file" 2>"$err_file"
   local rc=$?
-  local err
+  local err out
   err=$(cat "$err_file")
-  rm -f "$err_file"
+  out=$(cat "$out_file")
+  rm -f "$err_file" "$out_file"
 
   local ok=1
   case "$expectation" in
     advisory)
+      # exit 0 carries the advisory on BOTH channels (#1265): stderr, which the
+      # fire ledger grades the fire on, and additionalContext, which is the only
+      # exit-0 PreToolUse channel the model reads.
       [ "$rc" -eq 0 ] || ok=0
       echo "$err" | grep -q "\[phantom-path\]" || ok=0
+      echo "$out" | grep -q '"additionalContext"' || ok=0
+      echo "$out" | grep -q "\[phantom-path\]" || ok=0
       ;;
     pass)
       [ "$rc" -eq 0 ] || ok=0
       [ -z "$err" ] || ok=0
+      [ -z "$out" ] || ok=0
       ;;
     *)
       echo "FAIL: unknown expectation: $expectation" >&2

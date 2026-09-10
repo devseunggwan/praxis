@@ -37,6 +37,7 @@ import sys as _sys
 from pathlib import Path as _Path
 _sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
 from _git import repo_root as git_repo_root  # type: ignore[import-not-found]  # noqa: E402
+from _hook_io import emit_additional_context  # type: ignore[import-not-found]  # noqa: E402
 from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
     _is_gh_binary,
     iter_command_starts,
@@ -302,6 +303,12 @@ def main() -> int:
     if not body_files:
         return 0
 
+    # One command can carry several `--body-file` arguments, and stdout takes
+    # exactly one JSON document — a second `emit_additional_context` call would
+    # make the pair unparseable and the dispatcher would drop the context
+    # entirely. stderr has no such constraint, so it stays per-body.
+    advisories: list[str] = []
+
     for body_file in body_files:
         # Resolve path relative to cwd if not absolute.
         if not os.path.isabs(body_file):
@@ -367,7 +374,7 @@ def main() -> int:
         if phantom:
             _mark_reported(dk)
             lines = "\n".join(f"  • {p}" for p in phantom)
-            sys.stderr.write(
+            advisory = (
                 f"[phantom-path] {len(phantom)} referenced path(s) do not exist "
                 f"in repo root ({repo_root}):\n{lines}\n"
                 "Verify paths before posting — phantom links confuse readers and "
@@ -375,8 +382,17 @@ def main() -> int:
                 "Set PRAXIS_PHANTOM_PATH_STRICT=1 to convert this advisory into "
                 "a hard block (exit 2).\n"
             )
+            sys.stderr.write(advisory)
             if os.environ.get("PRAXIS_PHANTOM_PATH_STRICT") == "1":
+                # exit 2 — the harness feeds stderr to the model itself, so the
+                # collected advisories need no stdout copy.
                 return 2
+            advisories.append(advisory)
+
+    if advisories:
+        # At exit 0 stderr reaches only the debug log, so the advisory needs the
+        # one channel the model reads.
+        emit_additional_context("\n".join(advisories))
 
     return 0
 

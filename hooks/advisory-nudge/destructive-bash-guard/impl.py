@@ -77,7 +77,7 @@ _HOOK_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HOOK_DIR.parent.parent / "_lib"))
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
 from _hook_utils import safe_tokenize, iter_command_starts, strip_prefix  # type: ignore[import-not-found]  # noqa: E402
-from _hook_io import emit_decision  # type: ignore[import-not-found]  # noqa: E402
+from _hook_io import emit_additional_context, emit_decision  # type: ignore[import-not-found]  # noqa: E402
 from _payload import read_bash_payload  # type: ignore[import-not-found]  # noqa: E402
 
 # Privilege-escalation commands. Detected BEFORE strip_prefix — `sudo` is
@@ -618,7 +618,12 @@ def main() -> int:
         stderr_parts.append(_advisory_text(reasons, strict=False))
     if signal_reasons:
         stderr_parts.append(_signal_text(signal_reasons))
-    sys.stderr.write("\n\n".join(stderr_parts) + "\n")
+    advisory = "\n\n".join(stderr_parts)
+    # Both channels carry the same text, and neither replaces the other: stderr
+    # at exit 0 reaches the debug log and the fire ledger's `advise` grade,
+    # additionalContext reaches the model this warning is written for.
+    emit_additional_context(advisory)
+    sys.stderr.write(advisory + "\n")
     return 0
 
 

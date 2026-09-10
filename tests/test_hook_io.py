@@ -100,6 +100,56 @@ def test_emit_decision_does_not_exit() -> None:
     assert buf.getvalue()
 
 
+def test_format_additional_context_key_order_is_fixed() -> None:
+    d = hio.format_additional_context("watch out")
+    assert list(d.keys()) == ["hookSpecificOutput"]
+    inner = d["hookSpecificOutput"]
+    assert list(inner.keys()) == ["hookEventName", "additionalContext"]
+    assert inner["hookEventName"] == "PreToolUse"
+    assert inner["additionalContext"] == "watch out"
+
+
+def test_emit_additional_context_is_byte_identical_to_handrolled() -> None:
+    """Must equal the dict the three hand-rolling hooks emit."""
+    buf = io.StringIO()
+    hio.emit_additional_context("advisory text", stream=buf)
+    got = buf.getvalue()
+
+    expected_obj = {
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "additionalContext": "advisory text",
+        }
+    }
+    ref = io.StringIO()
+    json.dump(expected_obj, ref)
+    ref.write("\n")
+    assert got == ref.getvalue()
+    assert json.loads(got) == expected_obj
+    assert got.endswith("\n")
+
+
+def test_emit_additional_context_event_name_override() -> None:
+    buf = io.StringIO()
+    hio.emit_additional_context("x", event_name="PostToolUse", stream=buf)
+    obj = json.loads(buf.getvalue())
+    assert obj["hookSpecificOutput"]["hookEventName"] == "PostToolUse"
+
+
+def test_emit_additional_context_leaves_stderr_untouched() -> None:
+    """The stderr line is the caller's — `classify_decision` grades the fire on
+    it, so the helper must never write there itself."""
+    buf = io.StringIO()
+    err = io.StringIO()
+    real_stderr, sys.stderr = sys.stderr, err
+    try:
+        hio.emit_additional_context("advisory text", stream=buf)
+    finally:
+        sys.stderr = real_stderr
+    assert err.getvalue() == ""
+    assert buf.getvalue()
+
+
 # ---------------------------------------------------------------------------
 # 2. Adoption lint
 # ---------------------------------------------------------------------------
