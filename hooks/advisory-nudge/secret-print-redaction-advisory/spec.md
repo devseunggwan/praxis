@@ -152,6 +152,21 @@ mask() { printf '%s...%s' "${1:0:6}" "${1: -4}"; }
 def mask(s): return f"{s[:6]}...{s[-4:]}" if s else s
 ```
 
+## Output channels (issue #1265)
+
+At exit 0 the advisory travels two channels and neither replaces the other:
+
+- `hookSpecificOutput.additionalContext` on stdout, via
+  `_hook_io.emit_additional_context()` — the one exit-0 PreToolUse channel that
+  reaches the model. Without it the hook fires and the actor sees nothing,
+  which is indistinguishable from a hook that does not exist.
+- stderr — reaches the debug log, and is what
+  `_fire_ledger.classify_decision` derives the `advise` grade from. Moving the
+  text to stdout alone would record every fire as `pass`.
+
+This hook has no strict mode: every fire is an exit-0 advisory, so the
+pairing above is its only output shape.
+
 ## Parsing guarantees (fail-open)
 
 - malformed JSON stdin → exit 0

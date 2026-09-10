@@ -59,6 +59,21 @@ Set PRAXIS_PHANTOM_PATH_STRICT=1 to convert this advisory into a hard block (exi
 Default mode emits the advisory to stderr and **exits 0** (advisory only).
 Set `PRAXIS_PHANTOM_PATH_STRICT=1` to convert into a hard block (exit 2).
 
+### Output channels (issue #1265)
+
+At exit 0 the advisory travels two channels and neither replaces the other:
+
+- `hookSpecificOutput.additionalContext` on stdout, via
+  `_hook_io.emit_additional_context()` — the one exit-0 PreToolUse channel that
+  reaches the model. Without it the hook fires and the actor sees nothing,
+  which is indistinguishable from a hook that does not exist.
+- stderr — reaches the debug log, and is what
+  `_fire_ledger.classify_decision` derives the `advise` grade from. Moving the
+  text to stdout alone would record every fire as `pass`.
+
+`PRAXIS_PHANTOM_PATH_STRICT=1` exits 2, where the harness feeds stderr to
+the model itself, so no stdout copy is emitted on that path.
+
 ### Repo root resolution
 
 1. `git -C <dir-of-body-file> rev-parse --show-toplevel`
