@@ -27,20 +27,27 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parent.parent
 HOOKS = REPO_ROOT / "hooks" / "advisory-nudge"
 
-# Env that must not leak in from the developer's shell: a strict flag routes the
-# hook down the exit-2 path, which emits no stdout at all.
+# Env that must not leak in from the developer's shell. A strict flag routes the
+# hook down the exit-2 path, which emits no stdout at all; a bypass flag makes it
+# return before it decides anything, so the hook exits 0 silently and the
+# envelope assertion fails for a reason that has nothing to do with the code.
 _STRICT_VARS = (
     "PRAXIS_DESTRUCTIVE_BASH_STRICT",
     "PRAXIS_PROTECTED_PATHS_STRICT",
     "PRAXIS_PERSONAL_LEAK_STRICT",
     "PRAXIS_PHANTOM_PATH_STRICT",
 )
+#: Bypass vars are cleared by prefix rather than by name, so a hook that gains
+#: one later is covered without this list being updated.
+_BYPASS_PREFIX = "PRAXIS_HOOK_BYPASS_"
 
 
 def _run(hook: str, payload: dict, env: dict | None = None) -> subprocess.CompletedProcess:
     e = dict(os.environ)
     for var in _STRICT_VARS:
         e.pop(var, None)
+    for var in [v for v in e if v.startswith(_BYPASS_PREFIX)]:
+        e.pop(var)
     # The self-edit guard skips synthesized paths under the real plugin root.
     e["CLAUDE_PLUGIN_ROOT"] = "/nonexistent-plugin-root-for-tests"
     e.update(env or {})
