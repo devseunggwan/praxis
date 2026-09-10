@@ -48,6 +48,43 @@ are corrected. Re-run after pulls or after adding a new CLI script.
 Exits non-zero on drift, so it can be wired into CI or a SessionStart hook
 to catch "patch landed in the wrong clone" before it bites a future session.
 
+### Interpreter selection (`PRAXIS_PYTHON`)
+
+The generated wrappers exec `${PRAXIS_PYTHON:-python3}`, so setting the variable
+pins which interpreter every hook starts under. Unset, they call bare `python3`
+exactly as before.
+
+Set it when your `python3` resolves to a version-manager shim. A shim is a shell
+script that re-resolves the interpreter on every call, and hooks start a process
+per tool call, so that cost is paid on every one of them. Measured on a
+pyenv-managed macOS checkout, interleaved 21 times each so machine load moves
+both figures together:
+
+```console
+$ command -v python3
+~/.pyenv/shims/python3
+real binary    best   11.1 ms | median   12.3 ms
+pyenv shim     best   56.4 ms | median   60.3 ms
+```
+
+Point it at the resolved binary — `python3 -c 'import sys; print(sys.executable)'`
+prints it — via the `env` block of `settings.json`, the same way the other
+`PRAXIS_*` knobs are supplied:
+
+```json
+{ "env": { "PRAXIS_PYTHON": "/absolute/path/to/bin/python3" } }
+```
+
+A value that does not resolve makes the wrapper exit 0 rather than block, which
+is the same fall-through contract an absent `impl.py` gets — praxis never hands
+the host a decision it could not compute. The cost of that safety is that a typo
+disables the hooks silently, so verify with
+`PRAXIS_PYTHON=<value> ./hooks/_dispatch.sh PreToolUse Read claude </dev/null`
+after changing it: a resolvable value exits 0 having run the dispatcher, and so
+does an unresolvable one, so read
+[`tests/test_wrapper_interpreter_selection.sh`](tests/test_wrapper_interpreter_selection.sh)
+for the marker-file technique that tells the two apart.
+
 ### Keeping `AGENTS.md` small
 
 `AGENTS.md` (`CLAUDE.md` is a symlink to it) is loaded into every session, so
