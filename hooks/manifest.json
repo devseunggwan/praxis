@@ -513,6 +513,14 @@
       "review_by": "2026-12-04"
     },
     {
+      "name": "zsh-word-split-advisory",
+      "role": "advisory-nudge",
+      "event": "PreToolUse",
+      "matcher": "Bash",
+      "timeout": 5,
+      "review_by": "2026-12-04"
+    },
+    {
       "name": "secret-print-redaction-advisory",
       "role": "advisory-nudge",
       "event": "PreToolUse",
