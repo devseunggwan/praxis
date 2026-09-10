@@ -5,6 +5,41 @@ All notable changes to praxis are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.17.0](https://github.com/devseunggwan/praxis/compare/v7.16.0...v7.17.0) (2026-09-10)
+
+
+### Added
+
+* **docs:** add the per-hook output channel column ([#1400](https://github.com/devseunggwan/praxis/issues/1400)) ([9738307](https://github.com/devseunggwan/praxis/commit/9738307933a086261e888393d9c22204f1c2d875))
+* **hooks:** add rewrite arms to pipefail-advisory and gh-flag-verify ([#1399](https://github.com/devseunggwan/praxis/issues/1399)) ([5c60bb0](https://github.com/devseunggwan/praxis/commit/5c60bb0e28087faf6eae6d79a263ee25ca21904b))
+* **hooks:** close five surfaces no hook is positioned to read ([#1407](https://github.com/devseunggwan/praxis/issues/1407)) ([b545d8c](https://github.com/devseunggwan/praxis/commit/b545d8c740afa734ba18840599a3d941bc6ecd25))
+* **hooks:** compose PreToolUse input rewrites in the dispatcher ([#1398](https://github.com/devseunggwan/praxis/issues/1398)) ([6876269](https://github.com/devseunggwan/praxis/commit/687626919839f7bd64f7d75411ac191006e2a5d6))
+* **hooks:** gate opening-move blame attribution ([#1393](https://github.com/devseunggwan/praxis/issues/1393)) ([db4734e](https://github.com/devseunggwan/praxis/commit/db4734e0535748e6bbc0f34bd37bf1ce61bf2adf))
+* **hooks:** gate refusals missing from the final report ([#1395](https://github.com/devseunggwan/praxis/issues/1395)) ([bad4e6b](https://github.com/devseunggwan/praxis/commit/bad4e6bf47382805ca74dd1a5a06a2eb90352633))
+* **hooks:** meter the bypass-route prose lane ([#1394](https://github.com/devseunggwan/praxis/issues/1394)) ([fdc7e76](https://github.com/devseunggwan/praxis/commit/fdc7e76b10f8981da158b538a9102d1042ee2d6a))
+* **hooks:** send mutation advisories to the model ([#1406](https://github.com/devseunggwan/praxis/issues/1406)) ([1be2a4e](https://github.com/devseunggwan/praxis/commit/1be2a4e10ba7db99442ffc698d18cf673e4715c3))
+* **scripts:** check INDEX trigger cells against the manifest ([#1379](https://github.com/devseunggwan/praxis/issues/1379)) ([622301c](https://github.com/devseunggwan/praxis/commit/622301ce2fa196c72fff9ea18953736eee35851a))
+* **skills:** add bypass-report ledger viewer ([#1390](https://github.com/devseunggwan/praxis/issues/1390)) ([4431f23](https://github.com/devseunggwan/praxis/commit/4431f2367d3e200f92c591065a3d9a726d238b34))
+* **skills:** add tradeoff — decision-fork report ([#1389](https://github.com/devseunggwan/praxis/issues/1389)) ([2b8bec5](https://github.com/devseunggwan/praxis/commit/2b8bec5f62787a9827659d78dc558d12664db9f6))
+* **skills:** quantify the delegated prompt ([#1401](https://github.com/devseunggwan/praxis/issues/1401)) ([0a8d81d](https://github.com/devseunggwan/praxis/commit/0a8d81d33727e8f424c5ad2eff619e08ce49c684))
+
+
+### Fixed
+
+* **hooks:** normalize before the planning skip ([#1378](https://github.com/devseunggwan/praxis/issues/1378)) ([cb9eb11](https://github.com/devseunggwan/praxis/commit/cb9eb11ad1308689dc054649804b36674fe8076c))
+* **hooks:** stage locked state writes per process ([#1384](https://github.com/devseunggwan/praxis/issues/1384)) ([45eca22](https://github.com/devseunggwan/praxis/commit/45eca22912d1f6ee6e61fb1ce9bf86b94cda691e))
+* **hooks:** tie review advisory to gate tier ([#1388](https://github.com/devseunggwan/praxis/issues/1388)) ([1a8e016](https://github.com/devseunggwan/praxis/commit/1a8e016e0acc22b272341c6332b349128ac2fd37))
+* **skills:** use bare plugin-root placeholders ([#1396](https://github.com/devseunggwan/praxis/issues/1396)) ([cf4f521](https://github.com/devseunggwan/praxis/commit/cf4f52194b01383a8bcb85ffabc61448dbb42745))
+
+
+### Changed
+
+* bump reviewdog/action-actionlint from 1.73.2 to 1.73.4 ([#1276](https://github.com/devseunggwan/praxis/issues/1276)) ([763881e](https://github.com/devseunggwan/praxis/commit/763881e7b3a1d2ea0e1874a654913e9aebfa4d25))
+* **hooks:** delete the tool_response path ([#1386](https://github.com/devseunggwan/praxis/issues/1386)) ([a30e6e0](https://github.com/devseunggwan/praxis/commit/a30e6e03a6ce6448d011aa7ee46c49ac78d88363))
+* **hooks:** end the PostToolUse parallel run ([#1365](https://github.com/devseunggwan/praxis/issues/1365)) ([1aa5976](https://github.com/devseunggwan/praxis/commit/1aa59769b4eb572e063f58d2d22a2e61b3696d22))
+* **hooks:** make wrapper interpreter selectable ([#1404](https://github.com/devseunggwan/praxis/issues/1404)) ([825ff49](https://github.com/devseunggwan/praxis/commit/825ff49a9465b6535c2477ef1678ea1ae5419ce3))
+* record the hook if-field placement rule ([#1397](https://github.com/devseunggwan/praxis/issues/1397)) ([ec49ff3](https://github.com/devseunggwan/praxis/commit/ec49ff35c48367f951e8775a8fb188460a04093f))
+
 ## [7.16.0](https://github.com/devseunggwan/praxis/compare/v7.15.0...v7.16.0) (2026-09-07)
 
 
