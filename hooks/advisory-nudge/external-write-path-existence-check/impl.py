@@ -303,6 +303,12 @@ def main() -> int:
     if not body_files:
         return 0
 
+    # One command can carry several `--body-file` arguments, and stdout takes
+    # exactly one JSON document — a second `emit_additional_context` call would
+    # make the pair unparseable and the dispatcher would drop the context
+    # entirely. stderr has no such constraint, so it stays per-body.
+    advisories: list[str] = []
+
     for body_file in body_files:
         # Resolve path relative to cwd if not absolute.
         if not os.path.isabs(body_file):
@@ -376,15 +382,17 @@ def main() -> int:
                 "Set PRAXIS_PHANTOM_PATH_STRICT=1 to convert this advisory into "
                 "a hard block (exit 2).\n"
             )
-            strict = os.environ.get("PRAXIS_PHANTOM_PATH_STRICT") == "1"
-            if not strict:
-                # At exit 0 stderr reaches only the debug log, so the advisory
-                # needs the one channel the model reads. At exit 2 the harness
-                # feeds stderr to the model itself.
-                emit_additional_context(advisory)
             sys.stderr.write(advisory)
-            if strict:
+            if os.environ.get("PRAXIS_PHANTOM_PATH_STRICT") == "1":
+                # exit 2 — the harness feeds stderr to the model itself, so the
+                # collected advisories need no stdout copy.
                 return 2
+            advisories.append(advisory)
+
+    if advisories:
+        # At exit 0 stderr reaches only the debug log, so the advisory needs the
+        # one channel the model reads.
+        emit_additional_context("\n".join(advisories))
 
     return 0
 

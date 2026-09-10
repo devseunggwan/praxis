@@ -71,6 +71,10 @@ At exit 0 the advisory travels two channels and neither replaces the other:
   `_fire_ledger.classify_decision` derives the `advise` grade from. Moving the
   text to stdout alone would record every fire as `pass`.
 
+One command can carry several `--body-file` arguments, and stdout takes
+exactly one JSON document. The advisories are therefore collected across bodies
+and emitted once; stderr keeps one block per body, which has no such constraint.
+
 `PRAXIS_PHANTOM_PATH_STRICT=1` exits 2, where the harness feeds stderr to
 the model itself, so no stdout copy is emitted on that path.
 
