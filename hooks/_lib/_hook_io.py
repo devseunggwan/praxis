@@ -79,6 +79,55 @@ def emit_decision(
     out.write("\n")
 
 
+# --- PreToolUse advisory context (issue #1265) ------------------------------
+#
+# A PreToolUse hook that exits 0 has exactly one channel that reaches the model:
+# `hookSpecificOutput.additionalContext`. Bare stderr at exit 0 goes to the
+# debug log, so an advisory written only there fires correctly and is
+# indistinguishable, to the actor, from a hook that does not exist.
+#
+# Callers keep writing the same text to stderr as well. The two channels carry
+# different jobs and neither replaces the other: `classify_decision` derives the
+# `advise` grade from a non-empty stderr (`_fire_ledger.py`), so an advisory
+# that moved wholesale to stdout would be recorded as `pass` and disappear from
+# the fire-rate metric.
+#
+# Three hooks hand-roll this dict today — `pipefail-advisory`,
+# `foreground-poll-loop-guard` and `anchor-comment-gate` — which is the
+# rule-of-three that put it here; they keep their own copies until a change
+# needs them. The `builtin-task-postuse` shape in the scope note above stays
+# out: it carries a top-level `continue` field alongside the context and is
+# still a single call site.
+
+
+def format_additional_context(
+    context: str,
+    event_name: str = "PreToolUse",
+) -> dict:
+    """Return the bare `additionalContext` dict (no I/O)."""
+    return {
+        "hookSpecificOutput": {
+            "hookEventName": event_name,
+            "additionalContext": context,
+        }
+    }
+
+
+def emit_additional_context(
+    context: str,
+    event_name: str = "PreToolUse",
+    stream: Optional[TextIO] = None,
+) -> None:
+    """Write the `additionalContext` JSON to stdout (+ trailing newline).
+
+    Does NOT exit, and does NOT write stderr — the caller owns both, because
+    the stderr line is what the fire ledger grades the fire on.
+    """
+    out = stream if stream is not None else sys.stdout
+    json.dump(format_additional_context(context, event_name), out)
+    out.write("\n")
+
+
 # --- PreToolUse input rewrite (issue #1334) ---------------------------------
 #
 # A PreToolUse hook may hand the harness a corrected tool input instead of
