@@ -35,6 +35,7 @@ in [`../SECURITY.md`](../SECURITY.md).
 | `PRAXIS_HOOK_BYPASS_DESTRUCTIVE_BASH` | `destructive-bash-guard` | Skip the destructive-command guard |
 | `PRAXIS_HOOK_BYPASS_ROUTE_SIGNAL` | `bypass-route-signal` | Skip the bypass-route frequency meter. The hook emits nothing on any path, so setting this changes only whether the turn is counted — it silences no output and relaxes no gate |
 | `PRAXIS_HOOK_BYPASS_SKILL_GATE` | `skill-gate-commands` | Skip the skill-gated-command preflight |
+| `PRAXIS_HOOK_BYPASS_MEMORY_FIELDS` | `memory-distillation-fields-gate` | Skip the memory distillation-field preflight |
 | `PRAXIS_HOOK_BYPASS_WORKTREE_GATE` | `worktree-edit-gate` | Skip the worktree-edit preflight |
 | `PRAXIS_HOOK_BYPASS_DECISION_CONSISTENCY_GATE` | `write-decision-consistency-gate` | Skip the Decisions-block consistency preflight |
 | `PRAXIS_HOOK_BYPASS_WORKTREE_PRUNE_SNAPSHOT` | `worktree-prune-snapshot-gate` | Skip the snapshot-before-prune gate |
@@ -55,6 +56,7 @@ in [`../SECURITY.md`](../SECURITY.md).
 | `PRAXIS_PR_ANCHOR_BYPASS` | `pr-anchor-existence-gate` | Skip the PR-anchor existence gate entirely |
 | `PRAXIS_PR_ANCHOR_ADVISORY` | `pr-anchor-existence-gate` | Pin the PR-anchor existence gate to advisory forever — no escalation to block on repeat fires this session |
 | `PRAXIS_PROPOSAL_PREMISE_BYPASS` | `proposal-premise-gate` | Skip the prose-proposal premise advisory |
+| `PRAXIS_PROSE_OPTION_MENU_BYPASS` | `prose-option-menu-advisory` | Skip the prose option-menu advisory |
 | `PRAXIS_DENIED_ACTION_BYPASS` | `denied-action-report-gate` | Skip the denied-action report gate. Exact value `1` after stripping; read before the strict variable, so it wins when both are set |
 | `PRAXIS_HOOK_BYPASS_PR_REPORT_DESTINATION_GATE` | `pr-report-destination-gate` | Skip the PR-report-destination advisory (local report not posted to the PR) |
 | `PRAXIS_NEGATIVE_EXISTENCE_ADVISORY` | `negative-existence-verdict-gate` | Demote the negative-existence verdict gate from block to advisory (systemMessage, non-blocking). Set to any non-falsey value (`1` / `true` / `yes`); `0` / `false` / empty keep block mode (mirrors `PRAXIS_ASK_END_ADVISORY`) |
@@ -168,7 +170,7 @@ per-hook `spec.md` before promoting any of them.
 | `PRAXIS_HOOK_ERROR_LOG_MAX_BYTES` | `5242880` | shared (`@fail_open`) — error-log rotation cap in bytes, `0` disables (#1282) |
 | `PRAXIS_BYPASS_TELEMETRY_FILE` | `~/.praxis/telemetry/bypass-events-<date>.jsonl` | `bypass-telemetry` |
 | `PRAXIS_BYPASS_ROUTE_SIGNAL_FILE` | `~/.praxis/telemetry/bypass-route-events-<date>.jsonl` | `bypass-route-signal` |
-| `PRAXIS_MEMORY_DIR` | memory store dir | `memory-hint`, `momentum-rule-retrieval-gate` |
+| `PRAXIS_MEMORY_DIR` | memory store dir | `memory-hint`, `momentum-rule-retrieval-gate`, `memory-distillation-fields-gate` |
 | `PRAXIS_GH_LABEL_CACHE_PATH` | `~/.praxis/cache/gh-label-cache.json` | `gh-label-verify` |
 | `PRAXIS_GH_LABEL_CACHE_TTL_SEC` | `300` | `gh-label-verify` |
 | `PRAXIS_SESSION_INTENT_FILE` | `${TMPDIR}/praxis-session-intent-<sid>.json` | `session-intent` |

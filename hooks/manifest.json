@@ -1425,18 +1425,6 @@
       }
     },
     {
-      "name": "prose-option-menu-advisory",
-      "role": "completion-verify",
-      "event": "Stop",
-      "timeout": 10,
-      "review_by": "2026-12-04",
-      "mode": {
-        "bypass_env": [
-          "PRAXIS_PROSE_OPTION_MENU_BYPASS"
-        ]
-      }
-    },
-    {
       "name": "proposal-premise-gate",
       "role": "completion-verify",
       "event": "Stop",
@@ -1445,6 +1433,18 @@
       "mode": {
         "bypass_env": [
           "PRAXIS_PROPOSAL_PREMISE_BYPASS"
+        ]
+      }
+    },
+    {
+      "name": "prose-option-menu-advisory",
+      "role": "completion-verify",
+      "event": "Stop",
+      "timeout": 10,
+      "review_by": "2026-12-04",
+      "mode": {
+        "bypass_env": [
+          "PRAXIS_PROSE_OPTION_MENU_BYPASS"
         ]
       }
     },

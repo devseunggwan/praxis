@@ -68,13 +68,13 @@ def test_group_members_count_and_roles():
     # exact-`Bash` entry (#1239), so they are members here and standalone on
     # their remaining matcher.
     members = _dispatch.group_members("PreToolUse", "Bash")
-    assert len(members) == 55, f"expected 55 exact-Bash members, got {len(members)}"
+    assert len(members) == 56, f"expected 56 exact-Bash members, got {len(members)}"
     # every impl path must exist on disk
     for role, name, impl in members:
         assert impl.exists(), f"missing impl for {role}/{name}: {impl}"
     roles = [role for role, _name, _impl in members]
     assert roles.count("preflight-gate") == 29
-    assert roles.count("advisory-nudge") == 26
+    assert roles.count("advisory-nudge") == 27
 
 
 def test_group_members_host_filter():
@@ -88,7 +88,7 @@ def test_group_members_host_filter():
     claude = _dispatch.group_members("PreToolUse", "Bash", host="claude")
     codex = _dispatch.group_members("PreToolUse", "Bash", host="codex")
 
-    assert len(unfiltered) == 55  # host=None -> canonical, unfiltered view
+    assert len(unfiltered) == 56  # host=None -> canonical, unfiltered view
     # the only host-restricted Bash members are the 6 claude-only guards
     assert names(claude) == names(unfiltered)
     assert "block-commit-without-codex-review" not in names(codex)
@@ -97,7 +97,7 @@ def test_group_members_host_filter():
     assert "commit-decomposition-advisory" not in names(codex)
     assert "model-routing-advisory" not in names(codex)
     assert "block-unmatched-glob" not in names(codex)
-    assert len(codex) == 48
+    assert len(codex) == 49
 
 
 # --------------------------------------------------------------------------- #
@@ -1616,7 +1616,7 @@ def test_real_stop_group_keeps_strike_counter_standalone():
     names = [n for _r, n, _i in _dispatch.group_members("Stop", None, host="claude")]
     assert "strike-counter" not in names
     assert names[:2] == ["completion-verify", "retrospect-mix-check"]  # shell members
-    assert len(names) == 15
+    assert len(names) == 16
 
 
 # --------------------------------------------------------------------------- #
