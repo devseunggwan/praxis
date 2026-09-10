@@ -22,8 +22,10 @@ not inferred:
   nudges (never block)", i.e. that role's stderr rides an exit-0 path, which
   `_hook_io.py` records as reaching "only the debug log".
 
-Scope: this module reports the channels a body *can* emit. It deliberately
-does not infer, per branch, which exit code accompanies a stderr write —
+Scope: this module reports the channels a body *can* emit, reading the body's
+code rather than its prose — a comment naming `systemMessage` is not a channel.
+It deliberately does not infer, per branch, which exit code accompanies a
+stderr write —
 that needs flow analysis whose unresolved cases outnumbered its resolved ones
 when measured, and a hand-rolled analyzer whose answer cannot be trusted is
 worse than a narrower one that can. Reachability of a stderr write therefore
@@ -31,7 +33,9 @@ reads off the role contract above, in the doc, rather than off this table.
 """
 from __future__ import annotations
 
+import io
 import re
+import tokenize
 from pathlib import Path
 
 # Channel tokens, in the order they are rendered. The order is fixed so the
@@ -107,13 +111,70 @@ CHANNEL_LITERALS: dict[str, tuple[str, ...]] = {
 }
 
 
-def channels_for_source(source: str) -> list[str]:
+def strip_comments(source: str, suffix: str) -> str:
+    """Return `source` with its comments removed.
+
+    A comment cannot emit anything, so matching raw text reads prose as a
+    channel: one shipped hook was classified `system-msg` on the strength of a
+    sentence that merely named `systemMessage`. Because the matrix and the
+    drift gate both consume this classification, regenerating preserved the
+    wrong value rather than correcting it.
+
+    String literals stay. They are where the hand-rolled payloads live
+    (`{"additionalContext": ...}`), so removing them would trade this false
+    positive for a false negative in the harder-to-notice direction.
+
+    Python goes through `tokenize`, which is the language's own answer to
+    where a comment ends. Only the comment's own span is blanked rather than
+    round-tripping through `untokenize`: the two agree on every shipped body
+    and `untokenize` measured at 120 ms against 65 ms for the same 98 bodies.
+    A body that does not tokenize is returned unchanged — classifying it from
+    raw text is the answer this function gave before the guard existed, and
+    silently reporting no channels would be worse.
+    """
+    if suffix == ".py":
+        try:
+            spans = [
+                tok
+                for tok in tokenize.generate_tokens(io.StringIO(source).readline)
+                if tok.type == tokenize.COMMENT
+            ]
+        except (tokenize.TokenError, IndentationError, SyntaxError, ValueError):
+            return source
+        if not spans:
+            return source
+        lines = source.splitlines(keepends=True)
+        for tok in spans:
+            row = tok.start[0] - 1
+            lines[row] = lines[row][: tok.start[1]] + "\n"
+        return "".join(lines)
+    return _strip_sh_comments(source)
+
+
+def _strip_sh_comments(source: str) -> str:
+    """Drop whole-line `#` comments from a shell body.
+
+    Deliberately only the unambiguous subset: a trailing `#` may sit inside a
+    string, a `${#var}` expansion, or a pattern, and deciding that needs a
+    shell parser whose corner cases outnumber what it would buy here. Three
+    hook bodies are shell, and each was read to confirm no channel of theirs
+    hides behind a trailing comment.
+    """
+    return "\n".join(
+        line
+        for line in source.splitlines()
+        if not line.lstrip().startswith("#")
+    )
+
+
+def channels_for_source(source: str, suffix: str = ".py") -> list[str]:
     """Return the channel tokens `source` can emit, in `CHANNEL_ORDER`."""
+    code = strip_comments(source, suffix)
     return [
         name
         for name in CHANNEL_ORDER
-        if any(lit in source for lit in CHANNEL_LITERALS[name])
-        and CHANNEL_PATTERNS[name].search(source)
+        if any(lit in code for lit in CHANNEL_LITERALS[name])
+        and CHANNEL_PATTERNS[name].search(code)
     ]
 
 
@@ -141,7 +202,7 @@ def channels_for_hook(repo_root: Path, entries: list[dict]) -> list[str]:
         if path in seen or not path.exists():
             continue
         seen.add(path)
-        found.update(channels_for_source(path.read_text()))
+        found.update(channels_for_source(path.read_text(), path.suffix))
     return [name for name in CHANNEL_ORDER if name in found]
 
 

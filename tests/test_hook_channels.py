@@ -36,6 +36,7 @@ from hook_channels import (  # noqa: E402
     CHANNEL_ORDER,
     CHANNEL_PATTERNS,
     NO_CHANNEL,
+    strip_comments,
     channels_for_hook,
     channels_for_source,
     render_channels,
@@ -195,12 +196,13 @@ def test_the_prefilter_never_changes_a_verdict_on_the_shipped_corpus() -> None:
             / (entries[0].get("body") or "impl.py")
         )
         source = path.read_text()
+        code = strip_comments(source, path.suffix)
         regex_only = [
             name
             for name in CHANNEL_ORDER
-            if CHANNEL_PATTERNS[name].search(source)
+            if CHANNEL_PATTERNS[name].search(code)
         ]
-        assert channels_for_source(source) == regex_only, path
+        assert channels_for_source(source, path.suffix) == regex_only, path
 
 
 def test_every_pattern_alternative_survives_its_prefilter() -> None:
@@ -242,3 +244,49 @@ def test_every_pattern_alternative_survives_its_prefilter() -> None:
                 f"{channel}: prefilter rejects a form its pattern accepts: {source}"
             )
             assert channel in channels_for_source(source), (channel, source)
+
+
+# --- comments are prose, not channels --------------------------------------
+
+
+def test_a_comment_naming_a_channel_is_not_a_channel() -> None:
+    """The defect this guard exists for, in both comment positions.
+
+    One shipped hook was classified `system-msg` because line 238 of its body
+    says "The three ways out were: emit a user-visible `systemMessage`, emit a
+    stderr ..." — a sentence about the design, in a file that emits neither.
+    """
+    assert channels_for_source("# emit_stop_advisory(message)\n") == []
+    assert channels_for_source("x = 1  # emit_stop_advisory(m)\n") == []
+    assert channels_for_source("# a user-visible `systemMessage`\n") == []
+    assert channels_for_source("# sys.stderr.write(x) used to live here\n") == []
+
+
+def test_a_string_literal_naming_a_channel_still_counts() -> None:
+    """Stripping literals too would trade this bug for a quieter one.
+
+    The hand-rolled payloads live in literals, and several hooks predate the
+    shared emitter, so a literal-stripping pass would report them as emitting
+    nothing — the direction that hides a missing channel instead of inventing
+    one.
+    """
+    assert channels_for_source('json.dump({"additionalContext": n}, out)') == [
+        "context"
+    ]
+    assert channels_for_source('REASON = "permissionDecision"') == ["decision"]
+
+
+def test_a_shell_comment_line_is_not_a_channel() -> None:
+    assert channels_for_source("# echo hi >&2\n", ".sh") == []
+    assert channels_for_source('echo hi >&2\n', ".sh") == ["stderr"]
+
+
+def test_a_body_that_does_not_tokenize_falls_back_to_raw_text() -> None:
+    """Reporting no channels for an unparseable body would be worse.
+
+    The fallback keeps the pre-guard answer rather than inventing an empty one,
+    so a syntax error in a hook shows up as a test or lint failure elsewhere
+    instead of silently emptying its matrix cell.
+    """
+    broken = "def f(:\n    emit_decision(a, b)\n"
+    assert channels_for_source(broken) == ["decision"]
