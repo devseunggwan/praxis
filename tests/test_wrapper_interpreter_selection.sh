@@ -87,6 +87,17 @@ run_case "missing_interpreter_falls_through" "$?" "0"
 #    different template than the dispatcher.
 HOOK_WRAPPER="$ROOT_DIR/hooks/memory-hint.sh"
 if [ -f "$HOOK_WRAPPER" ]; then
+  # The positive path first: a fall-through case alone cannot tell an honored
+  # override from an ignored one, since both end in 0.
+  rm -f "$TMP/marker"
+  PRAXIS_PYTHON="$STUB" "$HOOK_WRAPPER" <<<"$PAYLOAD" >/dev/null 2>&1
+  if [ -f "$TMP/marker" ]; then
+    run_case "hook_wrapper_execs_override" "yes" "yes"
+  else
+    run_case "hook_wrapper_execs_override" "no" "yes"
+  fi
+
+  rm -f "$TMP/marker"
   PRAXIS_PYTHON="$TMP/definitely-not-here" "$HOOK_WRAPPER" <<<"$PAYLOAD" >/dev/null 2>&1
   run_case "hook_wrapper_falls_through" "$?" "0"
 else
