@@ -480,7 +480,7 @@ _CLAUSE_TAIL_RE = re.compile(r"[.!?。…\n,;·]+")
 
 # Each `"question"="answer"` pair in an AskUserQuestion tool_result; the answer
 # is the option label (or the typed "Other" text) the user picked.
-_ASK_ANSWER_RE = re.compile(r'"=\s*"((?:[^"\\]|\\.)*)"')
+_ASK_ANSWER_RE = re.compile(r'"((?:[^"\\]|\\.)*)"=\s*"((?:[^"\\]|\\.)*)"')
 
 # A consent after a merge is rarely a bare token: picked labels read "승인 — 머지"
 # or "머지, `Carried: none`", typed ones "둘다 승인". Such a reply counts when it
@@ -809,21 +809,45 @@ def _consents(content: object) -> bool:
     return bool(_CONSENT_STEM_RE.search(text)) and not _REFUSAL_RE.search(text)
 
 
-def _ask_answer_approves(content: object) -> bool:
-    """True when an AskUserQuestion result picks an approval for any question."""
-    return any(_consents(a) for a in _ASK_ANSWER_RE.findall(_user_message_text(content)))
+def _ask_answer_approves(content: object, pr: str) -> bool:
+    """True when an AskUserQuestion result approves a question that names `pr`;
+    an approval picked for some other question is not this merge's answer."""
+    return any(_mentions_pr(q, pr) and _consents(a)
+               for q, a in _ASK_ANSWER_RE.findall(_user_message_text(content)))
 
 
-def _answered_after(entries: list[dict], idxs: list[int], index: int) -> bool:
+def _merge_target_pr(entries: list[dict], command: object) -> str | None:
+    """PR number a single `gh pr merge` targets, resolved the way
+    `_correlated_prior_turn_text` resolves it; None when it cannot be named."""
+    segments = _merge_segments(command)
+    if len(segments) != 1:
+        return None
+    pos = segments[0]
+    if pos is None:
+        return _context_pr_from_window(entries, 0, len(entries))
+    m = _PULL_TOKEN_RE.match(pos)
+    return (m.group(1) or m.group(2)) if m else None
+
+
+def _answered_after(entries: list[dict], idxs: list[int], index: int,
+                    pr: str | None) -> bool:
     """True when the user approved after entry `index` — typed or via AskUserQuestion.
 
-    Only consent counts (`_consents`): an unrelated message, or a `보류` picked
-    in the question, is a reply but not an approval of this merge. An AskUserQuestion answer arrives as
+    Only consent to THIS merge counts: `_consents`, tied to `pr` — a typed
+    approval must name the PR or answer a turn that did, a picked one must
+    answer a question that did. With no resolvable target nothing counts. An AskUserQuestion answer arrives as
     a tool_result, which `_human_user_indices` skips by design, so it is matched
     to its question here; a declined question comes back `is_error`.
     """
-    if any(i > index and _consents(entries[i].get("message", {}).get("content")) for i in idxs):
-        return True
+    if pr is None:
+        return False
+    for k, i in enumerate(idxs):
+        content = entries[i].get("message", {}).get("content")
+        if i <= index or not _consents(content):
+            continue
+        replied_to = _assistant_text(entries, max(index + 1, idxs[k - 1] + 1 if k else 0), i)
+        if _mentions_pr(_user_message_text(content), pr) or _mentions_pr(replied_to, pr):
+            return True
     asks: set[str] = set()
     for i, ev in enumerate(entries):
         msg = ev.get("message")
@@ -840,7 +864,7 @@ def _answered_after(entries: list[dict], idxs: list[int], index: int) -> bool:
                     asks.add(b["id"])
             elif (i > index and b.get("type") == "tool_result"
                   and b.get("tool_use_id") in asks and not b.get("is_error")
-                  and _ask_answer_approves(b.get("content"))):
+                  and _ask_answer_approves(b.get("content"), pr)):
                 return True
     return False
 
@@ -956,7 +980,8 @@ def _merge_escalation_reason(payload: dict) -> str | None:
     # no user message since can only be citing an answer the earlier merge
     # already consumed, so it no longer releases the next merge on text alone.
     last_merge = _last_executed_merge(entries)
-    answered = last_merge is None or _answered_after(entries, idxs, last_merge)
+    answered = last_merge is None or _answered_after(
+        entries, idxs, last_merge, _merge_target_pr(entries, code))
     items = _briefing_item_count(current_text)
     full_briefing = items >= MERGE_BRIEFING_MIN_ITEMS
     if full_briefing and answered:

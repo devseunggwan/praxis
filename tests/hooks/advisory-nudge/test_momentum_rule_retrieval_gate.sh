@@ -797,6 +797,14 @@ run_merge_escalation_case "merge_serial_ask_held_denies" \
 run_merge_escalation_case "merge_serial_refusal_denies" \
   "yes" "" "momentum-merge-serial-refusal.jsonl" "gh pr merge 999 --squash --delete-branch"
 
+# Consent must be to THIS merge: a bare "ok" that names no PR and answers no
+# turn about one, and an approval picked for a different question, leave #999
+# unanswered.
+run_merge_escalation_case "merge_serial_untargeted_ok_denies" \
+  "yes" "" "momentum-merge-serial-untargeted-ok.jsonl" "gh pr merge 999 --squash --delete-branch"
+run_merge_escalation_case "merge_serial_ask_other_question_denies" \
+  "yes" "" "momentum-merge-serial-ask-other-question.jsonl" "gh pr merge 999 --squash --delete-branch"
+
 # The deny names the missing answer, not a short briefing — the briefing was
 # complete, and a "fewer than 4 of 6" reason would send the actor to rewrite it.
 unanswered_reason=$(python3 -c '

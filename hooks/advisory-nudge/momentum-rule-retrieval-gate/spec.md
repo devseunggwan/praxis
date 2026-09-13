@@ -300,20 +300,28 @@ approve blindly.
   answer the first merge already consumed, reached 4 of 6 items and released
   the second merge on text alone. So once a merge has executed, both
   full-briefing releases — the current turn and the correlated prior turn —
-  also require an approval after that merge, judged by the same
-  `_is_approval_reply` the prior-turn path uses: a typed message that passes it,
-  or an `AskUserQuestion` tool_result that is not `is_error` and whose picked
-  option passes it. A reply is not consent — an unrelated message, a `보류`
-  pick, or a declined question leaves the merge unanswered, and a directive that
-  does not end on an approval token is asked once more. The second form matters because `_human_user_indices` skips
+  also require an approval of THIS merge after that merge (`_consents` tied to
+  the target `_merge_target_pr` resolves, the same way the prior-turn path
+  resolves it): a typed approval that names the PR or answers a turn that named
+  it, or an `AskUserQuestion` tool_result that is not `is_error` and whose
+  question names the PR and whose picked option approves. A reply is not
+  consent — an unrelated message, a bare `ok` to a turn about something else, an
+  approval picked for a different question, a `보류` pick, a refusal that carries
+  an approval word (`승인 안 해`), or a declined question leaves the merge
+  unanswered; a merge whose target cannot be resolved is never answered this
+  way. The second form matters because `_human_user_indices` skips
   tool_result-only entries by design — replayed over 566 local merges, the
   typed-message-only version denied 47 merges the shipped gate allowed, and 13
   of those had been answered through `AskUserQuestion`. `_consents` is wider
   than the bare-token `_is_approval_reply` for the same reason: exact tokens
   denied picked labels such as `승인 — 머지` and `` 머지, `Carried: none` `` and
-  typed replies such as `둘다 승인`. The shipped check denies 39 of the 566, none
-  answered through the tool; the only typed entries after those merges are
-  compaction summaries and task notifications, which are not the user. No new state; a session
+  typed replies such as `둘다 승인`. Tying the approval to the merge's target
+  moves that count to 41 of the 566. What the target tie adds is a typed `승인`
+  that neither names the merged PR nor answers a turn that named it, and one
+  answer picked for a question about a CHANGELOG gap that did not name the merged
+  PR — each costs one more ask. The rest are `둘다 진행`, which carries no
+  approval word, and merges with nothing from the user after the previous one:
+  compaction summaries and task notifications are not the user. No new state; a session
   with no executed merge is untouched. A complete briefing that fails only this
   check is denied with its own reason naming the missing answer, not the item
   count.
