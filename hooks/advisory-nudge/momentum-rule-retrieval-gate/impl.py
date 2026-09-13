@@ -478,6 +478,20 @@ _APPROVAL_TOKENS = frozenset({
 # still fails, which is the property exact equality was protecting.
 _CLAUSE_TAIL_RE = re.compile(r"[.!?。…\n,;·]+")
 
+# Each `"question"="answer"` pair in an AskUserQuestion tool_result; the answer
+# is the option label (or the typed "Other" text) the user picked.
+_ASK_ANSWER_RE = re.compile(r'"=\s*"((?:[^"\\]|\\.)*)"')
+
+# A consent after a merge is rarely a bare token: picked labels read "승인 — 머지"
+# or "머지, `Carried: none`", typed ones "둘다 승인". Such a reply counts when it
+# names the approval and nothing in it holds or refuses it; `진행` is left out
+# because "진행 상황 알려줘" is a status request.
+_CONSENT_STEM_RE = re.compile(r"승인|머지|merge|approve|lgtm|ship it", re.IGNORECASE)
+_REFUSAL_RE = re.compile(
+    r"보류|대기|취소|거절|않|말고|하지\s*마|\b(?:no|not|don't|hold|wait|cancel)\b",
+    re.IGNORECASE,
+)
+
 # A single positional token that is a bare PR number or a …/pull/N URL.
 _PULL_TOKEN_RE = re.compile(r"^(?:\S*/pull/(\d+)|(\d+))$")
 
@@ -785,6 +799,51 @@ def _last_executed_merge(entries: list[dict]) -> int | None:
     return executed[-1] if executed else None
 
 
+def _consents(content: object) -> bool:
+    """True when a reply approves: a bare approval token, or a longer reply that
+    names the approval with no hold or refusal in it."""
+    if _is_approval_reply(content):
+        return True
+    text = _user_message_text(content)
+    return bool(_CONSENT_STEM_RE.search(text)) and not _REFUSAL_RE.search(text)
+
+
+def _ask_answer_approves(content: object) -> bool:
+    """True when an AskUserQuestion result picks an approval for any question."""
+    return any(_consents(a) for a in _ASK_ANSWER_RE.findall(_user_message_text(content)))
+
+
+def _answered_after(entries: list[dict], idxs: list[int], index: int) -> bool:
+    """True when the user approved after entry `index` — typed or via AskUserQuestion.
+
+    Only consent counts (`_consents`): an unrelated message, or a `보류` picked
+    in the question, is a reply but not an approval of this merge. An AskUserQuestion answer arrives as
+    a tool_result, which `_human_user_indices` skips by design, so it is matched
+    to its question here; a declined question comes back `is_error`.
+    """
+    if any(i > index and _consents(entries[i].get("message", {}).get("content")) for i in idxs):
+        return True
+    asks: set[str] = set()
+    for i, ev in enumerate(entries):
+        msg = ev.get("message")
+        if not isinstance(msg, dict) or ev.get("isSidechain"):
+            continue
+        content = msg.get("content")
+        if not isinstance(content, list):
+            continue
+        for b in content:
+            if not isinstance(b, dict):
+                continue
+            if b.get("type") == "tool_use" and b.get("name") == "AskUserQuestion":
+                if isinstance(b.get("id"), str):
+                    asks.add(b["id"])
+            elif (i > index and b.get("type") == "tool_result"
+                  and b.get("tool_use_id") in asks and not b.get("is_error")
+                  and _ask_answer_approves(b.get("content"))):
+                return True
+    return False
+
+
 def _has_repetition(command: object) -> bool:
     """True when the command wraps the merge in a shell loop / xargs — a single
     approval must not authorize a repeated merge (No Approval Transfer)."""
@@ -890,16 +949,26 @@ def _merge_escalation_reason(payload: dict) -> str | None:
     current_text = _assistant_text(entries, lo, len(entries))
     if _is_trivial_merge(current_text):
         return None
+
+    # A complete briefing is half of the flow; the user's answer is the other
+    # half (issue #1402). Once a merge has run, a briefing written after it with
+    # no user message since can only be citing an answer the earlier merge
+    # already consumed, so it no longer releases the next merge on text alone.
+    last_merge = _last_executed_merge(entries)
+    answered = last_merge is None or _answered_after(entries, idxs, last_merge)
     items = _briefing_item_count(current_text)
-    if items >= MERGE_BRIEFING_MIN_ITEMS:
+    full_briefing = items >= MERGE_BRIEFING_MIN_ITEMS
+    if full_briefing and answered:
         return None
 
     prev_text = _correlated_prior_turn_text(entries, idxs, code)
-    if prev_text is not None and (
-        _is_trivial_merge(prev_text)
-        or _briefing_item_count(prev_text) >= MERGE_BRIEFING_MIN_ITEMS
-    ):
-        return None
+    if prev_text is not None:
+        if _is_trivial_merge(prev_text):
+            return None
+        if _briefing_item_count(prev_text) >= MERGE_BRIEFING_MIN_ITEMS:
+            if answered:
+                return None
+            full_briefing = True
 
     # The marker attests that a briefing was surfaced, so it can stand in for
     # *completeness* — the item counter reads prose and under-counts a briefing
@@ -926,8 +995,7 @@ def _merge_escalation_reason(payload: dict) -> str | None:
     # them merges that DID carry a complete briefing — that only raises the
     # cost of the honest path, the ground on which #1214 discarded its own
     # original proposal. Cut here, 3 change and all 3 are marker-only merges.
-    floor = _last_executed_merge(entries)
-    floor = 0 if floor is None else floor + 1
+    floor = 0 if last_merge is None else last_merge + 1
     marker_prev = _correlated_prior_turn_text(entries, idxs, code, floor)
     marker_items = max(
         _briefing_item_count(_assistant_text(entries, max(lo, floor), len(entries))),
@@ -944,6 +1012,22 @@ def _merge_escalation_reason(payload: dict) -> str | None:
                 "was complete, not that one exists, and none was found",
             correct_path="surface the 6-item briefing and an explicit 'Approve "
                 "merge?' question in this turn, then re-run the merge",
+            bypass_env=MERGE_ADVISORY_ENV,
+            bypass_reason_hint="with a one-line reason — set in the session "
+                "environment, since an inline `VAR=1 gh pr merge …` prefix "
+                "never reaches this hook",
+            reference="CLAUDE.md → Pre-Merge Reporting; "
+                "hooks/advisory-nudge/momentum-rule-retrieval-gate/spec.md",
+        )
+
+    if full_briefing:
+        return format_block(
+            rule_name="Pre-Merge Reporting briefing",
+            why="a gh pr merge already ran in this session and no user message "
+                "has arrived since — the briefing is complete, but approving "
+                "one PR approves only that PR, so this merge needs its own answer",
+            correct_path="ask 'Approve merge?' for this PR, wait for the user's "
+                "answer, then re-run the merge",
             bypass_env=MERGE_ADVISORY_ENV,
             bypass_reason_hint="with a one-line reason — set in the session "
                 "environment, since an inline `VAR=1 gh pr merge …` prefix "

@@ -761,6 +761,56 @@ run_merge_escalation_case "merge_serial_blocked_retry_bare_denies" \
 run_merge_escalation_case "merge_serial_rebriefed_bare_denies" \
   "yes" "" "momentum-merge-serial-rebriefed.jsonl" "gh pr merge 999 --squash --delete-branch"
 
+# --- serial merge needs its own answer (issue #1402) --------------------------
+#
+# Every fixture carries a COMPLETE briefing for #999 after #833's merge ran, so
+# the 4-of-6 counter is satisfied in all of them and only the answer separates them.
+#
+#   unanswered-current  briefing after the merge, no user message   → deny
+#   unanswered-prior    answer predates the merge it was spent on   → deny
+#   answered-prior      briefing → "ok" → merge                     → allow
+#   answered-current    approval after the merge → briefing         → allow
+#   unrelated-message   non-approval message after the merge        → deny
+run_merge_escalation_case "merge_serial_unanswered_current_denies" \
+  "yes" "" "momentum-merge-serial-unanswered-current.jsonl" "gh pr merge 999 --squash --delete-branch"
+run_merge_escalation_case "merge_serial_unanswered_prior_denies" \
+  "yes" "" "momentum-merge-serial-unanswered-prior.jsonl" "gh pr merge 999 --squash --delete-branch"
+run_merge_escalation_case "merge_serial_answered_prior_passes" \
+  "no" "" "momentum-merge-serial-answered-prior.jsonl" "gh pr merge 999 --squash --delete-branch"
+run_merge_escalation_case "merge_serial_answered_current_passes" \
+  "no" "" "momentum-merge-serial-answered-current.jsonl" "gh pr merge 999 --squash --delete-branch"
+run_merge_escalation_case "merge_serial_unrelated_message_denies" \
+  "yes" "" "momentum-merge-serial-unrelated-message.jsonl" "gh pr merge 999 --squash --delete-branch"
+
+# An AskUserQuestion answer is a tool_result, not a typed message. Replayed over
+# local transcripts, 13 of the merges this check first denied were answered this
+# way, so it must count — and neither a declined question (`is_error`) nor a
+# `보류` pick does: a reply to the question is not consent to the merge.
+run_merge_escalation_case "merge_serial_ask_answered_passes" \
+  "no" "" "momentum-merge-serial-ask-answered.jsonl" "gh pr merge 999 --squash --delete-branch"
+run_merge_escalation_case "merge_serial_ask_declined_denies" \
+  "yes" "" "momentum-merge-serial-ask-declined.jsonl" "gh pr merge 999 --squash --delete-branch"
+run_merge_escalation_case "merge_serial_ask_held_denies" \
+  "yes" "" "momentum-merge-serial-ask-held.jsonl" "gh pr merge 999 --squash --delete-branch"
+
+# The deny names the missing answer, not a short briefing — the briefing was
+# complete, and a "fewer than 4 of 6" reason would send the actor to rewrite it.
+unanswered_reason=$(python3 -c '
+import json, sys
+print(json.dumps({"tool_name": "Bash",
+                  "tool_input": {"command": "gh pr merge 999 --squash --delete-branch"},
+                  "transcript_path": sys.argv[1], "session_id": "test-momentum-1402"}))' \
+  "$FIXTURES_DIR/momentum-merge-serial-unanswered-current.jsonl" \
+  | python3 "$HOOK" 2>/dev/null \
+  | python3 -c 'import json, sys; print(json.load(sys.stdin)["hookSpecificOutput"]["permissionDecisionReason"])')
+if printf '%s' "$unanswered_reason" | grep -qF "this merge needs its own answer" \
+    && ! printf '%s' "$unanswered_reason" | grep -qF "of 6 items present"; then
+  echo "PASS  [merge_serial_unanswered_reason_names_the_answer]"; PASS=$((PASS + 1))
+else
+  echo "FAIL  [merge_serial_unanswered_reason_names_the_answer] reason: $(printf '%s' "$unanswered_reason" | head -c 200)"
+  FAIL=$((FAIL + 1)); FAILED_NAMES+=("merge_serial_unanswered_reason_names_the_answer")
+fi
+
 # The marker attests to completeness, never to existence — a spent window has
 # nothing left for it to be about, so it does not release the second merge.
 run_merge_escalation_case "merge_serial_second_with_marker_denies" \

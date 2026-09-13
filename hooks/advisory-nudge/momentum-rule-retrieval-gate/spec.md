@@ -294,6 +294,37 @@ approve blindly.
   path, which is the ground this hook's spec already takes elsewhere: it is a
   self-discipline nudge, not an adversarial boundary.
 
+  **A serial merge needs its own answer (issue #1402).** The cut above leaves
+  the full-briefing path uncut, and that path had no notion of an answer: a
+  briefing written after the first merge, whose approve-ask slot cites the
+  answer the first merge already consumed, reached 4 of 6 items and released
+  the second merge on text alone. So once a merge has executed, both
+  full-briefing releases — the current turn and the correlated prior turn —
+  also require an approval after that merge, judged by the same
+  `_is_approval_reply` the prior-turn path uses: a typed message that passes it,
+  or an `AskUserQuestion` tool_result that is not `is_error` and whose picked
+  option passes it. A reply is not consent — an unrelated message, a `보류`
+  pick, or a declined question leaves the merge unanswered, and a directive that
+  does not end on an approval token is asked once more. The second form matters because `_human_user_indices` skips
+  tool_result-only entries by design — replayed over 566 local merges, the
+  typed-message-only version denied 47 merges the shipped gate allowed, and 13
+  of those had been answered through `AskUserQuestion`. `_consents` is wider
+  than the bare-token `_is_approval_reply` for the same reason: exact tokens
+  denied picked labels such as `승인 — 머지` and `` 머지, `Carried: none` `` and
+  typed replies such as `둘다 승인`. The shipped check denies 39 of the 566, none
+  answered through the tool; the only typed entries after those merges are
+  compaction summaries and task notifications, which are not the user. No new state; a session
+  with no executed merge is untouched. A complete briefing that fails only this
+  check is denied with its own reason naming the missing answer, not the item
+  count.
+
+  The comparison is session-wide, not per repository: a merge in one repo
+  followed by a briefing for another still needs its answer, which is the
+  same No Approval Transfer rule. The marker floor is deliberately left as
+  #1214 shipped it — `merge_serial_rebriefed_passes` pins that a briefing item
+  written after the first merge re-arms the marker on its own — so a marked
+  merge is the one release this check does not reach.
+
   **Both directions fail open.** A merge counts as executed only on a clean
   `tool_result`, and only when the shell could not have jumped over it —
   `_SKIPPABLE_KEYWORDS` (`||`, `if`, `elif`, `case`) plus a non-terminal `&&`.
