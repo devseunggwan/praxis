@@ -793,6 +793,10 @@ run_merge_escalation_case "merge_serial_ask_declined_denies" \
 run_merge_escalation_case "merge_serial_ask_held_denies" \
   "yes" "" "momentum-merge-serial-ask-held.jsonl" "gh pr merge 999 --squash --delete-branch"
 
+# A refusal that carries an approval word is still a refusal.
+run_merge_escalation_case "merge_serial_refusal_denies" \
+  "yes" "" "momentum-merge-serial-refusal.jsonl" "gh pr merge 999 --squash --delete-branch"
+
 # The deny names the missing answer, not a short briefing — the briefing was
 # complete, and a "fewer than 4 of 6" reason would send the actor to rewrite it.
 unanswered_reason=$(python3 -c '

@@ -488,7 +488,8 @@ _ASK_ANSWER_RE = re.compile(r'"=\s*"((?:[^"\\]|\\.)*)"')
 # because "진행 상황 알려줘" is a status request.
 _CONSENT_STEM_RE = re.compile(r"승인|머지|merge|approve|lgtm|ship it", re.IGNORECASE)
 _REFUSAL_RE = re.compile(
-    r"보류|대기|취소|거절|않|말고|하지\s*마|\b(?:no|not|don't|hold|wait|cancel)\b",
+    r"보류|대기|취소|거절|않|말고|말자|말아|하지\s*마|안\s*(?:해|함|하|돼|됨|할)"
+    r"|\b(?:no|not|don't|hold|wait|cancel)\b",
     re.IGNORECASE,
 )
 
