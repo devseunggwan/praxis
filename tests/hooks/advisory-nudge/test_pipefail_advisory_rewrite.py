@@ -56,6 +56,13 @@ def _rewrite(out: str) -> dict:
     return json.loads(out)["hookSpecificOutput"]
 
 
+def _assert_advised(out: str, err: str) -> None:
+    """The advisory path: stderr plus the same text as context, never a rewrite."""
+    hso = _rewrite(out)
+    assert "updatedInput" not in hso
+    assert hso["additionalContext"] == err.rstrip("\n")
+
+
 # --- the arm fires -----------------------------------------------------------
 
 @pytest.mark.parametrize("command", [
@@ -98,8 +105,8 @@ def test_the_corrected_command_no_longer_trips_the_advisory(monkeypatch, capsys)
 def test_the_arm_is_opt_in(monkeypatch, capsys, arm):
     rc, out, err = _run(monkeypatch, capsys, PIPED, arm=arm)
     assert rc == 0
-    assert out == ""
     assert "pipefail-advisory" in err
+    _assert_advised(out, err)
 
 
 def test_a_padded_one_still_arms_it(monkeypatch, capsys):
@@ -117,15 +124,15 @@ def test_the_masked_gating_path_advises_instead_of_rewriting(monkeypatch, capsys
         monkeypatch, capsys, "git switch main 2>&1 | tail -1 && gh pr merge 1"
     )
     assert rc == 0
-    assert out == ""
     assert "masked exit code gates an irreversible command" in err
+    _assert_advised(out, err)
 
 
 def test_a_line_continuation_advises_instead_of_rewriting(monkeypatch, capsys):
     rc, out, err = _run(monkeypatch, capsys, "git commit -m x \\\n| tail -3")
     assert rc == 0
-    assert out == ""
     assert "pipefail-advisory" in err
+    _assert_advised(out, err)
 
 
 @pytest.mark.parametrize("command", [

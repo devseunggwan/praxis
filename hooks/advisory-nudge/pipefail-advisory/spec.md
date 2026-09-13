@@ -367,77 +367,57 @@ what tells them apart — the test suite asserts on the headline rather
 than the marker for exactly that reason. Predicate 1 is evaluated first;
 at most one advisory is emitted per command.
 
-Advisory-only: the hook **never blocks**. By default it emits no JSON at
-all; `PRAXIS_PIPEFAIL_ADVISORY_CONTEXT=1` adds a second copy of the same
-text on stdout — see the next section.
+Advisory-only: the hook **never blocks**. Every advisory also goes to
+stdout as `additionalContext` — see the next section.
 
-## ADVISE-channel experiment (issue #874)
+## Delivery channels (issues #874, #1408)
 
-`docs/hook-prune-audit.md` closed the "is the ADVISE tier inert?" question
-(it is not — 24% recurrence over 466 sessions) but left the delivery
-channel explicitly open: *"The delivery-channel question the issue raises
-(stderr vs. `systemMessage`) stands on its own and is not settled by this
-data either way — it needs an experiment, not a larger window."* This hook
-is the named first subject: at 250/1056 advises it is the largest advisory
-load in the 30-day window.
-
-**Arms.** Control = the stderr line above. Treatment =
-`hookSpecificOutput.additionalContext` on stdout, gated on
-`PRAXIS_PIPEFAIL_ADVISORY_CONTEXT=1` (exact value `1`, mirroring
-`PRAXIS_ANCHOR_GATE_ADVISORY`). With the variable unset the hook is
-byte-identical to its pre-#874 form.
+Both copies are written on every fire. There is no switch.
 
 ```json
 {"hookSpecificOutput": {"hookEventName": "PreToolUse", "additionalContext": "<the same advisory text>"}}
 ```
 
-**Why `additionalContext` and not `systemMessage`.** `_hook_io.py:88-92`
-documents `systemMessage` as transcript-only and *"NOT fed to the model"*,
-so promoting to it would change where a human sees the text without
-changing what the model sees — the experiment would measure nothing.
-`additionalContext` is the channel PR #1000 (commit `7262740`) validated
-and shipped for `anchor-comment-gate`'s non-blocking findings on this same
-problem; this hook mirrors that mechanism rather than inventing one.
+**How the experiment ended.** #874 set this up as an A/B test: control =
+the stderr line, treatment = `additionalContext` behind
+`PRAXIS_PIPEFAIL_ADVISORY_CONTEXT=1`. #874 closed without a recorded
+result, and the ledger cannot tell the arms apart anyway, because both
+write the same stderr line and the ledger grades on stderr. #1408 promoted
+the treatment arm to the default on what the control arm did alone:
 
-**Why the stderr line stays in both arms** (#1000 dropped it; this hook
-must not):
+| Evidence | Source |
+| -------- | ------ |
+| 2,788 `advise` fires across 2026-09-01~13, each delivered where the model cannot read it unless the arm was on | local fire ledger `~/.praxis/telemetry/fire-events-2026-09-*`, rows with `hook == "pipefail-advisory"`, counted 2026-09-13 |
+| One session assembled `git switch main 2>&1 \| tail -N && gh pr merge …` 11 times, and the hook detected every one | #1408 |
+| stderr at exit 0 reaches the debug log only, never the model | canary #841 |
+| `additionalContext` reaches the model through the dispatch group | the 2026-08-15 measurement below; #1265 moved five sibling mutation advisories to it unconditionally (PR #1406) |
+
+**Why `additionalContext` and not `systemMessage`.** `_hook_io.py`
+documents `systemMessage` as transcript-only and *"NOT fed to the model"*,
+so it would change where a human sees the text without changing what the
+model sees. `additionalContext` is the channel PR #1000 (commit `7262740`)
+shipped for `anchor-comment-gate`. The envelope comes from the shared
+`_hook_io.emit_additional_context`, the same emitter the #1265 siblings use.
+
+**Why the stderr line stays** (#1000 dropped it; this hook must not):
 
 | Reason | Evidence |
 | ------ | -------- |
-| The metric is derived from stderr | `_fire_ledger.classify_decision` returns `advise` iff `stderr.strip()` is non-empty (`hooks/_lib/_fire_ledger.py:118-119`). Moving the text to stdout would reclassify every fire as `pass`, erasing the recurrence rate the two arms are compared with |
-| stderr leaves the dispatch group unconditionally | `_dispatch.run_group` forwards every member's stderr whatever its exit code (`hooks/_lib/_dispatch.py:196-199`), so the control arm is unaffected by whatever the stdout path does |
+| The fire grade is derived from stderr | `_fire_ledger.classify_decision` grades `advise` from non-empty stderr. Moving the text to stdout only would record every fire as `pass` |
+| stderr leaves the dispatch group unconditionally | `_dispatch.run_group` forwards every member's stderr whatever its exit code |
 
 **End-to-end delivery.** This hook is a member of the dispatched
-`PreToolUse(Bash)` group, so the arm reaches the model only if the
-dispatcher forwards member stdout. `_dispatch.run_group` merges every
-member's non-decision `additionalContext` into one `hookSpecificOutput` and
-writes it, once deny and ask have both missed
-(`hooks/_lib/_dispatch.py:208-223`). Both halves — the emission here and the
-forwarding there — ship in the same PR.
-
-Before that change the arm was inert: `run_group` forwarded member *stdout*
-only when it carried a `"permissionDecision": "deny"` or `"ask"` marker, and
-everything else was discarded inside the dispatcher process. All four
-generated `hooks.json` files route `PreToolUse`/`Bash` through
-`_dispatch.sh`, so that held on every platform. #1000's hook is PostToolUse
-and runs in its own process, which is why the same emission worked there.
+`PreToolUse(Bash)` group, so its stdout reaches the model only because
+`_dispatch.run_group` merges every member's non-decision
+`additionalContext` into one `hookSpecificOutput` and writes it once deny
+and ask have both missed. Before that forwarding existed, a member's stdout
+was discarded inside the dispatcher on every platform.
 
 Measured, 2026-08-15 (`hooks/_lib/_dispatch.py PreToolUse Bash claude`,
-payload `gh pr merge 123 --squash 2>&1 | tail -3  # side-effect:ack`, env
-`PRAXIS_PIPEFAIL_ADVISORY_CONTEXT=1`): with the emission alone the hook's own
-stdout carried `additionalContext` while the dispatcher's did not; with the
+payload `gh pr merge 123 --squash 2>&1 | tail -3  # side-effect:ack`, then
+with the arm switched on): with the emission alone the hook's own stdout
+carried `additionalContext` while the dispatcher's did not; with the
 forwarding in place the dispatcher's stdout carries it as well.
-
-Two design constraints the experiment inherits from the audit:
-
-- **Right-censoring.** The last advise of a session has no later fire to
-  compare against and is excluded from the recurrence denominator. That
-  exclusion is not random (a session ending right after an advisory is
-  exactly the case where nothing was done about it), so both arms must be
-  scored with the same exclusion, and the absolute rate read as a bound.
-- **The metric is the hook's own re-evaluation**, not a behaviour diff: a
-  later `pass` can also mean the session moved to commands the matcher
-  does not cover.
 
 ## Parsing guarantees (fail-open)
 
