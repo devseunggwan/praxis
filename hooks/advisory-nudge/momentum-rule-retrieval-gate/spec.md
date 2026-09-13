@@ -300,28 +300,37 @@ approve blindly.
   answer the first merge already consumed, reached 4 of 6 items and released
   the second merge on text alone. So once a merge has executed, both
   full-briefing releases — the current turn and the correlated prior turn —
-  also require an approval of THIS merge after that merge (`_consents` tied to
-  the target `_merge_target_pr` resolves, the same way the prior-turn path
-  resolves it): a typed approval that names the PR or answers a turn that named
-  it, or an `AskUserQuestion` tool_result that is not `is_error` and whose
-  question names the PR and whose picked option approves. A reply is not
-  consent — an unrelated message, a bare `ok` to a turn about something else, an
-  approval picked for a different question, a `보류` pick, a refusal that carries
-  an approval word (`승인 안 해`), or a declined question leaves the merge
-  unanswered; a merge whose target cannot be resolved is never answered this
-  way. The second form matters because `_human_user_indices` skips
+  also require an approval of THIS merge after that merge. The target is the
+  one `_merge_target_pr` resolves, the way the prior-turn path resolves it,
+  except that a numberless merge reads its `gh pr checks/view` probe only after
+  the last executed merge — the earlier probe named that merge's PR. The
+  approval is either a typed reply that `_is_approval_reply` accepts (its final
+  clause is an approval token) and that names the PR or answers a turn that
+  named it, or an `AskUserQuestion` tool_result that is not `is_error`, whose
+  question names the PR and whose picked label leads with an approval token
+  (`승인 — 머지`). A reply is not an approval: an unrelated message, a status
+  request that names the PR (`PR #999 머지 상태만 알려줘`), a refusal that does
+  not end on an approval token, a bare `ok` to a turn about something else, an
+  approval picked for a different question, a `보류` pick, or a declined
+  question leaves the merge unanswered, and a merge whose target cannot be
+  resolved is never answered this way. Keyword tests were tried and dropped — each review round found a
+  phrasing that named the PR beside an approval word without agreeing to
+  anything. A PR number counts as named when no ASCII identifier character
+  touches it, so `#999를` names PR 999 and `v999` does not.
+
+  The `AskUserQuestion` form matters because `_human_user_indices` skips
   tool_result-only entries by design — replayed over 566 local merges, the
   typed-message-only version denied 47 merges the shipped gate allowed, and 13
-  of those had been answered through `AskUserQuestion`. `_consents` is wider
-  than the bare-token `_is_approval_reply` for the same reason: exact tokens
-  denied picked labels such as `승인 — 머지` and `` 머지, `Carried: none` `` and
-  typed replies such as `둘다 승인`. Tying the approval to the merge's target
-  moves that count to 41 of the 566. What the target tie adds is a typed `승인`
-  that neither names the merged PR nor answers a turn that named it, and one
-  answer picked for a question about a CHANGELOG gap that did not name the merged
-  PR — each costs one more ask. The rest are `둘다 진행`, which carries no
-  approval word, and merges with nothing from the user after the previous one:
-  compaction summaries and task notifications are not the user. No new state; a session
+  of those had been answered through `AskUserQuestion`. With the forms above the
+  replay denies 44 of the 566 that the shipped gate allowed. Three of them carry
+  a real approval that these forms do not read — typed `둘다 승인` and
+  `둘다 머지하세요`, whose final clause is not a bare token, and a picked
+  `앵커 작성 후 머지`, which does not lead with one — and a typed `승인` whose turn
+  did not name the merged PR; one answer was picked for a CHANGELOG question
+  that did not name it either. Each of those costs one more ask. The rest are
+  replies that approve nothing (`둘다 진행`, `각각 올리세요`) or merges with
+  nothing from the user after the previous one: compaction summaries and task
+  notifications are not the user. No new state; a session
   with no executed merge is untouched. A complete briefing that fails only this
   check is denied with its own reason naming the missing answer, not the item
   count.

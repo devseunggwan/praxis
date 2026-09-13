@@ -818,6 +818,13 @@ run_merge_escalation_case "merge_serial_ask_version_id_denies" \
 run_merge_escalation_case "merge_serial_numberless_stale_probe_denies" \
   "yes" "" "momentum-merge-serial-numberless-stale-probe.jsonl" "gh pr merge --squash --delete-branch"
 
+# Naming the PR next to an approval word is not approving it: a status request
+# and an English refusal both carry one, and neither ends on an approval token.
+run_merge_escalation_case "merge_serial_status_request_denies" \
+  "yes" "" "momentum-merge-serial-status-request.jsonl" "gh pr merge 999 --squash --delete-branch"
+run_merge_escalation_case "merge_serial_english_refusal_denies" \
+  "yes" "" "momentum-merge-serial-english-refusal.jsonl" "gh pr merge 999 --squash --delete-branch"
+
 # The deny names the missing answer, not a short briefing — the briefing was
 # complete, and a "fewer than 4 of 6" reason would send the actor to rewrite it.
 unanswered_reason=$(python3 -c '

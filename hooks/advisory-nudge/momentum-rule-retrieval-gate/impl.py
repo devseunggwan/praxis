@@ -482,16 +482,11 @@ _CLAUSE_TAIL_RE = re.compile(r"[.!?。…\n,;·]+")
 # is the option label (or the typed "Other" text) the user picked.
 _ASK_ANSWER_RE = re.compile(r'"((?:[^"\\]|\\.)*)"=\s*"((?:[^"\\]|\\.)*)"')
 
-# A consent after a merge is rarely a bare token: picked labels read "승인 — 머지"
-# or "머지, `Carried: none`", typed ones "둘다 승인". Such a reply counts when it
-# names the approval and nothing in it holds or refuses it; `진행` is left out
-# because "진행 상황 알려줘" is a status request.
-_CONSENT_STEM_RE = re.compile(r"승인|머지|merge|approve|lgtm|ship it", re.IGNORECASE)
-_REFUSAL_RE = re.compile(
-    r"보류|대기|취소|거절|않|말고|말자|말아|하지\s*마|안\s*(?:해|함|하|돼|됨|할)"
-    r"|\b(?:no|not|don't|hold|wait|cancel)\b",
-    re.IGNORECASE,
-)
+# A picked AskUserQuestion label usually leads with the approval and qualifies
+# it after a separator ("승인 — 머지", "머지, `Carried: none`"). Only that leading
+# segment is read: a keyword anywhere in the label cannot tell asking from
+# agreeing, as "PR #999 머지 상태만 알려줘" shows.
+_LABEL_LEAD_RE = re.compile(r"\s*[—–:,(-]\s*")
 
 # A single positional token that is a bare PR number or a …/pull/N URL.
 _PULL_TOKEN_RE = re.compile(r"^(?:\S*/pull/(\d+)|(\d+))$")
@@ -805,19 +800,19 @@ def _last_executed_merge(entries: list[dict]) -> int | None:
     return executed[-1] if executed else None
 
 
-def _consents(content: object) -> bool:
-    """True when a reply approves: a bare approval token, or a longer reply that
-    names the approval with no hold or refusal in it."""
-    if _is_approval_reply(content):
+def _ask_label_approves(label: str) -> bool:
+    """True when a picked label is an approval: the whole label passes
+    `_is_approval_reply`, or its leading segment is an approval token."""
+    if _is_approval_reply(label):
         return True
-    text = _user_message_text(content)
-    return bool(_CONSENT_STEM_RE.search(text)) and not _REFUSAL_RE.search(text)
+    lead = _LABEL_LEAD_RE.split(label.strip().lower(), maxsplit=1)[0]
+    return lead.strip(" .!~,·") in _APPROVAL_TOKENS
 
 
 def _ask_answer_approves(content: object, pr: str) -> bool:
     """True when an AskUserQuestion result approves a question that names `pr`;
     an approval picked for some other question is not this merge's answer."""
-    return any(_mentions_pr(q, pr) and _consents(a)
+    return any(_mentions_pr(q, pr) and _ask_label_approves(a)
                for q, a in _ASK_ANSWER_RE.findall(_user_message_text(content)))
 
 
@@ -841,7 +836,7 @@ def _answered_after(entries: list[dict], idxs: list[int], index: int,
                     pr: str | None) -> bool:
     """True when the user approved after entry `index` — typed or via AskUserQuestion.
 
-    Only consent to THIS merge counts: `_consents`, tied to `pr` — a typed
+    Only approval of THIS merge counts, tied to `pr` — a typed
     approval must name the PR or answer a turn that did, a picked one must
     answer a question that did. With no resolvable target nothing counts. An AskUserQuestion answer arrives as
     a tool_result, which `_human_user_indices` skips by design, so it is matched
@@ -851,7 +846,7 @@ def _answered_after(entries: list[dict], idxs: list[int], index: int,
         return False
     for k, i in enumerate(idxs):
         content = entries[i].get("message", {}).get("content")
-        if i <= index or not _consents(content):
+        if i <= index or not _is_approval_reply(content):
             continue
         replied_to = _assistant_text(entries, max(index + 1, idxs[k - 1] + 1 if k else 0), i)
         if _mentions_pr(_user_message_text(content), pr) or _mentions_pr(replied_to, pr):
