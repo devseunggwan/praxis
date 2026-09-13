@@ -422,6 +422,7 @@ _BRIEFING_ITEM_GROUPS: tuple[tuple[str, ...], ...] = (
 # Named indices keep the strip correct if the group order is ever changed.
 _VERIFIED_GROUP_IDX = 1
 _NOT_VERIFIED_GROUP_IDX = 2
+_APPROVE_ASK_GROUP_IDX = 5
 
 # Trivial-PR carve-out — CLAUDE.md permits a 2-line report for typo / comment /
 # single-line config merges. When the agent has flagged the PR as trivial, the
@@ -837,8 +838,10 @@ def _answered_after(entries: list[dict], idxs: list[int], index: int,
     """True when the user approved after entry `index` — typed or via AskUserQuestion.
 
     Only approval of THIS merge counts, tied to `pr` — a typed
-    approval must name the PR or answer a turn that did, a picked one must
-    answer a question that did. With no resolvable target nothing counts. An AskUserQuestion answer arrives as
+    approval must name the PR or answer a turn that named it and asked for the
+    merge, since an "ok" to a status line about the PR agrees to nothing; a
+    picked one must answer a question that named it. With no resolvable target
+    nothing counts. An AskUserQuestion answer arrives as
     a tool_result, which `_human_user_indices` skips by design, so it is matched
     to its question here; a declined question comes back `is_error`.
     """
@@ -849,7 +852,10 @@ def _answered_after(entries: list[dict], idxs: list[int], index: int,
         if i <= index or not _is_approval_reply(content):
             continue
         replied_to = _assistant_text(entries, max(index + 1, idxs[k - 1] + 1 if k else 0), i)
-        if _mentions_pr(_user_message_text(content), pr) or _mentions_pr(replied_to, pr):
+        asked = any(kw in replied_to.lower()
+                    for kw in _BRIEFING_ITEM_GROUPS[_APPROVE_ASK_GROUP_IDX])
+        if _mentions_pr(_user_message_text(content), pr) or (
+                asked and _mentions_pr(replied_to, pr)):
             return True
     asks: set[str] = set()
     for i, ev in enumerate(entries):

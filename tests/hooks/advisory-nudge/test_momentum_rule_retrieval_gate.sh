@@ -825,6 +825,11 @@ run_merge_escalation_case "merge_serial_status_request_denies" \
 run_merge_escalation_case "merge_serial_english_refusal_denies" \
   "yes" "" "momentum-merge-serial-english-refusal.jsonl" "gh pr merge 999 --squash --delete-branch"
 
+# An "ok" to a turn that names the PR but asks nothing ("PR #999 checks are
+# green.") acknowledges a status line; it is not an answer to a merge ask.
+run_merge_escalation_case "merge_serial_status_ok_denies" \
+  "yes" "" "momentum-merge-serial-status-ok.jsonl" "gh pr merge 999 --squash --delete-branch"
+
 # The deny names the missing answer, not a short briefing — the briefing was
 # complete, and a "fewer than 4 of 6" reason would send the actor to rewrite it.
 unanswered_reason=$(python3 -c '
