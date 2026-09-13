@@ -964,7 +964,10 @@ def _merge_escalation_reason(payload: dict) -> str | None:
         bypass_reason_hint="with a one-line reason, set in the session "
             "environment (an inline `VAR=1 gh pr merge …` prefix never reaches "
             "this hook) — or append `# briefing-surfaced: <reason>` to the "
-            "merge command",
+            "merge command, only when the 6-item briefing is already in this "
+            "turn, or in the turn that named this PR right before the user's "
+            "approval: the marker attests the briefing was complete, not that "
+            "one exists",
         reference="CLAUDE.md → Pre-Merge Reporting; "
             "hooks/advisory-nudge/momentum-rule-retrieval-gate/spec.md",
     )

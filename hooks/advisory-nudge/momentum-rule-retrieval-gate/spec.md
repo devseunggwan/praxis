@@ -260,6 +260,19 @@ approve blindly.
   still fails open, which is the bridge-session case the marker was invented
   for: there is nothing to verify against, so nothing is claimed.
 
+  **The offer carries the condition (issue #1402).** The first deny message is
+  where the marker is advertised, and it used to name only the syntax — the
+  attestation condition surfaced in the second, marker-specific deny, after the
+  marker had already been attached. Read on first contact, the offer was a
+  relief that takes a reason string, and a reason slot invites filling rather
+  than checking. Both the deny's `bypass_reason_hint` and the `gh pr merge` gate
+  checklist in `hooks/_lib/block_message.py` now state it in the same sentence
+  as the offer: only when the briefing is already in the window the gate scores
+  (this turn, or the turn that named this PR right before the user's approval),
+  because the marker attests the briefing was complete, not that one exists.
+  This narrows one supply path; markers attached pre-emptively with no block at
+  all never read the message.
+
   "The window" is whichever one the gate was allowed to score, current turn or
   correlated prior turn — the same window the full-briefing check reads. The
   mandated flow is briefing → approval → merge, which leaves the current turn
