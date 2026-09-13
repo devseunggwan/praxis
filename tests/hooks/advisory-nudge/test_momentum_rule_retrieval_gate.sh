@@ -808,6 +808,9 @@ run_merge_escalation_case "merge_serial_ask_other_question_denies" \
 # A Korean particle glued to the number (`#999를`) still names the PR.
 run_merge_escalation_case "merge_serial_ask_particle_passes" \
   "no" "" "momentum-merge-serial-ask-particle.jsonl" "gh pr merge 999 --squash --delete-branch"
+# …but a number inside an ASCII identifier (`v999`) does not.
+run_merge_escalation_case "merge_serial_ask_version_id_denies" \
+  "yes" "" "momentum-merge-serial-ask-version-id.jsonl" "gh pr merge 999 --squash --delete-branch"
 
 # The deny names the missing answer, not a short briefing — the briefing was
 # complete, and a "fewer than 4 of 6" reason would send the actor to rewrite it.

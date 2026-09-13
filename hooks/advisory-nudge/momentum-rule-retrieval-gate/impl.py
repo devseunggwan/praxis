@@ -697,10 +697,11 @@ def _merge_segments(command: object) -> list[str | None]:
 def _mentions_pr(text: str, pr: str) -> bool:
     """True when the text references the target PR (`#N` or the bare number).
 
-    Bounded by digits, not `\\b`: Hangul is a word character, so `#1102를` or
-    `1102번` has no word boundary after the number and would read as no mention.
+    Bounded by ASCII identifier characters, not `\\b`: Hangul is a word
+    character, so `#1102를` or `1102번` has no word boundary after the number,
+    while `v1102` must still not read as PR 1102.
     """
-    return re.search(rf"(?<!\d){pr}(?!\d)", text) is not None
+    return re.search(rf"(?<![A-Za-z0-9_]){pr}(?![A-Za-z0-9_])", text) is not None
 
 
 def _context_pr_from_window(entries: list[dict], lo: int, hi: int) -> str | None:
