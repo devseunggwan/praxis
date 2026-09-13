@@ -336,6 +336,13 @@ approve blindly.
   new window, in which case the defect never arose. Widening the constant is out
   of scope: it is shared, so it would move every other hook's cost too.
 
+  The prior-turn extension works inside the same tail without widening it
+  (issue #1410). When the approval is the only human message left in the tail,
+  the briefing turn's opening message has scrolled out. Every entry before the
+  approval still belongs to that turn, so the extension scores from the tail
+  head instead of giving up. A briefing pushed entirely past the tail stays
+  invisible, and that merge still denies.
+
 - **Injected user entries do not start a new window (issue #940).** A skill body
   loaded mid-turn and the expansion of a slash command both arrive as
   `role: user` with prose content; the harness stamps them `isMeta: true` while

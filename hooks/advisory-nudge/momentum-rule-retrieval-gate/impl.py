@@ -826,12 +826,16 @@ def _correlated_prior_turn_text(entries: list[dict], idxs: list[int],
     # A single approval authorizes ONE merge. A compound `merge A && merge B` (≥2
     # segments) or a shell loop repeating one segment (`for pr in …; do merge`)
     # must not ride a single approval (No Approval Transfer) → no extension.
-    if len(segments) != 1 or _has_repetition(command) or len(idxs) < 2:
+    if len(segments) != 1 or _has_repetition(command) or not idxs:
         return None
     if not _is_approval_reply(entries[idxs[-1]].get("message", {}).get("content")):
         return None
 
-    prev_lo = max(idxs[-2] + 1, floor)
+    # On a long turn the briefing turn's opening message scrolls past the bounded
+    # tail. Every entry before the only visible human message still belongs to
+    # that one turn, so the tail head is its lower bound (issue #1410).
+    prev_start = idxs[-2] + 1 if len(idxs) >= 2 else 0
+    prev_lo = max(prev_start, floor)
     if prev_lo >= idxs[-1]:
         return None
     prev_text = _assistant_text(entries, prev_lo, idxs[-1])

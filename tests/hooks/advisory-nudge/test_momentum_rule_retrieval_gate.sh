@@ -977,6 +977,17 @@ run_merge_escalation_case "merge_escalation_task_notification_keeps_window_passe
 run_merge_escalation_case "merge_escalation_untagged_notification_denies" \
   "yes" "" "momentum-merge-untagged-notification-after-approval.jsonl" "gh pr merge 833 --squash"
 
+# A long briefing turn pushes its opening user message past the 400-line tail,
+# leaving the approval as the only visible human message (issue #1410). The
+# briefing is still in the tail, so the extension must score it.
+run_merge_escalation_case "merge_escalation_briefing_turn_opens_past_tail_passes" \
+  "no" "" "momentum-merge-briefing-turn-opens-past-tail.jsonl" "gh pr merge 833 --squash"
+
+# Control: the briefing itself scrolled out, so nothing before the approval can
+# be scored and the merge must still deny.
+run_merge_escalation_case "merge_escalation_briefing_past_tail_denies" \
+  "yes" "" "momentum-merge-briefing-past-tail.jsonl" "gh pr merge 833 --squash"
+
 # --- verb gate checklist on both channels (issues #873, #932) -----------------
 #
 # The briefing is one of several gates on `gh pr merge`. Before #873 the deny
