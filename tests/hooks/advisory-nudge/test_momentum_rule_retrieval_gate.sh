@@ -830,6 +830,11 @@ run_merge_escalation_case "merge_serial_english_refusal_denies" \
 run_merge_escalation_case "merge_serial_status_ok_denies" \
   "yes" "" "momentum-merge-serial-status-ok.jsonl" "gh pr merge 999 --squash --delete-branch"
 
+# A picked label that names the PR beside the approval (`PR #999 머지`) is the
+# same approval as a bare `머지`.
+run_merge_escalation_case "merge_serial_ask_label_names_pr_passes" \
+  "no" "" "momentum-merge-serial-ask-label-names-pr.jsonl" "gh pr merge 999 --squash --delete-branch"
+
 # The deny names the missing answer, not a short briefing — the briefing was
 # complete, and a "fewer than 4 of 6" reason would send the actor to rewrite it.
 unanswered_reason=$(python3 -c '

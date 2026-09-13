@@ -309,7 +309,7 @@ approve blindly.
   named it and asked for the merge — the approve-ask item the briefing counter
   already reads — or an `AskUserQuestion` tool_result that is not `is_error`, whose
   question names the PR and whose picked label leads with an approval token
-  (`승인 — 머지`). A reply is not an approval: an unrelated message, a status
+  (`승인 — 머지`), a reference to the PR itself set aside (`PR #999 머지`). A reply is not an approval: an unrelated message, a status
   request that names the PR (`PR #999 머지 상태만 알려줘`), a refusal that does
   not end on an approval token, a bare `ok` to a turn about something else or
   to a status line about the PR that asks nothing (`PR #999 checks are green.`), an

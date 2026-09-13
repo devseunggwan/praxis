@@ -801,19 +801,21 @@ def _last_executed_merge(entries: list[dict]) -> int | None:
     return executed[-1] if executed else None
 
 
-def _ask_label_approves(label: str) -> bool:
+def _ask_label_approves(label: str, pr: str) -> bool:
     """True when a picked label is an approval: the whole label passes
-    `_is_approval_reply`, or its leading segment is an approval token."""
+    `_is_approval_reply`, or its leading segment is an approval token once a
+    reference to `pr` is removed (`PR #999 머지`, `Merge PR #999`)."""
     if _is_approval_reply(label):
         return True
     lead = _LABEL_LEAD_RE.split(label.strip().lower(), maxsplit=1)[0]
-    return lead.strip(" .!~,·") in _APPROVAL_TOKENS
+    lead = re.sub(rf"(?:\bpr\s*)?#?(?<![A-Za-z0-9_]){pr}(?![A-Za-z0-9_])", " ", lead)
+    return re.sub(r"\s+", " ", lead).strip(" .!~,·") in _APPROVAL_TOKENS
 
 
 def _ask_answer_approves(content: object, pr: str) -> bool:
     """True when an AskUserQuestion result approves a question that names `pr`;
     an approval picked for some other question is not this merge's answer."""
-    return any(_mentions_pr(q, pr) and _ask_label_approves(a)
+    return any(_mentions_pr(q, pr) and _ask_label_approves(a, pr)
                for q, a in _ASK_ANSWER_RE.findall(_user_message_text(content)))
 
 
