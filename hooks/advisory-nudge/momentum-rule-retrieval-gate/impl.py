@@ -544,6 +544,12 @@ def _human_user_indices(entries: list[dict]) -> list[int]:
     "since the last user message" window, which discards a briefing the user
     actually saw — a skill invoked between the briefing and the merge was enough
     to make a compliant flow look unbriefed.
+
+    Host notifications carry no `isMeta` but are tagged by `origin.kind`
+    (issue #1410): a background task finishing between the approval and the
+    merge otherwise becomes the last user message and closes the prior-turn
+    extension. An entry with no `origin` stays human, since transcripts written
+    before the field existed carry none.
     """
     idxs: list[int] = []
     for i, ev in enumerate(entries):
@@ -551,6 +557,9 @@ def _human_user_indices(entries: list[dict]) -> list[int]:
         if not isinstance(msg, dict) or msg.get("role") != "user" or ev.get("isSidechain"):
             continue
         if ev.get("isMeta"):
+            continue
+        origin = ev.get("origin")
+        if isinstance(origin, dict) and origin.get("kind") not in (None, "human"):
             continue
         content = msg.get("content", [])
         if isinstance(content, str):
@@ -817,12 +826,16 @@ def _correlated_prior_turn_text(entries: list[dict], idxs: list[int],
     # A single approval authorizes ONE merge. A compound `merge A && merge B` (≥2
     # segments) or a shell loop repeating one segment (`for pr in …; do merge`)
     # must not ride a single approval (No Approval Transfer) → no extension.
-    if len(segments) != 1 or _has_repetition(command) or len(idxs) < 2:
+    if len(segments) != 1 or _has_repetition(command) or not idxs:
         return None
     if not _is_approval_reply(entries[idxs[-1]].get("message", {}).get("content")):
         return None
 
-    prev_lo = max(idxs[-2] + 1, floor)
+    # On a long turn the briefing turn's opening message scrolls past the bounded
+    # tail. Every entry before the only visible human message still belongs to
+    # that one turn, so the tail head is its lower bound (issue #1410).
+    prev_start = idxs[-2] + 1 if len(idxs) >= 2 else 0
+    prev_lo = max(prev_start, floor)
     if prev_lo >= idxs[-1]:
         return None
     prev_text = _assistant_text(entries, prev_lo, idxs[-1])
