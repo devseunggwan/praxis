@@ -812,6 +812,12 @@ run_merge_escalation_case "merge_serial_ask_particle_passes" \
 run_merge_escalation_case "merge_serial_ask_version_id_denies" \
   "yes" "" "momentum-merge-serial-ask-version-id.jsonl" "gh pr merge 999 --squash --delete-branch"
 
+# A numberless merge targets the current branch; the `gh pr checks 833` probe
+# before #833's merge named that PR, so an "ok" to a turn about #833 is not an
+# approval of this one.
+run_merge_escalation_case "merge_serial_numberless_stale_probe_denies" \
+  "yes" "" "momentum-merge-serial-numberless-stale-probe.jsonl" "gh pr merge --squash --delete-branch"
+
 # The deny names the missing answer, not a short briefing — the briefing was
 # complete, and a "fewer than 4 of 6" reason would send the actor to rewrite it.
 unanswered_reason=$(python3 -c '

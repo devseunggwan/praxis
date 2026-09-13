@@ -821,15 +821,18 @@ def _ask_answer_approves(content: object, pr: str) -> bool:
                for q, a in _ASK_ANSWER_RE.findall(_user_message_text(content)))
 
 
-def _merge_target_pr(entries: list[dict], command: object) -> str | None:
+def _merge_target_pr(entries: list[dict], command: object, floor: int) -> str | None:
     """PR number a single `gh pr merge` targets, resolved the way
-    `_correlated_prior_turn_text` resolves it; None when it cannot be named."""
+    `_correlated_prior_turn_text` resolves it; None when it cannot be named.
+
+    A numberless merge reads its probe from `floor` on: a probe before the last
+    executed merge named THAT merge's PR, not the current branch's."""
     segments = _merge_segments(command)
     if len(segments) != 1:
         return None
     pos = segments[0]
     if pos is None:
-        return _context_pr_from_window(entries, 0, len(entries))
+        return _context_pr_from_window(entries, floor, len(entries))
     m = _PULL_TOKEN_RE.match(pos)
     return (m.group(1) or m.group(2)) if m else None
 
@@ -986,7 +989,7 @@ def _merge_escalation_reason(payload: dict) -> str | None:
     # already consumed, so it no longer releases the next merge on text alone.
     last_merge = _last_executed_merge(entries)
     answered = last_merge is None or _answered_after(
-        entries, idxs, last_merge, _merge_target_pr(entries, code))
+        entries, idxs, last_merge, _merge_target_pr(entries, code, last_merge + 1))
     items = _briefing_item_count(current_text)
     full_briefing = items >= MERGE_BRIEFING_MIN_ITEMS
     if full_briefing and answered:
