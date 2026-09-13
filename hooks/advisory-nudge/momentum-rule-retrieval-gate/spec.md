@@ -344,6 +344,18 @@ approve blindly.
   so a skill invoked between the briefing and the merge made a compliant flow
   look unbriefed. `_human_user_indices` skips them — a structural discriminator,
   not a content heuristic.
+- **Host notifications do not start a new window either (issue #1410).** A
+  background task finishing arrives as `role: user` text with no `isMeta`, and
+  carries `origin: {"kind": "task-notification"}` where a typed message carries
+  `origin: {"kind": "human"}`. Waiting on CI in the background between the
+  approval and the merge put the notification in the "last user message" slot,
+  which is not an approval reply, so the prior-turn extension never opened and a
+  briefed, approved merge was denied at 0 of 6 items. `_human_user_indices`
+  skips an entry whose `origin.kind` is present and is not `human`. An entry
+  with no `origin` is kept: transcripts written before the field existed carry
+  none on real user messages. Measured over 3,136 local transcripts: 9,592
+  `task-notification` entries, none with `isMeta`; 428 of 3,003 `gh pr merge`
+  calls had one as the last user entry.
 - Trivial-PR markers (`typo`, `comment-only`, `single-line`, `오타`, `주석만`,
   `trivial pr`, `2-line report`, …) in the briefing text → no escalation,
   matching the *Pre-Merge Reporting* rule's "Trivial PRs: a 2-line report is

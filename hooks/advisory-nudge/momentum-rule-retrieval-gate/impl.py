@@ -544,6 +544,12 @@ def _human_user_indices(entries: list[dict]) -> list[int]:
     "since the last user message" window, which discards a briefing the user
     actually saw — a skill invoked between the briefing and the merge was enough
     to make a compliant flow look unbriefed.
+
+    Host notifications carry no `isMeta` but are tagged by `origin.kind`
+    (issue #1410): a background task finishing between the approval and the
+    merge otherwise becomes the last user message and closes the prior-turn
+    extension. An entry with no `origin` stays human, since transcripts written
+    before the field existed carry none.
     """
     idxs: list[int] = []
     for i, ev in enumerate(entries):
@@ -551,6 +557,9 @@ def _human_user_indices(entries: list[dict]) -> list[int]:
         if not isinstance(msg, dict) or msg.get("role") != "user" or ev.get("isSidechain"):
             continue
         if ev.get("isMeta"):
+            continue
+        origin = ev.get("origin")
+        if isinstance(origin, dict) and origin.get("kind") not in (None, "human"):
             continue
         content = msg.get("content", [])
         if isinstance(content, str):

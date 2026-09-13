@@ -964,6 +964,19 @@ run_merge_escalation_case "merge_escalation_marker_uncorrelated_prior_turn_denie
 run_merge_escalation_case "merge_escalation_injected_meta_keeps_window_passes" \
   "no" "" "momentum-merge-injected-meta-turn.jsonl" "gh pr merge 833 --squash"
 
+# A background task finishing between the approval and the merge arrives as a
+# `role: user` entry with no `isMeta`, tagged `origin.kind: task-notification`
+# (issue #1410). It must not become the "last user message": the approval
+# before it still opens the prior-turn extension.
+run_merge_escalation_case "merge_escalation_task_notification_keeps_window_passes" \
+  "no" "" "momentum-merge-task-notification-after-approval.jsonl" "gh pr merge 833 --squash"
+
+# Positive control: the same transcript with the notification's `origin` removed
+# still denies, so the field decides, not the fixture text. An entry with no
+# `origin` is kept as human because transcripts predating the field carry none.
+run_merge_escalation_case "merge_escalation_untagged_notification_denies" \
+  "yes" "" "momentum-merge-untagged-notification-after-approval.jsonl" "gh pr merge 833 --squash"
+
 # --- verb gate checklist on both channels (issues #873, #932) -----------------
 #
 # The briefing is one of several gates on `gh pr merge`. Before #873 the deny
