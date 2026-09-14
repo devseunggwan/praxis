@@ -498,7 +498,8 @@ _LABEL_LEAD_RE = re.compile(r"\s*[—–:,(-]\s*")
 _MERGE_WORD_RE = re.compile(r"(?<![A-Za-z])merge(?![A-Za-z-])|머지|병합", re.IGNORECASE)
 _NOT_MERGE_ASK_RE = re.compile(
     r"(?<![A-Za-z])(?:not|don't|dont|never)(?![A-Za-z])"
-    r"|(?:머지|병합)\s*(?:됐|되었|된|되어|되나|하지|안\b|말)|(?:안|말)\s*(?:머지|병합)|말까요",
+    r"|(?:머지|병합)\s*(?:됐|되었|된|되어|되나|하지|안\b|말|상태|충돌|결과)|(?:안|말)\s*(?:머지|병합)|말까요"
+    r"|(?<![A-Za-z])merge\s+(?:status|state|conflicts?|results?)(?![A-Za-z])",
     re.IGNORECASE)
 _ASK_SENTENCE_RE = re.compile(r"[^.!?。\n]*(?:\?|할까요|될까요|하시겠|해도 되)")
 # An explicit PR reference (`#N`, `PR N`, `…/pull/N`). A bare number is not one:
