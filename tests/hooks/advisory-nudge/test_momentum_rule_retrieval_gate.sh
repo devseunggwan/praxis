@@ -852,6 +852,9 @@ run_merge_escalation_case "merge_serial_ask_label_names_pr_passes" \
 # `Approve merge` picked for "PR #999 Approve merge?" is the canonical answer.
 run_merge_escalation_case "merge_serial_ask_approve_merge_label_passes" \
   "no" "" "momentum-merge-serial-ask-approve-merge-label.jsonl" "gh pr merge 999 --squash --delete-branch"
+# Typing the ask back ("Approve merge?") asks again; it does not agree.
+run_merge_escalation_case "merge_serial_question_reply_denies" \
+  "yes" "" "momentum-merge-serial-question-reply.jsonl" "gh pr merge 999 --squash --delete-branch"
 
 # The deny names the missing answer, not a short briefing — the briefing was
 # complete, and a "fewer than 4 of 6" reason would send the actor to rewrite it.

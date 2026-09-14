@@ -622,6 +622,10 @@ def _user_message_text(content: object) -> str:
 def _is_approval_reply(content: object) -> bool:
     """True when a user message is a short bare approval token (ok / 진행 / 승인 …)."""
     raw = _user_message_text(content).strip().lower()
+    # A reply that ends in a question asks rather than agrees: "Approve merge?"
+    # typed back is the ask itself, and "ok?" is checking, not consent.
+    if raw.endswith(("?", "？")):
+        return False
     if re.sub(r"\s+", " ", raw).strip(" .!~,·") in _APPROVAL_TOKENS:
         return True
     # Split the RAW text: normalizing whitespace first turns a newline into a
