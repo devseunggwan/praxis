@@ -464,7 +464,7 @@ _APPROVAL_TOKENS = frozenset({
     "ok", "okay", "okey", "k", "kk", "yes", "yep", "yup", "y", "go", "go ahead",
     "do it", "proceed", "proceed with the merge", "merge", "merge it", "sure",
     "lgtm", "ship it", "sounds good",
-    "approve", "approved",
+    "approve", "approved", "approve merge", "머지 승인",
     "네", "넵", "응", "ㅇㅋ", "ㅇㅇ", "ㄱㄱ", "고고", "승인", "진행", "진행해",
     "진행해줘", "진행하자", "머지", "머지해", "머지해줘", "머지 진행", "좋아",
     "좋습니다", "그래", "ㄱ",
