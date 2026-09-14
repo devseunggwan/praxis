@@ -1152,11 +1152,14 @@ def _merge_escalation_reason(payload: dict) -> str | None:
         )
 
     if full_briefing:
+        replied = last_merge is not None and any(i > last_merge for i in idxs)
         return format_block(
             rule_name="Pre-Merge Reporting briefing",
-            why="a gh pr merge already ran in this session and no user message "
-                "has arrived since — the briefing is complete, but approving "
-                "one PR approves only that PR, so this merge needs its own answer",
+            why="a gh pr merge already ran in this session and "
+                + ("nothing the user said since approves this merge"
+                   if replied else "no user message has arrived since")
+                + " — the briefing is complete, but approving one PR approves "
+                "only that PR, so this merge needs its own answer",
             correct_path="ask 'Approve merge?' for this PR, wait for the user's "
                 "answer, then re-run the merge",
             bypass_env=MERGE_ADVISORY_ENV,

@@ -877,6 +877,15 @@ run_merge_escalation_case "merge_serial_loop_answered_denies" \
 # A later hold replaces an earlier approval ("ok" then "PR #999 머지 보류").
 run_merge_escalation_case "merge_serial_hold_after_ok_denies" \
   "yes" "" "momentum-merge-serial-hold-after-ok.jsonl" "gh pr merge 999 --squash --delete-branch"
+# The block names the gap: a reply that approves nothing is not a missing message.
+_reason_out=$(python3 -c 'import json, sys; print(json.dumps({"tool_name": "Bash", "tool_input": {"command": "gh pr merge 999 --squash --delete-branch"}, "transcript_path": sys.argv[1], "session_id": "test-momentum-merge"}))' \
+  "$FIXTURES_DIR/momentum-merge-serial-status-request.jsonl" | python3 "$HOOK" 2>/dev/null)
+if echo "$_reason_out" | grep -qF 'nothing the user said since approves this merge'; then
+  echo "PASS  [merge_serial_reply_without_approval_reason]"; PASS=$((PASS + 1))
+else
+  echo "FAIL  [merge_serial_reply_without_approval_reason] out=$(echo "$_reason_out" | head -c 200)"
+  FAIL=$((FAIL + 1)); FAILED_NAMES+=("merge_serial_reply_without_approval_reason")
+fi
 
 # A picked label that names the PR beside the approval (`PR #999 머지`) is the
 # same approval as a bare `머지`.
