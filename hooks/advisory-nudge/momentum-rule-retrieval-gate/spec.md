@@ -321,13 +321,22 @@ approve blindly.
   clause is an approval token, with a reference to the PR set aside, so
   `PR #999 머지해줘` counts) and that names the PR or answers a turn that
   named it and either asked to merge that PR, or is answered by an approval
-  that names merging itself (`머지 진행`).
+  that names merging itself (`머지 진행`), and no later user message about the
+  PR or about merging is something other than an approval — the latest decision
+  wins, so `ok` followed by `PR #999 머지 보류` leaves the merge unanswered. A
+  merge that repeats or chains merge segments is never answered this way: one
+  answer releases one merge.
   Asking to merge is one question sentence (ending in `?`, `할까요`, `될까요`,
   `하시겠` or `해도 되`) with `merge` as a whole word, `머지` or `병합`, that
-  neither negates it nor asks whether it happened (`머지하지 말까요?`,
-  `머지됐나요?`), and that names the PR or names no PR at all
-  (`PR #999 브리핑 … Approve merge?` counts; `Approve merge #833?` beside a
-  #999 status line does not). An unnamed ask is not discounted because the turn
+  neither negates it nor asks whether it happened or how it stands
+  (`머지하지 말까요?`, `머지됐나요?`, `PR #999 merge status?`, `머지 상태`),
+  and that is about the PR. When the merge verb takes PR references as its
+  object — a list right before `머지`/`병합` or right after `merge` — the ask is
+  about exactly those PRs (`#833, #999 를 머지할까요?` asks about both;
+  `PR #999 checks are green, #833 머지할까요?` asks about #833 only). Without
+  such an object the sentence must name the PR or no PR at all
+  (`PR #999 브리핑 … Approve merge?` counts;
+  `PR #833 and #999 are ready; Approve merge #833?` does not). An unnamed ask is not discounted because the turn
   cites other PRs or issues, since briefings do; a turn that briefs two PRs and
   asks once without a number is read as asking about either. The other form is an `AskUserQuestion` tool_result that is not
   `is_error`, whose question names the PR, held to the same merge rule
@@ -351,7 +360,7 @@ approve blindly.
   tool_result-only entries by design — replayed over 566 local merges, the
   typed-message-only version denied 47 merges the shipped gate allowed, and 13
   of those had been answered through `AskUserQuestion`. With the forms above, a
-  replay over 569 local merges denies 45 that the shipped gate allowed. Three of them carry
+  replay over 572 local merges denies 45 that the shipped gate allowed. Three of them carry
   a real approval that these forms do not read — typed `둘다 승인` and
   `둘다 머지하세요`, whose final clause is not a bare token, and a picked
   `앵커 작성 후 머지`, which does not lead with one — and a typed `승인` whose turn
