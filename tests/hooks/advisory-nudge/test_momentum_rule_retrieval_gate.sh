@@ -1051,8 +1051,10 @@ print("\n".join(sorted(set(re.findall(r"←\s*(\S+)", verb_gate_checklist("gh pr
   done <<< "$tokens"
 
   # Relief affordances are prose, not `←`-tagged gate names, so they are not
-  # derivable above and stay explicit.
-  for token in "PRAXIS_MOMENTUM_MERGE_ADVISORY=1" "briefing-surfaced:"; do
+  # derivable above and stay explicit. The marker's condition rides with the
+  # offer: shown only after use, it read as a reason-string relief (#1402).
+  for token in "PRAXIS_MOMENTUM_MERGE_ADVISORY=1" "briefing-surfaced:" \
+      "attests the briefing was complete, not that one exists"; do
     printf '%s' "$err" | grep -qF "$token" || { ok=0; echo "        missing from stderr: $token"; }
     printf '%s' "$reason" | grep -qF "$token" || { ok=0; echo "        missing from decision reason: $token"; }
   done

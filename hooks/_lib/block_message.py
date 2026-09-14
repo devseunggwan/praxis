@@ -133,7 +133,10 @@ Unconditional — fire on every `gh pr merge`, whatever the flags:
   6-item briefing in this turn              ← momentum-rule-retrieval-gate
     What changed / verified / NOT verified / Risk / Open items / approve-ask.
     Relief: an unquoted shell comment `# briefing-surfaced: <reason>` on the
-    merge command itself. PRAXIS_MOMENTUM_MERGE_ADVISORY=1 also works, but
+    merge command itself, only when the briefing is already in this turn, or
+    in the turn that named this PR right before the user's approval — it
+    attests the briefing was complete, not that one exists.
+    PRAXIS_MOMENTUM_MERGE_ADVISORY=1 also works, but
     ONLY from the session environment — the hook is spawned by the harness,
     so an inline `VAR=1 gh pr merge …` prefix never reaches it.
   Explicit per-PR user approval             ← pre-merge-approval-gate
