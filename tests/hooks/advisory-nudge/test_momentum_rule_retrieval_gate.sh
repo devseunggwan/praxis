@@ -852,6 +852,10 @@ run_merge_escalation_case "merge_serial_other_pr_merge_ask_denies" \
   "yes" "" "momentum-merge-serial-other-pr-merge-ask.jsonl" "gh pr merge 999 --squash --delete-branch"
 run_merge_escalation_case "merge_serial_ask_other_pr_merge_denies" \
   "yes" "" "momentum-merge-serial-ask-other-pr-merge.jsonl" "gh pr merge 999 --squash --delete-branch"
+# …while an unnamed "Approve merge?" still asks about the briefed PR when the
+# briefing cites other issues or PRs, as real briefings do.
+run_merge_escalation_case "merge_serial_unnamed_ask_cited_prs_passes" \
+  "no" "" "momentum-merge-serial-unnamed-ask-cited-prs.jsonl" "gh pr merge 999 --squash --delete-branch"
 # …but an approval that names merging itself answers the merge even when the
 # question did not ask it ("PR #999 어떻게 할까요?" → `승인 — 그대로 머지`).
 run_merge_escalation_case "merge_serial_ask_label_names_merge_passes" \
