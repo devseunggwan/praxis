@@ -1061,8 +1061,11 @@ def _merge_escalation_reason(payload: dict) -> str | None:
     # no user message since can only be citing an answer the earlier merge
     # already consumed, so it no longer releases the next merge on text alone.
     last_merge = _last_executed_merge(entries)
-    answered = last_merge is None or _answered_after(
-        entries, idxs, last_merge, _merge_target_pr(entries, code, last_merge + 1))
+    # One answer releases one merge: a loop or chained merge is never answered.
+    answered = last_merge is None or (
+        len(_merge_segments(code)) == 1 and not _has_repetition(code)
+        and _answered_after(entries, idxs, last_merge,
+                            _merge_target_pr(entries, code, last_merge + 1)))
     items = _briefing_item_count(current_text)
     full_briefing = items >= MERGE_BRIEFING_MIN_ITEMS
     if full_briefing and answered:
