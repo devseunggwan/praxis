@@ -260,6 +260,19 @@ approve blindly.
   still fails open, which is the bridge-session case the marker was invented
   for: there is nothing to verify against, so nothing is claimed.
 
+  **The offer carries the condition (issue #1402).** The first deny message is
+  where the marker is advertised, and it used to name only the syntax — the
+  attestation condition surfaced in the second, marker-specific deny, after the
+  marker had already been attached. Read on first contact, the offer was a
+  relief that takes a reason string, and a reason slot invites filling rather
+  than checking. Both the deny's `bypass_reason_hint` and the `gh pr merge` gate
+  checklist in `hooks/_lib/block_message.py` now state it in the same sentence
+  as the offer: only when the briefing is already in the window the gate scores
+  (this turn, or the turn that named this PR right before the user's approval),
+  because the marker attests the briefing was complete, not that one exists.
+  This narrows one supply path; markers attached pre-emptively with no block at
+  all never read the message.
+
   "The window" is whichever one the gate was allowed to score, current turn or
   correlated prior turn — the same window the full-briefing check reads. The
   mandated flow is briefing → approval → merge, which leaves the current turn
@@ -386,6 +399,13 @@ approve blindly.
   new window, in which case the defect never arose. Widening the constant is out
   of scope: it is shared, so it would move every other hook's cost too.
 
+  The prior-turn extension works inside the same tail without widening it
+  (issue #1410). When the approval is the only human message left in the tail,
+  the briefing turn's opening message has scrolled out. Every entry before the
+  approval still belongs to that turn, so the extension scores from the tail
+  head instead of giving up. A briefing pushed entirely past the tail stays
+  invisible, and that merge still denies.
+
 - **Injected user entries do not start a new window (issue #940).** A skill body
   loaded mid-turn and the expansion of a slash command both arrive as
   `role: user` with prose content; the harness stamps them `isMeta: true` while
@@ -394,6 +414,18 @@ approve blindly.
   so a skill invoked between the briefing and the merge made a compliant flow
   look unbriefed. `_human_user_indices` skips them — a structural discriminator,
   not a content heuristic.
+- **Host notifications do not start a new window either (issue #1410).** A
+  background task finishing arrives as `role: user` text with no `isMeta`, and
+  carries `origin: {"kind": "task-notification"}` where a typed message carries
+  `origin: {"kind": "human"}`. Waiting on CI in the background between the
+  approval and the merge put the notification in the "last user message" slot,
+  which is not an approval reply, so the prior-turn extension never opened and a
+  briefed, approved merge was denied at 0 of 6 items. `_human_user_indices`
+  skips an entry whose `origin.kind` is present and is not `human`. An entry
+  with no `origin` is kept: transcripts written before the field existed carry
+  none on real user messages. Measured over 3,136 local transcripts: 9,592
+  `task-notification` entries, none with `isMeta`; 428 of 3,003 `gh pr merge`
+  calls had one as the last user entry.
 - Trivial-PR markers (`typo`, `comment-only`, `single-line`, `오타`, `주석만`,
   `trivial pr`, `2-line report`, …) in the briefing text → no escalation,
   matching the *Pre-Merge Reporting* rule's "Trivial PRs: a 2-line report is
