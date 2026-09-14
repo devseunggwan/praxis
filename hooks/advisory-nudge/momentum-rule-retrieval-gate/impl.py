@@ -833,9 +833,12 @@ def _is_merge_ask(text: str) -> bool:
 
 
 def _ask_answer_approves(content: object, pr: str) -> bool:
-    """True when an AskUserQuestion result approves a merge question that names
-    `pr`; an approval picked for some other question is not this merge's answer."""
-    return any(_mentions_pr(q, pr) and _is_merge_ask(q) and _ask_label_approves(a, pr)
+    """True when an AskUserQuestion result approves merging a question that names
+    `pr` — the question asks to merge, or the picked approval names merging
+    itself ("승인 — 그대로 머지"); a bare approval picked for some other ask is
+    not this merge's answer."""
+    return any(_mentions_pr(q, pr) and (_is_merge_ask(q) or _MERGE_WORD_RE.search(a))
+               and _ask_label_approves(a, pr)
                for q, a in _ASK_ANSWER_RE.findall(_user_message_text(content)))
 
 
@@ -860,9 +863,10 @@ def _answered_after(entries: list[dict], idxs: list[int], index: int,
     """True when the user approved after entry `index` — typed or via AskUserQuestion.
 
     Only approval of THIS merge counts, tied to `pr` — a typed
-    approval must name the PR or answer a turn that named it and asked to
-    merge, since an "ok" to a status line or to another approval ask agrees to
-    nothing; a picked one must answer a merge question that named it. With no resolvable target
+    approval must name the PR or answer a turn that named it, where either that
+    turn asked to merge or the approval names merging itself ("머지 진행"),
+    since an "ok" to a status line or to another approval ask agrees to
+    nothing; a picked one is held to the same rule against its question. With no resolvable target
     nothing counts. An AskUserQuestion answer arrives as
     a tool_result, which `_human_user_indices` skips by design, so it is matched
     to its question here; a declined question comes back `is_error`.
@@ -874,8 +878,9 @@ def _answered_after(entries: list[dict], idxs: list[int], index: int,
         if i <= index or not _is_approval_reply(content):
             continue
         replied_to = _assistant_text(entries, max(index + 1, idxs[k - 1] + 1 if k else 0), i)
-        if _mentions_pr(_user_message_text(content), pr) or (
-                _is_merge_ask(replied_to) and _mentions_pr(replied_to, pr)):
+        reply = _user_message_text(content)
+        merge_named = _is_merge_ask(replied_to) or _MERGE_WORD_RE.search(reply)
+        if _mentions_pr(reply, pr) or (merge_named and _mentions_pr(replied_to, pr)):
             return True
     asks: set[str] = set()
     for i, ev in enumerate(entries):

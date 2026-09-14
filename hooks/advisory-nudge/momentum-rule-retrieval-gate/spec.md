@@ -319,9 +319,11 @@ approve blindly.
   the last executed merge — the earlier probe named that merge's PR. The
   approval is either a typed reply that `_is_approval_reply` accepts (its final
   clause is an approval token) and that names the PR or answers a turn that
-  named it and asked to merge — one sentence that names merging and asks,
-  as in `Approve merge?` — or an `AskUserQuestion` tool_result that is not
-  `is_error`, whose question names the PR, asks to merge the same way, and whose
+  named it and either asked to merge — one sentence that names merging and
+  asks, as in `Approve merge?` — or is answered by an approval that names
+  merging itself (`머지 진행`), or an `AskUserQuestion` tool_result that is not
+  `is_error`, whose question names the PR, held to the same merge rule
+  (`PR #999 어떻게 할까요?` answered `승인 — 그대로 머지` counts), and whose
   picked label leads with an approval token
   (`승인 — 머지`), a reference to the PR itself set aside (`PR #999 머지`). A reply is not an approval: an unrelated message, a status
   request that names the PR (`PR #999 머지 상태만 알려줘`), a refusal that does
