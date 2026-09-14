@@ -840,6 +840,12 @@ run_merge_escalation_case "merge_serial_non_merge_ask_ok_denies" \
   "yes" "" "momentum-merge-serial-non-merge-ask-ok.jsonl" "gh pr merge 999 --squash --delete-branch"
 run_merge_escalation_case "merge_serial_ask_non_merge_question_denies" \
   "yes" "" "momentum-merge-serial-ask-non-merge-question.jsonl" "gh pr merge 999 --squash --delete-branch"
+# Nor is a question that only contains the letters ("emergency rollback?"), or
+# one that asks not to merge ("PR #999 머지하지 말까요?").
+run_merge_escalation_case "merge_serial_status_question_ok_denies" \
+  "yes" "" "momentum-merge-serial-status-question-ok.jsonl" "gh pr merge 999 --squash --delete-branch"
+run_merge_escalation_case "merge_serial_ask_negative_merge_denies" \
+  "yes" "" "momentum-merge-serial-ask-negative-merge.jsonl" "gh pr merge 999 --squash --delete-branch"
 # …but an approval that names merging itself answers the merge even when the
 # question did not ask it ("PR #999 어떻게 할까요?" → `승인 — 그대로 머지`).
 run_merge_escalation_case "merge_serial_ask_label_names_merge_passes" \

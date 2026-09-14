@@ -492,7 +492,14 @@ _LABEL_LEAD_RE = re.compile(r"\s*[—–:,(-]\s*")
 # merge?", "PR #999를 머지할까요?"). The briefing counter's approve-ask words
 # cannot stand in for it: "approve" also matches "PR #999 was approved", and
 # "승인" matches "테스트 승인할까요?", and neither of those asks to merge.
-_MERGE_WORD_RE = re.compile(r"merge|머지|병합", re.IGNORECASE)
+# "merge" is a whole word so "emergency" and "merged" stay out, and a question
+# that negates merging or asks whether it happened ("머지하지 말까요?",
+# "머지됐나요?") is not an ask to merge.
+_MERGE_WORD_RE = re.compile(r"(?<![A-Za-z])merge(?![A-Za-z-])|머지|병합", re.IGNORECASE)
+_NOT_MERGE_ASK_RE = re.compile(
+    r"(?<![A-Za-z])(?:not|don't|dont|never)(?![A-Za-z])"
+    r"|(?:머지|병합)\s*(?:됐|되었|된|되어|되나|하지|안\b|말)|(?:안|말)\s*(?:머지|병합)|말까요",
+    re.IGNORECASE)
 _ASK_SENTENCE_RE = re.compile(r"[^.!?。\n]*(?:\?|할까요|될까요|하시겠|해도 되)")
 
 # A single positional token that is a bare PR number or a …/pull/N URL.
@@ -833,7 +840,8 @@ def _ask_label_approves(label: str, pr: str) -> bool:
 
 def _is_merge_ask(text: str) -> bool:
     """True when some sentence of `text` asks to merge."""
-    return any(_MERGE_WORD_RE.search(s) for s in _ASK_SENTENCE_RE.findall(text))
+    return any(_MERGE_WORD_RE.search(s) and not _NOT_MERGE_ASK_RE.search(s)
+               for s in _ASK_SENTENCE_RE.findall(text))
 
 
 def _ask_answer_approves(content: object, pr: str) -> bool:
