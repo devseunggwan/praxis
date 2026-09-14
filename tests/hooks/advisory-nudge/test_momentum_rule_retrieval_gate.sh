@@ -761,6 +761,164 @@ run_merge_escalation_case "merge_serial_blocked_retry_bare_denies" \
 run_merge_escalation_case "merge_serial_rebriefed_bare_denies" \
   "yes" "" "momentum-merge-serial-rebriefed.jsonl" "gh pr merge 999 --squash --delete-branch"
 
+# --- serial merge needs its own answer (issue #1402) --------------------------
+#
+# Every fixture carries a COMPLETE briefing for #999 after #833's merge ran, so
+# the 4-of-6 counter is satisfied in all of them and only the answer separates them.
+#
+#   unanswered-current  briefing after the merge, no user message   → deny
+#   unanswered-prior    answer predates the merge it was spent on   → deny
+#   answered-prior      briefing → "ok" → merge                     → allow
+#   answered-current    approval after the merge → briefing         → allow
+#   unrelated-message   non-approval message after the merge        → deny
+run_merge_escalation_case "merge_serial_unanswered_current_denies" \
+  "yes" "" "momentum-merge-serial-unanswered-current.jsonl" "gh pr merge 999 --squash --delete-branch"
+run_merge_escalation_case "merge_serial_unanswered_prior_denies" \
+  "yes" "" "momentum-merge-serial-unanswered-prior.jsonl" "gh pr merge 999 --squash --delete-branch"
+run_merge_escalation_case "merge_serial_answered_prior_passes" \
+  "no" "" "momentum-merge-serial-answered-prior.jsonl" "gh pr merge 999 --squash --delete-branch"
+run_merge_escalation_case "merge_serial_answered_current_passes" \
+  "no" "" "momentum-merge-serial-answered-current.jsonl" "gh pr merge 999 --squash --delete-branch"
+run_merge_escalation_case "merge_serial_unrelated_message_denies" \
+  "yes" "" "momentum-merge-serial-unrelated-message.jsonl" "gh pr merge 999 --squash --delete-branch"
+
+# An AskUserQuestion answer is a tool_result, not a typed message. Replayed over
+# local transcripts, 13 of the merges this check first denied were answered this
+# way, so it must count — and neither a declined question (`is_error`) nor a
+# `보류` pick does: a reply to the question is not consent to the merge.
+run_merge_escalation_case "merge_serial_ask_answered_passes" \
+  "no" "" "momentum-merge-serial-ask-answered.jsonl" "gh pr merge 999 --squash --delete-branch"
+run_merge_escalation_case "merge_serial_ask_declined_denies" \
+  "yes" "" "momentum-merge-serial-ask-declined.jsonl" "gh pr merge 999 --squash --delete-branch"
+run_merge_escalation_case "merge_serial_ask_held_denies" \
+  "yes" "" "momentum-merge-serial-ask-held.jsonl" "gh pr merge 999 --squash --delete-branch"
+
+# A refusal that carries an approval word is still a refusal.
+run_merge_escalation_case "merge_serial_refusal_denies" \
+  "yes" "" "momentum-merge-serial-refusal.jsonl" "gh pr merge 999 --squash --delete-branch"
+
+# Consent must be to THIS merge: a bare "ok" that names no PR and answers no
+# turn about one, and an approval picked for a different question, leave #999
+# unanswered.
+run_merge_escalation_case "merge_serial_untargeted_ok_denies" \
+  "yes" "" "momentum-merge-serial-untargeted-ok.jsonl" "gh pr merge 999 --squash --delete-branch"
+run_merge_escalation_case "merge_serial_ask_other_question_denies" \
+  "yes" "" "momentum-merge-serial-ask-other-question.jsonl" "gh pr merge 999 --squash --delete-branch"
+
+# A Korean particle glued to the number (`#999를`) still names the PR.
+run_merge_escalation_case "merge_serial_ask_particle_passes" \
+  "no" "" "momentum-merge-serial-ask-particle.jsonl" "gh pr merge 999 --squash --delete-branch"
+# …but a number inside an ASCII identifier (`v999`) does not.
+run_merge_escalation_case "merge_serial_ask_version_id_denies" \
+  "yes" "" "momentum-merge-serial-ask-version-id.jsonl" "gh pr merge 999 --squash --delete-branch"
+
+# A numberless merge targets the current branch; the `gh pr checks 833` probe
+# before #833's merge named that PR, so an "ok" to a turn about #833 is not an
+# approval of this one.
+run_merge_escalation_case "merge_serial_numberless_stale_probe_denies" \
+  "yes" "" "momentum-merge-serial-numberless-stale-probe.jsonl" "gh pr merge --squash --delete-branch"
+
+# Naming the PR next to an approval word is not approving it: a status request
+# and an English refusal both carry one, and neither ends on an approval token.
+run_merge_escalation_case "merge_serial_status_request_denies" \
+  "yes" "" "momentum-merge-serial-status-request.jsonl" "gh pr merge 999 --squash --delete-branch"
+run_merge_escalation_case "merge_serial_english_refusal_denies" \
+  "yes" "" "momentum-merge-serial-english-refusal.jsonl" "gh pr merge 999 --squash --delete-branch"
+
+# An "ok" to a turn that names the PR but asks nothing ("PR #999 checks are
+# green.") acknowledges a status line; it is not an answer to a merge ask.
+run_merge_escalation_case "merge_serial_status_ok_denies" \
+  "yes" "" "momentum-merge-serial-status-ok.jsonl" "gh pr merge 999 --squash --delete-branch"
+
+# An approval word is not a merge ask: "PR #999 was approved; checks are green."
+# reports a past approval, and "PR #999 테스트 승인할까요?" asks to approve
+# something else. An "ok" to either, or a `승인` picked for the second, leaves
+# the merge unanswered.
+run_merge_escalation_case "merge_serial_approved_status_ok_denies" \
+  "yes" "" "momentum-merge-serial-approved-status-ok.jsonl" "gh pr merge 999 --squash --delete-branch"
+run_merge_escalation_case "merge_serial_non_merge_ask_ok_denies" \
+  "yes" "" "momentum-merge-serial-non-merge-ask-ok.jsonl" "gh pr merge 999 --squash --delete-branch"
+run_merge_escalation_case "merge_serial_ask_non_merge_question_denies" \
+  "yes" "" "momentum-merge-serial-ask-non-merge-question.jsonl" "gh pr merge 999 --squash --delete-branch"
+# Nor is a question that only contains the letters ("emergency rollback?"), or
+# one that asks not to merge ("PR #999 머지하지 말까요?").
+run_merge_escalation_case "merge_serial_status_question_ok_denies" \
+  "yes" "" "momentum-merge-serial-status-question-ok.jsonl" "gh pr merge 999 --squash --delete-branch"
+run_merge_escalation_case "merge_serial_ask_negative_merge_denies" \
+  "yes" "" "momentum-merge-serial-ask-negative-merge.jsonl" "gh pr merge 999 --squash --delete-branch"
+# A merge ask for another PR does not become this PR's because the same turn
+# mentions it ("Approve merge #833? PR #999 checks are green.").
+run_merge_escalation_case "merge_serial_other_pr_merge_ask_denies" \
+  "yes" "" "momentum-merge-serial-other-pr-merge-ask.jsonl" "gh pr merge 999 --squash --delete-branch"
+run_merge_escalation_case "merge_serial_ask_other_pr_merge_denies" \
+  "yes" "" "momentum-merge-serial-ask-other-pr-merge.jsonl" "gh pr merge 999 --squash --delete-branch"
+# …while an unnamed "Approve merge?" still asks about the briefed PR when the
+# briefing cites other issues or PRs, as real briefings do.
+run_merge_escalation_case "merge_serial_unnamed_ask_cited_prs_passes" \
+  "no" "" "momentum-merge-serial-unnamed-ask-cited-prs.jsonl" "gh pr merge 999 --squash --delete-branch"
+# …but an approval that names merging itself answers the merge even when the
+# question did not ask it ("PR #999 어떻게 할까요?" → `승인 — 그대로 머지`).
+run_merge_escalation_case "merge_serial_ask_label_names_merge_passes" \
+  "no" "" "momentum-merge-serial-ask-label-names-merge.jsonl" "gh pr merge 999 --squash --delete-branch"
+# A question about the merge's state asks nothing ("PR #999 merge status?").
+run_merge_escalation_case "merge_serial_merge_status_ok_denies" \
+  "yes" "" "momentum-merge-serial-merge-status-ok.jsonl" "gh pr merge 999 --squash --delete-branch"
+# A merge ask is about the PRs its verb takes, not every PR in the sentence…
+run_merge_escalation_case "merge_serial_mixed_pr_ask_denies" \
+  "yes" "" "momentum-merge-serial-mixed-pr-ask.jsonl" "gh pr merge 999 --squash --delete-branch"
+run_merge_escalation_case "merge_serial_clause_other_pr_denies" \
+  "yes" "" "momentum-merge-serial-clause-other-pr.jsonl" "gh pr merge 999 --squash --delete-branch"
+# …so "#833, #999 를 머지해 반영할까요?" still asks about both.
+run_merge_escalation_case "merge_serial_two_pr_ask_passes" \
+  "no" "" "momentum-merge-serial-two-pr-ask.jsonl" "gh pr merge 999 --squash --delete-branch"
+# One answer releases one merge, never a loop that repeats it.
+run_merge_escalation_case "merge_serial_loop_answered_denies" \
+  "yes" "" "momentum-merge-serial-answered-current.jsonl" "for i in 1 2; do gh pr merge 999 --squash; done"
+# A later hold replaces an earlier approval ("ok" then "PR #999 머지 보류").
+run_merge_escalation_case "merge_serial_hold_after_ok_denies" \
+  "yes" "" "momentum-merge-serial-hold-after-ok.jsonl" "gh pr merge 999 --squash --delete-branch"
+# The block names the gap: a reply that approves nothing is not a missing message.
+_reason_out=$(python3 -c 'import json, sys; print(json.dumps({"tool_name": "Bash", "tool_input": {"command": "gh pr merge 999 --squash --delete-branch"}, "transcript_path": sys.argv[1], "session_id": "test-momentum-merge"}))' \
+  "$FIXTURES_DIR/momentum-merge-serial-status-request.jsonl" | python3 "$HOOK" 2>/dev/null)
+if echo "$_reason_out" | grep -qF 'nothing the user said since approves this merge'; then
+  echo "PASS  [merge_serial_reply_without_approval_reason]"; PASS=$((PASS + 1))
+else
+  echo "FAIL  [merge_serial_reply_without_approval_reason] out=$(echo "$_reason_out" | head -c 200)"
+  FAIL=$((FAIL + 1)); FAILED_NAMES+=("merge_serial_reply_without_approval_reason")
+fi
+
+# A picked label that names the PR beside the approval (`PR #999 머지`) is the
+# same approval as a bare `머지`.
+run_merge_escalation_case "merge_serial_ask_label_names_pr_passes" \
+  "no" "" "momentum-merge-serial-ask-label-names-pr.jsonl" "gh pr merge 999 --squash --delete-branch"
+# `Approve merge` picked for "PR #999 Approve merge?" is the canonical answer.
+run_merge_escalation_case "merge_serial_ask_approve_merge_label_passes" \
+  "no" "" "momentum-merge-serial-ask-approve-merge-label.jsonl" "gh pr merge 999 --squash --delete-branch"
+# A typed approval that names the PR ("PR #999 머지해줘") reads like the label.
+run_merge_escalation_case "merge_serial_typed_names_pr_passes" \
+  "no" "" "momentum-merge-serial-typed-names-pr.jsonl" "gh pr merge 999 --squash --delete-branch"
+# Typing the ask back ("Approve merge?") asks again; it does not agree.
+run_merge_escalation_case "merge_serial_question_reply_denies" \
+  "yes" "" "momentum-merge-serial-question-reply.jsonl" "gh pr merge 999 --squash --delete-branch"
+
+# The deny names the missing answer, not a short briefing — the briefing was
+# complete, and a "fewer than 4 of 6" reason would send the actor to rewrite it.
+unanswered_reason=$(python3 -c '
+import json, sys
+print(json.dumps({"tool_name": "Bash",
+                  "tool_input": {"command": "gh pr merge 999 --squash --delete-branch"},
+                  "transcript_path": sys.argv[1], "session_id": "test-momentum-1402"}))' \
+  "$FIXTURES_DIR/momentum-merge-serial-unanswered-current.jsonl" \
+  | python3 "$HOOK" 2>/dev/null \
+  | python3 -c 'import json, sys; print(json.load(sys.stdin)["hookSpecificOutput"]["permissionDecisionReason"])')
+if printf '%s' "$unanswered_reason" | grep -qF "this merge needs its own answer" \
+    && ! printf '%s' "$unanswered_reason" | grep -qF "of 6 items present"; then
+  echo "PASS  [merge_serial_unanswered_reason_names_the_answer]"; PASS=$((PASS + 1))
+else
+  echo "FAIL  [merge_serial_unanswered_reason_names_the_answer] reason: $(printf '%s' "$unanswered_reason" | head -c 200)"
+  FAIL=$((FAIL + 1)); FAILED_NAMES+=("merge_serial_unanswered_reason_names_the_answer")
+fi
+
 # The marker attests to completeness, never to existence — a spent window has
 # nothing left for it to be about, so it does not release the second merge.
 run_merge_escalation_case "merge_serial_second_with_marker_denies" \

@@ -307,6 +307,79 @@ approve blindly.
   path, which is the ground this hook's spec already takes elsewhere: it is a
   self-discipline nudge, not an adversarial boundary.
 
+  **A serial merge needs its own answer (issue #1402).** The cut above leaves
+  the full-briefing path uncut, and that path had no notion of an answer: a
+  briefing written after the first merge, whose approve-ask slot cites the
+  answer the first merge already consumed, reached 4 of 6 items and released
+  the second merge on text alone. So once a merge has executed, both
+  full-briefing releases — the current turn and the correlated prior turn —
+  also require an approval of THIS merge after that merge. The target is the
+  one `_merge_target_pr` resolves, the way the prior-turn path resolves it,
+  except that a numberless merge reads its `gh pr checks/view` probe only after
+  the last executed merge — the earlier probe named that merge's PR. The
+  approval is either a typed reply that `_is_approval_reply` accepts (its final
+  clause is an approval token, with a reference to the PR set aside, so
+  `PR #999 머지해줘` counts) and that names the PR or answers a turn that
+  named it and either asked to merge that PR, or is answered by an approval
+  that names merging itself (`머지 진행`), and no later user message about the
+  PR or about merging is something other than an approval — the latest decision
+  wins, so `ok` followed by `PR #999 머지 보류` leaves the merge unanswered. A
+  merge that repeats or chains merge segments is never answered this way: one
+  answer releases one merge.
+  Asking to merge is one question sentence (ending in `?`, `할까요`, `될까요`,
+  `하시겠` or `해도 되`) with `merge` as a whole word, `머지` or `병합`, that
+  neither negates it nor asks whether it happened or how it stands
+  (`머지하지 말까요?`, `머지됐나요?`, `PR #999 merge status?`, `머지 상태`),
+  and that is about the PR. When the merge verb takes PR references as its
+  object — a list right before `머지`/`병합` or right after `merge` — the ask is
+  about exactly those PRs (`#833, #999 를 머지할까요?` asks about both;
+  `PR #999 checks are green, #833 머지할까요?` asks about #833 only). Without
+  such an object the sentence must name the PR or no PR at all
+  (`PR #999 브리핑 … Approve merge?` counts;
+  `PR #833 and #999 are ready; Approve merge #833?` does not). An unnamed ask is not discounted because the turn
+  cites other PRs or issues, since briefings do; a turn that briefs two PRs and
+  asks once without a number is read as asking about either. The other form is an `AskUserQuestion` tool_result that is not
+  `is_error`, whose question names the PR, held to the same merge rule
+  (`PR #999 어떻게 할까요?` answered `승인 — 그대로 머지` counts), and whose
+  picked label leads with an approval token
+  (`승인 — 머지`, `Approve merge`), a reference to the PR itself set aside (`PR #999 머지`). A reply is not an approval: an unrelated message, a status
+  request that names the PR (`PR #999 머지 상태만 알려줘`), a refusal that does
+  not end on an approval token, a reply that ends in a question mark
+  (`Approve merge?` typed back, `ok?`), a bare `ok` to a turn about something else or
+  to a status line about the PR that asks nothing (`PR #999 checks are green.`,
+  `PR #999 was approved; checks are green.`, `PR #999 emergency rollback?`), an answer to an approval ask that
+  is not a merge ask (`PR #999 테스트 승인할까요?`), an
+  approval picked for a different question, a `보류` pick, or a declined
+  question leaves the merge unanswered, and a merge whose target cannot be
+  resolved is never answered this way. Keyword tests were tried and dropped — each review round found a
+  phrasing that named the PR beside an approval word without agreeing to
+  anything. A PR number counts as named when no ASCII identifier character
+  touches it, so `#999를` names PR 999 and `v999` does not.
+
+  The `AskUserQuestion` form matters because `_human_user_indices` skips
+  tool_result-only entries by design — replayed over 566 local merges, the
+  typed-message-only version denied 47 merges the shipped gate allowed, and 13
+  of those had been answered through `AskUserQuestion`. With the forms above, a
+  replay over 572 local merges denies 45 that the shipped gate allowed. Three of them carry
+  a real approval that these forms do not read — typed `둘다 승인` and
+  `둘다 머지하세요`, whose final clause is not a bare token, and a picked
+  `앵커 작성 후 머지`, which does not lead with one — and a typed `승인` whose turn
+  did not name the merged PR; one answer was picked for a CHANGELOG question
+  that did not name it either. Each of those costs one more ask. The rest are
+  replies that approve nothing (`둘다 진행`, `각각 올리세요`) or merges with
+  nothing from the user after the previous one: compaction summaries and task
+  notifications are not the user. No new state; a session
+  with no executed merge is untouched. A complete briefing that fails only this
+  check is denied with its own reason naming the missing answer, not the item
+  count.
+
+  The comparison is session-wide, not per repository: a merge in one repo
+  followed by a briefing for another still needs its answer, which is the
+  same No Approval Transfer rule. The marker floor is deliberately left as
+  #1214 shipped it — `merge_serial_rebriefed_passes` pins that a briefing item
+  written after the first merge re-arms the marker on its own — so a marked
+  merge is the one release this check does not reach.
+
   **Both directions fail open.** A merge counts as executed only on a clean
   `tool_result`, and only when the shell could not have jumped over it —
   `_SKIPPABLE_KEYWORDS` (`||`, `if`, `elif`, `case`) plus a non-terminal `&&`.

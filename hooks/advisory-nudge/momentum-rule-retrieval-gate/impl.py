@@ -464,7 +464,7 @@ _APPROVAL_TOKENS = frozenset({
     "ok", "okay", "okey", "k", "kk", "yes", "yep", "yup", "y", "go", "go ahead",
     "do it", "proceed", "proceed with the merge", "merge", "merge it", "sure",
     "lgtm", "ship it", "sounds good",
-    "approve", "approved",
+    "approve", "approved", "approve merge", "머지 승인",
     "네", "넵", "응", "ㅇㅋ", "ㅇㅇ", "ㄱㄱ", "고고", "승인", "진행", "진행해",
     "진행해줘", "진행하자", "머지", "머지해", "머지해줘", "머지 진행", "좋아",
     "좋습니다", "그래", "ㄱ",
@@ -477,6 +477,42 @@ _APPROVAL_TOKENS = frozenset({
 # last clause is a fresh instruction ("머지 진행 상황 알려주고 파서부터 고쳐줘")
 # still fails, which is the property exact equality was protecting.
 _CLAUSE_TAIL_RE = re.compile(r"[.!?。…\n,;·]+")
+
+# Each `"question"="answer"` pair in an AskUserQuestion tool_result; the answer
+# is the option label (or the typed "Other" text) the user picked.
+_ASK_ANSWER_RE = re.compile(r'"((?:[^"\\]|\\.)*)"=\s*"((?:[^"\\]|\\.)*)"')
+
+# A picked AskUserQuestion label usually leads with the approval and qualifies
+# it after a separator ("승인 — 머지", "머지, `Carried: none`"). Only that leading
+# segment is read: a keyword anywhere in the label cannot tell asking from
+# agreeing, as "PR #999 머지 상태만 알려줘" shows.
+_LABEL_LEAD_RE = re.compile(r"\s*[—–:,(-]\s*")
+
+# A merge ask is one sentence that both names merging and asks ("Approve
+# merge?", "PR #999를 머지할까요?"). The briefing counter's approve-ask words
+# cannot stand in for it: "approve" also matches "PR #999 was approved", and
+# "승인" matches "테스트 승인할까요?", and neither of those asks to merge.
+# "merge" is a whole word so "emergency" and "merged" stay out, and a question
+# that negates merging or asks whether it happened ("머지하지 말까요?",
+# "머지됐나요?") is not an ask to merge.
+_MERGE_WORD_RE = re.compile(r"(?<![A-Za-z])merge(?![A-Za-z-])|머지|병합", re.IGNORECASE)
+_NOT_MERGE_ASK_RE = re.compile(
+    r"(?<![A-Za-z])(?:not|don't|dont|never)(?![A-Za-z])"
+    r"|(?:머지|병합)\s*(?:됐|되었|된|되어|되나|하지|안\b|말|상태|충돌|결과)|(?:안|말)\s*(?:머지|병합)|말까요"
+    r"|(?<![A-Za-z])merge\s+(?:status|state|conflicts?|results?)(?![A-Za-z])",
+    re.IGNORECASE)
+_ASK_SENTENCE_RE = re.compile(r"[^.!?。\n]*(?:\?|할까요|될까요|하시겠|해도 되)")
+# An explicit PR reference (`#N`, `PR N`, `…/pull/N`). A bare number is not one:
+# "CI 10/10" must not read as a second PR in the turn.
+_PR_REF_RE = re.compile(r"(?:#|/pull/|(?<![A-Za-z])pr\s*#?\s*)(\d+)(?![A-Za-z0-9_])", re.IGNORECASE)
+
+# The PRs a merge verb takes as its object: a list of references right before
+# 머지/병합 ("#1023, #1024 를 머지") or right after "merge" ("Approve merge #833").
+_REF_LIST = (r"(?:#|(?<![A-Za-z])pr\s*#?\s*)\d+(?![A-Za-z0-9_])"
+             r"(?:\s*(?:,|과|와|및|and|&)\s*(?:#|pr\s*#?\s*)?\d+(?![A-Za-z0-9_]))*")
+_MERGE_OBJECT_RE = re.compile(
+    rf"({_REF_LIST})\s*(?:을|를|은|는|도)?\s*(?:머지|병합)"
+    rf"|(?<![A-Za-z])merge\s+(?:pr\s*)?({_REF_LIST})", re.IGNORECASE)
 
 # A single positional token that is a bare PR number or a …/pull/N URL.
 _PULL_TOKEN_RE = re.compile(r"^(?:\S*/pull/(\d+)|(\d+))$")
@@ -605,6 +641,10 @@ def _user_message_text(content: object) -> str:
 def _is_approval_reply(content: object) -> bool:
     """True when a user message is a short bare approval token (ok / 진행 / 승인 …)."""
     raw = _user_message_text(content).strip().lower()
+    # A reply that ends in a question asks rather than agrees: "Approve merge?"
+    # typed back is the ask itself, and "ok?" is checking, not consent.
+    if raw.endswith(("?", "？")):
+        return False
     if re.sub(r"\s+", " ", raw).strip(" .!~,·") in _APPROVAL_TOKENS:
         return True
     # Split the RAW text: normalizing whitespace first turns a newline into a
@@ -689,8 +729,13 @@ def _merge_segments(command: object) -> list[str | None]:
 
 
 def _mentions_pr(text: str, pr: str) -> bool:
-    """True when the text references the target PR (`#N` or the bare number)."""
-    return re.search(rf"#{pr}\b|\b{pr}\b", text) is not None
+    """True when the text references the target PR (`#N` or the bare number).
+
+    Bounded by ASCII identifier characters, not `\\b`: Hangul is a word
+    character, so `#1102를` or `1102번` has no word boundary after the number,
+    while `v1102` must still not read as PR 1102.
+    """
+    return re.search(rf"(?<![A-Za-z0-9_]){pr}(?![A-Za-z0-9_])", text) is not None
 
 
 def _context_pr_from_window(entries: list[dict], lo: int, hi: int) -> str | None:
@@ -792,6 +837,134 @@ def _last_executed_merge(entries: list[dict]) -> int | None:
     """Index of the most recent executed `gh pr merge`, or None."""
     executed = _executed_merge_indices(entries)
     return executed[-1] if executed else None
+
+
+def _strip_pr_ref(text: str, pr: str) -> str:
+    """`text` with each reference to `pr` (`PR #999`, `#999`, `999`) blanked out."""
+    return re.sub(rf"(?:(?<![A-Za-z])pr\s*)?#?(?<![A-Za-z0-9_]){pr}(?![A-Za-z0-9_])", " ",
+                  text, flags=re.IGNORECASE)
+
+
+def _ask_label_approves(label: str, pr: str) -> bool:
+    """True when a picked label is an approval: the whole label passes
+    `_is_approval_reply`, or its leading segment is an approval token once a
+    reference to `pr` is removed (`PR #999 머지`, `Merge PR #999`)."""
+    if _is_approval_reply(label):
+        return True
+    lead = _LABEL_LEAD_RE.split(label.strip().lower(), maxsplit=1)[0]
+    lead = _strip_pr_ref(lead, pr)
+    return re.sub(r"\s+", " ", lead).strip(" .!~,·") in _APPROVAL_TOKENS
+
+
+def _is_merge_ask(text: str, pr: str) -> bool:
+    """True when some sentence of `text` asks to merge `pr`: the sentence names
+    it, or names no PR at all ("PR #999 브리핑 … Approve merge?"). A sentence
+    that names another PR ("Approve merge #833?") asks about that PR. A briefing
+    cites issues and sibling PRs, so an unnamed ask is not discounted for them."""
+    for s in _ASK_SENTENCE_RE.findall(text):
+        if not _MERGE_WORD_RE.search(s) or _NOT_MERGE_ASK_RE.search(s):
+            continue
+        objects = {n for m in _MERGE_OBJECT_RE.finditer(s)
+                   for n in re.findall(r"\d+", m.group(1) or m.group(2))}
+        if pr in objects if objects else set(_PR_REF_RE.findall(s)) <= {pr}:
+            return True
+    return False
+
+
+def _ask_answer_approves(content: object, pr: str) -> bool:
+    """True when an AskUserQuestion result approves merging a question that names
+    `pr` — the question asks to merge, or the picked approval names merging
+    itself ("승인 — 그대로 머지"); a bare approval picked for some other ask is
+    not this merge's answer."""
+    return any(_mentions_pr(q, pr)
+               and (_is_merge_ask(q, pr) or _MERGE_WORD_RE.search(a))
+               and _ask_label_approves(a, pr)
+               for q, a in _ASK_ANSWER_RE.findall(_user_message_text(content)))
+
+
+def _merge_target_pr(entries: list[dict], command: object, floor: int) -> str | None:
+    """PR number a single `gh pr merge` targets, resolved the way
+    `_correlated_prior_turn_text` resolves it; None when it cannot be named.
+
+    A numberless merge reads its probe from `floor` on: a probe before the last
+    executed merge named THAT merge's PR, not the current branch's."""
+    segments = _merge_segments(command)
+    if len(segments) != 1:
+        return None
+    pos = segments[0]
+    if pos is None:
+        return _context_pr_from_window(entries, floor, len(entries))
+    m = _PULL_TOKEN_RE.match(pos)
+    return (m.group(1) or m.group(2)) if m else None
+
+
+def _is_typed_approval(content: object, pr: str) -> bool:
+    reply = _user_message_text(content)
+    return _is_approval_reply(content) or (
+        _mentions_pr(reply, pr) and _is_approval_reply(_strip_pr_ref(reply, pr)))
+
+
+def _held_after(entries: list[dict], idxs: list[int], index: int, pr: str) -> bool:
+    """True when a later user message about this PR or merging is not an approval
+    ("PR #999 머지 보류"): the latest decision replaces an earlier approval."""
+    for j in idxs:
+        if j <= index:
+            continue
+        content = entries[j].get("message", {}).get("content")
+        text = _user_message_text(content)
+        if ((_mentions_pr(text, pr) or _MERGE_WORD_RE.search(text))
+                and not _is_typed_approval(content, pr)):
+            return True
+    return False
+
+
+def _answered_after(entries: list[dict], idxs: list[int], index: int,
+                    pr: str | None) -> bool:
+    """True when the user approved after entry `index` — typed or via AskUserQuestion.
+
+    Only approval of THIS merge counts, tied to `pr` — a typed
+    approval must name the PR or answer a turn that named it, where either that
+    turn asked to merge or the approval names merging itself ("머지 진행"),
+    since an "ok" to a status line or to another approval ask agrees to
+    nothing; a picked one is held to the same rule against its question. With no resolvable target
+    nothing counts. An AskUserQuestion answer arrives as
+    a tool_result, which `_human_user_indices` skips by design, so it is matched
+    to its question here; a declined question comes back `is_error`.
+    """
+    if pr is None:
+        return False
+    for k, i in enumerate(idxs):
+        content = entries[i].get("message", {}).get("content")
+        if i <= index:
+            continue
+        reply = _user_message_text(content)
+        if not _is_typed_approval(content, pr):
+            continue
+        replied_to = _assistant_text(entries, max(index + 1, idxs[k - 1] + 1 if k else 0), i)
+        merge_named = _is_merge_ask(replied_to, pr) or _MERGE_WORD_RE.search(reply)
+        if ((_mentions_pr(reply, pr) or (merge_named and _mentions_pr(replied_to, pr)))
+                and not _held_after(entries, idxs, i, pr)):
+            return True
+    asks: set[str] = set()
+    for i, ev in enumerate(entries):
+        msg = ev.get("message")
+        if not isinstance(msg, dict) or ev.get("isSidechain"):
+            continue
+        content = msg.get("content")
+        if not isinstance(content, list):
+            continue
+        for b in content:
+            if not isinstance(b, dict):
+                continue
+            if b.get("type") == "tool_use" and b.get("name") == "AskUserQuestion":
+                if isinstance(b.get("id"), str):
+                    asks.add(b["id"])
+            elif (i > index and b.get("type") == "tool_result"
+                  and b.get("tool_use_id") in asks and not b.get("is_error")
+                  and _ask_answer_approves(b.get("content"), pr)
+                  and not _held_after(entries, idxs, i, pr)):
+                return True
+    return False
 
 
 def _has_repetition(command: object) -> bool:
@@ -903,16 +1076,30 @@ def _merge_escalation_reason(payload: dict) -> str | None:
     current_text = _assistant_text(entries, lo, len(entries))
     if _is_trivial_merge(current_text):
         return None
+
+    # A complete briefing is half of the flow; the user's answer is the other
+    # half (issue #1402). Once a merge has run, a briefing written after it with
+    # no user message since can only be citing an answer the earlier merge
+    # already consumed, so it no longer releases the next merge on text alone.
+    last_merge = _last_executed_merge(entries)
+    # One answer releases one merge: a loop or chained merge is never answered.
+    answered = last_merge is None or (
+        len(_merge_segments(code)) == 1 and not _has_repetition(code)
+        and _answered_after(entries, idxs, last_merge,
+                            _merge_target_pr(entries, code, last_merge + 1)))
     items = _briefing_item_count(current_text)
-    if items >= MERGE_BRIEFING_MIN_ITEMS:
+    full_briefing = items >= MERGE_BRIEFING_MIN_ITEMS
+    if full_briefing and answered:
         return None
 
     prev_text = _correlated_prior_turn_text(entries, idxs, code)
-    if prev_text is not None and (
-        _is_trivial_merge(prev_text)
-        or _briefing_item_count(prev_text) >= MERGE_BRIEFING_MIN_ITEMS
-    ):
-        return None
+    if prev_text is not None:
+        if _is_trivial_merge(prev_text):
+            return None
+        if _briefing_item_count(prev_text) >= MERGE_BRIEFING_MIN_ITEMS:
+            if answered:
+                return None
+            full_briefing = True
 
     # The marker attests that a briefing was surfaced, so it can stand in for
     # *completeness* — the item counter reads prose and under-counts a briefing
@@ -939,8 +1126,7 @@ def _merge_escalation_reason(payload: dict) -> str | None:
     # them merges that DID carry a complete briefing — that only raises the
     # cost of the honest path, the ground on which #1214 discarded its own
     # original proposal. Cut here, 3 change and all 3 are marker-only merges.
-    floor = _last_executed_merge(entries)
-    floor = 0 if floor is None else floor + 1
+    floor = 0 if last_merge is None else last_merge + 1
     marker_prev = _correlated_prior_turn_text(entries, idxs, code, floor)
     marker_items = max(
         _briefing_item_count(_assistant_text(entries, max(lo, floor), len(entries))),
@@ -957,6 +1143,25 @@ def _merge_escalation_reason(payload: dict) -> str | None:
                 "was complete, not that one exists, and none was found",
             correct_path="surface the 6-item briefing and an explicit 'Approve "
                 "merge?' question in this turn, then re-run the merge",
+            bypass_env=MERGE_ADVISORY_ENV,
+            bypass_reason_hint="with a one-line reason — set in the session "
+                "environment, since an inline `VAR=1 gh pr merge …` prefix "
+                "never reaches this hook",
+            reference="CLAUDE.md → Pre-Merge Reporting; "
+                "hooks/advisory-nudge/momentum-rule-retrieval-gate/spec.md",
+        )
+
+    if full_briefing:
+        replied = last_merge is not None and any(i > last_merge for i in idxs)
+        return format_block(
+            rule_name="Pre-Merge Reporting briefing",
+            why="a gh pr merge already ran in this session and "
+                + ("nothing the user said since approves this merge"
+                   if replied else "no user message has arrived since")
+                + " — the briefing is complete, but approving one PR approves "
+                "only that PR, so this merge needs its own answer",
+            correct_path="ask 'Approve merge?' for this PR, wait for the user's "
+                "answer, then re-run the merge",
             bypass_env=MERGE_ADVISORY_ENV,
             bypass_reason_hint="with a one-line reason — set in the session "
                 "environment, since an inline `VAR=1 gh pr merge …` prefix "
