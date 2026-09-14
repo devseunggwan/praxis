@@ -318,18 +318,27 @@ approve blindly.
   except that a numberless merge reads its `gh pr checks/view` probe only after
   the last executed merge — the earlier probe named that merge's PR. The
   approval is either a typed reply that `_is_approval_reply` accepts (its final
-  clause is an approval token) and that names the PR or answers a turn that
-  named it and either asked to merge — one sentence that names merging and
-  asks, as in `Approve merge?` — or is answered by an approval that names
-  merging itself (`머지 진행`), or an `AskUserQuestion` tool_result that is not
+  clause is an approval token, with a reference to the PR set aside, so
+  `PR #999 머지해줘` counts) and that names the PR or answers a turn that
+  named it and either asked to merge that PR, or is answered by an approval
+  that names merging itself (`머지 진행`).
+  Asking to merge is one question sentence (ending in `?`, `할까요`, `될까요`,
+  `하시겠` or `해도 되`) with `merge` as a whole word, `머지` or `병합`, that
+  neither negates it nor asks whether it happened (`머지하지 말까요?`,
+  `머지됐나요?`), and that names the PR or names no PR at all
+  (`PR #999 브리핑 … Approve merge?` counts; `Approve merge #833?` beside a
+  #999 status line does not). An unnamed ask is not discounted because the turn
+  cites other PRs or issues, since briefings do; a turn that briefs two PRs and
+  asks once without a number is read as asking about either. The other form is an `AskUserQuestion` tool_result that is not
   `is_error`, whose question names the PR, held to the same merge rule
   (`PR #999 어떻게 할까요?` answered `승인 — 그대로 머지` counts), and whose
   picked label leads with an approval token
-  (`승인 — 머지`), a reference to the PR itself set aside (`PR #999 머지`). A reply is not an approval: an unrelated message, a status
+  (`승인 — 머지`, `Approve merge`), a reference to the PR itself set aside (`PR #999 머지`). A reply is not an approval: an unrelated message, a status
   request that names the PR (`PR #999 머지 상태만 알려줘`), a refusal that does
-  not end on an approval token, a bare `ok` to a turn about something else or
+  not end on an approval token, a reply that ends in a question mark
+  (`Approve merge?` typed back, `ok?`), a bare `ok` to a turn about something else or
   to a status line about the PR that asks nothing (`PR #999 checks are green.`,
-  `PR #999 was approved; checks are green.`), an answer to an approval ask that
+  `PR #999 was approved; checks are green.`, `PR #999 emergency rollback?`), an answer to an approval ask that
   is not a merge ask (`PR #999 테스트 승인할까요?`), an
   approval picked for a different question, a `보류` pick, or a declined
   question leaves the merge unanswered, and a merge whose target cannot be
