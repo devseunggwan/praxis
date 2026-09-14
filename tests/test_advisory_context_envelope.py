@@ -1,4 +1,4 @@
-"""The five mutation advisories emit ONE well-formed context envelope (#1265).
+"""Mutation advisories emit ONE well-formed context envelope (#1265, #1408).
 
 A substring check on stdout (`"additionalContext" in out`) passes on output the
 harness cannot use: stdout takes exactly one JSON document, so a hook that emits
@@ -102,6 +102,13 @@ CASES = [
             "TOKEN=$(aws secretsmanager get-secret-value --secret-id fake "
             '--query SecretString --output text); echo "$TOKEN"')}},
         "[secret-print-redaction-advisory]",
+    ),
+    (
+        # The masked-exit shape #1408 counted 11 times in one session.
+        "pipefail-advisory",
+        {"tool_name": _BASH, "tool_input": {
+            "command": "git switch main 2>&1 | tail -1 && gh pr merge 1406 --squash --delete-branch"}},
+        "masked exit code gates an irreversible command",
     ),
 ]
 
