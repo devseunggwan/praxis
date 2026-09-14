@@ -846,6 +846,12 @@ run_merge_escalation_case "merge_serial_status_question_ok_denies" \
   "yes" "" "momentum-merge-serial-status-question-ok.jsonl" "gh pr merge 999 --squash --delete-branch"
 run_merge_escalation_case "merge_serial_ask_negative_merge_denies" \
   "yes" "" "momentum-merge-serial-ask-negative-merge.jsonl" "gh pr merge 999 --squash --delete-branch"
+# A merge ask for another PR does not become this PR's because the same turn
+# mentions it ("Approve merge #833? PR #999 checks are green.").
+run_merge_escalation_case "merge_serial_other_pr_merge_ask_denies" \
+  "yes" "" "momentum-merge-serial-other-pr-merge-ask.jsonl" "gh pr merge 999 --squash --delete-branch"
+run_merge_escalation_case "merge_serial_ask_other_pr_merge_denies" \
+  "yes" "" "momentum-merge-serial-ask-other-pr-merge.jsonl" "gh pr merge 999 --squash --delete-branch"
 # …but an approval that names merging itself answers the merge even when the
 # question did not ask it ("PR #999 어떻게 할까요?" → `승인 — 그대로 머지`).
 run_merge_escalation_case "merge_serial_ask_label_names_merge_passes" \

@@ -501,6 +501,9 @@ _NOT_MERGE_ASK_RE = re.compile(
     r"|(?:머지|병합)\s*(?:됐|되었|된|되어|되나|하지|안\b|말)|(?:안|말)\s*(?:머지|병합)|말까요",
     re.IGNORECASE)
 _ASK_SENTENCE_RE = re.compile(r"[^.!?。\n]*(?:\?|할까요|될까요|하시겠|해도 되)")
+# An explicit PR reference (`#N`, `PR N`, `…/pull/N`). A bare number is not one:
+# "CI 10/10" must not read as a second PR in the turn.
+_PR_REF_RE = re.compile(r"(?:#|/pull/|(?<![A-Za-z])pr\s*#?\s*)(\d+)(?![A-Za-z0-9_])", re.IGNORECASE)
 
 # A single positional token that is a bare PR number or a …/pull/N URL.
 _PULL_TOKEN_RE = re.compile(r"^(?:\S*/pull/(\d+)|(\d+))$")
@@ -838,10 +841,22 @@ def _ask_label_approves(label: str, pr: str) -> bool:
     return re.sub(r"\s+", " ", lead).strip(" .!~,·") in _APPROVAL_TOKENS
 
 
-def _is_merge_ask(text: str) -> bool:
-    """True when some sentence of `text` asks to merge."""
-    return any(_MERGE_WORD_RE.search(s) and not _NOT_MERGE_ASK_RE.search(s)
-               for s in _ASK_SENTENCE_RE.findall(text))
+def _names_no_other_pr(text: str, pr: str) -> bool:
+    """True when `text` references no PR other than `pr`."""
+    return set(_PR_REF_RE.findall(text)) <= {pr}
+
+
+def _is_merge_ask(text: str, pr: str) -> bool:
+    """True when some sentence of `text` asks to merge `pr`: the sentence names
+    it, or names no PR in a turn that names no other ("PR #999 브리핑 … Approve
+    merge?"). "Approve merge #833?" beside a #999 status line asks about #833."""
+    for s in _ASK_SENTENCE_RE.findall(text):
+        if not _MERGE_WORD_RE.search(s) or _NOT_MERGE_ASK_RE.search(s):
+            continue
+        refs = set(_PR_REF_RE.findall(s))
+        if pr in refs or (not refs and _names_no_other_pr(text, pr)):
+            return True
+    return False
 
 
 def _ask_answer_approves(content: object, pr: str) -> bool:
@@ -849,7 +864,8 @@ def _ask_answer_approves(content: object, pr: str) -> bool:
     `pr` — the question asks to merge, or the picked approval names merging
     itself ("승인 — 그대로 머지"); a bare approval picked for some other ask is
     not this merge's answer."""
-    return any(_mentions_pr(q, pr) and (_is_merge_ask(q) or _MERGE_WORD_RE.search(a))
+    return any(_mentions_pr(q, pr)
+               and (_is_merge_ask(q, pr) or (_MERGE_WORD_RE.search(a) and _names_no_other_pr(q, pr)))
                and _ask_label_approves(a, pr)
                for q, a in _ASK_ANSWER_RE.findall(_user_message_text(content)))
 
@@ -891,7 +907,8 @@ def _answered_after(entries: list[dict], idxs: list[int], index: int,
             continue
         replied_to = _assistant_text(entries, max(index + 1, idxs[k - 1] + 1 if k else 0), i)
         reply = _user_message_text(content)
-        merge_named = _is_merge_ask(replied_to) or _MERGE_WORD_RE.search(reply)
+        merge_named = _is_merge_ask(replied_to, pr) or (
+            _MERGE_WORD_RE.search(reply) and _names_no_other_pr(replied_to, pr))
         if _mentions_pr(reply, pr) or (merge_named and _mentions_pr(replied_to, pr)):
             return True
     asks: set[str] = set()
