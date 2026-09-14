@@ -506,6 +506,14 @@ _ASK_SENTENCE_RE = re.compile(r"[^.!?。\n]*(?:\?|할까요|될까요|하시겠|
 # "CI 10/10" must not read as a second PR in the turn.
 _PR_REF_RE = re.compile(r"(?:#|/pull/|(?<![A-Za-z])pr\s*#?\s*)(\d+)(?![A-Za-z0-9_])", re.IGNORECASE)
 
+# The PRs a merge verb takes as its object: a list of references right before
+# 머지/병합 ("#1023, #1024 를 머지") or right after "merge" ("Approve merge #833").
+_REF_LIST = (r"(?:#|(?<![A-Za-z])pr\s*#?\s*)\d+(?![A-Za-z0-9_])"
+             r"(?:\s*(?:,|과|와|및|and|&)\s*(?:#|pr\s*#?\s*)?\d+(?![A-Za-z0-9_]))*")
+_MERGE_OBJECT_RE = re.compile(
+    rf"({_REF_LIST})\s*(?:을|를|은|는|도)?\s*(?:머지|병합)"
+    rf"|(?<![A-Za-z])merge\s+(?:pr\s*)?({_REF_LIST})", re.IGNORECASE)
+
 # A single positional token that is a bare PR number or a …/pull/N URL.
 _PULL_TOKEN_RE = re.compile(r"^(?:\S*/pull/(\d+)|(\d+))$")
 
@@ -856,8 +864,9 @@ def _is_merge_ask(text: str, pr: str) -> bool:
     for s in _ASK_SENTENCE_RE.findall(text):
         if not _MERGE_WORD_RE.search(s) or _NOT_MERGE_ASK_RE.search(s):
             continue
-        refs = set(_PR_REF_RE.findall(s))
-        if pr in refs or not refs:
+        objects = {n for m in _MERGE_OBJECT_RE.finditer(s)
+                   for n in re.findall(r"\d+", m.group(1) or m.group(2))}
+        if pr in objects if objects else set(_PR_REF_RE.findall(s)) <= {pr}:
             return True
     return False
 

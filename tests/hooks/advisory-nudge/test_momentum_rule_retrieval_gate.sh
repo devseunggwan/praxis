@@ -863,6 +863,14 @@ run_merge_escalation_case "merge_serial_ask_label_names_merge_passes" \
 # A question about the merge's state asks nothing ("PR #999 merge status?").
 run_merge_escalation_case "merge_serial_merge_status_ok_denies" \
   "yes" "" "momentum-merge-serial-merge-status-ok.jsonl" "gh pr merge 999 --squash --delete-branch"
+# A merge ask is about the PRs its verb takes, not every PR in the sentence…
+run_merge_escalation_case "merge_serial_mixed_pr_ask_denies" \
+  "yes" "" "momentum-merge-serial-mixed-pr-ask.jsonl" "gh pr merge 999 --squash --delete-branch"
+run_merge_escalation_case "merge_serial_clause_other_pr_denies" \
+  "yes" "" "momentum-merge-serial-clause-other-pr.jsonl" "gh pr merge 999 --squash --delete-branch"
+# …so "#833, #999 를 머지해 반영할까요?" still asks about both.
+run_merge_escalation_case "merge_serial_two_pr_ask_passes" \
+  "no" "" "momentum-merge-serial-two-pr-ask.jsonl" "gh pr merge 999 --squash --delete-branch"
 
 # A picked label that names the PR beside the approval (`PR #999 머지`) is the
 # same approval as a bare `머지`.
