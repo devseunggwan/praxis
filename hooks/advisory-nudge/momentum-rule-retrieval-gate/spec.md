@@ -341,8 +341,8 @@ approve blindly.
   The `AskUserQuestion` form matters because `_human_user_indices` skips
   tool_result-only entries by design — replayed over 566 local merges, the
   typed-message-only version denied 47 merges the shipped gate allowed, and 13
-  of those had been answered through `AskUserQuestion`. With the forms above the
-  replay denies 44 of the 566 that the shipped gate allowed. Three of them carry
+  of those had been answered through `AskUserQuestion`. With the forms above, a
+  replay over 569 local merges denies 45 that the shipped gate allowed. Three of them carry
   a real approval that these forms do not read — typed `둘다 승인` and
   `둘다 머지하세요`, whose final clause is not a bare token, and a picked
   `앵커 작성 후 머지`, which does not lead with one — and a typed `승인` whose turn
