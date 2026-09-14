@@ -874,6 +874,9 @@ run_merge_escalation_case "merge_serial_two_pr_ask_passes" \
 # One answer releases one merge, never a loop that repeats it.
 run_merge_escalation_case "merge_serial_loop_answered_denies" \
   "yes" "" "momentum-merge-serial-answered-current.jsonl" "for i in 1 2; do gh pr merge 999 --squash; done"
+# A later hold replaces an earlier approval ("ok" then "PR #999 머지 보류").
+run_merge_escalation_case "merge_serial_hold_after_ok_denies" \
+  "yes" "" "momentum-merge-serial-hold-after-ok.jsonl" "gh pr merge 999 --squash --delete-branch"
 
 # A picked label that names the PR beside the approval (`PR #999 머지`) is the
 # same approval as a bare `머지`.

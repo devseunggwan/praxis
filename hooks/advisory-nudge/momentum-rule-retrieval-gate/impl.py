@@ -898,6 +898,26 @@ def _merge_target_pr(entries: list[dict], command: object, floor: int) -> str | 
     return (m.group(1) or m.group(2)) if m else None
 
 
+def _is_typed_approval(content: object, pr: str) -> bool:
+    reply = _user_message_text(content)
+    return _is_approval_reply(content) or (
+        _mentions_pr(reply, pr) and _is_approval_reply(_strip_pr_ref(reply, pr)))
+
+
+def _held_after(entries: list[dict], idxs: list[int], index: int, pr: str) -> bool:
+    """True when a later user message about this PR or merging is not an approval
+    ("PR #999 머지 보류"): the latest decision replaces an earlier approval."""
+    for j in idxs:
+        if j <= index:
+            continue
+        content = entries[j].get("message", {}).get("content")
+        text = _user_message_text(content)
+        if ((_mentions_pr(text, pr) or _MERGE_WORD_RE.search(text))
+                and not _is_typed_approval(content, pr)):
+            return True
+    return False
+
+
 def _answered_after(entries: list[dict], idxs: list[int], index: int,
                     pr: str | None) -> bool:
     """True when the user approved after entry `index` — typed or via AskUserQuestion.
@@ -918,12 +938,12 @@ def _answered_after(entries: list[dict], idxs: list[int], index: int,
         if i <= index:
             continue
         reply = _user_message_text(content)
-        if not (_is_approval_reply(content)
-                or (_mentions_pr(reply, pr) and _is_approval_reply(_strip_pr_ref(reply, pr)))):
+        if not _is_typed_approval(content, pr):
             continue
         replied_to = _assistant_text(entries, max(index + 1, idxs[k - 1] + 1 if k else 0), i)
         merge_named = _is_merge_ask(replied_to, pr) or _MERGE_WORD_RE.search(reply)
-        if _mentions_pr(reply, pr) or (merge_named and _mentions_pr(replied_to, pr)):
+        if ((_mentions_pr(reply, pr) or (merge_named and _mentions_pr(replied_to, pr)))
+                and not _held_after(entries, idxs, i, pr)):
             return True
     asks: set[str] = set()
     for i, ev in enumerate(entries):
@@ -941,7 +961,8 @@ def _answered_after(entries: list[dict], idxs: list[int], index: int,
                     asks.add(b["id"])
             elif (i > index and b.get("type") == "tool_result"
                   and b.get("tool_use_id") in asks and not b.get("is_error")
-                  and _ask_answer_approves(b.get("content"), pr)):
+                  and _ask_answer_approves(b.get("content"), pr)
+                  and not _held_after(entries, idxs, i, pr)):
                 return True
     return False
 
