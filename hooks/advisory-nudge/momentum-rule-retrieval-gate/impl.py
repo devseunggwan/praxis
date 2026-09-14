@@ -830,6 +830,12 @@ def _last_executed_merge(entries: list[dict]) -> int | None:
     return executed[-1] if executed else None
 
 
+def _strip_pr_ref(text: str, pr: str) -> str:
+    """`text` with each reference to `pr` (`PR #999`, `#999`, `999`) blanked out."""
+    return re.sub(rf"(?:(?<![A-Za-z])pr\s*)?#?(?<![A-Za-z0-9_]){pr}(?![A-Za-z0-9_])", " ",
+                  text, flags=re.IGNORECASE)
+
+
 def _ask_label_approves(label: str, pr: str) -> bool:
     """True when a picked label is an approval: the whole label passes
     `_is_approval_reply`, or its leading segment is an approval token once a
@@ -837,7 +843,7 @@ def _ask_label_approves(label: str, pr: str) -> bool:
     if _is_approval_reply(label):
         return True
     lead = _LABEL_LEAD_RE.split(label.strip().lower(), maxsplit=1)[0]
-    lead = re.sub(rf"(?:\bpr\s*)?#?(?<![A-Za-z0-9_]){pr}(?![A-Za-z0-9_])", " ", lead)
+    lead = _strip_pr_ref(lead, pr)
     return re.sub(r"\s+", " ", lead).strip(" .!~,·") in _APPROVAL_TOKENS
 
 
@@ -903,10 +909,13 @@ def _answered_after(entries: list[dict], idxs: list[int], index: int,
         return False
     for k, i in enumerate(idxs):
         content = entries[i].get("message", {}).get("content")
-        if i <= index or not _is_approval_reply(content):
+        if i <= index:
+            continue
+        reply = _user_message_text(content)
+        if not (_is_approval_reply(content)
+                or (_mentions_pr(reply, pr) and _is_approval_reply(_strip_pr_ref(reply, pr)))):
             continue
         replied_to = _assistant_text(entries, max(index + 1, idxs[k - 1] + 1 if k else 0), i)
-        reply = _user_message_text(content)
         merge_named = _is_merge_ask(replied_to, pr) or (
             _MERGE_WORD_RE.search(reply) and _names_no_other_pr(replied_to, pr))
         if _mentions_pr(reply, pr) or (merge_named and _mentions_pr(replied_to, pr)):
