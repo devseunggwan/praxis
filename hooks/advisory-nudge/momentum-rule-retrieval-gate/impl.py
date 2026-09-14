@@ -847,20 +847,16 @@ def _ask_label_approves(label: str, pr: str) -> bool:
     return re.sub(r"\s+", " ", lead).strip(" .!~,·") in _APPROVAL_TOKENS
 
 
-def _names_no_other_pr(text: str, pr: str) -> bool:
-    """True when `text` references no PR other than `pr`."""
-    return set(_PR_REF_RE.findall(text)) <= {pr}
-
-
 def _is_merge_ask(text: str, pr: str) -> bool:
     """True when some sentence of `text` asks to merge `pr`: the sentence names
-    it, or names no PR in a turn that names no other ("PR #999 브리핑 … Approve
-    merge?"). "Approve merge #833?" beside a #999 status line asks about #833."""
+    it, or names no PR at all ("PR #999 브리핑 … Approve merge?"). A sentence
+    that names another PR ("Approve merge #833?") asks about that PR. A briefing
+    cites issues and sibling PRs, so an unnamed ask is not discounted for them."""
     for s in _ASK_SENTENCE_RE.findall(text):
         if not _MERGE_WORD_RE.search(s) or _NOT_MERGE_ASK_RE.search(s):
             continue
         refs = set(_PR_REF_RE.findall(s))
-        if pr in refs or (not refs and _names_no_other_pr(text, pr)):
+        if pr in refs or not refs:
             return True
     return False
 
@@ -871,7 +867,7 @@ def _ask_answer_approves(content: object, pr: str) -> bool:
     itself ("승인 — 그대로 머지"); a bare approval picked for some other ask is
     not this merge's answer."""
     return any(_mentions_pr(q, pr)
-               and (_is_merge_ask(q, pr) or (_MERGE_WORD_RE.search(a) and _names_no_other_pr(q, pr)))
+               and (_is_merge_ask(q, pr) or _MERGE_WORD_RE.search(a))
                and _ask_label_approves(a, pr)
                for q, a in _ASK_ANSWER_RE.findall(_user_message_text(content)))
 
@@ -916,8 +912,7 @@ def _answered_after(entries: list[dict], idxs: list[int], index: int,
                 or (_mentions_pr(reply, pr) and _is_approval_reply(_strip_pr_ref(reply, pr)))):
             continue
         replied_to = _assistant_text(entries, max(index + 1, idxs[k - 1] + 1 if k else 0), i)
-        merge_named = _is_merge_ask(replied_to, pr) or (
-            _MERGE_WORD_RE.search(reply) and _names_no_other_pr(replied_to, pr))
+        merge_named = _is_merge_ask(replied_to, pr) or _MERGE_WORD_RE.search(reply)
         if _mentions_pr(reply, pr) or (merge_named and _mentions_pr(replied_to, pr)):
             return True
     asks: set[str] = set()
