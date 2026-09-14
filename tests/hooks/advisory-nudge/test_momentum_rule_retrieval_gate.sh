@@ -830,6 +830,17 @@ run_merge_escalation_case "merge_serial_english_refusal_denies" \
 run_merge_escalation_case "merge_serial_status_ok_denies" \
   "yes" "" "momentum-merge-serial-status-ok.jsonl" "gh pr merge 999 --squash --delete-branch"
 
+# An approval word is not a merge ask: "PR #999 was approved; checks are green."
+# reports a past approval, and "PR #999 테스트 승인할까요?" asks to approve
+# something else. An "ok" to either, or a `승인` picked for the second, leaves
+# the merge unanswered.
+run_merge_escalation_case "merge_serial_approved_status_ok_denies" \
+  "yes" "" "momentum-merge-serial-approved-status-ok.jsonl" "gh pr merge 999 --squash --delete-branch"
+run_merge_escalation_case "merge_serial_non_merge_ask_ok_denies" \
+  "yes" "" "momentum-merge-serial-non-merge-ask-ok.jsonl" "gh pr merge 999 --squash --delete-branch"
+run_merge_escalation_case "merge_serial_ask_non_merge_question_denies" \
+  "yes" "" "momentum-merge-serial-ask-non-merge-question.jsonl" "gh pr merge 999 --squash --delete-branch"
+
 # A picked label that names the PR beside the approval (`PR #999 머지`) is the
 # same approval as a bare `머지`.
 run_merge_escalation_case "merge_serial_ask_label_names_pr_passes" \
