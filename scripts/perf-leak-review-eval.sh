@@ -47,6 +47,13 @@ restore_tree_writability() {
   fi
 }
 
+discard_tree() {
+  if [ -n "$TREE_TO_RESTORE" ]; then
+    chmod -R u+w "$TREE_TO_RESTORE" 2>/dev/null || true
+    rm -rf "$TREE_TO_RESTORE"
+  fi
+}
+
 git_commit() {
   # A fixed identity so the script works on a machine with no git config, and
   # -q so the fixture's own file list never lands in the eval output.
@@ -70,6 +77,11 @@ cmd_prepare() {
   # the same directory reads back as /private/var/..., and an unnormalized
   # comparison would fail on the platform difference rather than on the answer.
   prepared="$(realpath "$prepared")"
+  # Every step below can fail under `set -e` — an unappliable diff, an inert one,
+  # a commit that cannot run. Without this the tree is left behind, and it is
+  # write-protected by then, so it is not even easy to remove by hand.
+  TREE_TO_RESTORE="$prepared"
+  trap discard_tree EXIT
 
   cp -R "$fixture/repo/." "$prepared/"
   git -C "$prepared" init -q
@@ -104,6 +116,10 @@ cmd_prepare() {
   "change_sha": "$change_sha"
 }
 JSON
+
+  # Past this point the tree is the deliverable, so release the failure cleanup.
+  TREE_TO_RESTORE=""
+  trap - EXIT
 
   echo "prepared: $prepared"
   echo "diff:     $results_dir/input.diff"
