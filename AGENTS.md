@@ -56,7 +56,7 @@ Skills are orchestrators with pluggable steps; external integrations (issue trac
 | `spec-drift`             | Spec↔code drift report — runs each requirement's `Verify:` command, reports `implemented` / `missing` / `UNKNOWN`; report-only                                                                           |
 | `merge-briefing`         | Pre-merge approval procedure — three-surface probe, blocking-decoration grading, anchor-gap carry, six-part approve-ask; chains into `worktree-merge-cleanup`                                            |
 | `worktree-merge-cleanup` | Pre-merge worktree precondition + post-merge cleanup — base-worktree call site, submodule `--force` caveat, squash-ancestry stale-HEAD guard, no-`&&`-chain rule                                         |
-| `perf-leak-review`       | Perf/leak review — a read-only reviewer reads a diff plus the repo and reports candidates in a closed five-class list (N+1, unreleased resource, unbounded container, leaked listener); report-only      |
+| `perf-leak-review`       | Perf/leak review — a read-only reviewer reads a diff and the repo for five closed classes: N+1, unreleased resource, unbounded container, load-then-filter, leaked listener or timer; report-only        |
 | `tradeoff`               | Tradeoff report — options at a fork, or whether a finding blocks; reversibility / blast radius / cost-if-wrong / process cost, graded by source; report-only                                             |
 
 ### Discipline
