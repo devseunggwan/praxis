@@ -36,7 +36,19 @@ run_case() {
 }
 
 WORK="$(mktemp -d)" || { echo "FATAL: mktemp -d failed" >&2; exit 1; }
+# Prepared trees are siblings of $WORK, not children: `prepare` makes its own
+# mktemp dir. Only `score` removes one, so a case that prepares without scoring
+# would leave it behind. A file rather than an array, because every call site
+# reads the path through `$(...)` — a subshell, where an array append is lost.
+TREE_REGISTRY="$WORK/prepared-trees.txt"
+: > "$TREE_REGISTRY"
 cleanup() {
+  local tree
+  while IFS= read -r tree; do
+    [ -d "$tree" ] || continue
+    chmod -R u+w "$tree" 2>/dev/null
+    rm -rf "$tree"
+  done < "$TREE_REGISTRY"
   # Every prepared tree is write-protected; restore before removing so a failed
   # case cannot leave an undeletable directory behind.
   chmod -R u+w "$WORK" 2>/dev/null
@@ -45,9 +57,14 @@ cleanup() {
 trap cleanup EXIT
 
 # prepared_path_of <results-dir>
+# Registering here rather than at each call site: this is the one function every
+# case already goes through to learn a tree's path.
 prepared_path_of() {
-  python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["prepared_path"])' \
-    "$1/prepared.json"
+  local tree
+  tree="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["prepared_path"])' \
+    "$1/prepared.json")"
+  printf '%s\n' "$tree" >> "$TREE_REGISTRY"
+  printf '%s\n' "$tree"
 }
 
 # write_envelope <results-dir> <repo_root> [<class> <relative-file>]
