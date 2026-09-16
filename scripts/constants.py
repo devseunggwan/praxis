@@ -61,6 +61,7 @@ EXPECTED_SKILLS: frozenset[str] = frozenset({
     "codex-review-wrap",
     "debt",
     "merge-briefing",
+    "perf-leak-review",
     "recover-sessions",
     "reset-strikes",
     "retrospect",
