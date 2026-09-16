@@ -1,0 +1,6 @@
+{
+  "expected_class": "C4",
+  "requires_repo_read": true,
+  "language": "python",
+  "note": "select_where already pushes predicate, ordering, and limit down; it sits outside the diff."
+}

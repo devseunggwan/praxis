@@ -1,0 +1,6 @@
+{
+  "expected_class": "C3",
+  "requires_repo_read": true,
+  "language": "typescript",
+  "note": "The module-lifetime comment sits on the container declaration, outside the diff."
+}

@@ -1,0 +1,12 @@
+diff --git a/src/watcher.ts b/src/watcher.ts
+index a6ed2e3..498e659 100644
+--- a/src/watcher.ts
++++ b/src/watcher.ts
+@@ -6,6 +6,7 @@ export class ConfigWatcher {
+ 
+   constructor(emitter: EventEmitter) {
+     this.emitter = emitter;
++    this.emitter.on("change", (path: string) => this.apply(path));
+   }
+ 
+   dispose(): void {

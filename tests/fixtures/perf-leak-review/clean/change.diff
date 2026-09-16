@@ -1,0 +1,23 @@
+diff --git a/text/slug.py b/text/slug.py
+index c39d79d..cfc29fa 100644
+--- a/text/slug.py
++++ b/text/slug.py
+@@ -1,8 +1,18 @@
+ """Slug helpers. Pure string work — no I/O, no shared state."""
+ 
+ SEPARATOR = "-"
++MAX_LENGTH = 60
+ 
+ 
+ def slugify(title):
+     kept = [char.lower() if char.isalnum() else " " for char in title]
+     return SEPARATOR.join("".join(kept).split())
++
++
++def truncate(slug, max_length=MAX_LENGTH):
++    """Cut a slug at the last separator that fits, so words stay whole."""
++    if len(slug) <= max_length:
++        return slug
++    head = slug[:max_length]
++    cut = head.rfind(SEPARATOR)
++    return head if cut == -1 else head[:cut]

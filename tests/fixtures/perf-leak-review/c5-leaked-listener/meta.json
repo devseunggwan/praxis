@@ -1,0 +1,6 @@
+{
+  "expected_class": "C5",
+  "requires_repo_read": true,
+  "language": "typescript",
+  "note": "dispose() exists in the untouched part of the file and removes nothing from the shared emitter."
+}

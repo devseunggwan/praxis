@@ -1,0 +1,16 @@
+diff --git a/analytics/report.py b/analytics/report.py
+index c1843f9..07102ef 100644
+--- a/analytics/report.py
++++ b/analytics/report.py
+@@ -5,3 +5,11 @@ PAGE_SIZE = 10
+ 
+ def render(rows):
+     return [f"{row['at']} {row['kind']}" for row in rows]
++
++
++def recent(table, kind, since):
++    """The newest PAGE_SIZE events of one kind."""
++    rows = table.fetch_all()
++    matching = [row for row in rows if row["kind"] == kind and row["at"] > since]
++    matching.sort(key=lambda row: row["at"], reverse=True)
++    return render(matching[:PAGE_SIZE])
