@@ -13,8 +13,10 @@ Envelope:
 
 Finding (every key required, no others accepted):
   class       one of C1..C5 — the closed list in DEFECT_CLASSES
-  file        path relative to repo_root; absolute paths are rejected so the
-              envelope stays portable across the prepared/real tree boundary
+  file        path relative to repo_root, and contained by it: absolute paths
+              and `..` components are both rejected, so the envelope stays
+              portable across the prepared/real tree boundary and cannot name a
+              file the review never had in scope
   line        integer >= 1
   evidence    non-empty quoted excerpt from the code under review
   confidence  one of low / med / high
@@ -29,6 +31,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from pathlib import PurePosixPath
 from typing import Any
 
 # The closed list (spec `### Defect classes`). A sixth entry is a spec change,
@@ -82,6 +85,13 @@ def _check_finding(index: int, finding: Any, violations: list[str]) -> None:
         elif path.startswith("/"):
             violations.append(
                 f"{where}.file: {path!r} is absolute — must be relative to repo_root"
+            )
+        elif ".." in PurePosixPath(path).parts:
+            # Relative is not the same as contained: `../outside.py` names a file
+            # the review never had in scope, and a reported location outside the
+            # reviewed tree is not a finding about this diff.
+            violations.append(
+                f"{where}.file: {path!r} leaves repo_root — no `..` components"
             )
 
     line = finding.get("line")

@@ -103,6 +103,20 @@ def test_rejects_an_absolute_file_path() -> None:
     assert any("is absolute" in v for v in violations)
 
 
+def test_rejects_a_file_path_that_leaves_repo_root() -> None:
+    """Relative is not contained. `..` in any position names a file the review
+    never had in scope, so the check is on the path's components — not on its
+    prefix, which would also reject a legitimate name that merely starts `..`."""
+    for value in ("../outside.py", "a/../../outside.py", "billing/../../x.py"):
+        violations = _module().validate(_with(file=value))
+        assert any("leaves repo_root" in v for v in violations), value
+
+
+def test_accepts_a_file_whose_name_begins_with_two_dots() -> None:
+    """`..hidden.py` is one component, not a parent reference."""
+    assert _module().validate(_with(file="billing/..hidden.py")) == []
+
+
 def test_rejects_a_grade_other_than_candidate() -> None:
     violations = _module().validate(_with(grade="defect"))
     assert any(".grade" in v for v in violations)

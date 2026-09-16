@@ -126,7 +126,9 @@ code fence:
 Rules for the envelope:
 
 - `repo_root` is the path you were given, echoed unchanged.
-- `file` is **relative** to `repo_root`. Never absolute.
+- `file` is **relative** to `repo_root` and stays inside it. Never absolute,
+  and never a `..` component — a path outside the tree you were given is not
+  a finding about this diff, and the validator rejects it.
 - `line` is a 1-based line number in the post-change file.
 - `confidence` is one of `low`, `med`, `high`.
 - `grade` is always the literal `candidate`.
