@@ -1,0 +1,10 @@
+{
+  "expected_class": null,
+  "requires_repo_read": true,
+  "language": "bash",
+  "release_site": {
+    "file": "lib/teardown.sh",
+    "symbol": "release_feed"
+  },
+  "note": "Clean control for the AC-7 pair: the same change.diff, but a file the diff never touches releases descriptor 3 without using the word close."
+}

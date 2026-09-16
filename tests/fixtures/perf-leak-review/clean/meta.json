@@ -1,0 +1,6 @@
+{
+  "expected_class": null,
+  "requires_repo_read": false,
+  "language": "python",
+  "note": "General clean control: pure string work, no I/O, no handle, no shared container, no registration."
+}

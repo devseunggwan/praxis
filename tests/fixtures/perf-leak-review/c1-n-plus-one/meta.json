@@ -1,0 +1,6 @@
+{
+  "expected_class": "C1",
+  "requires_repo_read": true,
+  "language": "python",
+  "note": "The batched sibling fetch_many already exists in the same class the diff calls into."
+}

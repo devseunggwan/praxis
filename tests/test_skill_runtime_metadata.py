@@ -608,6 +608,10 @@ def test_current_repo_runtime_sensitive_skill_set_is_stable():
         # Skill(...) since #978: the approved merge chains into
         # worktree-merge-cleanup, which owns the merge call itself.
         "merge-briefing": ("Skill(...)", "external-cli-wrapper"),
+        # external-cli-wrapper from the `git diff` / `git rev-parse` steps that
+        # resolve the review's inputs; helper-executable from the envelope
+        # validator, which is the one place the closed contract is enforced.
+        "perf-leak-review": ("external-cli-wrapper", "helper-executable"),
         "recover-sessions": (
             "AskUserQuestion",
             "external-cli-wrapper",

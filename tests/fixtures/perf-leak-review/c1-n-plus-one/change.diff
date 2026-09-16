@@ -1,0 +1,16 @@
+diff --git a/billing/summary.py b/billing/summary.py
+index 3e7b636..c80b6b9 100644
+--- a/billing/summary.py
++++ b/billing/summary.py
+@@ -3,3 +3,11 @@
+ 
+ def total_paid(rows):
+     return sum(row["total"] for row in rows if row["paid_at"] is not None)
++
++
++def summarize(store, invoice_ids):
++    """Total the given invoices."""
++    rows = []
++    for invoice_id in invoice_ids:
++        rows.append(store.fetch_one(invoice_id))
++    return total_paid(rows)

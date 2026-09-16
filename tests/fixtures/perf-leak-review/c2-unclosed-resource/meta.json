@@ -1,0 +1,6 @@
+{
+  "expected_class": "C2",
+  "requires_repo_read": true,
+  "language": "bash",
+  "note": "Paired with c2-closed-elsewhere: byte-identical change.diff, divergent repo/. Here nothing releases descriptor 3."
+}

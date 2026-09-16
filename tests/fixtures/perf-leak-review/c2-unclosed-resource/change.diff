@@ -1,0 +1,15 @@
+diff --git a/lib/source.sh b/lib/source.sh
+index c061896..87607fb 100644
+--- a/lib/source.sh
++++ b/lib/source.sh
+@@ -4,6 +4,10 @@
+ # The feed is read line by line from file descriptor 3 so the caller can keep a
+ # single stream open across several report sections.
+ 
++open_feed() {
++  exec 3<"$1"
++}
++
+ read_feed_line() {
+   IFS= read -r feed_line <&3 || return 1
+   printf '%s\n' "$feed_line"

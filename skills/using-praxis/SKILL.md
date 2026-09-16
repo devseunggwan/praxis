@@ -30,6 +30,7 @@ Tools for code quality and review workflow.
 | `bypass-report`          | Reading the bypass-telemetry / hook fire-rate ledgers — which hooks fire, which never do |
 | `merge-briefing`         | Before asking to merge a PR — probe all three finding surfaces, grade, brief, then ask   |
 | `worktree-merge-cleanup` | Merging from a worktree and cleaning up after — right call site, safe teardown           |
+| `perf-leak-review`       | Before a change with loops, handles, caches, or subscriptions merges                     |
 | `tradeoff`               | Tradeoff between implementation options, or whether a review finding blocks              |
 
 ### Discipline
@@ -76,6 +77,7 @@ Recover, save, and orchestrate Claude Code sessions.
 | "What did we mark 'later' in commit trailers and never revisit?"       | `debt`                                                      |
 | "Several ways to build this — what's the tradeoff between them?"       | `tradeoff`                                                  |
 | "Should I act on this review finding, and does it block the merge?"    | `tradeoff`                                                  |
+| "Does this diff leak a handle or add an N+1 query?"                    | `perf-leak-review`                                          |
 | "I want to add a new skill to praxis"                                  | `writing-praxis-skill`                                      |
 
 ## Hook System

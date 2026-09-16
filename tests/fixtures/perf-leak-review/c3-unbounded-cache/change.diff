@@ -1,0 +1,31 @@
+diff --git a/src/registry.ts b/src/registry.ts
+index 42fdf45..dc1e2c5 100644
+--- a/src/registry.ts
++++ b/src/registry.ts
+@@ -11,3 +11,7 @@ export function lookup(key: string): string | undefined {
+ export function size(): number {
+   return RESOLVED.size;
+ }
++
++export function remember(key: string, rendered: string): void {
++  RESOLVED.set(key, rendered);
++}
+diff --git a/src/template.ts b/src/template.ts
+index f3998a8..4ab4e10 100644
+--- a/src/template.ts
++++ b/src/template.ts
+@@ -1,6 +1,12 @@
+ // Template rendering entry point.
+-import { lookup } from "./registry";
++import { lookup, remember } from "./registry";
+ 
+ export function render(key: string, fallback: string): string {
+-  return lookup(key) ?? fallback;
++  const hit = lookup(key);
++  if (hit !== undefined) {
++    return hit;
++  }
++  const rendered = fallback.replace("{key}", key);
++  remember(key, rendered);
++  return rendered;
+ }
