@@ -22,8 +22,10 @@ This hook is the live-refetch analogue of `pre-merge-approval-gate`'s
 lock-boundary pattern applied to a different surface: when a question's text
 names a specific PR number alongside a merge-intent keyword, it re-fetches
 that PR's live `state`/`mergeStateStatus` via `gh pr view` BEFORE the menu is
-allowed to surface, and warns (or, in strict mode, blocks) when the live state
-is already MERGED or CLOSED.
+allowed to surface, and warns (or, in strict mode, blocks) when that live
+state cannot support a merge question — the PR is already resolved, it is a
+draft, or its merge state is not one the `praxis:merge-briefing` skill allows
+an ask on (issue #1436).
 
 Detection signal (co-occurrence, scoped per-question — see spec.md "False
 positive boundary" for the full rationale):
@@ -45,7 +47,15 @@ Fail-open conditions (never block/advise):
   3. `gh` binary missing, `gh pr view` errors, times out, or returns
      unparseable JSON for a candidate PR number — that number is silently
      skipped (the live state genuinely could not be determined)
-  4. Live state is neither MERGED nor CLOSED (still OPEN — the premise holds)
+  4. The live state is ask-ready: OPEN, not a draft, `mergeable` is
+     `MERGEABLE` and `mergeStateStatus` is `CLEAN` or `HAS_HOOKS` — the
+     allowlist `praxis:merge-briefing` Step 1 states. Those two values are the
+     only ones meaning "mergeable with a passing commit status"; every other
+     one names a condition the user should not be asked to decide against.
+  5. `UNKNOWN` merge state advises but never blocks, even in strict mode:
+     GitHub computes the merge state asynchronously on a freshly-pushed PR, so
+     an unknown answer is a not-yet, not a defect. It is still not `CLEAN`, so
+     it is not silent either.
 """
 from __future__ import annotations
 
@@ -65,6 +75,19 @@ from block_message import format_block  # type: ignore[import-not-found]  # noqa
 _STRICT_ENV = "PRAXIS_PR_STATE_REFETCH_STRICT"
 _GH_TIMEOUT_SEC = 2
 _MAX_PR_NUMBERS = 3
+
+# `praxis:merge-briefing` Step 1 is the source of truth for "may we ask yet".
+# It allows exactly two merge states — the two that mean mergeable with a
+# passing commit status — and reads `isDraft` separately, because draft is not
+# a value of this enum and a draft PR can report CLEAN.
+_ASK_READY_MERGE_STATES = frozenset({"CLEAN", "HAS_HOOKS"})
+_MERGEABLE_OK = "MERGEABLE"
+
+# Not a verdict of its own: GitHub returns it while the merge state is still
+# being computed. Advises, never blocks.
+_UNKNOWN_STATES = frozenset({"UNKNOWN", ""})
+
+_RESOLVED_STATES = frozenset({"MERGED", "CLOSED"})
 
 # ---------------------------------------------------------------------------
 # Pattern definitions
@@ -173,10 +196,10 @@ def _candidate_pr_numbers(tool_input: dict) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
-def _gh_pr_state(cwd: str | None, number: str) -> tuple[str, object] | None:
-    """Run `gh pr view <N> --json state,mergeStateStatus`.
+def _gh_pr_state(cwd: str | None, number: str) -> dict | None:
+    """Run `gh pr view <N> --json state,mergeStateStatus,mergeable,isDraft`.
 
-    Returns (state, mergeStateStatus) on success, or None on ANY failure
+    Returns the parsed fields on success, or None on ANY failure
     (binary missing, non-zero exit, timeout, unparseable JSON, non-dict
     payload, missing/non-string `state`) — the caller treats None as
     "cannot determine live state", which fail-opens that single PR number
@@ -184,7 +207,10 @@ def _gh_pr_state(cwd: str | None, number: str) -> tuple[str, object] | None:
     """
     try:
         proc = subprocess.run(
-            ["gh", "pr", "view", number, "--json", "state,mergeStateStatus"],
+            [
+                "gh", "pr", "view", number,
+                "--json", "state,mergeStateStatus,mergeable,isDraft",
+            ],
             capture_output=True,
             text=True,
             timeout=_GH_TIMEOUT_SEC,
@@ -204,7 +230,53 @@ def _gh_pr_state(cwd: str | None, number: str) -> tuple[str, object] | None:
     state = data.get("state")
     if not isinstance(state, str) or not state:
         return None
-    return state.upper(), data.get("mergeStateStatus")
+    return {
+        "state": state.upper(),
+        "mergeStateStatus": data.get("mergeStateStatus"),
+        "mergeable": data.get("mergeable"),
+        "isDraft": data.get("isDraft"),
+    }
+
+
+def _upper(value: object) -> str:
+    """A live enum value as an uppercase string; non-strings read as absent."""
+    return value.upper() if isinstance(value, str) else ""
+
+
+def _ask_readiness(fields: dict) -> tuple[str, bool] | None:
+    """Why this PR cannot carry a merge ask, and whether that may block.
+
+    None means ask-ready. The bool is False for a reason that advises but never
+    blocks — an answer GitHub has not finished computing is not a defect to
+    hard-stop on, while every other reason names a condition that is.
+    """
+    state = fields["state"]
+    if state in _RESOLVED_STATES:
+        return f"already {state}", True
+    if state != "OPEN":
+        # An enum value this hook does not model. Say so rather than guessing
+        # in either direction.
+        return f"live state = {state}", False
+    if fields.get("isDraft") is True:
+        # Draft is not a value of mergeStateStatus, so a draft PR reports CLEAN
+        # and passes every check below. It is read on its own line for that
+        # reason, not for completeness.
+        return "draft — not ready to merge", True
+
+    merge_state = _upper(fields.get("mergeStateStatus"))
+    mergeable = _upper(fields.get("mergeable"))
+    if merge_state in _UNKNOWN_STATES or mergeable in _UNKNOWN_STATES:
+        return (
+            "mergeStateStatus="
+            f"{merge_state or 'absent'} / mergeable={mergeable or 'absent'}"
+            " — GitHub has not finished computing the merge state; re-poll",
+            False,
+        )
+    if mergeable != _MERGEABLE_OK:
+        return f"mergeable={mergeable}", True
+    if merge_state not in _ASK_READY_MERGE_STATES:
+        return f"mergeStateStatus={merge_state}", True
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -212,33 +284,34 @@ def _gh_pr_state(cwd: str | None, number: str) -> tuple[str, object] | None:
 # ---------------------------------------------------------------------------
 
 
-def _stale_lines(stale: list[tuple[str, str, object]]) -> str:
+def _stale_lines(stale: list[tuple[str, str, bool]]) -> str:
     lines = []
-    for number, state, merge_status in stale:
-        suffix = f" (mergeStateStatus={merge_status})" if merge_status else ""
-        lines.append(f"  - PR #{number}: live state = {state}{suffix}")
+    for number, reason, hard in stale:
+        note = "" if hard else "  [advisory only — never blocks]"
+        lines.append(f"  - PR #{number}: {reason}{note}")
     return "\n".join(lines)
 
 
-def _advisory_msg(stale: list[tuple[str, str, object]]) -> str:
+def _advisory_msg(stale: list[tuple[str, str, bool]]) -> str:
     return (
         "[advisory] This AskUserQuestion names a PR number alongside a "
         "merge-intent keyword (merge/squash/머지), so its premise depends on "
-        "that PR's state. A live `gh pr view` re-fetch shows it is ALREADY "
-        "resolved:\n"
+        "that PR's state. A live `gh pr view` re-fetch shows that state "
+        "cannot carry a merge ask:\n"
         f"{_stale_lines(stale)}\n"
         "\n"
-        "Asking the user to decide against a stale premise (e.g. \"merge PR "
-        "#N?\" when #N is already MERGED/CLOSED) forces them to notice and "
-        "correct it. Re-author the question to reflect the live state, or "
-        "act directly (report the PR is already resolved) instead of "
-        "surfacing this menu.\n"
+        "Asking the user to decide against a stale premise (\"merge PR #N?\" "
+        "when #N is already MERGED, is a draft, or has failing checks) forces "
+        "them to notice and correct it. `praxis:merge-briefing` Step 1 allows "
+        "an ask only when mergeable=MERGEABLE and mergeStateStatus is CLEAN "
+        "or HAS_HOOKS. Resolve the condition first, or re-author the question "
+        "to reflect the live state, instead of surfacing this menu.\n"
         "\n"
         "Strict mode disabled. Set PRAXIS_PR_STATE_REFETCH_STRICT=1 to block.\n"
     )
 
 
-def _block_msg(stale: list[tuple[str, str, object]]) -> str:
+def _block_msg(stale: list[tuple[str, str, bool]]) -> str:
     # Standard five-field block format (issue #439) — see
     # docs/hook/block-message-format.md. The dynamic per-PR live-state list
     # doesn't fit the fixed fields, so it is appended after the formatted
@@ -248,11 +321,11 @@ def _block_msg(stale: list[tuple[str, str, object]]) -> str:
         format_block(
             rule_name="pr state re-fetch",
             why="the question's text names this PR alongside a merge-intent "
-                "keyword, but a live `gh pr view` re-fetch shows its state is "
-                "already MERGED/CLOSED — the premise is stale",
-            correct_path="re-issue the AskUserQuestion reflecting the live "
-                "state, or act directly (report the PR is already resolved) "
-                "instead of asking",
+                "keyword, but a live `gh pr view` re-fetch shows a state that "
+                "cannot carry a merge ask (resolved, draft, or outside the "
+                "mergeable+CLEAN/HAS_HOOKS allowlist) — the premise is stale",
+            correct_path="resolve the condition named below, or re-issue the "
+                "AskUserQuestion reflecting the live state, instead of asking",
             bypass_env=None,
             reference="CLAUDE.md → External Discussion Fidelity - Lock-"
                 "boundary re-fetch; hooks/preflight-gate/pr-state-refetch-"
@@ -293,14 +366,15 @@ def main() -> int:
     if not isinstance(cwd, str) or not cwd:
         cwd = None
 
-    stale: list[tuple[str, str, object]] = []
+    stale: list[tuple[str, str, bool]] = []
     for number in candidates:
-        result = _gh_pr_state(cwd, number)
-        if result is None:
+        fields = _gh_pr_state(cwd, number)
+        if fields is None:
             continue  # cannot determine live state — fail-open for this PR
-        state, merge_status = result
-        if state in ("MERGED", "CLOSED"):
-            stale.append((number, state, merge_status))
+        verdict = _ask_readiness(fields)
+        if verdict is not None:
+            reason, hard = verdict
+            stale.append((number, reason, hard))
 
     if not stale:
         return 0
@@ -310,7 +384,10 @@ def main() -> int:
     # destructive-bash-guard, protected-paths-guard, push-remote-ref-verify).
     strict_set = os.environ.get(_STRICT_ENV, "").strip() == "1"
 
-    if strict_set:
+    # A reason GitHub has not finished computing is not grounds for a hard
+    # stop, so strict mode blocks only when at least one blocking reason is
+    # present. The advisory still names every reason either way.
+    if strict_set and any(hard for _, _, hard in stale):
         sys.stderr.write(_block_msg(stale))
         return 2
 

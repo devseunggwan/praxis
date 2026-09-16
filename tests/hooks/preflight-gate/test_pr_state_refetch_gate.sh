@@ -53,6 +53,9 @@ print(json.dumps({
 #   mode:
 #     map      — responds per PR number using "map-content" lines "N STATE"
 #                (e.g. "714 MERGED"); unmapped numbers -> gh error exit 1
+#                Optional extra columns: "<num> <state> <mergeStateStatus>
+#                <mergeable> <isDraft>", defaulting to CLEAN / MERGEABLE /
+#                false — the ask-ready values (issue #1436).
 #     error    — every call exits 1 (auth-style failure)
 #     badjson  — every call exits 0 but prints unparseable output
 #     absent   — no gh binary at all (dir has no gh file)
@@ -98,19 +101,31 @@ import sys
 
 num, map_file = sys.argv[1], sys.argv[2]
 state = None
+fields = {}
 with open(map_file) as f:
     for line in f:
         line = line.strip()
         if not line:
             continue
-        n, s = line.split()
+        parts = line.split()
+        n = parts[0]
         if n == num:
-            state = s
+            # `<num> <state> [mergeStateStatus] [mergeable] [isDraft]`.
+            # The three optional columns default to the ask-ready values
+            # (issue #1436) so a case that only cares about `state` keeps
+            # meaning what it meant before the allowlist verdict landed.
+            state = parts[1]
+            fields = {
+                "state": state,
+                "mergeStateStatus": parts[2] if len(parts) > 2 else "CLEAN",
+                "mergeable": parts[3] if len(parts) > 3 else "MERGEABLE",
+                "isDraft": (parts[4].lower() == "true") if len(parts) > 4 else False,
+            }
             break
 if state is None:
     sys.stderr.write("gh: no pull requests found\n")
     sys.exit(1)
-print(json.dumps({"state": state, "mergeStateStatus": "UNKNOWN"}))
+print(json.dumps(fields))
 PY
 EOF
       ;;
@@ -237,6 +252,58 @@ run_case "multiple candidates, mixed states" pass \
 run_case "strict mode blocks on MERGED" block \
   '[{"question":"","options":[{"label":"Merge PR #714","description":""}]}]' \
   map "714 MERGED" 1 'PR #714.*MERGED'
+
+# ---------------------------------------------------------------------------
+# Ask-readiness allowlist (issue #1436)
+#
+# `praxis:merge-briefing` Step 1 allows a merge ask only when
+# mergeable=MERGEABLE and mergeStateStatus is CLEAN or HAS_HOOKS. Before this,
+# the gate answered only MERGED/CLOSED, so every other not-ready state reached
+# the user as a question they had to correct.
+# ---------------------------------------------------------------------------
+
+Q_MERGE='[{"question":"merge PR #714?","options":[{"label":"yes","description":"go"}]}]'
+
+run_case "OPEN + CLEAN + MERGEABLE is ask-ready (silent)" pass \
+  "$Q_MERGE" map "714 OPEN CLEAN MERGEABLE false" 0 '' 0 '.'
+
+run_case "OPEN + HAS_HOOKS is ask-ready (silent)" pass \
+  "$Q_MERGE" map "714 OPEN HAS_HOOKS MERGEABLE false" 0 '' 0 '.'
+
+run_case "UNSTABLE (non-passing checks) advises" pass \
+  "$Q_MERGE" map "714 OPEN UNSTABLE MERGEABLE false" 0 'PR #714.*UNSTABLE'
+
+run_case "BLOCKED advises" pass \
+  "$Q_MERGE" map "714 OPEN BLOCKED MERGEABLE false" 0 'PR #714.*BLOCKED'
+
+run_case "BEHIND advises" pass \
+  "$Q_MERGE" map "714 OPEN BEHIND MERGEABLE false" 0 'PR #714.*BEHIND'
+
+run_case "DIRTY advises" pass \
+  "$Q_MERGE" map "714 OPEN DIRTY MERGEABLE false" 0 'PR #714.*DIRTY'
+
+run_case "CONFLICTING mergeable advises even on a CLEAN merge state" pass \
+  "$Q_MERGE" map "714 OPEN CLEAN CONFLICTING false" 0 'PR #714.*CONFLICTING'
+
+# Draft is not a value of mergeStateStatus, so a draft PR reports CLEAN and
+# would otherwise pass every other check.
+run_case "draft + CLEAN advises" pass \
+  "$Q_MERGE" map "714 OPEN CLEAN MERGEABLE true" 0 'PR #714.*draft'
+
+run_case "strict mode blocks on UNSTABLE" block \
+  "$Q_MERGE" map "714 OPEN UNSTABLE MERGEABLE false" 1 'PR #714.*UNSTABLE'
+
+run_case "strict mode blocks on draft" block \
+  "$Q_MERGE" map "714 OPEN CLEAN MERGEABLE true" 1 'PR #714.*draft'
+
+# UNKNOWN is GitHub still computing the merge state — not `CLEAN`, so not
+# silent; not a defect either, so it never blocks, strict mode included.
+run_case "UNKNOWN advises" pass \
+  "$Q_MERGE" map "714 OPEN UNKNOWN MERGEABLE false" 0 'PR #714.*re-poll'
+
+run_case "UNKNOWN does not block under strict mode" pass \
+  "$Q_MERGE" map "714 OPEN UNKNOWN MERGEABLE false" 1 'advisory only'
+
 
 # ---------------------------------------------------------------------------
 # gh infrastructure failures — fail-open

@@ -81,7 +81,7 @@ below rather than needing separate issue-vs-PR disambiguation logic.
 For each candidate PR number (deduplicated, capped at 3 per payload):
 
 ```bash
-gh pr view <N> --json state,mergeStateStatus
+gh pr view <N> --json state,mergeStateStatus,mergeable,isDraft
 ```
 
 Run with `cwd` set from the hook payload's `cwd` field (falls back to the
@@ -89,24 +89,52 @@ hook process's own cwd when absent) so the query targets the correct
 worktree's repo, and a 2-second timeout (worst case 3 candidates × 2s = 6s,
 under the 8s manifest timeout).
 
-| Live `state` | Result |
+### Ask-readiness allowlist (issue #1436)
+
+The verdict is an **allowlist**, not a "not obviously resolved" check. It is
+the one `praxis:merge-briefing` Step 1 states: ask only when `mergeable` is
+`MERGEABLE` **and** `mergeStateStatus` is `CLEAN` or `HAS_HOOKS` — the two
+values that mean *mergeable with a passing commit status*. Every other value
+names a condition the user should not be asked to decide against, and until
+this issue the gate answered only `MERGED` / `CLOSED`, so all of them reached
+the menu.
+
+`isDraft` is read on its own line because draft is **not** a value of the
+`mergeStateStatus` enum: a draft PR reports `CLEAN` and passes every other
+check.
+
+| Live fields | Result |
 | --------------- | -------- |
-| `MERGED` or `CLOSED` | Stale premise — advisory (default) or block (strict) |
-| `OPEN` | Premise holds — silent pass |
+| `state` is `MERGED` or `CLOSED` | Stale premise — advisory (default) or block (strict) |
+| `state` is `OPEN`, `isDraft` is true | Not ready — advisory or block |
+| `mergeable` is not `MERGEABLE` (e.g. `CONFLICTING`) | Not ready — advisory or block |
+| `mergeStateStatus` is `UNSTABLE` / `BLOCKED` / `BEHIND` / `DIRTY` | Not ready — advisory or block |
+| `mergeStateStatus` or `mergeable` is `UNKNOWN` / absent | **Advisory only, never blocks** — see below |
+| `state` is `OPEN`, not draft, `MERGEABLE` + (`CLEAN` \| `HAS_HOOKS`) | Premise holds — silent pass |
+| `state` is some other value this hook does not model | Advisory only — named rather than guessed in either direction |
 | `gh` call fails, times out, or returns unparseable JSON | **That PR number is skipped** (fail-open) — cannot determine live state, so neither warn nor block on it |
 
-A payload with 2+ candidate PR numbers where only some are stale still fires
-— the message lists only the stale ones.
+**`UNKNOWN` advises but never blocks, strict mode included.** GitHub computes
+the merge state asynchronously on a freshly-pushed PR, so an unknown answer is
+a *not yet*, not a defect — hard-stopping on it would block on GitHub's
+latency. It is still not `CLEAN`, so it is not silent either: the advisory
+names it and says to re-poll. Strict mode blocks only when at least one
+*blocking* reason is present; an advisory-only reason is marked as such in the
+message.
+
+A payload with 2+ candidate PR numbers where only some are not ready still
+fires — the message lists only those, each with its own reason.
 
 ## What is advised / blocked
 
 | Scenario | Action |
 | ---------- | -------- |
-| Default mode, ≥1 candidate PR's live state is MERGED/CLOSED | exit 0 + advisory stderr |
-| `PRAXIS_PR_STATE_REFETCH_STRICT=1`, ≥1 candidate PR's live state is MERGED/CLOSED | exit 2 (block) |
+| Default mode, ≥1 candidate PR is not ask-ready | exit 0 + advisory stderr |
+| `PRAXIS_PR_STATE_REFETCH_STRICT=1`, ≥1 candidate PR is not ask-ready for a **blocking** reason | exit 2 (block) |
+| `PRAXIS_PR_STATE_REFETCH_STRICT=1`, the only reason is `UNKNOWN` | exit 0 + advisory stderr (never blocks) |
 | Any tool name other than `AskUserQuestion` | silent pass-through |
 | No question carries the PR-number + merge-keyword co-occurrence signal | silent pass-through (no `gh` call made — zero subprocess cost) |
-| All candidate PRs are still OPEN | silent pass-through |
+| All candidate PRs are ask-ready (OPEN, not draft, `MERGEABLE` + `CLEAN`/`HAS_HOOKS`) | silent pass-through |
 | `gh` binary missing / call errors / times out / unparseable JSON, for a given PR number | that number is skipped (fail-open); if no other candidate is stale, silent pass-through |
 | Malformed / missing payload | silent pass-through (fail-open) |
 
