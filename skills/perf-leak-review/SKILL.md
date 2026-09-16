@@ -59,13 +59,13 @@ widening it is a separate change to
 [`references/reviewer-brief.md`](references/reviewer-brief.md) and
 `validate_findings.py` together.
 
-| # | Class |
-|---|-------|
-| C1 | N+1 / remote call inside a loop |
+| #  | Class                                                      |
+|----|------------------------------------------------------------|
+| C1 | N+1 / remote call inside a loop                            |
 | C2 | Unreleased resource (file, socket, connection, subprocess) |
-| C3 | Unbounded global container or cache |
-| C4 | Load-everything-then-filter-in-memory |
-| C5 | Unreleased listener, callback, or timer |
+| C3 | Unbounded global container or cache                        |
+| C4 | Load-everything-then-filter-in-memory                      |
+| C5 | Unreleased listener, callback, or timer                    |
 
 ## Caller-agnostic by contract
 
@@ -152,14 +152,14 @@ to the line without re-deriving anything.
 
 ## Error Handling
 
-| Error | Recovery |
-|-------|----------|
-| `--diff` path missing or empty | Abort — report the path; do not fall back to `git diff` when a path was given explicitly |
-| `--repo` is not a directory | Abort with the path |
-| `Agent` tool unavailable on this host | Stop with the unverified-host message (Step 2); never review inline |
+| Error                                                                              | Recovery                                                                                                                                                                                               |
+|------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `--diff` path missing or empty                                                     | Abort — report the path; do not fall back to `git diff` when a path was given explicitly                                                                                                               |
+| `--repo` is not a directory                                                        | Abort with the path                                                                                                                                                                                    |
+| `Agent` tool unavailable on this host                                              | Stop with the unverified-host message (Step 2); never review inline                                                                                                                                    |
 | Reviewer wrapped the envelope in a ```` ```json ```` fence, or put prose around it | Strip the fence and extract the single JSON object; if there is not exactly one, report the raw output and stop. Observed on a third of live envelopes, so treat it as normal rather than as a failure |
-| Validator exits 1 | Report its violation lines verbatim; do not repair the envelope |
-| Reviewer reports a class outside C1..C5 | The validator rejects it — report it as an out-of-list finding, which is a false positive |
+| Validator exits 1                                                                  | Report its violation lines verbatim; do not repair the envelope                                                                                                                                        |
+| Reviewer reports a class outside C1..C5                                            | The validator rejects it — report it as an out-of-list finding, which is a false positive                                                                                                              |
 
 ## Limitations
 
