@@ -140,6 +140,10 @@ else
 fi
 
 # ------------------------- (e) TMPDIR inside another repo does not swallow the patch
+# Effective on GNU coreutils, which is what CI runs. BSD `mktemp -d` with no
+# template ignores TMPDIR and always uses the per-user temp directory, so on
+# macOS this case passes without ever placing the tree inside the parent repo.
+# A local PASS is therefore not evidence for this one; read CI's.
 dir_e="$WORK/e"
 parent_repo="$WORK/parent"
 mkdir -p "$parent_repo/tmp"
