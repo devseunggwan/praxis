@@ -12,12 +12,21 @@ write to the repository — not a file, not a temp file inside it, nothing.
 
 ## What to read
 
-Start from the diff. Then open, outside the diff, **only** the definition and
-release sites of the symbols the changed hunks touch: where an acquired handle
-is stored, where that stored slot is read or released, where a registered
-callback is unregistered, where a called function is defined. That is the whole
-read budget. Do not survey the repository, do not read its documentation, and
-do not open files unrelated to the hunks.
+Start from the diff. Then open, outside the diff, **only** the **lifecycle
+sites** of the symbols the changed hunks touch: where an acquired handle is
+stored, where that stored slot is read or released, where a registered callback
+is unregistered, where a called function is defined, where a container's entries
+are removed and where its size or age is bounded. That is the whole read budget.
+Do not survey the repository, do not read its documentation, and do not open
+files unrelated to the hunks.
+
+Every class asks you to establish an **absence**, and an absence cannot be read
+off the diff alone, so the budget has to reach the sites that would disprove it:
+the release of a stored slot for C2 and C5, the batched sibling of a per-item
+call for C1, the storage layer's own filtering for C4, and — for C3 — every
+delete, eviction, capacity ceiling and expiry on that one container. Report a
+C3 only after opening those: a changed insertion tells you nothing while the
+code that bounds the container sits in a file the diff never touched.
 
 This matters in both directions. A diff that acquires a resource and never
 releases it *in the diff* may be released in a file the diff does not touch —
