@@ -1039,6 +1039,68 @@ else
 fi
 
 
+# ---------------------------------------------------------------------------
+# `gh api` arm (issue #1435)
+#
+# The approval gate knew only the (noun, verb) pairs, so the one write path the
+# anchor convention *requires* — a rev >=2 PATCH by comment id — reached the
+# network ungated. Detection is the shared `_lib/_external_write_body` one, so
+# these cases pin the wiring and the repo attribution, not the parser.
+# ---------------------------------------------------------------------------
+
+run_case "gh api PATCH comment by id (literal repo)" ask \
+  'gh api --method PATCH repos/owner/repo/issues/comments/123 -F body=@/tmp/a.md'
+
+run_case_detail "gh api literal repo names that repo, not the checkout" \
+  'gh api --method PATCH repos/other/target/issues/comments/123 -F body=@/tmp/a.md' \
+  'other/target'
+
+run_case_detail "gh api ask renders the api form, not a --repo flag" \
+  'gh api --method PATCH repos/owner/repo/issues/comments/123 -F body=@/tmp/a.md' \
+  'gh api --method PATCH <endpoint>'
+
+run_case_detail "gh api item 3 prescribes -F body=@, not --body-file" \
+  'gh api --method PATCH repos/owner/repo/issues/comments/123 -F body=@/tmp/a.md' \
+  '-F body=@/tmp/<slug>.md'
+
+run_case "gh api POST issue comments (method implied by a field)" ask \
+  'gh api repos/owner/repo/issues/42/comments -f body=hi'
+
+run_case "gh api POST pr review" ask \
+  'gh api --method POST repos/owner/repo/pulls/7/reviews -f body=lgtm'
+
+# gh fills `{owner}`/`{repo}` from the checkout, so the endpoint names nothing
+# on its own — it must resolve exactly like a repo-less write.
+run_case_detail "gh api placeholder repo resolves from the checkout" \
+  'gh api repos/{owner}/{repo}/issues/1/comments -f body=hi' \
+  'devseunggwan/praxis'
+
+# A read is not a write. Both the default GET and an explicit one stay silent.
+run_case "gh api GET by default is silent" pass \
+  'gh api repos/owner/repo/issues/comments/123'
+
+run_case "gh api explicit GET with a field is silent" pass \
+  'gh api --method GET repos/owner/repo/issues/comments/1 -f x=1'
+
+# An endpoint family that carries no public body buys nothing but false
+# positives, so it is deliberately outside the detector.
+run_case "gh api PATCH on a non-comment endpoint is silent" pass \
+  'gh api --method PATCH repos/owner/repo/issues/42 -f state=closed'
+
+# Role-aware tokenization: the same text inside a quoted argument is not a call.
+run_case "gh api inside an echo string is silent" pass \
+  'echo "gh api --method PATCH repos/owner/repo/issues/comments/1 -f body=x"'
+
+# The heredoc hard block prescribes --body-file, which `gh api` does not accept.
+# Blocking there would name a remedy the caller cannot follow, so the api arm
+# takes the ask instead — with its own item 3.
+run_case "gh api with a heredoc asks rather than hard-blocking" ask \
+  'gh api --method PATCH repos/owner/repo/issues/comments/1 -F body=@- <<EOF'
+
+# The opt-out marker covers the api arm on the same terms as every other write.
+run_case "gh api with the ack marker passes" pass \
+  'gh api --method PATCH repos/owner/repo/issues/comments/1 -F body=@/tmp/a.md  # cross-boundary:ack'
+
 
 # ---------------------------------------------------------------------------
 echo

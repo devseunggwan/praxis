@@ -5,7 +5,7 @@ Supported hosts: all
 Reference: [Autonomy vs Convention — ETHOS.md](../../../ETHOS.md#autonomy-vs-convention)
 
 `hooks/preflight-gate/cross-boundary-preflight/impl.py` intercepts every Bash tool call and
-fires on three cross-boundary patterns before the command executes.
+fires on four cross-boundary patterns before the command executes.
 
 ### Why this exists
 
@@ -16,13 +16,14 @@ same violations recurred on the next relevant session. This hook replaces
 the memo with a structural gate that fires at the command boundary (praxis
 issue #199).
 
-The three patterns covered:
+The four patterns covered:
 
-| Pattern               | Trigger                                                              | Action                                                                                                         |
-| --------------------- | -------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
-| `HEREDOC_BODY`        | `<<` token in same segment as `gh pr/issue create`                   | **Hard block** (exit 2) — suggests `--body-file`                                                               |
-| `CROSS_REPO_WRITE`    | `--repo/-R` flag in `gh pr/issue create/comment/edit` (any owner)    | **Ask** — surfaces four-point checklist                                                                        |
-| `IMPLICIT_REPO_WRITE` | same subcommands with **no** `--repo/-R`, target resolvable for `gh` | **Ask** — same checklist, naming the effective repo and the selector that chose it; silent if nothing resolves |
+| Pattern               | Trigger                                                                                                                         | Action                                                                                                                                                                                              |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `HEREDOC_BODY`        | `<<` token in same segment as `gh pr/issue create`                                                                              | **Hard block** (exit 2) — suggests `--body-file`                                                                                                                                                    |
+| `CROSS_REPO_WRITE`    | `--repo/-R` flag in `gh pr/issue create/comment/edit` (any owner)                                                               | **Ask** — surfaces four-point checklist                                                                                                                                                             |
+| `IMPLICIT_REPO_WRITE` | same subcommands with **no** `--repo/-R`, target resolvable for `gh`                                                            | **Ask** — same checklist, naming the effective repo and the selector that chose it; silent if nothing resolves                                                                                      |
+| `GH_API_WRITE`        | `gh api` with a write method (`POST`/`PATCH`/`PUT`, including the one gh infers from a field) against a comment/review endpoint | **Ask** — same checklist, rendered in the `gh api` form; target read from the endpoint's `repos/<owner>/<repo>`, or resolved from the checkout when it carries gh's `{owner}`/`{repo}` placeholders |
 
 ### What is blocked / asked
 
@@ -30,6 +31,50 @@ The hook uses `_hook_utils.tokenize_with_roles` (the same role-aware
 tokenization as sibling hooks, issue #263) so only live `gh` invocations match. Pattern
 references inside quoted arguments, echo/grep/commit bodies, or preceding
 variable assignments are transparent pass-throughs.
+
+#### GH_API_WRITE — ask (issue #1435)
+
+`gh api` carries no `(object, verb)` pair, so the `GH_WRITE_SUBCOMMANDS`
+frozenset can never reach it. That mattered because the verification-anchor
+convention **requires** the form: a rev >=2 anchor is a PATCH against a comment
+id, which no `gh <noun> <verb>` command can issue (`gh pr comment --edit-last`
+is forbidden by the same convention). Following the anchor procedure therefore
+moved the write *out* of the one gate that asks for per-action approval.
+
+Detection is **not** new here. `_lib/_external_write_body.py` has recognized the
+shape since issue #1265 — `parse_gh_api()` for the command structure,
+`GH_API_WRITE_PATH_RE` for the endpoint families that carry a public body
+(`issues/comments/<id>`, `issues/<n>/comments`, `pulls/comments/<id>`,
+`pulls/<n>/comments`, `pulls/<n>/reviews`). Every consumer of that module was an
+*advisory* hook, so what was missing was the wiring to the gate that asks, not
+the parser. This hook now consumes `is_gh_api_external_write()` and
+`parse_gh_api()` directly, which keeps one definition of "is this an external
+write" rather than a second copy that drifts.
+
+**Target attribution.** `gh api` takes no `--repo`, so the repo comes from the
+endpoint:
+
+| Endpoint head | Target | Arm |
+| --- | --- | --- |
+| `repos/<owner>/<repo>/…` with git-config-safe names | that repo, named literally | asked immediately, selector `the gh api endpoint path` — no git probe |
+| `repos/{owner}/{repo}/…` (gh's placeholders) | whatever gh resolves from the checkout | falls through to `IMPLICIT_REPO_WRITE` resolution (GH_REPO → `gh-resolved` → remote order) |
+| anything else | not readable | falls through to the same resolution |
+
+A braced placeholder names nothing on its own, so treating it as a literal would
+put the string `{owner}/{repo}` in front of an approval. The fall-through is what
+makes the two forms answer with the same repo.
+
+**Reads stay silent.** The method must be a write method. gh sends `GET` by
+default and `POST` as soon as a field or `--input` is added, and an explicit
+`--method GET` wins over that inference — all three are already modeled in
+`parse_gh_api`. An endpoint family that carries no public body (`issues/<n>`
+itself, say) is deliberately outside the path regex: `gh api` is overwhelmingly
+used for reads, and widening it would buy false positives only.
+
+**No heredoc hard block on this arm.** `HEREDOC_BODY`'s block message prescribes
+`--body-file`, which `gh api` does not accept. Hard-blocking an api call there
+would name a remedy the caller cannot follow, so the api arm takes the ask, and
+item ③ of its checklist states the form that does apply (`-F body=@<file>`).
 
 #### HEREDOC_BODY — hard block (exit 2)
 
