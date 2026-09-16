@@ -65,7 +65,11 @@ def _check_finding(index: int, finding: Any, violations: list[str]) -> None:
         )
 
     klass = finding.get("class")
-    if "class" in finding and klass not in DEFECT_CLASSES:
+    # The isinstance guard is load-bearing: an unhashable value (list, dict) in
+    # `class` makes the dict membership test raise instead of reporting.
+    if "class" in finding and (
+        not isinstance(klass, str) or klass not in DEFECT_CLASSES
+    ):
         violations.append(
             f"{where}.class: {klass!r} is outside the closed list "
             f"{sorted(DEFECT_CLASSES)} — report nothing outside it"

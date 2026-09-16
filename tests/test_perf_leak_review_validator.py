@@ -73,6 +73,14 @@ def test_rejects_a_class_outside_the_closed_list() -> None:
     assert any("outside the closed list" in v for v in violations)
 
 
+def test_rejects_an_unhashable_class() -> None:
+    """A list or dict in `class` must report, not raise: the closed list lives in
+    a dict, so the membership test itself is what an unhashable value breaks."""
+    for value in ([], {"a": 1}):
+        violations = _module().validate(_with(**{"class": value}))
+        assert any("outside the closed list" in v for v in violations), value
+
+
 def test_rejects_confidence_outside_the_enum() -> None:
     violations = _module().validate(_with(confidence="very high"))
     assert any(".confidence" in v for v in violations)
