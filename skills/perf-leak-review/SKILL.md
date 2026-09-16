@@ -14,7 +14,6 @@ allowed-tools:
   - Read
   - Grep
   - Glob
-  - Bash(git diff *)
   - Bash(git rev-parse *)
 verified-against-runtime: true
 runtime-verified-at: 2026-09-16
@@ -81,13 +80,22 @@ trigger surface added later attaches by passing the two arguments.
 
 ```bash
 git rev-parse --show-toplevel
-git diff
 ```
 
 `--diff <path>` is a unified diff file and `--repo <root>` is the root the diff
-applies to. With neither argument, take the diff from `git diff` in the current
-repository and the root from `git rev-parse --show-toplevel`. Both paths are
-read-only for the rest of the run.
+applies to. **`--diff` is required.** Step 3 hands the reviewer a path, and this
+skill cannot produce one from `git diff`: that writes to stdout, and the
+`allowed-tools` above carry no `Write` and no redirect, deliberately — a skill
+whose whole claim is that it does not write to the repository does not get a
+file-creating step. A caller with no diff file on hand makes one itself
+(`git diff > <path outside the repository>`) and passes it.
+
+With `--diff` given and `--repo` omitted, the root comes from
+`git rev-parse --show-toplevel`. Both paths are read-only for the rest of the
+run.
+
+Stop if `--diff` is absent and report
+`perf-leak-review: --diff <path> is required — this skill does not create one`.
 
 Stop if the diff is empty: there is nothing to review, and an empty envelope
 from an empty diff says nothing about the reviewer.
@@ -154,7 +162,7 @@ to the line without re-deriving anything.
 
 | Error                                                                              | Recovery                                                                                                                                                                                               |
 |------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `--diff` path missing or empty                                                     | Abort — report the path; do not fall back to `git diff` when a path was given explicitly                                                                                                               |
+| `--diff` absent, or its path missing or empty                                      | Abort and report it. There is no fallback: this skill cannot create a diff file (Step 1)                                                                                                               |
 | `--repo` is not a directory                                                        | Abort with the path                                                                                                                                                                                    |
 | `Agent` tool unavailable on this host                                              | Stop with the unverified-host message (Step 2); never review inline                                                                                                                                    |
 | Reviewer wrapped the envelope in a ```` ```json ```` fence, or put prose around it | Strip the fence and extract the single JSON object; if there is not exactly one, report the raw output and stop. Observed on a third of live envelopes, so treat it as normal rather than as a failure |
