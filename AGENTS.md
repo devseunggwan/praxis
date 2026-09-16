@@ -52,10 +52,10 @@ Skills are orchestrators with pluggable steps; external integrations (issue trac
 | `codex-review-wrap`      | Worktree-aware wrapper for `/codex:review` — explicit target selection, premise-verification gate, flip detection                                                                                        |
 | `debt`                   | Deferred-decision ledger — commit-trailer markers (`Not-tested:`, `Confidence: low`, `Rejected:`, `Directive:`, `Scope-risk:`) plus `# [PR #N]` comments; report-only                                    |
 | `surface-enumeration`    | Input-surface enumeration before writing a parser/validator/sanitizer/classifier — every variant becomes a required test case                                                                            |
-| `bypass-report`          | Bypass-telemetry and hook fire-rate viewer — runs the `bypass-review` CLI over local event ledgers; user-invoked, report-only                                                                             |
-| `spec-drift`             | Spec↔code drift report — runs each requirement's `Verify:` command, reports `implemented` / `missing` / `UNKNOWN`; report-only                                                                            |
-| `merge-briefing`         | Pre-merge approval procedure — three-surface probe, blocking-decoration grading, anchor-gap carry, six-part approve-ask; chains into `worktree-merge-cleanup`                                           |
-| `worktree-merge-cleanup` | Pre-merge worktree precondition + post-merge cleanup — base-worktree call site, submodule `--force` caveat, squash-ancestry stale-HEAD guard, no-`&&`-chain rule                                        |
+| `bypass-report`          | Bypass-telemetry and hook fire-rate viewer — runs the `bypass-review` CLI over local event ledgers; user-invoked, report-only                                                                            |
+| `spec-drift`             | Spec↔code drift report — runs each requirement's `Verify:` command, reports `implemented` / `missing` / `UNKNOWN`; report-only                                                                           |
+| `merge-briefing`         | Pre-merge approval procedure — three-surface probe, blocking-decoration grading, anchor-gap carry, six-part approve-ask; chains into `worktree-merge-cleanup`                                            |
+| `worktree-merge-cleanup` | Pre-merge worktree precondition + post-merge cleanup — base-worktree call site, submodule `--force` caveat, squash-ancestry stale-HEAD guard, no-`&&`-chain rule                                         |
 | `tradeoff`               | Tradeoff report — options at a fork, or whether a finding blocks; reversibility / blast radius / cost-if-wrong / process cost, graded by source; report-only                                             |
 
 ### Discipline
