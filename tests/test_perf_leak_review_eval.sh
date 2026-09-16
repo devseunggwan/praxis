@@ -209,6 +209,23 @@ run_case "k2_nonexistent_finding_path_fails" "$?" "1"
 printf '%s' "$out_k2" | grep -q "does not exist under"
 run_case "k2_path_failure_names_the_check" "$?" "0"
 
+# ------ (l) a finding whose file resolves outside the prepared tree fails
+# Existence alone is not containment: `../<sibling>/...` can name a real file
+# that the review never had in scope, and it used to score as a located finding.
+dir_l="$WORK/l"
+"$EVAL" prepare "$FIXTURES/c1-n-plus-one" "$dir_l" > /dev/null 2>&1
+root_l="$(prepared_path_of "$dir_l")"
+outside_l="$WORK/outside-the-tree.py"
+printf 'x = 1\n' > "$outside_l"
+write_envelope "$dir_l" "$root_l" "C1" "$(python3 -c '
+import os, sys
+print(os.path.relpath(sys.argv[1], sys.argv[2]))
+' "$outside_l" "$root_l")"
+out_l="$("$EVAL" score "$dir_l" 2>&1)"
+run_case "l_escaping_finding_path_fails" "$?" "1"
+printf '%s' "$out_l" | grep -q "escapes the prepared tree"
+run_case "l_escape_failure_names_the_check" "$?" "0"
+
 echo
 echo "Passed: $PASS"
 echo "Failed: $FAIL"

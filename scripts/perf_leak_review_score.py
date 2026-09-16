@@ -88,7 +88,16 @@ def main() -> int:
                 "to repo_root"
             )
             continue
-        if not (prepared_path / rel).is_file():
+        # Resolve before testing: existence alone lets `../sibling/file` name a
+        # real file outside the tree, which would count as a located finding.
+        candidate = (prepared_path / rel).resolve()
+        if not candidate.is_relative_to(prepared_path):
+            failures.append(
+                f"findings[{index}].file: {rel!r} escapes the prepared tree "
+                f"{prepared_path}"
+            )
+            continue
+        if not candidate.is_file():
             failures.append(
                 f"findings[{index}].file: {rel!r} does not exist under "
                 f"{prepared_path}"
