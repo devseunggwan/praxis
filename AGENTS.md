@@ -49,14 +49,14 @@ Skills are orchestrators with pluggable steps; external integrations (issue trac
 | Skill                    | Purpose                                                                                                                                                                                                  |
 | ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `retrospect`             | Session retrospect — find friction root causes, propose improvements                                                                                                                                     |
-| `codex-review-wrap`      | Worktree-aware wrapper for `/codex:review` — forces explicit target selection, premise-verification gate, flip detection across rounds                                                                   |
-| `debt`                   | Deferred-decision ledger — unions commit-trailer markers (`Not-tested:`, `Confidence: low`, `Rejected:`, `Directive:`, `Scope-risk:`) with tree compounding comments (`# [PR #N]`); report-only          |
-| `surface-enumeration`    | Pre-implementation input-surface enumeration — enumerate every input variant before writing a parser/validator/sanitizer/classifier so each becomes a required test case                                 |
-| `bypass-report`          | Bypass-telemetry and hook fire-rate viewer — runs the shipped `bypass-review` CLI over the local event ledgers and reports its output verbatim; user-invoked only, report-only                           |
-| `spec-drift`             | Spec↔code drift report — runs each spec-store requirement's `Verify:` command and reports `implemented` / `missing` / `UNKNOWN`; prose backticks are never executed; report-only                         |
-| `merge-briefing`         | On-demand home for the pre-merge approval procedure — three-surface probe, grading findings by blocking decoration, carrying anchor gaps, six-part approve-ask; chains into `worktree-merge-cleanup`     |
-| `worktree-merge-cleanup` | On-demand home for the pre-merge worktree precondition + unified post-merge cleanup sequence — base-worktree call site, submodule `--force` caveat, squash-ancestry stale-HEAD guard, no-`&&`-chain rule |
-| `tradeoff`               | Tradeoff report — options at an implementation fork, or whether a review finding blocks; reversibility / blast radius / cost-if-wrong / process cost, graded by source; stops at a precedent; report-only|
+| `codex-review-wrap`      | Worktree-aware wrapper for `/codex:review` — explicit target selection, premise-verification gate, flip detection                                                                                        |
+| `debt`                   | Deferred-decision ledger — commit-trailer markers (`Not-tested:`, `Confidence: low`, `Rejected:`, `Directive:`, `Scope-risk:`) plus `# [PR #N]` comments; report-only                                    |
+| `surface-enumeration`    | Input-surface enumeration before writing a parser/validator/sanitizer/classifier — every variant becomes a required test case                                                                            |
+| `bypass-report`          | Bypass-telemetry and hook fire-rate viewer — runs the `bypass-review` CLI over local event ledgers; user-invoked, report-only                                                                             |
+| `spec-drift`             | Spec↔code drift report — runs each requirement's `Verify:` command, reports `implemented` / `missing` / `UNKNOWN`; report-only                                                                            |
+| `merge-briefing`         | Pre-merge approval procedure — three-surface probe, blocking-decoration grading, anchor-gap carry, six-part approve-ask; chains into `worktree-merge-cleanup`                                           |
+| `worktree-merge-cleanup` | Pre-merge worktree precondition + post-merge cleanup — base-worktree call site, submodule `--force` caveat, squash-ancestry stale-HEAD guard, no-`&&`-chain rule                                        |
+| `tradeoff`               | Tradeoff report — options at a fork, or whether a finding blocks; reversibility / blast radius / cost-if-wrong / process cost, graded by source; report-only                                             |
 
 ### Discipline
 
