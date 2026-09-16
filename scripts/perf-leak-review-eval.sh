@@ -37,6 +37,16 @@ USAGE
   exit 2
 }
 
+# The prepared tree the EXIT trap acts on. A global, because a `local` is out of
+# scope by the time the trap fires and the trap would then act on an empty path.
+TREE_TO_RESTORE=""
+
+restore_tree_writability() {
+  if [ -n "$TREE_TO_RESTORE" ]; then
+    chmod -R u+w "$TREE_TO_RESTORE" 2>/dev/null || true
+  fi
+}
+
 git_commit() {
   # A fixed identity so the script works on a machine with no git config, and
   # -q so the fixture's own file list never lands in the eval output.
@@ -128,8 +138,8 @@ cmd_score() {
   prepared="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["prepared_path"])' "$prepared_json")"
   # Restore write permission on every exit path, so a failed run never leaves an
   # undeletable tree behind.
-  # shellcheck disable=SC2064  # expand $prepared now: it is gone by trap time
-  trap "chmod -R u+w '$prepared' 2>/dev/null || true" EXIT
+  TREE_TO_RESTORE="$prepared"
+  trap restore_tree_writability EXIT
 
   local rc=0
   local porcelain
