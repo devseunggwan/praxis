@@ -844,20 +844,6 @@
       }
     },
     {
-      "name": "block-rename-sweep-survivors",
-      "role": "preflight-gate",
-      "event": "PreToolUse",
-      "matcher": "Bash",
-      "gates": [
-        "git-commit"
-      ],
-      "hosts": [
-        "claude"
-      ],
-      "timeout": 10,
-      "review_by": "2026-12-04"
-    },
-    {
       "name": "block-gh-issue-create-without-dup-search",
       "role": "preflight-gate",
       "event": "PreToolUse",

@@ -315,7 +315,7 @@ run_repo_case "quoted literal git commit is silent" \
 
 # Documented shared-tokenizer boundary (see spec.md "Detection boundaries"):
 # a git commit inside an assignment's command substitution is NOT detected —
-# same as the blocking sibling block-rename-sweep-survivors. Pins the current
+# inherited from the shared _hook_utils tokenizer. Pins the current
 # behavior so a future _hook_utils tokenizer change surfaces here.
 run_repo_case "assignment command-substitution commit is not detected (boundary)" \
   "silent" \
