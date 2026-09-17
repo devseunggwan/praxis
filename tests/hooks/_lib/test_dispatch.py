@@ -89,13 +89,14 @@ def test_group_members_host_filter():
     codex = _dispatch.group_members("PreToolUse", "Bash", host="codex")
 
     assert len(unfiltered) == 55  # host=None -> canonical, unfiltered view
-    # the only host-restricted Bash members are the 5 claude-only guards
+    # the only host-restricted Bash members are the 6 claude-only guards
     assert names(claude) == names(unfiltered)
     assert "block-commit-without-codex-review" not in names(codex)
     assert "pre-commit-staged-file-enumeration" not in names(codex)
     assert "commit-decomposition-advisory" not in names(codex)
     assert "model-routing-advisory" not in names(codex)
     assert "block-unmatched-glob" not in names(codex)
+    assert "unenforced-step-advisory" not in names(codex)
     assert len(codex) == 49
 
 
