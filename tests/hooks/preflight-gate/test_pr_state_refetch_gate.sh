@@ -136,6 +136,10 @@ with open(map_file) as f:
                 "mergeable": parts[3] if len(parts) > 3 else "MERGEABLE",
                 "isDraft": (parts[4].lower() == "true") if len(parts) > 4 else False,
             }
+            # `absent` drops the key entirely — the only way to reproduce a
+            # response that answers the query without answering this field.
+            if len(parts) > 4 and parts[4].lower() == "absent":
+                del fields["isDraft"]
             break
 if state is None:
     sys.stderr.write("gh: no pull requests found\n")
@@ -327,6 +331,12 @@ run_case "UNKNOWN advises" pass \
 
 run_case "UNKNOWN does not block under strict mode" pass \
   "$Q_MERGE" map "714 OPEN UNKNOWN MERGEABLE false" 1 'advisory only'
+
+# An `isDraft` the response never carried is not a "not a draft" answer. Every
+# other unanswered field above routes to a soft reason; this one resolved
+# toward the ask.
+run_case "absent isDraft advises rather than passing silently" pass \
+  "$Q_MERGE" map "714 OPEN CLEAN MERGEABLE absent" 0 'draft status unknown'
 
 # Only this case can see the query itself; every other assertion reads the
 # shim's answer, and the shim used to answer for a query nobody had asked.

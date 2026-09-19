@@ -257,11 +257,17 @@ def _ask_readiness(fields: dict) -> tuple[str, bool] | None:
         # An enum value this hook does not model. Say so rather than guessing
         # in either direction.
         return f"live state = {state}", False
-    if fields.get("isDraft") is True:
+    draft = fields.get("isDraft")
+    if draft is True:
         # Draft is not a value of mergeStateStatus, so a draft PR reports CLEAN
         # and passes every check below. It is read on its own line for that
         # reason, not for completeness.
         return "draft — not ready to merge", True
+    if not isinstance(draft, bool):
+        # Absent or non-bool. Reading that as "not a draft" is the one axis
+        # where an unanswered field would resolve toward the ask, while every
+        # other unanswered field below routes to a soft reason.
+        return "isDraft absent — draft status unknown; re-poll", False
 
     merge_state = _upper(fields.get("mergeStateStatus"))
     mergeable = _upper(fields.get("mergeable"))

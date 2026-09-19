@@ -103,6 +103,11 @@ the menu.
 `mergeStateStatus` enum: a draft PR reports `CLEAN` and passes every other
 check.
 
+An `isDraft` the response does not carry is not an answer of `false`. Every
+other unanswered field routes to a soft reason, and reading this one as "not a
+draft" would resolve the one axis `mergeStateStatus` cannot report toward the
+ask — so an absent or non-bool value takes the advisory-only row instead.
+
 | Live fields | Result |
 | --------------- | -------- |
 | `state` is `MERGED` or `CLOSED` | Stale premise — advisory (default) or block (strict) |
@@ -110,6 +115,7 @@ check.
 | `mergeable` is not `MERGEABLE` (e.g. `CONFLICTING`) | Not ready — advisory or block |
 | `mergeStateStatus` is `UNSTABLE` / `BLOCKED` / `BEHIND` / `DIRTY` | Not ready — advisory or block |
 | `mergeStateStatus` or `mergeable` is `UNKNOWN` / absent | **Advisory only, never blocks** — see below |
+| `isDraft` is absent or not a bool | **Advisory only, never blocks** — draft status unanswered |
 | `state` is `OPEN`, not draft, `MERGEABLE` + (`CLEAN` \| `HAS_HOOKS`) | Premise holds — silent pass |
 | `state` is some other value this hook does not model | Advisory only — named rather than guessed in either direction |
 | `gh` call fails, times out, or returns unparseable JSON | **That PR number is skipped** (fail-open) — cannot determine live state, so neither warn nor block on it |
