@@ -1063,6 +1063,17 @@ run_case_detail "gh api item 3 prescribes -F body=@, not --body-file" \
   'gh api --method PATCH repos/owner/repo/issues/comments/123 -F body=@/tmp/a.md' \
   '-F body=@/tmp/<slug>.md'
 
+# Check 1's hard block exempts `gh api`, so the API checklist must not repeat
+# the `pr/issue create` wording — it would send the caller to rewrite a command
+# that already reached this prompt.
+run_case_detail "gh api item 3 says the heredoc reaches approval, not a block" \
+  'gh api --method PATCH repos/owner/repo/issues/comments/123 -F body=@/tmp/a.md' \
+  'it enters this approval path'
+
+run_case_detail "non-api item 3 keeps the heredoc block wording" \
+  'gh pr comment 1 --repo other/target --body-file /tmp/a.md' \
+  'is blocked by the praxis hook chain'
+
 run_case "gh api POST issue comments (method implied by a field)" ask \
   'gh api repos/owner/repo/issues/42/comments -f body=hi'
 

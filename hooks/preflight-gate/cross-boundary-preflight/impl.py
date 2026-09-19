@@ -821,7 +821,14 @@ def _build_checklist(
             if is_api
             else "     Use --body-file /tmp/<slug>.md (write body via Write tool first)."
         ),
-        "     Heredoc (`<<EOF`) is blocked by the praxis hook chain.",
+        # The hard block at Check 1 exempts `gh api` (`subcommand[0] !=
+        # GH_API_OBJECT`), so telling an API caller their heredoc is blocked
+        # sends them to rewrite a command that would have reached this prompt.
+        (
+            "     Heredoc (`<<EOF`) is not blocked here; it enters this approval path."
+            if is_api
+            else "     Heredoc (`<<EOF`) is blocked by the praxis hook chain."
+        ),
         "",
         "  ④ Language & content rules (CLAUDE.md §External-repo content isolation)",
         "     English only. No internal identifiers (org/team prefixes,",
