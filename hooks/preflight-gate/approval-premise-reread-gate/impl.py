@@ -405,6 +405,10 @@ _INLINE_PROGRAM_RE = re.compile(
 )
 
 
+# `$(…)` (one level of nested parens) and backticks.
+_COMMAND_SUBSTITUTION_RE = re.compile(r"\$\((?:[^()]|\([^()]*\))*\)|`[^`]*`")
+
+
 def _strip_inline_programs(text: str) -> str:
     return _INLINE_PROGRAM_RE.sub(lambda m: m.group(0).replace(m.group("prog"), ""), text)
 
@@ -451,10 +455,14 @@ def _bash_marker_text(command: str) -> str:
         return shell_text
     openers = _heredoc_opener_commands(command)
     kept = [shell_text]
-    for index, (_delim, body, _quoted) in enumerate(sources):
+    for index, (_delim, body, quoted) in enumerate(sources):
         opener = openers[index] if index < len(openers) else ""
         if opener.rsplit("/", 1)[-1] not in _INTERPRETERS:
             kept.append(body)
+        elif not quoted:
+            # bash expands an unquoted body before the interpreter sees it, so
+            # a substitution there is the shell's own call, not program text.
+            kept.extend(m.group(0) for m in _COMMAND_SUBSTITUTION_RE.finditer(body))
     return "\n".join(kept)
 
 

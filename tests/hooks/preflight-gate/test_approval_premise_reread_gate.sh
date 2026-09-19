@@ -148,6 +148,16 @@ run_case "chain_heredoc_owner" \
 # interpreter that opens the next one.
 run_case "attached_heredoc_operator_binds" \
   "$(verdict "$(bash_payload $'kubectl apply -f -<<A && python3 - <<B\nmetadata:\n  namespace: prod-a\nA\nprint(1)\nB')")" "ask"
+# An unquoted heredoc is expanded by the shell before the interpreter reads
+# it, so a command substitution in it is the shell's own call.
+run_case "py_unquoted_heredoc_cmdsub" \
+  "$(verdict "$(bash_payload $'python3 - <<EOF\nx = "$(hubctl dev trigger --phase prod)"\nEOF')")" "ask"
+run_case "py_unquoted_heredoc_backtick" \
+  "$(verdict "$(bash_payload $'python3 - <<EOF\nx = "`hubctl dev trigger --phase prod`"\nEOF')")" "ask"
+run_case "py_quoted_heredoc_cmdsub_is_literal" \
+  "$(verdict "$(bash_payload $'python3 - <<\'EOF\'\nx = "$(hubctl dev trigger --phase prod)"\nEOF')")" "quiet"
+run_case "py_unquoted_heredoc_plain_literal" \
+  "$(verdict "$(bash_payload $'python3 - <<EOF\nprint("prod")\nEOF')")" "quiet"
 # Blanking the body must not blank the shell line the body hangs off.
 run_case "py_heredoc_argv_marker_survives" \
   "$(verdict "$(bash_payload $'python3 - --profile prod <<\'EOF\'\nprint(1)\nEOF')")" "ask"

@@ -197,6 +197,16 @@ Two exclusions from the carve-out are decisions, not omissions:
   `namespace: prod-a` inside a `kubectl apply -f - <<'EOF'` manifest is the
   call's actual target. Calling `strip_heredoc_bodies` on the whole command is
   the one-line version of this change and would silence exactly that call.
+- **A substitution in an unquoted interpreter body stays in scope.** bash
+  expands `<<EOF` (unquoted) before the interpreter reads it, so
+  `$(hubctl dev trigger --phase prod)` or its backtick form there runs as the
+  shell's own call. Only those substitutions are kept; the rest of the body is
+  still program text, and a quoted `<<'EOF'` body is literal throughout.
+
+One gap is accepted: an interpreter program that itself reaches production —
+`subprocess.run([..., "--phase", "prod"])` in a Python heredoc — does not ask.
+Reading it would mean treating every string literal as an argument again,
+which is the false positive #1428 removed.
 
 The MCP branch is unchanged and still scans the serialized `tool_input`: that
 is JSON, not shell, and the quoted-form alternatives of `PROD_MARKER_RE` exist
