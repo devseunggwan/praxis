@@ -201,6 +201,12 @@ the exit-2 channel and the "fix the comment now / `gh api --method PATCH …`"
 instruction that rides with it, because a merged pull request cannot be edited
 into a mergeable one and the anchor is now a record of what was verified.
 
+This is not a hypothetical shape. Of the 45 non-OPEN pull requests in this
+repository, 36 carry an anchor and **9 of those anchors are stale** — `#1344`
+pins `da64808` while its merged head is `2dd67dd`. Each one is a permanent
+exit-2 trap: the pull request cannot be edited into a mergeable state, so the
+instruction can never be satisfied, only complied with pointlessly.
+
 A `gh` that answers with two fields predates the `state` request. An unreadable
 state keeps today's tier rather than buying silence — the direction this gate
 states throughout is that a gap costs a question while a wrong silence ships a
