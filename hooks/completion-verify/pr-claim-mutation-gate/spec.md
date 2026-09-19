@@ -129,6 +129,13 @@ Two consequences of the token view worth stating, because both are deliberate:
   mutation shape. Counting it cleared the claim on a rehearsal; a mutation
   shape seen only inside a substitution is therefore not evidence, which fails
   closed the same way the whole-string scan did.
+- **The shape has to be the segment's own `git` / `gh` call.** A segment counts
+  only when its `COMMAND`-role token (by basename) is `git` or `gh`, and the
+  mutation pattern is matched from that command word forward, not anywhere in
+  the segment. In `git log --oneline | grep 'git push'` the push is `grep`'s
+  pattern argument, so it is data; `man git push` and `echo git push` fall out
+  by the same rule. A `bash -c 'git push …'` falls out with them — the same
+  fail-closed miss as the accepted gap below.
 - **Accepted gap — a mutation the shell runs from inside data.** A
   `$(gh pr comment …)` inside a flag value, or a `git push` inside a heredoc
   that `bash -s` / `sh` executes, is dropped with the rest of the data, so the
@@ -197,7 +204,7 @@ no mutation evidence blocks, per the Escalation section above.
 bash tests/hooks/completion-verify/test_pr_claim_mutation_gate.sh
 ```
 
-46 cases: the motivating incident verbatim (KR, zero mutation → block),
+47 cases: the motivating incident verbatim (KR, zero mutation → block),
 4 EN/KR claim variants without mutation (block), claim cleared by `git
 push` / `gh pr comment` / `gh pr review` / write-method `gh api` / GitHub MCP
 comment tool (silent, 5 cases).
@@ -211,8 +218,9 @@ otherwise identical succeeded push stays silent, so what the pair
 distinguishes is the result correlation, not the command text.
 
 Two pin the inspection command: `man git push` blocks, and so does
-`/usr/bin/man git push` — the command word is compared by basename, since an
-exact match let the path-prefixed form read as a real push.
+`/usr/bin/man git push` — the command word is compared by basename (now via
+the command-argv rule), since an exact match let the path-prefixed form read
+as a real push.
 
 Three pin the equals form, which the separate-token exclusion cannot reach: a
 `git commit --message=` quoting a mutation still blocks, and `--method=POST` /
@@ -228,7 +236,9 @@ message quotes `gh pr comment`, and a heredoc body quoting `git push`.
 
 Two pin the substitution rule: `OUT=$(git push --dry-run …)` and
 `X=$(gh pr comment 1 --help)` both block, because the rehearsal flag inside
-the `SUBST_RUN` token is out of the flag check's reach.
+the `SUBST_RUN` token is out of the flag check's reach. One pins the
+command-argv rule: `git log --oneline | grep 'git push'` blocks, because the
+push is `grep`'s pattern, not a call.
 
 The rest: `Write` tool_use does not count as PR mutation (block), mutation in
 the **previous** turn does not back a claim in this one (block — turn-scoped

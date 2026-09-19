@@ -52,6 +52,7 @@ from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E
 from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
     Token,
     TokenRole,
+    filter_argv,
     tokenize_with_roles,
 )
 from _payload import read_payload  # type: ignore[import-not-found]  # noqa: E402
@@ -188,7 +189,9 @@ _MCP_GH_READ_RE = re.compile(r"^(?:get|list|search|read|fetch|view)_", re.IGNORE
 # (`tail -N`) and `-H` (`gh api -H`) are not rehearsal flags for any covered
 # command, and an IGNORECASE match on them voided real mutations (#1434).
 _REHEARSAL_FLAGS = frozenset({"--dry-run", "-n", "--help", "-h"})
-_INSPECTION_COMMANDS = frozenset({"man"})
+# Only these command words can perform a covered mutation; any other command
+# (`man`, `grep`, `echo`) that mentions one is reading or quoting it.
+_MUTATING_COMMANDS = frozenset({"git", "gh"})
 
 # Value-taking flags, so the role API attributes their values as FLAG_VALUE
 # rather than POSITIONAL and a quoted body stops reading as shell syntax.
@@ -253,35 +256,39 @@ def _is_mutation_command(cmd: str) -> bool:
     if not cmd:
         return False
     for segment in tokenize_with_roles(cmd.replace("\\\n", " "), _FLAG_VALUE_SPEC):
+        argv = filter_argv(segment)
+        if not argv:
+            continue
+        # The mutation has to be this segment's own call: `grep 'git push'` or
+        # `man git push` carries the shape as another command's data. Basename,
+        # so `/usr/bin/git push` is the same call as `git push`.
+        command = argv[0].text.rsplit("/", 1)[-1]
+        if command not in _MUTATING_COMMANDS:
+            continue
         # Flag values are the caller's data, not its argv, so they are kept out
         # of the scan — a `--body` that merely quotes `gh pr comment` is prose.
-        argv_text = " ".join(_scannable(tok) for tok in segment)
+        # Anchored at the command word, so a positional quoting the shape
+        # (`git log --grep 'git push'`) is not read as the call itself.
+        argv_text = " ".join([command, *(_scannable(tok) for tok in argv[1:])])
         hit = (
-            _PUSH_RE.search(argv_text)
-            or _GH_PR_COMMENT_RE.search(argv_text)
-            or _GH_PR_REVIEW_RE.search(argv_text)
-            or _GH_API_WRITE_RE.search(argv_text)
+            _PUSH_RE.match(argv_text)
+            or _GH_PR_COMMENT_RE.match(argv_text)
+            or _GH_PR_REVIEW_RE.match(argv_text)
+            or _GH_API_WRITE_RE.match(argv_text)
             # The one pattern whose evidence IS a flag value: a GraphQL
             # mutation name only ever reaches gh inside `-f query=...`.
-            or _GRAPHQL_RESOLVE_RE.search(" ".join(
-                tok.text for tok in segment if tok.role is not TokenRole.SUBST_RUN
-            ))
+            or (command == "gh" and _GRAPHQL_RESOLVE_RE.search(" ".join(
+                tok.text for tok in argv if tok.role is not TokenRole.SUBST_RUN
+            )))
         )
         if not hit:
             continue
         flags = {
             tok.text.split("=", 1)[0]
-            for tok in segment
+            for tok in argv
             if tok.role is TokenRole.FLAG
         }
         if flags & _REHEARSAL_FLAGS:
-            continue
-        # Basename, so `/usr/bin/man git push` is the same read as `man git push`.
-        if any(
-            tok.role is TokenRole.COMMAND
-            and tok.text.rsplit("/", 1)[-1] in _INSPECTION_COMMANDS
-            for tok in segment
-        ):
             continue
         if _ECHOED_RE.search(argv_text):
             continue

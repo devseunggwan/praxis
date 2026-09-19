@@ -15,6 +15,7 @@ FAIL=0
 #   evidence: none|push|comment|review|api-write|api-read|mcp|write|prev-turn-push
 #             |api-write-labels|push-dry-run|push-echoed|push-failed
 #             |push-succeeded|mcp-read|subst-push-dry-run|subst-comment-help
+#             |grep-pattern-push
 # -> writes path to $TRANSCRIPT
 build_transcript() {
   local final_text="$1" evidence="$2"
@@ -123,6 +124,9 @@ elif evidence == "subst-push-dry-run":
     events.append(bash_ev("OUT=$(git push --dry-run origin issue-868)"))
 elif evidence == "subst-comment-help":
     events.append(bash_ev("X=$(gh pr comment 1 --help)"))
+elif evidence == "grep-pattern-push":
+    # `git push` is grep's pattern argument; the git segment is a read.
+    events.append(bash_ev("git log --oneline | grep 'git push' | head -n 1"))
 elif evidence == "write":
     events.append({"message": {"role": "assistant", "content": [
         {"type": "tool_use", "name": "Write",
@@ -345,6 +349,11 @@ run_case block "substituted-dry-run-push-still-fires" '{}'
 
 build_transcript "리뷰 코멘트 전부 반영했습니다." subst-comment-help
 run_case block "substituted-help-comment-still-fires" '{}'
+
+# --- the shape must be the segment's own git/gh call ------------------------
+# A grep pattern that spells `git push` is grep's data, not a push.
+build_transcript "리뷰 코멘트 전부 반영했습니다." grep-pattern-push
+run_case block "grep-pattern-push-still-fires" '{}'
 
 # --- failed vs successful mutation -----------------------------------------
 # A rejected push leaves the PR exactly as it was.
