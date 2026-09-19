@@ -25,7 +25,8 @@ Block when **all** of these hold:
      at the top level (`^<field>:`); **or**
    - **the hint-index shape** (#1426) — the frontmatter carries
      `hookable: true` and `_lib/_memory_frontmatter.dark_memory_shape()` names
-     a shape: `block-list`, `scalar`, `unclosed`, `empty`, or `absent`.
+     a shape: `block-list`, `scalar`, `unclosed`, `empty`, `valueless`, or
+     `absent`.
 
 The two are checked in that order, so no write that was already blocked
 changes the message it had. A file wrong on both axes reports the distillation
@@ -82,7 +83,13 @@ it: the memory is written, looks well-formed, and never fires again.
 | `scalar` | `hookKeywords: git` | no |
 | `unclosed` | `hookKeywords: [git, push` | no |
 | `empty` | `hookKeywords: []` | no |
+| `valueless` | `hookKeywords:` with no value anywhere after it | no |
 | `absent` | no `hookKeywords:` key at all | no |
+
+`valueless` is split out from `absent` because the two differ to a *caller*
+and not to the runtime: the lint's missing-key check sees the key and stays
+quiet, so while the helper named this shape `absent` — which that lint has no
+message for — the shape was reported by neither check and the memory was dark.
 
 `hookable: false` passes at any shape: nothing indexes the entry, so no shape
 can hide it from anything.

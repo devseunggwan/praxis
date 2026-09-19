@@ -70,6 +70,13 @@ FIXTURES = [
     ("empty list", "hookable: true\nhookKeywords: []", MF.SHAPE_EMPTY),
     ("list of empties", "hookable: true\nhookKeywords: [ , ]", MF.SHAPE_EMPTY),
     ("key absent", "hookable: true\ntype: feedback", MF.SHAPE_ABSENT),
+    # The key is there and nothing follows it in the block, so KEYWORDS_VALUE_RE
+    # — whose `\s*` spans newlines — finds no value anywhere. The runtime drops
+    # the entry exactly as for `absent`, but a caller keyed on "is the key
+    # there" answers the opposite, which is why this shape has its own name:
+    # named `absent`, it satisfied the lint's missing-key check and had no
+    # message under its own shape, so a dark memory passed clean.
+    ("key present, no value", "hookable: true\nhookKeywords:", MF.SHAPE_VALUELESS),
 
     # `hookable` not truthy: nothing indexes the entry, so no shape can hide
     # it from anything and the gate must stay silent whatever the keywords are.
@@ -87,7 +94,7 @@ def test_shape_matches_the_expected_name():
 
 def test_every_shape_name_has_a_reason():
     for shape in (MF.SHAPE_ABSENT, MF.SHAPE_BLOCK_LIST, MF.SHAPE_SCALAR,
-                  MF.SHAPE_UNCLOSED, MF.SHAPE_EMPTY):
+                  MF.SHAPE_UNCLOSED, MF.SHAPE_EMPTY, MF.SHAPE_VALUELESS):
         assert shape in MF.SHAPE_REASON
 
 

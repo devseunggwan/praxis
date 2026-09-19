@@ -58,9 +58,16 @@ SHAPE_BLOCK_LIST = "block-list"
 SHAPE_SCALAR = "scalar"
 SHAPE_UNCLOSED = "unclosed"
 SHAPE_EMPTY = "empty"
+# A key with nothing after the colon and nothing after it in the block. The
+# runtime drops it exactly like `absent`, but a reader keyed on "the file has
+# a hookKeywords key" sees the key and skips its own absent check — so naming
+# it `absent` left the one shape that satisfies both checks reported by
+# neither (#1426 follow-up).
+SHAPE_VALUELESS = "valueless"
 
 SHAPE_REASON = {
     SHAPE_ABSENT: "`hookable: true` with no `hookKeywords:` key at all",
+    SHAPE_VALUELESS: "`hookKeywords:` present with no value at all",
     SHAPE_BLOCK_LIST: "`hookKeywords:` in multi-line `- item` block form",
     SHAPE_SCALAR: "`hookKeywords:` in scalar form, not `[a, b]`",
     SHAPE_UNCLOSED: "`hookKeywords:` opens with `[` and never closes it",
@@ -128,6 +135,13 @@ def hookkeywords_shape(block: str) -> str | None:
         return None
     match = KEYWORDS_VALUE_RE.search(block)
     if not match:
+        # No value anywhere after the colon — not even on a following line,
+        # since `KEYWORDS_VALUE_RE`'s `\s*` spans newlines. The key is still
+        # there, so the two cases are different to a caller and identical to
+        # the runtime, which drops the entry either way.
+        same_line = KEYWORDS_SAME_LINE_RE.search(block)
+        if same_line is not None:
+            return SHAPE_VALUELESS
         return SHAPE_ABSENT
     raw = match.group(1).strip()
     if not raw.startswith("["):

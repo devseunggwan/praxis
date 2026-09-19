@@ -114,6 +114,10 @@ BRACKET_FIELDS = ("hookKeywords", "hookEvents")
 # each line names the consequence rather than only the shape. `absent` is not
 # here: the key being missing entirely is reported by its own check below,
 # which runs whether or not the occurrences loop saw a `hookKeywords` line.
+# `valueless` IS here, and that is the whole point of the shape: a bare
+# `hookKeywords:` with nothing after it satisfies the missing-key check (the
+# key is present) and, while the helper still called it `absent`, had no entry
+# here either — so the runtime dropped the memory and neither check said so.
 HOOKKEYWORDS_MESSAGE = {
     "block-list": (
         "`hookKeywords:` has no inline value (multi-line YAML-block `- item` form) — "
@@ -128,6 +132,11 @@ HOOKKEYWORDS_MESSAGE = {
         "`hookKeywords:` has no closing `]` — the memory-hint parser requires a closing "
         "bracket and silently drops the entire memory from the hint index when it is "
         "absent (issue #1094)"
+    ),
+    "valueless": (
+        "`hookKeywords:` has no value at all — the memory-hint parser finds nothing to "
+        "parse and silently drops the entire memory from the hint index; use single-line "
+        "`[a, b]` form"
     ),
     "empty": (
         "`hookKeywords:` is an empty list — the memory-hint parser treats an empty "

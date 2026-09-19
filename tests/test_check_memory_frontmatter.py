@@ -462,3 +462,37 @@ def test_hookkeywords_verdict_comes_from_the_shared_predicate(tmp_path):
         )
         errors = check.check_file(p)
         assert any(needle in e for e in errors), f"{name}: {errors}"
+
+
+def test_hookkeywords_present_but_valueless_is_reported(tmp_path):
+    """A bare `hookKeywords:` as the last frontmatter key used to pass clean.
+
+    It fell between two checks: the missing-key check saw the key present, and
+    the shape check got `absent` back from the helper, which has no message
+    here. The runtime drops the memory from the hint index all the same, so
+    the entry was dark and nothing said so. Controls below pin the three
+    neighbouring shapes, which were always reported (or always clean).
+    """
+    def _entry(name: str, tail: str) -> list[str]:
+        p = _write(
+            tmp_path,
+            f"feedback_{name}.md",
+            "---\nname: s\ndescription: test\nmetadata:\n  type: feedback\n"
+            f"  originSessionId: abc-123\n  hookable: true\n{tail}---\nbody\n",
+        )
+        return check.check_file(p)
+
+    valueless = _entry("valueless", "  hookKeywords:\n")
+    assert any("no value at all" in e for e in valueless), valueless
+
+    # Control 1 — key absent entirely: its own check reports it.
+    missing = _entry("missing", "")
+    assert any("`hookKeywords` is missing" in e for e in missing), missing
+
+    # Control 2 — scalar value: the shape check reports it.
+    scalar = _entry("scalar", "  hookKeywords: git push\n")
+    assert any("scalar form" in e for e in scalar), scalar
+
+    # Control 3 — the good form the runtime indexes: no hookKeywords error.
+    good = _entry("good", "  hookKeywords: [git, push]\n")
+    assert not [e for e in good if "hookKeywords" in e], good
