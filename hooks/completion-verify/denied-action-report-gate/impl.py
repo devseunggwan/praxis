@@ -9,10 +9,18 @@ structural fences, so an ordinary closing report is uncovered, and the
 always-loaded rule that failures are ranked by damage has no gate behind it
 there.
 
-Nothing here judges meaning. A structurally rejected tool call is an objective
+Nothing here judges meaning. A structurally denied tool call is an objective
 event (`_transcript.scan_user_rejections`: `toolDenialKind`, `is_error: true`
-and the runtime's fixed refusal sentence, three co-agreeing markers), and
-whether the report acknowledges it is a lexical test.
+and — for a user refusal — the runtime's fixed refusal sentence), and whether
+the report acknowledges it is a lexical test.
+
+Two denial kinds, one class of omission (issue #1422). The user refusing a call
+and a PreToolUse hook blocking one leave the same hole in a report: the call had
+no outcome, so there is no error to explain and no correction to narrate. In the
+turn #1422 observed, a label gate blocked `gh pr create`, the input was rewritten
+and re-run successfully, and the closing report listed two *other* skipped steps
+while never mentioning the block. The gate stayed silent because its oracle read
+only `user-rejected`.
 
 Scope is the **current turn**, by intersecting the session-wide scan with the
 tool_use ids this turn produced results for. The cursor cannot do that job: it
@@ -41,6 +49,9 @@ from _hook_io import (  # type: ignore[import-not-found]  # noqa: E402
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
 from _payload import read_payload  # type: ignore[import-not-found]  # noqa: E402
 from _transcript import (  # type: ignore[import-not-found]  # noqa: E402
+    DENIAL_KINDS,
+    HOOK_BLOCK_DENIAL_KIND,
+    REJECTION_DENIAL_KIND,
     load_stop_turn,
     resolve_stop_transcript,
     scan_cursor_path,
@@ -138,16 +149,39 @@ def unreported(rejections: list[dict], turn_ids: set[str], message: str) -> list
     return [r for r in candidates if not is_acknowledged(r, message, sole)]
 
 
+# The two kinds are named separately because they ask the reader for different
+# things: a block says a rule stopped you, a refusal says the user did. A
+# message that merges them names neither.
+# The Korean halves are labels, not bodies — the emitted message leads in
+# English, as `tests/test_emit_english_lead.py` requires of every hook.
+_KIND_WORDS = (
+    (HOOK_BLOCK_DENIAL_KIND, "blocked by a hook or permission rule", "훅·권한 차단"),
+    (REJECTION_DENIAL_KIND, "refused by the user", "사용자 거부"),
+)
+
+
+def _by_kind(items: list[dict], kind: str) -> list[dict]:
+    """Entries of one kind. An entry with no `kind` predates #1422's field and
+    is a user refusal, which is the only kind the scan used to return."""
+    return [r for r in items if (r.get("kind") or REJECTION_DENIAL_KIND) == kind]
+
+
 def _advisory(items: list[dict]) -> str:
-    names = ", ".join(sorted({(r.get("tool_name") or "?") for r in items})) or "?"
+    english, korean = [], []
+    for kind, en, ko in _KIND_WORDS:
+        group = _by_kind(items, kind)
+        if not group:
+            continue
+        names = ", ".join(sorted({(r.get("tool_name") or "?") for r in group}))
+        english.append(f"{len(group)} {en} ({names})")
+        korean.append(f"{ko} {len(group)}건({names})")
     return (
-        f"Denied action missing from the report: {len(items)} tool call(s) were "
-        f"refused this turn ({names}) and the final message never says so. Rank "
-        "what you report by damage, not by what is easiest to recall — a refused "
-        "action leaves no error, no correction and no confession, so it is "
-        "exactly what recall misses.\n"
-        f"이번 턴에 거부된 도구 호출 {len(items)}건({names})을 최종 보고가 "
-        "언급하지 않았습니다. 보고 순위는 고백하기 쉬운 순이 아니라 손해 순입니다.\n"
+        f"Denied action missing from the report: {'; '.join(english)} this turn, "
+        "and the final message never says so. Rank what you report by damage, "
+        "not by what is easiest to recall — a denied action leaves no error, no "
+        "correction and no confession, so it is exactly what recall misses.\n"
+        f"이번 턴의 {', '.join(korean)}을 최종 보고가 언급하지 않았습니다. "
+        "보고 순위는 고백하기 쉬운 순이 아니라 손해 순입니다.\n"
         "Reference: hooks/completion-verify/denied-action-report-gate/spec.md"
     )
 
@@ -185,6 +219,7 @@ def main() -> int:
     rejections = scan_user_rejections(
         transcript_path,
         cursor_path=scan_cursor_path(_HOOK_NAME, session_id),
+        kinds=DENIAL_KINDS,
     )
     turn = load_stop_turn(payload)
 
