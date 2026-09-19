@@ -29,9 +29,13 @@ So the phases split along what each one can actually know:
   reads as clean.
 - **PostToolUse — the published comment is the oracle.** `gh` prints the
   comment URL (or a JSON response carrying it), so the check reads what was
-  *actually posted* through the API. No shell parsing, no cwd, no host
-  guessing, no placeholder expansion: the URL names the comment. This is where
-  SHA freshness and diff coverage live, because both need the real target.
+  *actually posted* through the API. No cwd, no host guessing, no placeholder
+  expansion: the URL names the comment. This is where SHA freshness and diff
+  coverage live, because both need the real target. The one thing it does ask
+  of the command is whether it wrote at all — a URL in the output can come from
+  a `grep`, and the endpoint literal is spelled the same by a GET (#1421).
+  On a closed or merged pull request the findings stay but stop asking for a
+  write: there is nothing left to fix by editing the anchor.
 
 The cost is honest and worth stating: PostToolUse cannot prevent the post. A
 malformed anchor caught there is already visible, and the correction is "fix
@@ -115,6 +119,7 @@ from _external_write_body import (  # type: ignore[import-not-found]  # noqa: E4
     GH_BODY_FLAGS_WITH_ARG,
     GH_GLOBAL_FLAGS_WITH_ARG,
     GH_SHORT_FLAGS_WITH_ARG,
+    is_gh_external_write,
     parse_gh_api,
     split_gh_flag as _split_flag,
     split_gh_short_flags as _split_short_flags,
@@ -646,20 +651,34 @@ def _fetch_anchor(
     }, None
 
 
-def _head_and_base(post: dict, deadline: float) -> tuple[str | None, str | None, str | None]:
-    """The PR's current head SHA and base branch, from one `gh pr view`."""
+def _head_and_base(
+    post: dict, deadline: float
+) -> tuple[str | None, str | None, str | None, str | None]:
+    """The PR's current head SHA, base branch and state, from one `gh pr view`.
+
+    `state` rides along on the call that was already being made. It decides the
+    tier rather than the finding: on a closed or merged PR the anchor is a
+    record of what was verified, and there is nothing left to fix by editing it.
+    """
     out, err = _gh(
         ["pr", "view", post["pr"], "--repo", post["repo"],
-         "--json", "headRefOid,baseRefName",
-         "--jq", '.headRefOid + " " + .baseRefName'],
+         "--json", "headRefOid,baseRefName,state",
+         "--jq", '.headRefOid + " " + .baseRefName + " " + .state'],
         deadline,
     )
     if err:
-        return None, None, f"PR HEAD 조회 실패 — {err}"
-    sha, _, base = (out or "").partition(" ")
-    if not sha:
-        return None, None, "PR HEAD 가 비어 있음"
-    return sha, (base.strip() or None), None
+        return None, None, None, f"PR HEAD 조회 실패 — {err}"
+    parts = (out or "").split()
+    if not parts:
+        return None, None, None, "PR HEAD 가 비어 있음"
+    sha = parts[0]
+    base = parts[1] if len(parts) > 1 else ""
+    # A `gh` that answers with two fields predates the `state` request. Absent
+    # state reads as unknown, and unknown keeps today's tier — the gate's stated
+    # direction is that a gap costs a question while a wrong silence ships a
+    # stale anchor unremarked.
+    state = parts[2] if len(parts) > 2 else None
+    return sha, (base or None), state, None
 
 
 def _uncovered_files(
@@ -760,10 +779,55 @@ def _post_failed(tool_response: object) -> bool:
         return False
 
 
+def _publishes_a_comment(command: str) -> bool:
+    """Whether any segment of `command` writes to a GitHub surface at all.
+
+    Both ref sources below read text that a command can carry without having
+    written anything: `_comment_refs` scans the command's own **output**, where
+    a `grep` over notes or a heredoc echoing a saved link puts an anchor URL,
+    and `_refs_from_command` matches the endpoint literal, which a read-only
+    `gh api .../issues/comments/<id>` spells exactly like a `PATCH`. Either one
+    then spends two `gh` calls and a `git diff` re-auditing an anchor the
+    command never touched, and reports its findings against work in flight
+    elsewhere (#1421).
+
+    The precondition is the shared `is_gh_external_write`, not a parser of this
+    hook's own: it already decides the same question for the external-write
+    hooks, and it reads `gh api`'s method — gh's implied `POST` included —
+    rather than the endpoint. The cost is that an anchor published by a wrapper
+    script is no longer checked, the same gap the GitHub MCP path has always
+    had; widening the parser to chase it is the move this hook's two-event
+    split exists to avoid.
+    """
+    for tokens in _tokenizations(command):
+        for argv in iter_command_starts(tokens):
+            if is_gh_external_write(strip_prefix(argv)):
+                return True
+    return False
+
+
+def _demote_on_closed(
+    found: list[tuple[str, str]], state: str | None
+) -> list[tuple[str, str]]:
+    """On a closed or merged PR, no finding is something to fix."""
+    if not state or state.upper() == "OPEN":
+        return found
+    note = (
+        f" — PR state {state}: the anchor is a record of what was verified, "
+        "no edit is asked for / 닫힌 PR 이라 수정 요청이 아닙니다"
+    )
+    return [
+        (_ADVISORY, msg + note) if tier == _BLOCKING else (tier, msg)
+        for tier, msg in found
+    ]
+
+
 def _post_tool_use(payload: dict) -> int:
     """Verify the anchors that were actually published. Advisory unless strict."""
     command = (payload.get("tool_input") or {}).get("command") or ""
     if not command or os.environ.get(_BYPASS_ENV, "").strip() or _bypassed_with_reason(command):
+        return 0
+    if not _publishes_a_comment(command):
         return 0
 
     # Under the dispatcher this clamps to what is left of the Bash group's
@@ -819,19 +883,27 @@ def _post_tool_use(payload: dict) -> int:
         if post is None:
             continue
         urls.append(post["url"])
-        problems += [(tier, tag + msg) for tier, msg in _structure_findings(post["body"])]
+        # Collected per comment rather than appended straight through: the PR
+        # state that decides the tier is only known after the lookup below,
+        # and it applies to the structure findings gathered before it.
+        found: list[tuple[str, str]] = [
+            (tier, tag + msg) for tier, msg in _structure_findings(post["body"])
+        ]
+        state: str | None = None
 
         heading = _heading_match(post["body"])
         if not heading:
+            problems += found
             continue
         if not post["pr"]:
-            problems.append((_UNKNOWN, tag + "SHA 신선도 확인 불가 (코멘트의 PR 번호를 찾지 못함)"))
+            found.append((_UNKNOWN, tag + "SHA 신선도 확인 불가 (코멘트의 PR 번호를 찾지 못함)"))
+            problems += found
             continue
-        head, base, lookup_err = _head_and_base(post, deadline)
+        head, base, state, lookup_err = _head_and_base(post, deadline)
         if lookup_err:
-            problems.append((_UNKNOWN, tag + f"SHA 신선도 확인 불가 ({lookup_err})"))
+            found.append((_UNKNOWN, tag + f"SHA 신선도 확인 불가 ({lookup_err})"))
         elif head and not (head.startswith(heading.group(1)) or heading.group(1).startswith(head)):
-            problems.append((
+            found.append((
                 _BLOCKING,
                 tag + f"앵커 SHA `{heading.group(1)}` 가 현재 HEAD `{head[:7]}` 와 다름 — "
                 "stale 앵커는 없는 코드에 대한 증거를 주장한다",
@@ -840,13 +912,14 @@ def _post_tool_use(payload: dict) -> int:
         uncovered = list(_uncovered_files(post["body"], base, head, deadline, cwd))
         if uncovered:
             files_text = ", ".join(uncovered)
-            problems.append((
+            found.append((
                 _ADVISORY,
                 tag + f"changed files no table row mentions: {files_text} "
                 "(file↔claim is not 1:1, so this may be a false positive)\n"
                 f"표 행이 언급하지 않는 변경 파일: {files_text} "
                 "(파일↔주장은 1:1 이 아니므로 오탐일 수 있습니다)",
             ))
+        problems += _demote_on_closed(found, state)
 
     return _report(problems, urls)
 

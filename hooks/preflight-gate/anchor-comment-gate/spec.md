@@ -41,10 +41,14 @@ The split follows what each event can actually know.
 | On violation | blocks (exit 2) | reports (exit 2 blocking / context otherwise) |
 | Can be fooled by shell syntax | yes — it warns instead | no |
 
-PostToolUse needs no parsing at all: `gh pr comment` prints the new comment's
-URL and `gh api` returns a JSON body containing it, and that URL names host,
-owner, repo, PR and comment id outright. Whatever the command looked like, the
-published comment is the oracle.
+PostToolUse needs no parsing to identify the *target*: `gh pr comment` prints
+the new comment's URL and `gh api` returns a JSON body containing it, and that
+URL names host, owner, repo, PR and comment id outright. Whatever the command
+looked like, the published comment is the oracle.
+
+It does need one bit about the *command*, and issue #1421 is what that bit
+costs when it is missing — see **Only a command that published is checked**
+below.
 
 The cost is worth stating plainly: PostToolUse cannot prevent the post. A
 malformed anchor caught there is already visible, and the remedy is "fix it
@@ -158,6 +162,49 @@ It is not silent either: stderr says the pre-check was skipped, because silence
 reads as "checked and clean", which is the one thing it is not.
 
 ## PostToolUse — the published comment
+
+### Only a command that published is checked
+
+Both ref sources read text a command can carry without having written anything.
+The output scan finds an anchor URL that a `grep` over notes, a `gh pr view
+--json comments`, or a heredoc echoing a saved link merely *printed*; the
+endpoint literal is spelled identically by a read-only `gh api
+.../issues/comments/<id>` — gh sends GET without `--method` — and by the `PATCH`
+that revises an anchor. Either one then spent two `gh` calls and a `git diff`
+re-auditing an anchor the command never touched, and reported a stale SHA at
+exit 2 against work in flight somewhere else (#1421). A blocking message on a
+command that published nothing is worse than no message: the agent either
+performs an external write nobody asked for, or learns to skim this gate's
+output.
+
+So `_publishes_a_comment` runs first, before the deadline is even taken, and
+requires some segment of the command to be a GitHub write. It is the shared
+`is_gh_external_write` (`hooks/_lib/_external_write_body.py`), not a parser of
+this hook's own: it already decides this question for the external-write hooks,
+and it reads `gh api`'s method — gh's implied `POST` included — rather than
+matching the endpoint. That is the discrimination this gate needs and the one
+the endpoint literal cannot make.
+
+The cost is that an anchor published by a **wrapper script** is no longer
+checked here, which is the gap the GitHub MCP path has always had. Widening the
+parser to chase it is the move the two-event split above exists to avoid; the
+PreToolUse structure check still sees a wrapped post's body if the body is on
+the command line, and nothing sees it otherwise.
+
+### A closed pull request has nothing left to fix
+
+`_head_and_base` asks for `state` on the `gh pr view` it was already making, so
+this costs no extra call. When the state is not `OPEN`, every `blocking`
+finding for that comment is demoted to `advisory` with the state named in the
+message. The finding itself is unchanged and still reported — what goes away is
+the exit-2 channel and the "fix the comment now / `gh api --method PATCH …`"
+instruction that rides with it, because a merged pull request cannot be edited
+into a mergeable one and the anchor is now a record of what was verified.
+
+A `gh` that answers with two fields predates the `state` request. An unreadable
+state keeps today's tier rather than buying silence — the direction this gate
+states throughout is that a gap costs a question while a wrong silence ships a
+stale anchor unremarked.
 
 **Every** comment URL in the tool output is followed, not the first: one
 compound command can publish two anchors, and PreToolUse already checks each
