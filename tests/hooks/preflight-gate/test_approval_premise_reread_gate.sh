@@ -138,6 +138,9 @@ run_case "sh_c_is_not_interpreter" \
   "$(verdict "$(bash_payload "sh -c 'kubectl --context prod-x delete pod p'")")" "ask"
 run_case "kubectl_heredoc_manifest" \
   "$(verdict "$(bash_payload $'kubectl apply -f - <<\'EOF\'\nmetadata:\n  namespace: prod-a\nEOF')")" "ask"
+# An inline-program shape inside a manifest is manifest text, not a program.
+run_case "manifest_body_keeps_inline_program_text" \
+  "$(verdict "$(bash_payload $'kubectl apply -f - <<\'EOF\'\ncommand: python3 -c "prod"\nEOF')")" "ask"
 # The heredoc belongs to the segment carrying `<<`, not to whatever ran first.
 run_case "chain_heredoc_owner" \
   "$(verdict "$(bash_payload $'python3 -m x && kubectl apply -f - <<\'EOF\'\nns: prod-a\nEOF')")" "ask"

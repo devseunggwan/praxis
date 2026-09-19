@@ -405,6 +405,10 @@ _INLINE_PROGRAM_RE = re.compile(
 )
 
 
+def _strip_inline_programs(text: str) -> str:
+    return _INLINE_PROGRAM_RE.sub(lambda m: m.group(0).replace(m.group("prog"), ""), text)
+
+
 def _heredoc_opener_commands(command: str) -> list[str]:
     """`argv[0]` of the command opening each heredoc, in source order.
 
@@ -434,13 +438,17 @@ def _bash_marker_text(command: str) -> str:
     production target. Everything else is kept: a heredoc opened by anything
     but an interpreter is the call's own payload, so a `namespace: prod-a` in
     a `kubectl apply -f -` manifest still counts.
+
+    The inline-program strip runs on the shell text only. Applied to the whole
+    command it also rewrote heredoc bodies, so a manifest line shaped like
+    `python3 -c "prod"` lost its marker.
     """
-    text = _INLINE_PROGRAM_RE.sub(lambda m: m.group(0).replace(m.group("prog"), ""), command)
-    sources = heredoc_sources(text)
+    sources = heredoc_sources(command)
+    shell_text = _strip_inline_programs(strip_heredoc_bodies(command))
     if not sources:
-        return text
-    openers = _heredoc_opener_commands(text)
-    kept = [strip_heredoc_bodies(text)]
+        return shell_text
+    openers = _heredoc_opener_commands(command)
+    kept = [shell_text]
     for index, (_delim, body, _quoted) in enumerate(sources):
         opener = openers[index] if index < len(openers) else ""
         if opener.rsplit("/", 1)[-1] not in _INTERPRETERS:
