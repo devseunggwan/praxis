@@ -18,6 +18,9 @@ set +e
 # repo-less case away from its fixture. Unset it once, up front; the cases
 # that need it set it per-invocation.
 unset GH_REPO
+# `GH_HOST` decides the `gh api` target host the same way, so it is cleared
+# for the same reason; the cases that need it set it per-invocation.
+unset GH_HOST
 
 REPO_ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
 HOOK="$REPO_ROOT/hooks/preflight-gate/cross-boundary-preflight/impl.py"
@@ -1161,6 +1164,32 @@ run_case_detail_absent "gh api --hostname github.com keeps the bare repo" \
 run_case_detail "gh api --hostname with a placeholder endpoint is UNRESOLVED" \
   'gh api --hostname ghe.example repos/{owner}/{repo}/issues/1/comments -f body=hi' \
   'UNRESOLVED'
+
+# `GH_HOST` sends the request to another host just as `--hostname` does, and
+# `--hostname` outranks it (`gh api --help`).
+run_case_detail "gh api inline GH_HOST names the host with the repo" \
+  'GH_HOST=ghe.example gh api --method PATCH repos/o/r/issues/comments/1 -f body=x' \
+  'ghe.example/o/r'
+
+GH_HOST=ghe.env run_case_detail "gh api exported GH_HOST names the host with the repo" \
+  'gh api --method PATCH repos/o/r/issues/comments/1 -f body=x' \
+  'ghe.env/o/r'
+
+run_case_detail "gh api --hostname beats GH_HOST" \
+  'GH_HOST=ghe.example gh api --hostname other.example repos/o/r/issues/comments/1 -f body=x' \
+  'other.example/o/r'
+
+run_case_detail_absent "gh api --hostname beats GH_HOST (GH_HOST not named)" \
+  'GH_HOST=ghe.example gh api --hostname other.example repos/o/r/issues/comments/1 -f body=x' \
+  'ghe.example'
+
+run_case_detail "gh api run-time GH_HOST is UNRESOLVED" \
+  'GH_HOST=$H gh api --method PATCH repos/o/r/issues/comments/1 -f body=x' \
+  'host is decided at run time'
+
+run_case_detail_absent "gh api GH_HOST=github.com keeps the bare repo" \
+  'GH_HOST=github.com gh api --method PATCH repos/o/r/issues/comments/1 -f body=x' \
+  'github.com/o/r'
 
 # A read is not a write. Both the default GET and an explicit one stay silent.
 run_case "gh api GET by default is silent" pass \

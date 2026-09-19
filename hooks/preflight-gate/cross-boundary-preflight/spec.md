@@ -75,6 +75,15 @@ the checkout's repo, which the write never touches.
 endpoint the target is `UNRESOLVED` instead: the checkout's remote need not sit
 on the host the call is sent to.
 
+`GH_HOST` moves the call the same way (`gh api --help`: "GH_HOST: make the
+request to a GitHub host other than `github.com`"), and `--hostname` takes
+precedence over it. The effective host is therefore `--hostname` if present,
+else an inline `GH_HOST=` prefix on that gh command (scoped to it, so the
+process environment never sees it; an empty `GH_HOST=` means `github.com`),
+else the hook's own `GH_HOST`. A host the shell fills in (`GH_HOST=$H`,
+`--hostname "$H"`) makes the target `UNRESOLVED`. Not modeled: an
+`export GH_HOST=…` in an earlier segment of the same command.
+
 A run-time endpoint is the one case the comment-endpoint test cannot answer, so
 it is decided by the method alone: a write method asks, and a read stays silent.
 Reading it as "not a comment endpoint" let `gh api "$ENDPOINT" -f body=hi`

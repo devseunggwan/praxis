@@ -206,18 +206,40 @@ def _gh_api_hostname(argv: list[str]) -> str | None:
     return None
 
 
+GH_HOST_ENV = "GH_HOST"
+
+
+def _gh_api_effective_host(seg: list[Token], argv: list[str]) -> str | None:
+    """The host a `gh api` call is sent to, in gh's own precedence order.
+
+    `gh api --help`: "GH_HOST: make the request to a GitHub host other than
+    `github.com`", and `--hostname` outranks it. The inline `GH_HOST=` prefix
+    is read before the process environment for the same reason `GH_REPO=` is:
+    it is scoped to this one command, so `os.environ` never sees it.
+    """
+    flag = _gh_api_hostname(argv)
+    if flag is not None:
+        return flag
+    inline = _inline_env_value(seg, GH_HOST_ENV)
+    if inline is not None:
+        return inline
+    return os.environ.get(GH_HOST_ENV)
+
+
 def _qualify_api_target(slug: str | None, host: str | None) -> str | None:
-    """`slug` as the approval should name it once `--hostname` is known.
+    """`slug` as the approval should name it once the target host is known.
 
     The host decides which server the write lands on, so a bare `owner/repo`
     reads as the github.com repo of that name. A placeholder endpoint would
     resolve through the checkout's remote, which need not be on that host, so
-    it is UNRESOLVED rather than a guess.
+    it is UNRESOLVED rather than a guess — as is a host the shell fills in.
     """
     if not host or host.lower() == _DEFAULT_GH_HOST:
         return slug
+    if has_shell_expansion(host):
+        return "UNRESOLVED — the `gh api` host is decided at run time"
     if slug is None:
-        return f"UNRESOLVED — `--hostname {host}` with an endpoint that names no repo"
+        return f"UNRESOLVED — host `{host}` with an endpoint that names no repo"
     return f"{host}/{slug}"
 
 
@@ -585,8 +607,13 @@ def _inline_env_repo(seg: list[Token]) -> str | None:
     "" and falls through to the remotes, and so must this. Last assignment
     wins, matching the shell.
     """
+    return _inline_env_value(seg, GH_REPO_ENV)
+
+
+def _inline_env_value(seg: list[Token], name: str) -> str | None:
+    """The `<name>=` value assigned in this segment's command prefix, or None."""
     value: str | None = None
-    prefix = GH_REPO_ENV + "="
+    prefix = name + "="
     for tok in seg:
         if tok.role == TokenRole.COMMAND:
             break
@@ -1017,7 +1044,7 @@ def main() -> int:
             if is_gh_api_external_write(api_argv):
                 readable, slug = _gh_api_repo_slot(api_call.path)
                 api_repo = (
-                    _qualify_api_target(slug, _gh_api_hostname(api_argv))
+                    _qualify_api_target(slug, _gh_api_effective_host(seg, api_argv))
                     if readable
                     else _API_PARTIAL_REPO
                 )
