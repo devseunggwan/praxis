@@ -722,6 +722,47 @@ $(mk_assistant "Login now works with magic links. Try: \`npm run dev\`, open \`/
 # Guard: the word inside another word is not a claim.
 run_case "MC10 'undone,' is not 'done,'" pass "$USER_MC
 $(mk_assistant "The migration is undone, rolled back to v3.")"
+# MC11+ — English negated / forecast forms. Widening the anchor to a clause
+# break made these match, and each one reports NOT being finished. The
+# exclusion swallows the claim word too: stripping only "not " would leave
+# "done" and manufacture the claim (MC11 is that case).
+run_case "MC11 'not done:' is a negation" pass "$USER_MC
+$(mk_assistant "not done: two steps remain")"
+run_case "MC12 'not finished;' is a negation" pass "$USER_MC
+$(mk_assistant "not finished; waiting on CI")"
+run_case "MC13 'not yet done,' is a negation" pass "$USER_MC
+$(mk_assistant "Backfill not yet done, still running.")"
+run_case "MC14 \"isn't done:\" is a negation" pass "$USER_MC
+$(mk_assistant "The migration isn't done: two left.")"
+run_case "MC15 'is not finished.' is a negation" pass "$USER_MC
+$(mk_assistant "Cleanup is not finished.")"
+run_case "MC16 'has not been finished,' is a negation" pass "$USER_MC
+$(mk_assistant "The backfill has not been finished, CI is red.")"
+run_case "MC17 'never finished.' is a negation" pass "$USER_MC
+$(mk_assistant "That rollout never finished.")"
+run_case "MC18 'implementation not complete.' is a negation" pass "$USER_MC
+$(mk_assistant "implementation not complete.")"
+run_case "MC19 uppercase 'NOT DONE:' is a negation" pass "$USER_MC
+$(mk_assistant "NOT DONE: two steps remain")"
+run_case "MC20 'will be done,' is a forecast" pass "$USER_MC
+$(mk_assistant "The rename will be done, tracked in the follow-up.")"
+run_case "MC21 'should be done,' is a forecast" pass "$USER_MC
+$(mk_assistant "That should be done, see the plan.")"
+run_case "MC22 'cannot be done,' is a forecast" pass "$USER_MC
+$(mk_assistant "The backfill cannot be done, the pool is down.")"
+run_case "MC23 'expected to be done,' is a forecast" pass "$USER_MC
+$(mk_assistant "Migration expected to be done, ETA 3pm.")"
+# Controls: the exclusion must not disarm the gate.
+run_case "MC24 trailing negation is still a claim" block "$USER_MC
+$(mk_assistant "Step 3 done, but the tests are not finished.")"
+run_case "MC25 intervening quantifier is still a claim" block "$USER_MC
+$(mk_assistant "not all tests are done, but the schema landed.")"
+run_case "MC26 mid-line claim still fires" block "$USER_MC
+$(mk_assistant "Step 4 of 5 done: backfill written. Next: verify.")"
+run_case "MC27 bare 'done.' with no evidence still fires" block "$USER_MC
+$(mk_assistant "done.")"
+run_case "MC28 'cleanup is finished' still a claim" block "$USER_MC
+$(mk_assistant "cleanup is finished")"
 
 echo
 echo "=========================================="

@@ -23,10 +23,29 @@ since the last real user input — for verification evidence.
 
 A claim word counts at the end of a line **or before a clause break**
 (`.` `!` `?` `:` `;` `,`), so `Step 3 of 5 done: schema updated` and
-`커밋 3개 푸시 완료, CI 대기` are claims (issue #1416). Before matching,
-`NON_CLAIM_FORMS` removes `미완료` and `예상 완료`: a negation or a forecast
-carries the word without claiming anything. A line with no claim word at all
-(`Login now works`) is outside this pattern by construction.
+`커밋 3개 푸시 완료, CI 대기` are claims (issue #1416). A line with no claim
+word at all (`Login now works`) is outside this pattern by construction.
+
+Before matching, `sed -E "s/${NON_CLAIM_FORMS}//gI"` removes the forms that
+carry a claim word without claiming anything — a negation or a forecast:
+
+| Class | Covered |
+| ----- | ------- |
+| Korean | `미완료`, `예상 완료` |
+| English negation | `not` / `n't` / `n’t` / `never`, optionally `yet` and `be`/`been`, immediately before `done` / `finished` / `complete` — `not done:`, `not yet done,`, `isn't done:`, `is not finished.`, `has not been finished,`, `never finished.`, `implementation not complete.` |
+| English forecast | `will` / `would` / `should` / `can` / `could` / `may` / `might` / `to` / `going to` + `be`/`get` + the claim word, and `expect(ed/s/ing) to (finish\|complete\|be done\|be finished)` — `will be done,`, `should be done,`, `cannot be done,`, `expected to be done,` |
+
+Each alternative swallows the **claim word** as well as the negator; deleting
+only `not ` would leave `done` and manufacture the claim it was meant to drop.
+The `I` flag keeps the stripping case-insensitive, matching the `grep -iE` that
+follows, so `NOT DONE:` is stripped too.
+
+**Boundary — the negator must sit immediately before the claim word.** An
+over-broad exclusion silently disables the gate, so anything else stays a
+claim: a trailing negation (`Step 3 done, but the tests are not finished.`), an
+intervening quantifier (`not all tests are done,`), and a distant negator
+(`I don't think it's done.`). Those still fire the evidence gate — the hook
+would rather fire on a non-claim than go silent on a real one.
 
 Replayed over the local transcript corpus (867 transcripts, 14111 turns,
 deduplicated by real path; each turn cut after its last assistant entry and
