@@ -689,6 +689,40 @@ fi
 # Control: a plain Stop payload is unchanged by any of the above.
 run_case "Stop payload unchanged by the SubagentStop path" pass "$SS_PARENT"
 
+# MC — mid-line completion claims (issue #1416) -------------------------------
+# A claim word followed by a clause break is a claim; the end-of-line anchor
+# alone let every "Step N of M done: <what>" line past the gate.
+USER_MC=$(mk_user_text "status?")
+run_case "MC1 'Step 3 of 5 done:' mid-line claim" block "$USER_MC
+$(mk_assistant "Step 3 of 5 done: schema updated. Next: backfill the new column.")"
+run_case "MC2 'All tests done,' mid-line claim" block "$USER_MC
+$(mk_assistant "All tests done, lint clean, PR opened.")"
+run_case "MC3 '푸시 완료,' mid-line claim" block "$USER_MC
+$(mk_assistant "커밋 3개 푸시 완료, CI 결과를 기다립니다.")"
+# Positive control: the end-of-line form the shipped pattern already caught.
+run_case "MC4 end-of-line 'Migration done' still a claim" block "$USER_MC
+$(mk_assistant "Migration done")"
+# Evidence still clears a mid-line claim — the widening changes what is a
+# claim, not what counts as evidence.
+BASH_MC=$(mk_bash_use "mc1" "pytest tests/")
+run_case "MC5 mid-line claim with pasted evidence passes" pass "$USER_MC
+$(mk_assistant "running..." "[$BASH_MC]")
+$(mk_tool_result "mc1" "7 passed in 0.31s")
+$(mk_assistant "Step 3 of 5 done: 7 passed in 0.31s. Next: backfill.")"
+# Non-claims that carry the claim word.
+run_case "MC6 '예상 완료:' is a forecast" pass "$USER_MC
+$(mk_assistant "- **예상 완료:** 20시에서 21시 30분 사이로 봅니다.")"
+run_case "MC7 '미완료:' is a negation" pass "$USER_MC
+$(mk_assistant "- **Slack 스킬 매핑 미완료:** 채널 표에 아직 추가하지 않았습니다.")"
+run_case "MC8 end-of-line '미완료.' is a negation" pass "$USER_MC
+$(mk_assistant "매핑은 미완료.")"
+# Out of scope: no claim word at all, so no widening of the anchors reaches it.
+run_case "MC9 'now works' carries no claim word" pass "$USER_MC
+$(mk_assistant "Login now works with magic links. Try: \`npm run dev\`, open \`/login\`.")"
+# Guard: the word inside another word is not a claim.
+run_case "MC10 'undone,' is not 'done,'" pass "$USER_MC
+$(mk_assistant "The migration is undone, rolled back to v3.")"
+
 echo
 echo "=========================================="
 echo "  PASS: $PASS  FAIL: $FAIL"

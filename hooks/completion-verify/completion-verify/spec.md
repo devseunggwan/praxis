@@ -21,6 +21,21 @@ When the last 10 lines of the last assistant message match `CLAIM_PATTERNS`
 complete` / etc.), the hook checks the **current turn** — i.e., everything
 since the last real user input — for verification evidence.
 
+A claim word counts at the end of a line **or before a clause break**
+(`.` `!` `?` `:` `;` `,`), so `Step 3 of 5 done: schema updated` and
+`커밋 3개 푸시 완료, CI 대기` are claims (issue #1416). Before matching,
+`NON_CLAIM_FORMS` removes `미완료` and `예상 완료`: a negation or a forecast
+carries the word without claiming anything. A line with no claim word at all
+(`Login now works`) is outside this pattern by construction.
+
+Replayed over the local transcript corpus (867 transcripts, 14111 turns,
+deduplicated by real path; each turn cut after its last assistant entry and
+fed to `impl.sh`): the end-of-line pattern fires on 220 turns and blocks 183;
+the clause-break form fires on 335 more and blocks 289 of them — about 2.6×
+the blocks. A 60-line sample of the added fires (drawn before deduplication,
+so two lines appear twice) read as completion claims in 52 lines, 3 were non-claims (a forecast, a negation, a quoted pattern — the
+first two now suppressed), and 5 could not be classified.
+
 The turn passes only if **all** of the following hold:
 
 | Gate | Condition |
