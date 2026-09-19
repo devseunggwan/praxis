@@ -289,17 +289,33 @@ def _comment_at(node: dict, alias: str) -> dict:
 _DISPOSITION_PREFIXES = ("fixed —", "not fixed —", "false positive —")
 
 
+def _first_unquoted_line(body: str) -> str:
+    """The comment's first line that is not a blockquote.
+
+    Quoting the text you are answering is the ordinary shape of a reply, so the
+    verdict is whatever the author wrote themselves. Reading the raw body
+    matters here: `_clean_body` deletes newlines along with the other control
+    bytes, which fuses a quoted line into the objection underneath it.
+    """
+    for raw in (body or "").splitlines():
+        line = raw.strip()
+        if line and not line.startswith(">"):
+            return line
+    return ""
+
+
 def _is_dispositioned(t: dict) -> bool:
     """True when someone other than the thread's opener already recorded a verdict.
 
-    The author check is what keeps a bot's own follow-up from reading as a
-    disposition; the bot never writes this vocabulary, but a quoted excerpt of
-    an earlier reply could. A later comment from anyone else re-arms the
-    advisory, which is correct: a fresh objection deserves a fresh answer.
+    The author check keeps a bot's own follow-up from reading as a disposition;
+    the bot never writes this vocabulary, but it can quote a reply that does.
+    A later comment from anyone else re-arms the advisory, which is correct: a
+    fresh objection deserves a fresh answer — including one that opens by
+    quoting the disposition it disagrees with.
     """
     if t.get("last_author", "?") == t.get("author", "?"):
         return False
-    head = _clean_body(t.get("last_body", "")).lstrip("*_> \t").lower()
+    head = _clean_body(_first_unquoted_line(t.get("last_body", ""))).lstrip("*_ \t").lower()
     return head.startswith(_DISPOSITION_PREFIXES)
 
 

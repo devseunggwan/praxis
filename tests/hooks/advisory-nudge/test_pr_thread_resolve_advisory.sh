@@ -370,6 +370,25 @@ stub_gh "$PR_LIST" "$(threads_json \
   "$(thread false a.py 1 'issue (blocking): x' rev 'still broken after that change')")"
 run_case advisory "new-comment-rearms" "git push origin main" "$OK"
 
+# --- a quoted disposition is an objection, not a verdict ------------------
+setup_repo
+stub_gh "$PR_LIST" "$(threads_json "$(thread false a.py 1 'issue (blocking): x' me \
+  '> Fixed — abc1234 guard added
+
+Actually still broken')")"
+run_case advisory "quoted-disposition-still-needs" "git push origin main" "$OK"
+check_json "quoted-disposition-emits-context" expect-context \
+  "$(stdout_of "git push origin main" "$OK")"
+
+# quoting the finding before answering it is the ordinary reply shape
+setup_repo
+stub_gh "$PR_LIST" "$(threads_json "$(thread false a.py 1 'issue (blocking): x' me \
+  '> issue (blocking): x
+
+Not fixed — 후속 이슈 #7')")"
+check_json "quote-then-disposition-no-context" expect-empty \
+  "$(stdout_of "git push origin main" "$OK")"
+
 echo "----"
 echo "PASS: $PASS / FAIL: $FAIL"
 [ "$FAIL" -eq 0 ]
