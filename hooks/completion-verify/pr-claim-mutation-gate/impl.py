@@ -224,8 +224,13 @@ def _scannable(tok: Token) -> str:
     argv and a commit message reads as a PR comment. `--method=POST` keeps
     its value, because `--method` is not declared value-taking and the
     write-method pattern has to see it.
+
+    A `$(...)` substitution drops out whole too. The role API hands it back
+    as one SUBST_RUN token, so a `--dry-run` / `--help` inside it never
+    reaches the flag check while its text still matches the mutation shape;
+    counting it would clear the claim on a rehearsal (fail-closed instead).
     """
-    if tok.role is TokenRole.FLAG_VALUE:
+    if tok.role in (TokenRole.FLAG_VALUE, TokenRole.SUBST_RUN):
         return ""
     if tok.role is TokenRole.FLAG and "=" in tok.text:
         name = tok.text.split("=", 1)[0]
@@ -258,7 +263,9 @@ def _is_mutation_command(cmd: str) -> bool:
             or _GH_API_WRITE_RE.search(argv_text)
             # The one pattern whose evidence IS a flag value: a GraphQL
             # mutation name only ever reaches gh inside `-f query=...`.
-            or _GRAPHQL_RESOLVE_RE.search(" ".join(tok.text for tok in segment))
+            or _GRAPHQL_RESOLVE_RE.search(" ".join(
+                tok.text for tok in segment if tok.role is not TokenRole.SUBST_RUN
+            ))
         )
         if not hit:
             continue

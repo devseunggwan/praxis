@@ -14,7 +14,7 @@ FAIL=0
 # build_transcript <final_text> <evidence>
 #   evidence: none|push|comment|review|api-write|api-read|mcp|write|prev-turn-push
 #             |api-write-labels|push-dry-run|push-echoed|push-failed
-#             |push-succeeded|mcp-read
+#             |push-succeeded|mcp-read|subst-push-dry-run|subst-comment-help
 # -> writes path to $TRANSCRIPT
 build_transcript() {
   local final_text="$1" evidence="$2"
@@ -118,6 +118,11 @@ elif evidence == "man-push":
 elif evidence == "man-path-push":
     # The command word carries its path; the inspection test must still see `man`.
     events.append(bash_ev("/usr/bin/man git push origin issue-868"))
+elif evidence == "subst-push-dry-run":
+    # The substitution is one SUBST_RUN token, so `--dry-run` is never a FLAG.
+    events.append(bash_ev("OUT=$(git push --dry-run origin issue-868)"))
+elif evidence == "subst-comment-help":
+    events.append(bash_ev("X=$(gh pr comment 1 --help)"))
 elif evidence == "write":
     events.append({"message": {"role": "assistant", "content": [
         {"type": "tool_use", "name": "Write",
@@ -331,6 +336,15 @@ run_case silent "equals-method-api-write-clears" '{}'
 
 build_transcript "리뷰 코멘트 전부 반영했습니다." api-write-equals-x
 run_case silent "equals-x-api-write-clears" '{}'
+
+# --- a mutation shape inside `$(...)` is not evidence -----------------------
+# The rehearsal flag sits inside the substitution token, out of the flag check's
+# reach, so the substitution text is kept out of the scan altogether.
+build_transcript "리뷰 코멘트 전부 반영했습니다." subst-push-dry-run
+run_case block "substituted-dry-run-push-still-fires" '{}'
+
+build_transcript "리뷰 코멘트 전부 반영했습니다." subst-comment-help
+run_case block "substituted-help-comment-still-fires" '{}'
 
 # --- failed vs successful mutation -----------------------------------------
 # A rejected push leaves the PR exactly as it was.

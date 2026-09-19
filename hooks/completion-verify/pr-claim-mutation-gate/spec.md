@@ -122,6 +122,13 @@ Two consequences of the token view worth stating, because both are deliberate:
   pattern alone is matched against the segment *including* values.
 - **`--method` / `-X` are absent from the tokenizer's value spec**, so `POST` /
   `PATCH` stays a positional and the write-method pattern can still see it.
+- **A `$(...)` substitution is excluded from the scanned text.** The tokenizer
+  returns it as one `SUBST_RUN` token, so the `--dry-run` in
+  `OUT=$(git push --dry-run …)` or the `--help` in `X=$(gh pr comment 1 --help)`
+  never reaches the flag check, while the substitution's text still matches the
+  mutation shape. Counting it cleared the claim on a rehearsal; a mutation
+  shape seen only inside a substitution is therefore not evidence, which fails
+  closed the same way the whole-string scan did.
 - **Accepted gap — a mutation the shell runs from inside data.** A
   `$(gh pr comment …)` inside a flag value, or a `git push` inside a heredoc
   that `bash -s` / `sh` executes, is dropped with the rest of the data, so the
@@ -190,7 +197,7 @@ no mutation evidence blocks, per the Escalation section above.
 bash tests/hooks/completion-verify/test_pr_claim_mutation_gate.sh
 ```
 
-44 cases: the motivating incident verbatim (KR, zero mutation → block),
+46 cases: the motivating incident verbatim (KR, zero mutation → block),
 4 EN/KR claim variants without mutation (block), claim cleared by `git
 push` / `gh pr comment` / `gh pr review` / write-method `gh api` / GitHub MCP
 comment tool (silent, 5 cases).
@@ -218,6 +225,10 @@ guard, a `gh pr comment` whose body quotes `tail -N`, a write-method `gh api`
 after a heredoc containing `sed -n`, and a `gh api` carrying `-H`. Two are
 turns that mutated nothing and must still **block**: a `git commit -m` whose
 message quotes `gh pr comment`, and a heredoc body quoting `git push`.
+
+Two pin the substitution rule: `OUT=$(git push --dry-run …)` and
+`X=$(gh pr comment 1 --help)` both block, because the rehearsal flag inside
+the `SUBST_RUN` token is out of the flag check's reach.
 
 The rest: `Write` tool_use does not count as PR mutation (block), mutation in
 the **previous** turn does not back a claim in this one (block — turn-scoped
