@@ -53,8 +53,11 @@ from _payload import read_payload  # type: ignore[import-not-found]  # noqa: E40
 from block_message import format_block  # type: ignore[import-not-found]  # noqa: E402
 from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
     has_state_changing_redirect,
+    heredoc_delimiters,
+    heredoc_sources,
     iter_command_starts,
     safe_tokenize,
+    strip_heredoc_bodies,
     strip_prefix,
 )
 
@@ -383,6 +386,68 @@ def _carries_prod_marker(blob: str) -> bool:
     return PROD_MARKER_RE.search(blob) is not None
 
 
+# Languages whose inline program is data to the shell. A shell is absent on
+# purpose: `sh -c 'kubectl --context prod-x delete pod p'` names a production
+# target in its program, so dropping that program would silence the one call
+# this gate exists for.
+_INTERPRETERS = frozenset((
+    "python", "python2", "python3", "node", "nodejs", "deno", "bun",
+    "perl", "ruby", "php", "Rscript", "osascript", "jq",
+))
+
+# `python -c "..."` / `node -e "..."` — the quoted program, so that a `prod`
+# literal printed by the script is not read as the shell's own argument.
+_INLINE_PROGRAM_RE = re.compile(
+    r"""(?<![A-Za-z0-9_./-])(?:%s)(?:[0-9.]*)\s+(?:-\w+\s+)*-[ce]\s+
+        (?P<prog>'(?:[^']*)'|"(?:\\.|[^"\\])*")"""
+    % "|".join(sorted(_INTERPRETERS)),
+    re.VERBOSE,
+)
+
+
+def _heredoc_opener_commands(command: str) -> list[str]:
+    """`argv[0]` of the command opening each heredoc, in source order.
+
+    Binding is positional rather than by delimiter name: one command can open
+    two heredocs that are both called `EOF`, and matching on the name would
+    attribute the second body to the first opener. The `<<` survives
+    tokenization inside its own segment, so `a && kubectl apply -f - <<'EOF'`
+    credits the body to `kubectl` rather than to whatever ran first.
+    """
+    openers: list[str] = []
+    for line in command.split("\n"):
+        if not heredoc_delimiters(line):
+            continue
+        for segment in iter_command_starts(safe_tokenize(line)):
+            argv = strip_prefix(segment)
+            opens = sum(1 for token in segment if token.startswith("<<"))
+            openers.extend([argv[0] if argv else ""] * opens)
+    return openers
+
+
+def _bash_marker_text(command: str) -> str:
+    """The part of `command` that can name the command's own target.
+
+    A prod marker inside a non-shell interpreter's program is a string literal
+    in another language, not an argument to anything the shell runs — issue
+    #1428, where `python3 - <<'EOF'` rewriting a scratch file asked about a
+    production target. Everything else is kept: a heredoc opened by anything
+    but an interpreter is the call's own payload, so a `namespace: prod-a` in
+    a `kubectl apply -f -` manifest still counts.
+    """
+    text = _INLINE_PROGRAM_RE.sub(lambda m: m.group(0).replace(m.group("prog"), ""), command)
+    sources = heredoc_sources(text)
+    if not sources:
+        return text
+    openers = _heredoc_opener_commands(text)
+    kept = [strip_heredoc_bodies(text)]
+    for index, (_delim, body, _quoted) in enumerate(sources):
+        opener = openers[index] if index < len(openers) else ""
+        if opener.rsplit("/", 1)[-1] not in _INTERPRETERS:
+            kept.append(body)
+    return "\n".join(kept)
+
+
 # The two questions are the whole point of the gate, so they live in the
 # `correct_path` field the shared renderer prints under "Do this instead".
 _ANSWER_BOTH = (
@@ -537,7 +602,7 @@ def main() -> int:
         command = tool_input.get("command", "") or ""
         if _bash_ack(command):
             return 0
-        if not _carries_prod_marker(command):
+        if not _carries_prod_marker(_bash_marker_text(command)):
             return 0
         if _bash_is_readonly(command):
             return 0

@@ -169,6 +169,39 @@ Bare `production` is still deliberately **not** a marker. The read-only filter
 below narrows the Bash branch but does not make it exhaustive, and a marker that
 common would lean on the filter for every namespace query.
 
+## The Bash branch does not scan a non-shell interpreter's own program
+
+Issue #1428: a `python3 - <<'EOF'` call whose only effect was a string
+replacement on a scratch file asked about a production target, because the
+marker sat in the Python source. A regex over the whole command string cannot
+tell an argument from a string literal quoted inside it.
+
+So the Bash branch scans `_bash_marker_text(command)` rather than `command`.
+That text is the command minus two regions, both of which are a program in
+another language rather than anything the shell runs:
+
+- a heredoc body whose **opening segment**'s `argv[0]` is an interpreter;
+- the quoted argument of `-c` / `-e` on an interpreter.
+
+Bodies bind to openers **by source order, not by delimiter name** — one command
+can open two heredocs both called `EOF` — and the opener is the segment holding
+the `<<` token, so `python3 -m x && kubectl apply -f - <<'EOF'` credits the body
+to `kubectl`.
+
+Two exclusions from the carve-out are decisions, not omissions:
+
+- **A shell is not an interpreter.** `sh -c` / `bash -c` / `zsh -c` take a real
+  command as their program, so `sh -c 'kubectl --context prod-x delete pod p'`
+  must keep asking.
+- **A heredoc opened by anything else keeps its body in scope.** A
+  `namespace: prod-a` inside a `kubectl apply -f - <<'EOF'` manifest is the
+  call's actual target. Calling `strip_heredoc_bodies` on the whole command is
+  the one-line version of this change and would silence exactly that call.
+
+The MCP branch is unchanged and still scans the serialized `tool_input`: that
+is JSON, not shell, and the quoted-form alternatives of `PROD_MARKER_RE` exist
+for it.
+
 ## The Bash branch recognises read-only shapes, not mutating ones
 
 Both branches now require a mutation. The MCP side asks whether the leaf name
