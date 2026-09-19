@@ -413,3 +413,52 @@ def test_main_ignores_memory_md_index_file(tmp_path, monkeypatch):
         rc = check.main()
     assert rc == 0
     assert "N/A" in out.getvalue()  # no *.md entries besides MEMORY.md
+
+
+def test_hookkeywords_bracket_on_the_next_line_is_not_flagged(tmp_path):
+    # Regression (issue #1426). The lint's check was line-based: it asked
+    # whether the value on the `hookKeywords:` line itself was a bracket list.
+    # memory-hint's own regex puts `\s*` after the colon and `\s` spans a
+    # newline, so this shape IS indexed — and the lint reported it as
+    # "silently drops the entire memory", asserting a runtime behaviour that
+    # was not true. Same class as #1094 in the opposite direction: not a dark
+    # memory left unflagged, but a live one flagged as dark.
+    p = _write(
+        tmp_path,
+        "feedback_next_line_bracket.md",
+        """---
+name: next-line-bracket
+description: test
+metadata:
+  type: feedback
+  hookable: true
+  hookKeywords:
+    [foo, bar]
+  originSessionId: abc-123
+---
+body
+""",
+    )
+    errors = check.check_file(p)
+    assert not [e for e in errors if "hookKeywords" in e], errors
+
+
+def test_hookkeywords_verdict_comes_from_the_shared_predicate(tmp_path):
+    """Every dark shape still reported, and the wording still names the
+    consequence. The verdict is `_lib/_memory_frontmatter`'s; only the message
+    is this script's."""
+    shapes = {
+        "block form": ("  hookKeywords:\n    - foo\n", "multi-line YAML-block"),
+        "scalar": ("  hookKeywords: foo\n", "scalar form"),
+        "unclosed": ("  hookKeywords: [foo, bar\n", "no closing `]`"),
+        "empty": ("  hookKeywords: []\n", "empty list"),
+    }
+    for name, (line, needle) in shapes.items():
+        p = _write(
+            tmp_path,
+            f"feedback_shape_{name.replace(' ', '_')}.md",
+            "---\nname: s\ndescription: test\nmetadata:\n  type: feedback\n"
+            f"  hookable: true\n{line}  originSessionId: abc-123\n---\nbody\n",
+        )
+        errors = check.check_file(p)
+        assert any(needle in e for e in errors), f"{name}: {errors}"
