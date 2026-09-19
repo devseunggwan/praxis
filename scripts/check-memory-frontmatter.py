@@ -29,16 +29,17 @@ Checks (one entry = one `*.md` file in the memory dir, `MEMORY.md` excluded):
   3. `hookKeywords:` / `hookEvents:`, when present, use the single-line
      bracket form (`[a, b]`). The multi-line YAML-block form (`hookKeywords:`
      followed by `- item` lines) is a FUNCTIONAL bug, not just a style
-     drift: `hooks/advisory-nudge/memory-hint/impl.py`'s KEYWORDS_RE/EVENTS_RE
-     read the rest of the `key:` line only, find no `[`, and silently reject
-     the whole memory — `hookable: true` then never fires. Two entries in the
+     drift: the acceptance predicate — `hooks/_lib/_memory_frontmatter.py`,
+     which `memory-hint` itself calls — finds no `[` and rejects the whole
+     memory, and `hookable: true` then never fires. Two entries in the
      corpus shipped this way (issue #942 scan): the hint had been dark since
      they were authored.
   4. `hookable: true` with `hookKeywords` missing entirely, or present as an
      empty list (`hookKeywords: []`), is the same silent-drop failure as
-     check 3's block/scalar form — `impl.py:117-139` returns `None` (no
-     memory, no hint, ever) the moment `hookKeywords:` has no match or its
-     bracket content is empty. This check was added in a later revision of
+     check 3's block/scalar form — `_memory_frontmatter.parse_keywords()`
+     returns `None` (no memory, no hint, ever) the moment `hookKeywords:` has
+     no match or its bracket content is empty, and `parse_frontmatter()` drops
+     the entry on that `None`. This check was added in a later revision of
      this script (issue #942 F1, caught by an independent codex-review pass
      after the first revision shipped without it): the original release only
      inspected a field that IS present, so a memory missing `hookKeywords`
@@ -46,7 +47,8 @@ Checks (one entry = one `*.md` file in the memory dir, `MEMORY.md` excluded):
      case check 3 catches.
 
 Note on `hookEvents:` specifically: an empty list (`hookEvents: []`) is NOT
-flagged the same way — `impl.py:150-169` falls back to the `[Bash]` default
+flagged the same way — `memory-hint`'s own `EVENTS_RE` branch (the one field
+this script still checks line-by-line) falls back to the `[Bash]` default
 when the bracket content is empty or unparseable, so the memory still gets
 indexed (see check 3's own error text distinguishing the two fields' failure
 modes — this was also caught in the F1/F2 codex-review pass: prior to that,
