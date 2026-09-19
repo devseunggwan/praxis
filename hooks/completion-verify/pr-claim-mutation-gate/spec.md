@@ -82,7 +82,7 @@ A turn clears the gate if any assistant `tool_use` matches:
 | Push | `git push` |
 | PR comment | `gh pr comment ...` |
 | PR review | `gh pr review ...` |
-| Write-method `gh api` | `gh api ... --method POST\|PATCH\|PUT\|DELETE` (or `-X ...`) **on a `comments`/`reviews`/`threads` endpoint** |
+| Write-method `gh api` | `gh api ... --method POST\|PATCH\|PUT\|DELETE` (or `--method=...`, `-X ...`, `-XPOST`, `-X=...`) **on a `comments`/`reviews`/`threads` endpoint** |
 | GraphQL thread resolve | a command containing `resolveReviewThread` |
 | GitHub MCP mutation | `mcp__github__*` tool whose name carries a write verb (`add`/`create`/`submit`/`update`/`edit`/`delete`/`reply`/`resolve`/`dismiss`/`merge`); a `get`/`list`/`search`/`read` prefix always loses |
 
@@ -122,6 +122,17 @@ Two consequences of the token view worth stating, because both are deliberate:
   pattern alone is matched against the segment *including* values.
 - **`--method` / `-X` are absent from the tokenizer's value spec**, so `POST` /
   `PATCH` stays a positional and the write-method pattern can still see it.
+
+The **equals form needs its own step**, because `--message=gh pr comment done`
+is a single `FLAG` token carrying its own value — the separate-token exclusion
+above never reaches inside it, so the quoted text was scanned as argv and a
+commit message read as a PR comment. A `FLAG` token spelled `name=value` is
+therefore reduced to `name` when `name` is one of the value-taking flags the
+spec declares. `--method=POST` keeps its value for the same reason it keeps its
+positional: `--method` is not declared value-taking, and the write-method
+pattern has to see the verb. That pattern accepts `=` as well as whitespace
+after `--method` / `-X`; requiring whitespace read a real write call as having
+no write method at all.
 
 A **read-only** `gh api .../comments` call (no explicit write method — the
 default HTTP verb is GET) does **not** clear the gate: listing comments is
@@ -171,7 +182,7 @@ no mutation evidence blocks, per the Escalation section above.
 bash tests/hooks/completion-verify/test_pr_claim_mutation_gate.sh
 ```
 
-39 cases: the motivating incident verbatim (KR, zero mutation → block),
+42 cases: the motivating incident verbatim (KR, zero mutation → block),
 4 EN/KR claim variants without mutation (block), claim cleared by `git
 push` / `gh pr comment` / `gh pr review` / write-method `gh api` / GitHub MCP
 comment tool (silent, 5 cases).
@@ -183,6 +194,10 @@ write-method `gh api` on a `.../labels` endpoint, a consolidated MCP reader
 one half of a matched pair — a failed push (`is_error`) blocks while an
 otherwise identical succeeded push stays silent, so what the pair
 distinguishes is the result correlation, not the command text.
+
+Three pin the equals form, which the separate-token exclusion cannot reach: a
+`git commit --message=` quoting a mutation still blocks, and `--method=POST` /
+`-X=PATCH` on a comments endpoint clear the gate.
 
 Six more pin the scan's locality (#1434), and each fails against the
 pre-fix implementation in the direction its name states. Four are turns that

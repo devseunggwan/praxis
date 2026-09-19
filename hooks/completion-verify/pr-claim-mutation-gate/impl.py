@@ -50,6 +50,7 @@ from _hook_io import (  # type: ignore[import-not-found]  # noqa: E402
 )
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
 from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
+    Token,
     TokenRole,
     tokenize_with_roles,
 )
@@ -158,11 +159,14 @@ _GH_PR_REVIEW_RE = re.compile(r"\bgh\s+pr\s+review\b", re.IGNORECASE)
 # against `.../labels` or `.../milestones` mutates GitHub but never the PR
 # review surface the claim is about, and accepting it would reintroduce the
 # same "adjacent call clears the gate" defect this hook exists to close.
+# `--method=POST` is the same call as `--method POST`; requiring whitespace
+# read the equals form as no write method at all and blocked the claim the
+# call had just earned.
 _GH_API_WRITE_RE = re.compile(
     r"\bgh\s+api\b[^\n]*?(?:comments|reviews|threads)[^\n]*?"
-    r"(?:--method\s+(?:post|patch|put|delete)\b|-X\s*(?:post|patch|put|delete)\b)"
+    r"(?:--method[=\s]\s*(?:post|patch|put|delete)\b|-X[=\s]*(?:post|patch|put|delete)\b)"
     r"|\bgh\s+api\b[^\n]*?"
-    r"(?:--method\s+(?:post|patch|put|delete)\b|-X\s*(?:post|patch|put|delete)\b)"
+    r"(?:--method[=\s]\s*(?:post|patch|put|delete)\b|-X[=\s]*(?:post|patch|put|delete)\b)"
     r"[^\n]*?(?:comments|reviews|threads)",
     re.IGNORECASE,
 )
@@ -206,6 +210,30 @@ _ECHOED_RE = re.compile(
 )
 
 
+# Every bare flag name the spec above declares as value-taking, so the equals
+# form can be recognised without re-deriving which spec entry a segment used.
+_VALUE_FLAG_NAMES = frozenset().union(*_FLAG_VALUE_SPEC.values())
+
+
+def _scannable(tok: Token) -> str:
+    """The part of `tok` that belongs to the command rather than to its data.
+
+    A separate-token value arrives as FLAG_VALUE and drops out whole. The
+    equals form does not: `--message=gh pr comment done` is one FLAG token
+    carrying its own value, so without this the quoted text is scanned as
+    argv and a commit message reads as a PR comment. `--method=POST` keeps
+    its value, because `--method` is not declared value-taking and the
+    write-method pattern has to see it.
+    """
+    if tok.role is TokenRole.FLAG_VALUE:
+        return ""
+    if tok.role is TokenRole.FLAG and "=" in tok.text:
+        name = tok.text.split("=", 1)[0]
+        if name in _VALUE_FLAG_NAMES:
+            return name
+    return tok.text
+
+
 def _is_mutation_command(cmd: str) -> bool:
     """True if any segment of `cmd` performs a PR-surface mutation.
 
@@ -222,9 +250,7 @@ def _is_mutation_command(cmd: str) -> bool:
     for segment in tokenize_with_roles(cmd.replace("\\\n", " "), _FLAG_VALUE_SPEC):
         # Flag values are the caller's data, not its argv, so they are kept out
         # of the scan — a `--body` that merely quotes `gh pr comment` is prose.
-        argv_text = " ".join(
-            tok.text for tok in segment if tok.role is not TokenRole.FLAG_VALUE
-        )
+        argv_text = " ".join(_scannable(tok) for tok in segment)
         hit = (
             _PUSH_RE.search(argv_text)
             or _GH_PR_COMMENT_RE.search(argv_text)

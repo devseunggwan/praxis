@@ -103,6 +103,16 @@ elif evidence == "commit-message-quotes-mutation":
     events.append(bash_ev('git commit -m "gh pr comment done"'))
 elif evidence == "heredoc-quotes-push":
     events.append(bash_ev("cat <<EOF\ngit push origin issue-868\nEOF"))
+elif evidence == "equals-message-quotes-mutation":
+    # The equals form carries its value inside the FLAG token itself, so the
+    # separate-token exclusion never reaches it.
+    events.append(bash_ev('git commit --message="gh pr comment done"'))
+elif evidence == "api-write-equals-method":
+    # `--method=POST` is the same call as `--method POST`.
+    events.append(bash_ev(
+        "gh api --method=POST repos/o/r/pulls/868/comments -f body=fixed"))
+elif evidence == "api-write-equals-x":
+    events.append(bash_ev("gh api -X=PATCH repos/o/r/pulls/868/comments -f body=fixed"))
 elif evidence == "write":
     events.append({"message": {"role": "assistant", "content": [
         {"type": "tool_use", "name": "Write",
@@ -297,6 +307,19 @@ run_case block "quoted-mutation-in-commit-message-still-fires" '{}'
 
 build_transcript "리뷰 코멘트 전부 반영했습니다." heredoc-quotes-push
 run_case block "heredoc-quoted-push-still-fires" '{}'
+
+# --- the equals form of a value-taking flag (#1434 review round) ------------
+# `--message=...` is ONE token carrying its own value, so the separate-token
+# exclusion above does not reach it; and requiring whitespace after `--method`
+# read a real write call as having no write method at all.
+build_transcript "리뷰 코멘트 전부 반영했습니다." equals-message-quotes-mutation
+run_case block "equals-message-quoting-mutation-still-fires" '{}'
+
+build_transcript "리뷰 코멘트 전부 반영했습니다." api-write-equals-method
+run_case silent "equals-method-api-write-clears" '{}'
+
+build_transcript "리뷰 코멘트 전부 반영했습니다." api-write-equals-x
+run_case silent "equals-x-api-write-clears" '{}'
 
 # --- failed vs successful mutation -----------------------------------------
 # A rejected push leaves the PR exactly as it was.
