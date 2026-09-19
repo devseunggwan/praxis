@@ -193,6 +193,13 @@ _FENCE_RE = re.compile(r"```.*?```", re.DOTALL)
 # gh accepts the endpoint with or without a leading slash, and with or without
 # the api.github.com host — anchor both forms or the slashless one slips past.
 _COMMENTS_PATH_RE = re.compile(r"(?:^|/)repos/([^/]+)/([^/]+)/issues/comments/(\d+)")
+# The two `gh api` endpoints that publish a top-level comment: creating one on
+# an issue or PR, and editing an existing one by id.
+_COMMENT_ENDPOINT_RE = re.compile(
+    r"(?:^|/)repos/[^/\s]+/[^/\s]+/issues/(?:comments/\d+|\d+/comments)"
+)
+# The non-`api` forms that publish one.
+_COMMENT_SUBCOMMANDS = frozenset({("pr", "comment"), ("issue", "comment")})
 # Same path, but anchored enough to recover host/owner/repo/id from a raw
 # command when the command printed nothing to follow.
 _PATCH_ENDPOINT_RE = re.compile(
@@ -779,8 +786,46 @@ def _post_failed(tool_response: object) -> bool:
         return False
 
 
+def _gh_object_and_subcommand(argv: list[str]) -> tuple[str, str] | None:
+    """The `(object, subcommand)` pair, skipping global flags and their args."""
+    words: list[str] = []
+    i = 1
+    while i < len(argv) and len(words) < 2:
+        tok, inline = _split_flag(argv[i])
+        if not tok.startswith("-"):
+            words.append(tok)
+        elif inline is None and (tok in GH_GLOBAL_FLAGS_WITH_ARG or tok in _SHORT_FLAGS_WITH_ARG):
+            i += 1
+        i += 1
+    return (words[0], words[1]) if len(words) == 2 else None
+
+
+def _is_comment_publication(argv: list[str]) -> bool:
+    """Whether this one segment publishes a comment — not merely writes.
+
+    `is_gh_external_write` answers the wider question, and five of the seven
+    subcommands it accepts publish no comment at all (`pr edit`, `issue create`,
+    `pr review`, …). A segment it admits still reaches the ref extractors below,
+    both of which match on text any command can carry, so an unrelated mutation
+    gets audited against an anchor it never touched — and a blocking finding
+    there denies that mutation.
+
+    So the write check stays as the precondition, and the recognized comment
+    forms decide: `pr`/`issue comment`, or a `gh api` write whose endpoint is an
+    issue-comment one. Those are exactly the forms PreToolUse decodes, which is
+    what keeps the two events looking at the same set of publications.
+    """
+    argv = _split_short_flags(strip_prefix(argv))
+    if not argv or not _is_gh_binary(argv[0]) or not is_gh_external_write(argv):
+        return False
+    if _subcommand(argv) == "api":
+        call = parse_gh_api(argv)
+        return bool(call and call.path and _COMMENT_ENDPOINT_RE.search(call.path))
+    return _gh_object_and_subcommand(argv) in _COMMENT_SUBCOMMANDS
+
+
 def _publishes_a_comment(command: str) -> bool:
-    """Whether any segment of `command` writes to a GitHub surface at all.
+    """Whether any segment of `command` publishes a comment.
 
     Both ref sources below read text that a command can carry without having
     written anything: `_comment_refs` scans the command's own **output**, where
@@ -791,17 +836,13 @@ def _publishes_a_comment(command: str) -> bool:
     command never touched, and reports its findings against work in flight
     elsewhere (#1421).
 
-    The precondition is the shared `is_gh_external_write`, not a parser of this
-    hook's own: it already decides the same question for the external-write
-    hooks, and it reads `gh api`'s method — gh's implied `POST` included —
-    rather than the endpoint. The cost is that an anchor published by a wrapper
-    script is no longer checked, the same gap the GitHub MCP path has always
-    had; widening the parser to chase it is the move this hook's two-event
-    split exists to avoid.
+    The cost is that an anchor published by a wrapper script is no longer
+    checked, the same gap the GitHub MCP path has always had; widening the
+    parser to chase it is the move this hook's two-event split exists to avoid.
     """
     for tokens in _tokenizations(command):
         for argv in iter_command_starts(tokens):
-            if is_gh_external_write(strip_prefix(argv)):
+            if _is_comment_publication(argv):
                 return True
     return False
 

@@ -178,12 +178,18 @@ performs an external write nobody asked for, or learns to skim this gate's
 output.
 
 So `_publishes_a_comment` runs first, before the deadline is even taken, and
-requires some segment of the command to be a GitHub write. It is the shared
-`is_gh_external_write` (`hooks/_lib/_external_write_body.py`), not a parser of
-this hook's own: it already decides this question for the external-write hooks,
-and it reads `gh api`'s method — gh's implied `POST` included — rather than
-matching the endpoint. That is the discrimination this gate needs and the one
-the endpoint literal cannot make.
+requires some segment of the command to publish a comment. The shared
+`is_gh_external_write` (`hooks/_lib/_external_write_body.py`) is the
+precondition, because it reads `gh api`'s method — gh's implied `POST`
+included — rather than matching the endpoint, and that is the discrimination
+the endpoint literal cannot make. But a write is not a publication: five of the
+seven subcommands it accepts (`pr edit`, `issue create`, `pr create`,
+`issue edit`, `pr review`) publish no comment, and admitting one of them sends
+an unrelated mutation into the ref extractors, where a blocking finding about
+someone else's anchor denies it. So `_is_comment_publication` narrows the
+survivors to the forms that do publish one: `pr comment` / `issue comment`, and
+a `gh api` write whose endpoint is `repos/<o>/<r>/issues/<n>/comments` or
+`repos/<o>/<r>/issues/comments/<id>` — the same set PreToolUse decodes.
 
 The cost is that an anchor published by a **wrapper script** is no longer
 checked here, which is the gap the GitHub MCP path has always had. Widening the

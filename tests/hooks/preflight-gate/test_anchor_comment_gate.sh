@@ -601,6 +601,23 @@ run_case "38 pass: 코멘트 URL 이 없는 출력은 무시" \
   pass PostToolUse "$BROKEN_GH" "git push origin HEAD" \
   "$FIX" Bash "To github.com:owner/repo.git"
 
+# A gh write that publishes no comment must not be audited: its output can
+# carry an anchor URL it merely printed, and a blocking finding about someone
+# else's anchor would deny that mutation. 38b is the positive control — the
+# same fake and the same output DO produce a finding once a comment is posted.
+run_case "38a pass: 코멘트를 게시하지 않는 gh 쓰기는 감사 대상 아님" \
+  pass PostToolUse "$BROKEN_GH" "gh pr edit 42 --body-file anchor.md" \
+  "$FIX" Bash "$COMMENT_URL"
+
+run_case "38b report: 같은 출력이라도 코멘트 게시면 검사한다" \
+  "report:blocking" PostToolUse "$BROKEN_GH" "gh pr comment 42 --body-file anchor.md" \
+  "$FIX" Bash "$COMMENT_URL"
+
+run_case "38c pass: 코멘트 엔드포인트가 아닌 gh api 쓰기도 제외" \
+  pass PostToolUse "$BROKEN_GH" \
+  "gh api --method PATCH repos/owner/repo/pulls/42 -f body=x" \
+  "$FIX" Bash "$COMMENT_URL"
+
 run_case "39 pass: PostToolUse 에서도 바이패스 토큰 유효" \
   pass PostToolUse "$BROKEN_GH" \
   "gh pr comment 42 --body-file anchor.md # anchor-gate: 오프라인, 사유 기록" \
