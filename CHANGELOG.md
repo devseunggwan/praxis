@@ -5,6 +5,25 @@ All notable changes to praxis are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.18.0](https://github.com/devseunggwan/praxis/compare/v7.17.0...v7.18.0) (2026-09-19)
+
+
+### Added
+
+* **skill:** add perf-leak-review reviewer ([#1431](https://github.com/devseunggwan/praxis/issues/1431)) ([8aa72e5](https://github.com/devseunggwan/praxis/commit/8aa72e5812abaa3f9419d6820240c67eca50ae42))
+
+
+### Fixed
+
+* **hooks:** remove block-rename-sweep-survivors ([#1440](https://github.com/devseunggwan/praxis/issues/1440)) ([92bda2c](https://github.com/devseunggwan/praxis/commit/92bda2c4523ff44629ed43fad5b0c9827e5bd91a))
+
+
+### Changed
+
+* **agents:** trim skill rows for word budget ([#1430](https://github.com/devseunggwan/praxis/issues/1430)) ([b20a723](https://github.com/devseunggwan/praxis/commit/b20a7238fde2217758546800c3911e37a0438d8a))
+* bump reviewdog/action-actionlint from 1.73.4 to 1.75.0 ([#1455](https://github.com/devseunggwan/praxis/issues/1455)) ([4b5d482](https://github.com/devseunggwan/praxis/commit/4b5d4829b25ad3cc5283e34eb16cec9984eef66d))
+* **skill:** ask merge approval via AskUserQuestion ([#1446](https://github.com/devseunggwan/praxis/issues/1446)) ([fdc1871](https://github.com/devseunggwan/praxis/commit/fdc1871a69ec7f69b1f8d719460b0d7be18e5af2))
+
 ## [7.17.0](https://github.com/devseunggwan/praxis/compare/v7.16.0...v7.17.0) (2026-09-14)
 
 
