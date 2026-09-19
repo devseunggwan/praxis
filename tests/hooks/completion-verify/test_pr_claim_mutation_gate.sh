@@ -75,6 +75,49 @@ elif evidence == "mcp-read":
     events.append({"message": {"role": "assistant", "content": [
         {"type": "tool_use", "name": "mcp__github__get_review_comments",
          "input": {"pr": 868}}]}})
+elif evidence == "push-guarded-by-n":
+    # `-n` belongs to the `[` test in the preceding segment, not to the push.
+    events.append(bash_ev(
+        'if [ -n "$CLAUDE_SESSION_ID" ]; then\n'
+        '  git commit -q -F - --trailer "Session-Id: $CLAUDE_SESSION_ID"\n'
+        'fi\n'
+        'git push origin issue-868'))
+elif evidence == "comment-body-quotes-dash-n":
+    # `-N` lives inside the --body value; the comment itself is a real write.
+    events.append(bash_ev(
+        "gh pr comment 868 --repo o/r --body 'avoid `2>&1 | tail -N` here'"))
+elif evidence == "api-write-after-heredoc-sed-n":
+    # `sed -n` sits in a heredoc body built for the comment payload.
+    events.append(bash_ev(
+        "cat > /tmp/anchor.md <<'EOF'\n"
+        "sed -n '10,16p' impl.py\n"
+        "EOF\n"
+        "gh api --method PATCH repos/o/r/issues/comments/1 -F body=@/tmp/anchor.md"))
+elif evidence == "api-write-with-header-flag":
+    # `-H` is gh's header flag, not `-h`; only IGNORECASE ever confused them.
+    events.append(bash_ev(
+        'gh api -H "Accept: application/vnd.github+json" --method POST '
+        'repos/o/r/pulls/868/comments -f body=fixed'))
+elif evidence == "commit-message-quotes-mutation":
+    # A commit message that merely QUOTES the mutation is not the mutation.
+    events.append(bash_ev('git commit -m "gh pr comment done"'))
+elif evidence == "heredoc-quotes-push":
+    events.append(bash_ev("cat <<EOF\ngit push origin issue-868\nEOF"))
+elif evidence == "equals-message-quotes-mutation":
+    # The equals form carries its value inside the FLAG token itself, so the
+    # separate-token exclusion never reaches it.
+    events.append(bash_ev('git commit --message="gh pr comment done"'))
+elif evidence == "api-write-equals-method":
+    # `--method=POST` is the same call as `--method POST`.
+    events.append(bash_ev(
+        "gh api --method=POST repos/o/r/pulls/868/comments -f body=fixed"))
+elif evidence == "api-write-equals-x":
+    events.append(bash_ev("gh api -X=PATCH repos/o/r/pulls/868/comments -f body=fixed"))
+elif evidence == "man-push":
+    events.append(bash_ev("man git push origin issue-868"))
+elif evidence == "man-path-push":
+    # The command word carries its path; the inspection test must still see `man`.
+    events.append(bash_ev("/usr/bin/man git push origin issue-868"))
 elif evidence == "write":
     events.append({"message": {"role": "assistant", "content": [
         {"type": "tool_use", "name": "Write",
@@ -245,6 +288,49 @@ run_case block "push-dry-run-still-fires" '{}'
 
 build_transcript "리뷰 코멘트 전부 반영했습니다." push-echoed
 run_case block "echoed-push-still-fires" '{}'
+
+build_transcript "리뷰 코멘트 전부 반영했습니다." man-push
+run_case block "man-page-push-still-fires" '{}'
+
+build_transcript "리뷰 코멘트 전부 반영했습니다." man-path-push
+run_case block "path-prefixed-man-push-still-fires" '{}'
+
+# --- incidental tokens no longer void a real mutation (#1434) ---------------
+# Each of these turns DID mutate the PR surface; the whole-string rehearsal
+# scan discarded the call over a token that was never a flag on it.
+build_transcript "리뷰 코멘트 전부 반영했습니다." push-guarded-by-n
+run_case silent "guard-dash-n-does-not-void-push" '{}'
+
+build_transcript "리뷰 코멘트 전부 반영했습니다." comment-body-quotes-dash-n
+run_case silent "body-dash-n-does-not-void-comment" '{}'
+
+build_transcript "리뷰 코멘트 전부 반영했습니다." api-write-after-heredoc-sed-n
+run_case silent "heredoc-sed-n-does-not-void-api-write" '{}'
+
+build_transcript "리뷰 코멘트 전부 반영했습니다." api-write-with-header-flag
+run_case silent "header-flag-does-not-void-api-write" '{}'
+
+# --- the same gap with the polarity flipped (#1434) -------------------------
+# A mutation verb quoted inside an argument or a heredoc body used to CLEAR
+# the claim, silencing a turn that touched nothing on the PR.
+build_transcript "리뷰 코멘트 전부 반영했습니다." commit-message-quotes-mutation
+run_case block "quoted-mutation-in-commit-message-still-fires" '{}'
+
+build_transcript "리뷰 코멘트 전부 반영했습니다." heredoc-quotes-push
+run_case block "heredoc-quoted-push-still-fires" '{}'
+
+# --- the equals form of a value-taking flag (#1434 review round) ------------
+# `--message=...` is ONE token carrying its own value, so the separate-token
+# exclusion above does not reach it; and requiring whitespace after `--method`
+# read a real write call as having no write method at all.
+build_transcript "리뷰 코멘트 전부 반영했습니다." equals-message-quotes-mutation
+run_case block "equals-message-quoting-mutation-still-fires" '{}'
+
+build_transcript "리뷰 코멘트 전부 반영했습니다." api-write-equals-method
+run_case silent "equals-method-api-write-clears" '{}'
+
+build_transcript "리뷰 코멘트 전부 반영했습니다." api-write-equals-x
+run_case silent "equals-x-api-write-clears" '{}'
 
 # --- failed vs successful mutation -----------------------------------------
 # A rejected push leaves the PR exactly as it was.

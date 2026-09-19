@@ -24,7 +24,10 @@ SUCCESSFUL PR-surface mutation tool_use (`git push`, `gh pr comment`, `gh pr
 review`, a `gh api` call with an explicit write method against a
 comments/reviews/threads endpoint, a GraphQL `resolveReviewThread` mutation, or
 a write-verb GitHub MCP tool). Failed calls, `--dry-run`/`--help` rehearsals and
-echoed command text do not count as mutations.
+echoed command text do not count as mutations. Rehearsal flags are read from the
+FLAG positions of the mutating command's own segment (issue #1434) — a `-n`
+inside a neighbouring `[ -n "$VAR" ]` guard, inside a heredoc body, or inside a
+`--body` argument is data, not a flag on the call.
 
 Blocks by default (`{"decision": "block", ...}` + exit 0), because issue #868
 requires it verbatim: "부재 시 차단 ... advisory 티어의 실측 효과가 0 이므로
@@ -46,6 +49,11 @@ from _hook_io import (  # type: ignore[import-not-found]  # noqa: E402
     emit_stop_block,
 )
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
+from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
+    Token,
+    TokenRole,
+    tokenize_with_roles,
+)
 from _payload import read_payload  # type: ignore[import-not-found]  # noqa: E402
 from _transcript import (  # type: ignore[import-not-found]  # noqa: E402
     extract_last_assistant_text,
@@ -151,11 +159,14 @@ _GH_PR_REVIEW_RE = re.compile(r"\bgh\s+pr\s+review\b", re.IGNORECASE)
 # against `.../labels` or `.../milestones` mutates GitHub but never the PR
 # review surface the claim is about, and accepting it would reintroduce the
 # same "adjacent call clears the gate" defect this hook exists to close.
+# `--method=POST` is the same call as `--method POST`; requiring whitespace
+# read the equals form as no write method at all and blocked the claim the
+# call had just earned.
 _GH_API_WRITE_RE = re.compile(
     r"\bgh\s+api\b[^\n]*?(?:comments|reviews|threads)[^\n]*?"
-    r"(?:--method\s+(?:post|patch|put|delete)\b|-X\s*(?:post|patch|put|delete)\b)"
+    r"(?:--method[=\s]\s*(?:post|patch|put|delete)\b|-X[=\s]*(?:post|patch|put|delete)\b)"
     r"|\bgh\s+api\b[^\n]*?"
-    r"(?:--method\s+(?:post|patch|put|delete)\b|-X\s*(?:post|patch|put|delete)\b)"
+    r"(?:--method[=\s]\s*(?:post|patch|put|delete)\b|-X[=\s]*(?:post|patch|put|delete)\b)"
     r"[^\n]*?(?:comments|reviews|threads)",
     re.IGNORECASE,
 )
@@ -173,11 +184,24 @@ _MCP_GH_MUTATION_RE = re.compile(
 _MCP_GH_READ_RE = re.compile(r"^(?:get|list|search|read|fetch|view)_", re.IGNORECASE)
 
 # Rehearsal / inspection forms mention the mutation verb without performing it.
-_NON_MUTATING_FORM_RE = re.compile(
-    r"--dry-run\b|(?<![A-Za-z0-9_-])-n(?![A-Za-z0-9_-])|--help\b"
-    r"|(?<![A-Za-z0-9_-])-h(?![A-Za-z0-9_-])|(?<![A-Za-z0-9_])man(?![A-Za-z0-9_])",
-    re.IGNORECASE,
-)
+# Matched against the FLAG-role tokens of one segment, case-sensitively: `-N`
+# (`tail -N`) and `-H` (`gh api -H`) are not rehearsal flags for any covered
+# command, and an IGNORECASE match on them voided real mutations (#1434).
+_REHEARSAL_FLAGS = frozenset({"--dry-run", "-n", "--help", "-h"})
+_INSPECTION_COMMANDS = frozenset({"man"})
+
+# Value-taking flags, so the role API attributes their values as FLAG_VALUE
+# rather than POSITIONAL and a quoted body stops reading as shell syntax.
+# `--method` / `-X` are deliberately ABSENT: `_GH_API_WRITE_RE` needs to see
+# `POST` / `PATCH` in the scanned text, and a FLAG_VALUE is excluded from it.
+_FLAG_VALUE_SPEC: dict[str, set[str]] = {
+    "gh": {"-R", "--repo", "-H", "--hostname", "-F", "-f", "--field",
+           "--raw-field", "--input", "-q", "--jq", "-t", "--template"},
+    "gh pr": {"-R", "--repo", "-b", "--body", "-F", "--body-file"},
+    "git": {"-c", "-C"},
+    "git commit": {"-m", "--message", "-F", "--file", "--trailer"},
+}
+
 # `echo "git push"` / a heredoc quoting the command is text, not execution.
 _ECHOED_RE = re.compile(
     r"(?<![A-Za-z0-9_])(?:echo|printf|cat)\b[^\n|;&]*"
@@ -186,18 +210,76 @@ _ECHOED_RE = re.compile(
 )
 
 
+# Every bare flag name the spec above declares as value-taking, so the equals
+# form can be recognised without re-deriving which spec entry a segment used.
+_VALUE_FLAG_NAMES = frozenset().union(*_FLAG_VALUE_SPEC.values())
+
+
+def _scannable(tok: Token) -> str:
+    """The part of `tok` that belongs to the command rather than to its data.
+
+    A separate-token value arrives as FLAG_VALUE and drops out whole. The
+    equals form does not: `--message=gh pr comment done` is one FLAG token
+    carrying its own value, so without this the quoted text is scanned as
+    argv and a commit message reads as a PR comment. `--method=POST` keeps
+    its value, because `--method` is not declared value-taking and the
+    write-method pattern has to see it.
+    """
+    if tok.role is TokenRole.FLAG_VALUE:
+        return ""
+    if tok.role is TokenRole.FLAG and "=" in tok.text:
+        name = tok.text.split("=", 1)[0]
+        if name in _VALUE_FLAG_NAMES:
+            return name
+    return tok.text
+
+
 def _is_mutation_command(cmd: str) -> bool:
+    """True if any segment of `cmd` performs a PR-surface mutation.
+
+    Decided per segment rather than over the whole string. The whole-string
+    form let one incidental token anywhere in a multi-line command void a
+    mutation on a different line, and scanned heredoc bodies and quoted
+    arguments as if they were shell syntax (#1434). `tokenize_with_roles`
+    splits on `&&`/`||`/`;`/`|`/newline and hands back typed tokens; shlex
+    leaves a quoted argument as one token and never reads a heredoc body, so
+    the two failure modes disappear together.
+    """
     if not cmd:
         return False
-    if _NON_MUTATING_FORM_RE.search(cmd) or _ECHOED_RE.search(cmd):
-        return False
-    return bool(
-        _PUSH_RE.search(cmd)
-        or _GH_PR_COMMENT_RE.search(cmd)
-        or _GH_PR_REVIEW_RE.search(cmd)
-        or _GH_API_WRITE_RE.search(cmd)
-        or _GRAPHQL_RESOLVE_RE.search(cmd)
-    )
+    for segment in tokenize_with_roles(cmd.replace("\\\n", " "), _FLAG_VALUE_SPEC):
+        # Flag values are the caller's data, not its argv, so they are kept out
+        # of the scan — a `--body` that merely quotes `gh pr comment` is prose.
+        argv_text = " ".join(_scannable(tok) for tok in segment)
+        hit = (
+            _PUSH_RE.search(argv_text)
+            or _GH_PR_COMMENT_RE.search(argv_text)
+            or _GH_PR_REVIEW_RE.search(argv_text)
+            or _GH_API_WRITE_RE.search(argv_text)
+            # The one pattern whose evidence IS a flag value: a GraphQL
+            # mutation name only ever reaches gh inside `-f query=...`.
+            or _GRAPHQL_RESOLVE_RE.search(" ".join(tok.text for tok in segment))
+        )
+        if not hit:
+            continue
+        flags = {
+            tok.text.split("=", 1)[0]
+            for tok in segment
+            if tok.role is TokenRole.FLAG
+        }
+        if flags & _REHEARSAL_FLAGS:
+            continue
+        # Basename, so `/usr/bin/man git push` is the same read as `man git push`.
+        if any(
+            tok.role is TokenRole.COMMAND
+            and tok.text.rsplit("/", 1)[-1] in _INSPECTION_COMMANDS
+            for tok in segment
+        ):
+            continue
+        if _ECHOED_RE.search(argv_text):
+            continue
+        return True
+    return False
 
 
 def _is_mcp_mutation_tool(name: str) -> bool:
