@@ -144,6 +144,10 @@ run_case "manifest_body_keeps_inline_program_text" \
 # The heredoc belongs to the segment carrying `<<`, not to whatever ran first.
 run_case "chain_heredoc_owner" \
   "$(verdict "$(bash_payload $'python3 -m x && kubectl apply -f - <<\'EOF\'\nns: prod-a\nEOF')")" "ask"
+# `-<<A` is one token; its heredoc still belongs to `kubectl`, not to the
+# interpreter that opens the next one.
+run_case "attached_heredoc_operator_binds" \
+  "$(verdict "$(bash_payload $'kubectl apply -f -<<A && python3 - <<B\nmetadata:\n  namespace: prod-a\nA\nprint(1)\nB')")" "ask"
 # Blanking the body must not blank the shell line the body hangs off.
 run_case "py_heredoc_argv_marker_survives" \
   "$(verdict "$(bash_payload $'python3 - --profile prod <<\'EOF\'\nprint(1)\nEOF')")" "ask"

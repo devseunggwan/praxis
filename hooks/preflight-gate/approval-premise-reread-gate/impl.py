@@ -424,7 +424,9 @@ def _heredoc_opener_commands(command: str) -> list[str]:
             continue
         for segment in iter_command_starts(safe_tokenize(line)):
             argv = strip_prefix(segment)
-            opens = sum(1 for token in segment if token.startswith("<<"))
+            # Counted with the reader `heredoc_sources` uses, so `-<<A` (one
+            # token) opens a heredoc here exactly as it does there.
+            opens = sum(len(heredoc_delimiters(token)) for token in segment)
             openers.extend([argv[0] if argv else ""] * opens)
     return openers
 
