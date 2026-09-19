@@ -11,7 +11,8 @@ still holds is a block.
 - **Role:** completion-verify
 - **Default tier:** advisory once per session, then block
 - **Bypass:** `PRAXIS_PR_ANCHOR_BYPASS=1`
-- **Force advisory (never escalate to block):** `PRAXIS_PR_ANCHOR_ADVISORY=1`
+- **Advisory cap (advisories before the block):** `PRAXIS_PR_ANCHOR_ADVISORY=<N>`,
+  default 1; `=forever` never escalates
 
 ## Why this exists
 
@@ -111,8 +112,36 @@ create just happened and the agent is still mid-turn on something else.
 - `count_session_fires(hook, session_id, DECISION_ADVISE)` (issue #805's
   read path) answers "have I already advised this session" — reusing a
   primitive its siblings use for *suppression* to do *escalation* instead.
-- `PRAXIS_PR_ANCHOR_ADVISORY=1` pins the gate to advisory forever (no
-  escalation) for a session that wants the nudge without the block.
+- `PRAXIS_PR_ANCHOR_ADVISORY=<N>` moves that boundary: the first N fires
+  advise and fire N+1 blocks. Unset is `N=1`, which is the two rules above.
+  `=forever` never escalates. Any other value — `=true`, `=0`, a typo — reads
+  as `N=1` rather than as silence, for the reason in the next section.
+
+## Which tier the actor actually reads (issue #1443)
+
+The two tiers do not differ only in severity; they differ in **who receives
+them**. A block is `{"decision": "block", ...}` and re-prompts the model, so the
+actor reads it. An advisory is `systemMessage`, which the fire ledger records
+and the transcript shows as a `hook_success` attachment — and in the session that
+issue #1443 measured, the actor never acted on one.
+
+That session had `PRAXIS_PR_ANCHOR_ADVISORY=1` in a gitignored
+`.claude/settings.local.json`. The gate fired **12 times** on the same two
+PRs, **0** assistant messages referenced the gap, and both PRs were merged
+without an anchor while the verification lived only in the transcript. The
+gate was correct on all twelve and changed nothing. In the same session
+`pr-claim-mutation-gate` blocked once and was acted on in one turn.
+
+So a pin was not a softer tier — from the actor's side it was an off switch
+wearing the word "advisory". This is why the variable now counts rather than
+switches, and why a value the gate cannot parse falls back to `N=1` instead of
+to the pin: inheriting an off switch from a typo in a gitignored file is the
+exact failure this gate reports, and it leaves no trace the next session can
+see.
+
+`forever` remains, for a session that genuinely wants the nudge without the
+block. It is spelled as a word so that nobody reaches it by writing `=1` and
+meaning "on".
 
 ## Correctness guards
 
@@ -175,7 +204,9 @@ create just happened and the agent is still mid-turn on something else.
 | --- | --- | --- |
 | 1st fire this session | — | advisory (`systemMessage` JSON, non-blocking) |
 | 2nd+ fire this session | — | block (`{"decision": "block", ...}`) |
-| Force advisory | `PRAXIS_PR_ANCHOR_ADVISORY=1` | always advisory, never escalates |
+| Advisory cap | `PRAXIS_PR_ANCHOR_ADVISORY=<N>` | first N fires advise, fire N+1 blocks (default 1) |
+| Never escalate | `PRAXIS_PR_ANCHOR_ADVISORY=forever` | always advisory |
+| Unreadable value | `PRAXIS_PR_ANCHOR_ADVISORY=true` | reads as N=1 — never as silence |
 | Bypass | `PRAXIS_PR_ANCHOR_BYPASS=1` | full bypass, exit 0 |
 
 ## Fail-open contract
@@ -202,6 +233,7 @@ synthetic transcripts:
 - `gh pr create --draft` success, no post → silent
 - failed `gh pr create` (`is_error`) → silent
 - `gh pr comment` on an unrelated PR → still fires (current PR unanchored)
-- `PRAXIS_PR_ANCHOR_ADVISORY=1` with a repeat fire → stays advisory
+- `PRAXIS_PR_ANCHOR_ADVISORY=forever` with a repeat fire → stays advisory
+- `PRAXIS_PR_ANCHOR_ADVISORY=1` with a repeat fire → blocks (the cap, #1443)
 - `PRAXIS_PR_ANCHOR_BYPASS=1` → exit 0, no output
 - malformed stdin / missing transcript → exit 0 (fail-open)
