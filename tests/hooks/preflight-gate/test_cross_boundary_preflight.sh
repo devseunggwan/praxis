@@ -1086,6 +1086,22 @@ run_case_detail "gh api placeholder repo resolves from the checkout" \
   'gh api repos/{owner}/{repo}/issues/1/comments -f body=hi' \
   'devseunggwan/praxis'
 
+# An endpoint built at run time names no repo this hook can read, and it may
+# not be a comment endpoint at all — so a write-method call asks UNRESOLVED
+# rather than falling through as "not a write".
+run_case "gh api write to a variable endpoint asks" ask \
+  'ENDPOINT=repos/other/target/issues/1/comments; gh api "$ENDPOINT" -f body=hi'
+
+run_case "gh api write to a command-substituted endpoint asks" ask \
+  'gh api "$(echo repos/other/target/issues/1/comments)" -f body=hi'
+
+run_case_detail "gh api dynamic endpoint names no repo" \
+  'gh api "$ENDPOINT" -f body=hi' \
+  'UNRESOLVED'
+
+run_case "gh api GET on a variable endpoint is silent" pass \
+  'gh api "$ENDPOINT"'
+
 # A read is not a write. Both the default GET and an explicit one stay silent.
 run_case "gh api GET by default is silent" pass \
   'gh api repos/owner/repo/issues/comments/123'

@@ -59,10 +59,16 @@ endpoint:
 | `repos/<owner>/<repo>/…` with git-config-safe names | that repo, named literally | asked immediately, selector `the gh api endpoint path` — no git probe |
 | `repos/{owner}/{repo}/…` (gh's placeholders) | whatever gh resolves from the checkout | falls through to `IMPLICIT_REPO_WRITE` resolution (GH_REPO → `gh-resolved` → remote order) |
 | anything else | not readable | falls through to the same resolution |
+| built at run time (`"$ENDPOINT"`, `$(…)`, backticks) with a write method | unknown — neither the repo nor whether it is a comment endpoint | asked immediately as `UNRESOLVED` |
 
 A braced placeholder names nothing on its own, so treating it as a literal would
 put the string `{owner}/{repo}` in front of an approval. The fall-through is what
 makes the two forms answer with the same repo.
+
+A run-time endpoint is the one case the comment-endpoint test cannot answer, so
+it is decided by the method alone: a write method asks, and a read stays silent.
+Reading it as "not a comment endpoint" let `gh api "$ENDPOINT" -f body=hi`
+through without the checklist.
 
 **Reads stay silent.** The method must be a write method. gh sends `GET` by
 default and `POST` as soon as a field or `--input` is added, and an explicit

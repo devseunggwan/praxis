@@ -86,6 +86,7 @@ from _hosts import (  # type: ignore[import-not-found]  # noqa: E402
 )
 from _payload import read_bash_payload  # type: ignore[import-not-found]  # noqa: E402
 from _external_write_body import (  # type: ignore[import-not-found]  # noqa: E402
+    GH_API_WRITE_METHODS,
     is_gh_api_external_write,
     parse_gh_api,
 )
@@ -96,6 +97,7 @@ from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
     _is_gh_binary,
     compound_cascade_hint,
     filter_argv,
+    has_shell_expansion,
     tokenize_with_roles,
 )
 
@@ -180,6 +182,23 @@ def _gh_api_repo_slug(path: str | None) -> str | None:
     if not (_NAME_SEGMENT_RE.match(owner) and _NAME_SEGMENT_RE.match(repo)):
         return None
     return f"{owner}/{repo}"
+
+
+_API_DYNAMIC_ENDPOINT = "UNRESOLVED — the `gh api` endpoint is built at run time"
+
+
+def _is_dynamic_api_write(call) -> bool:
+    """A write-method `gh api` call whose endpoint the shell fills in.
+
+    `gh api "$ENDPOINT" -f body=hi` names no path this hook can read, so the
+    comment-endpoint test cannot say yes — and treating that as "not a write"
+    let it through unasked. Only the method is still knowable.
+    """
+    return (
+        call.method in GH_API_WRITE_METHODS
+        and bool(call.path)
+        and has_shell_expansion(call.path)
+    )
 
 
 OPT_OUT_MARKER = "# cross-boundary:ack"
@@ -934,13 +953,16 @@ def main() -> int:
             # exactly one place; what is local here is which repo the endpoint
             # names and therefore which arm below answers for it.
             api_argv = [tok.text for tok in seg_argv]
-            if not is_gh_api_external_write(api_argv):
-                continue
             api_call = parse_gh_api(api_argv)
-            if api_call is None:  # pragma: no cover - guarded by the test above
+            if api_call is None:
+                continue
+            if is_gh_api_external_write(api_argv):
+                api_repo = _gh_api_repo_slug(api_call.path)
+            elif _is_dynamic_api_write(api_call):
+                api_repo = _API_DYNAMIC_ENDPOINT
+            else:
                 continue
             subcommand = (GH_API_OBJECT, api_call.method)
-            api_repo = _gh_api_repo_slug(api_call.path)
 
         # Check 1: heredoc in same segment → hard block (marker-independent).
         # Scoped to the noun/verb writes: the block message prescribes
