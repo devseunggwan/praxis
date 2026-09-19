@@ -128,6 +128,8 @@ run_case "py_heredoc_branch_literal" \
   "$(verdict "$(bash_payload $'python3 - <<\'EOF\'\nopen("/tmp/s.txt", "w").write("prod-1434")\nEOF')")" "quiet"
 run_case "py_inline_c" \
   "$(verdict "$(bash_payload "python3 -c \"print('prod')\" > /tmp/s.txt")")" "quiet"
+run_case "py_inline_c_abs_path" \
+  "$(verdict "$(bash_payload "/usr/bin/python3 -c \"print('prod')\" > /tmp/s.txt")")" "quiet"
 run_case "node_inline_e" \
   "$(verdict "$(bash_payload "node -e \"console.log('prod')\" > /tmp/s.txt")")" "quiet"
 

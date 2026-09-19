@@ -396,9 +396,11 @@ _INTERPRETERS = frozenset((
 ))
 
 # `python -c "..."` / `node -e "..."` — the quoted program, so that a `prod`
-# literal printed by the script is not read as the shell's own argument.
+# literal printed by the script is not read as the shell's own argument. A path
+# prefix (`/usr/bin/python3`) is the same interpreter, as the heredoc opener
+# check already treats it.
 _INLINE_PROGRAM_RE = re.compile(
-    r"""(?<![A-Za-z0-9_./-])(?:%s)(?:[0-9.]*)\s+(?:-\w+\s+)*-[ce]\s+
+    r"""(?<![A-Za-z0-9_./-])(?:[^\s'"/]*/)*(?:%s)(?:[0-9.]*)\s+(?:-\w+\s+)*-[ce]\s+
         (?P<prog>'(?:[^']*)'|"(?:\\.|[^"\\])*")"""
     % "|".join(sorted(_INTERPRETERS)),
     re.VERBOSE,
