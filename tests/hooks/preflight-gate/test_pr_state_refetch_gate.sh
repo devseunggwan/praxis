@@ -53,6 +53,9 @@ print(json.dumps({
 #   mode:
 #     map      — responds per PR number using "map-content" lines "N STATE"
 #                (e.g. "714 MERGED"); unmapped numbers -> gh error exit 1
+#                Optional extra columns: "<num> <state> <mergeStateStatus>
+#                <mergeable> <isDraft>", defaulting to CLEAN / MERGEABLE /
+#                false — the ask-ready values (issue #1436).
 #     error    — every call exits 1 (auth-style failure)
 #     badjson  — every call exits 0 but prints unparseable output
 #     absent   — no gh binary at all (dir has no gh file)
@@ -90,27 +93,60 @@ EOF
       cat >"$d/gh" <<'EOF'
 #!/usr/bin/env bash
 echo "$@" >> "$PRSRG_CALL_LOG"
-num="$3"
 map_file="${PRSRG_MAP_FILE:-$(dirname "$0")/.map}"
-python3 - "$num" "$map_file" <<'PY'
+python3 - "$map_file" "$@" <<'PY'
 import json
 import sys
 
-num, map_file = sys.argv[1], sys.argv[2]
+# gh returns only the fields `--json` names, so this shim must too. Emitting
+# all four regardless is what let the hook's query narrow without a single
+# case failing — the shim answered for a query nobody had asked.
+map_file, argv = sys.argv[1], sys.argv[2:]
+num = None
+requested: list[str] = []
+i = 0
+while i < len(argv):
+    tok = argv[i]
+    if tok == "--json" and i + 1 < len(argv):
+        requested = [f for f in argv[i + 1].split(",") if f]
+        i += 2
+        continue
+    if num is None and tok not in ("pr", "view") and not tok.startswith("-"):
+        num = tok
+    i += 1
+
 state = None
+fields = {}
 with open(map_file) as f:
     for line in f:
         line = line.strip()
         if not line:
             continue
-        n, s = line.split()
+        parts = line.split()
+        n = parts[0]
         if n == num:
-            state = s
+            # `<num> <state> [mergeStateStatus] [mergeable] [isDraft]`.
+            # The three optional columns default to the ask-ready values
+            # (issue #1436) so a case that only cares about `state` keeps
+            # meaning what it meant before the allowlist verdict landed.
+            state = parts[1]
+            fields = {
+                "state": state,
+                "mergeStateStatus": parts[2] if len(parts) > 2 else "CLEAN",
+                "mergeable": parts[3] if len(parts) > 3 else "MERGEABLE",
+                "isDraft": (parts[4].lower() == "true") if len(parts) > 4 else False,
+            }
+            # `absent` drops the key entirely — the only way to reproduce a
+            # response that answers the query without answering this field.
+            if len(parts) > 4 and parts[4].lower() == "absent":
+                del fields["isDraft"]
             break
 if state is None:
     sys.stderr.write("gh: no pull requests found\n")
     sys.exit(1)
-print(json.dumps({"state": state, "mergeStateStatus": "UNKNOWN"}))
+if requested:
+    fields = {k: v for k, v in fields.items() if k in requested}
+print(json.dumps(fields))
 PY
 EOF
       ;;
@@ -120,10 +156,12 @@ EOF
 }
 
 # run_case <name> <expected: block|pass> <questions-json> <gh-mode> <gh-map> \
-#          <strict: 0|1> [need_grep] [expect_no_gh_call: 0|1] [not_grep]
+#          <strict: 0|1> [need_grep] [expect_no_gh_call: 0|1] [not_grep] \
+#          [call_grep: pattern the gh argv must match]
 run_case() {
   local name="$1" expected="$2" questions_json="$3" gh_mode="$4" gh_map="$5" \
-        strict="$6" need_grep="${7:-}" expect_no_call="${8:-0}" not_grep="${9:-}"
+        strict="$6" need_grep="${7:-}" expect_no_call="${8:-0}" not_grep="${9:-}" \
+        call_grep="${10:-}"
 
   local payload fake_bin call_log err_file rc
   payload=$(build_payload "$questions_json")
@@ -158,6 +196,11 @@ run_case() {
   fi
   if [ "$ok" -eq 1 ] && [ "$expect_no_call" = "1" ]; then
     [ -z "$call_content" ] || ok=0
+  fi
+  # The argv the hook actually sent. Every other assertion here reads the
+  # shim's answer, which the shim decides — only this one can see the query.
+  if [ "$ok" -eq 1 ] && [ -n "$call_grep" ]; then
+    printf '%s' "$call_content" | grep -Eq -- "$call_grep" || ok=0
   fi
 
   if [ "$ok" -eq 1 ]; then
@@ -237,6 +280,79 @@ run_case "multiple candidates, mixed states" pass \
 run_case "strict mode blocks on MERGED" block \
   '[{"question":"","options":[{"label":"Merge PR #714","description":""}]}]' \
   map "714 MERGED" 1 'PR #714.*MERGED'
+
+# ---------------------------------------------------------------------------
+# Ask-readiness allowlist (issue #1436)
+#
+# `praxis:merge-briefing` Step 1 allows a merge ask only when
+# mergeable=MERGEABLE and mergeStateStatus is CLEAN or HAS_HOOKS. Before this,
+# the gate answered only MERGED/CLOSED, so every other not-ready state reached
+# the user as a question they had to correct.
+# ---------------------------------------------------------------------------
+
+Q_MERGE='[{"question":"merge PR #714?","options":[{"label":"yes","description":"go"}]}]'
+
+run_case "OPEN + CLEAN + MERGEABLE is ask-ready (silent)" pass \
+  "$Q_MERGE" map "714 OPEN CLEAN MERGEABLE false" 0 '' 0 '.'
+
+run_case "OPEN + HAS_HOOKS is ask-ready (silent)" pass \
+  "$Q_MERGE" map "714 OPEN HAS_HOOKS MERGEABLE false" 0 '' 0 '.'
+
+run_case "UNSTABLE (non-passing checks) advises" pass \
+  "$Q_MERGE" map "714 OPEN UNSTABLE MERGEABLE false" 0 'PR #714.*UNSTABLE'
+
+run_case "BLOCKED advises" pass \
+  "$Q_MERGE" map "714 OPEN BLOCKED MERGEABLE false" 0 'PR #714.*BLOCKED'
+
+run_case "BEHIND advises" pass \
+  "$Q_MERGE" map "714 OPEN BEHIND MERGEABLE false" 0 'PR #714.*BEHIND'
+
+run_case "DIRTY advises" pass \
+  "$Q_MERGE" map "714 OPEN DIRTY MERGEABLE false" 0 'PR #714.*DIRTY'
+
+run_case "CONFLICTING mergeable advises even on a CLEAN merge state" pass \
+  "$Q_MERGE" map "714 OPEN CLEAN CONFLICTING false" 0 'PR #714.*CONFLICTING'
+
+# Draft is not a value of mergeStateStatus, so a draft PR reports CLEAN and
+# would otherwise pass every other check.
+run_case "draft + CLEAN advises" pass \
+  "$Q_MERGE" map "714 OPEN CLEAN MERGEABLE true" 0 'PR #714.*draft'
+
+run_case "strict mode blocks on UNSTABLE" block \
+  "$Q_MERGE" map "714 OPEN UNSTABLE MERGEABLE false" 1 'PR #714.*UNSTABLE'
+
+run_case "strict mode blocks on draft" block \
+  "$Q_MERGE" map "714 OPEN CLEAN MERGEABLE true" 1 'PR #714.*draft'
+
+# UNKNOWN is GitHub still computing the merge state — not `CLEAN`, so not
+# silent; not a defect either, so it never blocks, strict mode included.
+run_case "UNKNOWN advises" pass \
+  "$Q_MERGE" map "714 OPEN UNKNOWN MERGEABLE false" 0 'PR #714.*re-poll'
+
+run_case "UNKNOWN does not block under strict mode" pass \
+  "$Q_MERGE" map "714 OPEN UNKNOWN MERGEABLE false" 1 'advisory only'
+
+# Strict is on and every reason is the soft kind, so nothing blocks — but the
+# closing line used to tell that reader to set the variable they had set.
+run_case "strict mode is not reported as disabled when it is on" pass \
+  "$Q_MERGE" map "714 OPEN UNKNOWN MERGEABLE false" 1 'Strict mode is on' 0 \
+  'Strict mode disabled'
+
+run_case "the same line still reads 'disabled' when strict is off" pass \
+  "$Q_MERGE" map "714 OPEN UNKNOWN MERGEABLE false" 0 'Strict mode disabled'
+
+# An `isDraft` the response never carried is not a "not a draft" answer. Every
+# other unanswered field above routes to a soft reason; this one resolved
+# toward the ask.
+run_case "absent isDraft advises rather than passing silently" pass \
+  "$Q_MERGE" map "714 OPEN CLEAN MERGEABLE absent" 0 'draft status unknown'
+
+# Only this case can see the query itself; every other assertion reads the
+# shim's answer, and the shim used to answer for a query nobody had asked.
+run_case "the live query names every field the verdict reads" pass \
+  "$Q_MERGE" map "714 OPEN CLEAN MERGEABLE false" 0 '' 0 '' \
+  '--json state,mergeStateStatus,mergeable,isDraft'
+
 
 # ---------------------------------------------------------------------------
 # gh infrastructure failures — fail-open
