@@ -122,6 +122,14 @@ Two consequences of the token view worth stating, because both are deliberate:
   pattern alone is matched against the segment *including* values.
 - **`--method` / `-X` are absent from the tokenizer's value spec**, so `POST` /
   `PATCH` stays a positional and the write-method pattern can still see it.
+- **Accepted gap — a mutation the shell runs from inside data.** A
+  `$(gh pr comment …)` inside a flag value, or a `git push` inside a heredoc
+  that `bash -s` / `sh` executes, is dropped with the rest of the data, so the
+  real mutation goes unseen and the claim blocks. The whole-string scan caught
+  these only because it read every quoted byte as argv, which is the false
+  positive #1434 removed. The miss fails closed — a visible block, never a
+  silent pass — and a command hidden inside a string is outside the guard
+  parser's boundary (`SECURITY.md` → Guard Parser Boundary).
 
 The **equals form needs its own step**, because `--message=gh pr comment done`
 is a single `FLAG` token carrying its own value — the separate-token exclusion
