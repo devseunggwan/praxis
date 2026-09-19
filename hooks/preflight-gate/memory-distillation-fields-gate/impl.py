@@ -27,11 +27,27 @@ keys, so it has no judgement to get wrong and costs a compliant write nothing.
 The failure it prevents is silent and only observable much later, from the
 absence of something in a queue nobody re-derives.
 
+A second, unrelated way a memory goes dark (issue #1426). An entry with
+`hookable: true` whose `hookKeywords:` the hint index cannot read is dropped by
+`memory-hint` outright — indexed nowhere, firing never — and nothing says so.
+The shapes are the multi-line `- item` block form, the scalar form, an unclosed
+`[`, an empty list, and no `hookKeywords:` key at all. Measured over 4452 local
+entries: 420 carry `hookable: true` and 24 of them (5.7%) are dark this way.
+
+That predicate is not re-derived here. `_lib/_memory_frontmatter.py` holds it
+and `memory-hint` itself imports it, so this gate asks the runtime's own
+question rather than a likeness of it — issue #1094 is the incident where two
+copies of this rule drifted and the check written to find a dark memory could
+not see one.
+
 Relationship to `scripts/check-memory-frontmatter.py`: that lint checks the
 *position* of a different field set (the taxonomy fields — `type`, `hookable`,
 `hookKeywords`, …), never the *presence* of these three, and its own docstring
 records that the memory directory is structurally absent in CI, so it prints
-N/A and exits 0 there. The two do not overlap.
+N/A and exits 0 there. On the `hookKeywords` shape the two now agree by
+construction, both calling the same helper; they still differ on when they run,
+which is the whole point — the lint runs when someone runs it, the gate runs on
+every write.
 """
 from __future__ import annotations
 
@@ -43,6 +59,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "_lib"))
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
 from _memory_dir import resolve_memory_dir  # type: ignore[import-not-found]  # noqa: E402
+from _memory_frontmatter import (  # type: ignore[import-not-found]  # noqa: E402
+    SHAPE_REASON,
+    dark_memory_shape,
+)
 from _payload import read_payload  # type: ignore[import-not-found]  # noqa: E402
 from block_message import emit_block  # type: ignore[import-not-found]  # noqa: E402
 
@@ -118,6 +138,29 @@ def _why(missing: list[str], flat: list[str]) -> str:
     )
 
 
+def _dark_why(shape: str) -> str:
+    return (
+        f"{SHAPE_REASON[shape]}. `memory-hint` returns None for this shape, "
+        "which drops the WHOLE entry from the hint index — it is not rejected "
+        "and nothing reports it, so the memory is written, looks well-formed, "
+        "and never fires again."
+    )
+
+
+_DARK_CORRECT_PATH = (
+    "write the keywords as a single-line bracket list on the same line as the "
+    "key:\n"
+    "    metadata:\n"
+    "      hookable: true\n"
+    "      hookKeywords: [git, push, worktree]\n"
+    "  A trailing `# comment` after the `]` is fine. The multi-line `- item` "
+    "form, a bare scalar, an unclosed `[`, an empty `[]`, and omitting the key "
+    "are each read as 'no keywords' and drop the entry. If the memory is not "
+    "meant to be indexed, set `hookable: false` instead — that is checked, and "
+    "silence then means what it says."
+)
+
+
 @fail_open
 def main() -> int:
     if os.environ.get(BYPASS_ENV, "").strip():
@@ -141,7 +184,21 @@ def main() -> int:
     else:
         missing, flat = missing_fields(block), flat_fields(block)
     if not missing and not flat:
-        return 0
+        # The distillation fields are in order; the entry can still be dark
+        # (#1426). Checked second so that no pre-existing violation changes
+        # the message it already had.
+        shape = dark_memory_shape(block) if block is not None else None
+        if shape is None:
+            return 0
+        emit_block(
+            rule_name="hookable memory the hint index cannot read",
+            why=_dark_why(shape),
+            correct_path=_DARK_CORRECT_PATH,
+            bypass_env=BYPASS_ENV,
+            reference=f"{Path(__file__).parent.name}/spec.md",
+        )
+        sys.stderr.write(f"\nBlocked file: {file_path}\n")
+        return 2
 
     emit_block(
         rule_name="memory distillation fields",

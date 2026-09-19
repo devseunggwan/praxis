@@ -3,9 +3,11 @@
 Supported hosts: all
 
 `hooks/preflight-gate/memory-distillation-fields-gate/impl.py` fires on every
-PreToolUse event for `Write` and blocks a write to a session memory entry whose
-frontmatter is missing the three distillation fields, or carries them at the
-top level instead of nested under `metadata:`.
+PreToolUse event for `Write` and blocks a write to a session memory entry that
+would go dark in either of two ways: its frontmatter is missing the three
+distillation fields (or carries them at the top level instead of nested under
+`metadata:`), or it claims `hookable: true` with a `hookKeywords:` shape the
+hint index cannot read.
 
 ## Decision predicate
 
@@ -16,10 +18,18 @@ Block when **all** of these hold:
    `MEMORY-reference.md`, and its directory **is** the resolved memory
    directory (`resolve_memory_dir()` — `PRAXIS_MEMORY_DIR`, else
    `<claude_config_dir>/projects/<slug>/memory`).
-3. The written content's YAML frontmatter is absent, or any of `recurrence`,
-   `enforcement`, `escalated_to` is missing in the two-space-nested form
-   (`^  <field>:`), or any of them appears flat at the top level
-   (`^<field>:`).
+3. Either:
+   - **the distillation fields** — the written content's YAML frontmatter is
+     absent, or any of `recurrence`, `enforcement`, `escalated_to` is missing
+     in the two-space-nested form (`^  <field>:`), or any of them appears flat
+     at the top level (`^<field>:`); **or**
+   - **the hint-index shape** (#1426) — the frontmatter carries
+     `hookable: true` and `_lib/_memory_frontmatter.dark_memory_shape()` names
+     a shape: `block-list`, `scalar`, `unclosed`, `empty`, or `absent`.
+
+The two are checked in that order, so no write that was already blocked
+changes the message it had. A file wrong on both axes reports the distillation
+fields.
 
 Anything else passes. Bypass: `PRAXIS_HOOK_BYPASS_MEMORY_FIELDS` set to any
 non-empty value.
@@ -55,6 +65,77 @@ Compliance over the last 7 days is 96%, over 30 days 86%, over 90 days 56%, so
 this closes a residual leak rather than stemming a flood. Both recent misses
 had **none** of the three fields, meaning the convention was skipped wholesale
 rather than partially.
+
+## The second check: a hookable memory the index cannot read (#1426)
+
+`memory-hint` builds its index by parsing each entry's frontmatter, and it
+returns `None` — dropping the **whole** entry — for every `hookKeywords:` shape
+but the single-line bracket list. The entry is not rejected and nothing reports
+it: the memory is written, looks well-formed, and never fires again.
+
+| Shape | Example | Indexed |
+| ----- | ------- | ------- |
+| flat list | `hookKeywords: [git, push]` | yes |
+| flat list, trailing comment | `hookKeywords: [git] # why` | yes |
+| bracket on the next line | `hookKeywords:` then `[git, push]` on the next line | yes — see below |
+| `block-list` | `hookKeywords:` then `- git` on the next line | no |
+| `scalar` | `hookKeywords: git` | no |
+| `unclosed` | `hookKeywords: [git, push` | no |
+| `empty` | `hookKeywords: []` | no |
+| `absent` | no `hookKeywords:` key at all | no |
+
+`hookable: false` passes at any shape: nothing indexes the entry, so no shape
+can hide it from anything.
+
+**The bracket-on-the-next-line row is load-bearing.** The runtime's own regex
+puts `\s*` after the colon, and `\s` spans a newline, so that shape **is**
+indexed. Narrowing it would be a behaviour change to `memory-hint` wearing the
+shape of a refactor, so the helper preserves it and pins it with a test.
+
+### One predicate, not a fourth copy of it
+
+Three readers need this answer: `memory-hint` (the runtime that drops the
+entry), `scripts/check-memory-frontmatter.py` (the after-the-fact lint), and
+this gate. It lives in `hooks/_lib/_memory_frontmatter.py` and **the runtime
+imports it**, so the gate asks the runtime's own question rather than a
+likeness of it.
+
+Issue #1094 is why that matters. The lint had its own hand-kept copy of the
+`hookable:` truthiness rule, the copy omitted the inline-comment strip, and
+`hookable: true # enabled` read as non-truthy in the lint and truthy at
+runtime — so a dark memory went unflagged by the check written to find it.
+Adding a fourth copy here would have rebuilt that setup.
+
+`tests/test_memory_frontmatter_lib.py` runs every fixture through the helper
+**and** through the real `memory-hint` parser and requires they agree. That
+test found a live disagreement in the opposite direction while this change was
+being written: the lint reported a next-line bracket as "drops the entire
+memory", which was false — the runtime indexes it. The lint now takes its
+verdict from the helper and keeps its own per-shape wording.
+
+### Corpus
+
+Every local memory entry — 4452 files across 138 memory directories under
+`~/.claude*/projects/*/memory/*.md`, measured with the shipped helper:
+
+```text
+   4026  (hookable not true — out of scope)
+    396  indexed
+     18  block-list
+      6  (no frontmatter)
+      6  absent
+
+hookable: true entries : 420
+  indexed              : 396
+  gate would block     : 24  (5.7%)
+```
+
+Two notes on reading it. The `absent` shape — `hookable: true` with no
+`hookKeywords:` key at all — is 6 of the 24, and a predicate keyed on "the
+file has a `hookKeywords` key" cannot see any of them; that is why the gate's
+predicate is keyed on `hookable:` instead. And this is a population, not a
+backlog: the gate runs at write time, so it does not retro-fix the 24 entries
+that already exist.
 
 ## Why a block rather than an advisory
 
