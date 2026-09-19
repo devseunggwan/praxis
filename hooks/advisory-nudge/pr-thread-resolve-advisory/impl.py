@@ -52,6 +52,7 @@ from _hook_runtime import (  # type: ignore[import-not-found]  # noqa: E402
     fail_open,
     remaining_budget,
 )
+from _hook_io import emit_additional_context  # type: ignore[import-not-found]  # noqa: E402
 from _payload import read_payload  # type: ignore[import-not-found]  # noqa: E402
 
 _BYPASS_ENV = "PRAXIS_PR_THREAD_ADVISORY_BYPASS"
@@ -88,7 +89,8 @@ query($owner:String!, $name:String!, $number:Int!, $first:Int!) {
           isResolved
           path
           line
-          comments(first:1) { nodes { author { login } body } }
+          head: comments(first:1) { nodes { author { login } body } }
+          tail: comments(last:1) { nodes { author { login } body } }
         }
       }
     }
@@ -246,15 +248,16 @@ def _unresolved_threads(pr: dict, cwd: str):
     for node in nodes:
         if not isinstance(node, dict) or node.get("isResolved") is True:
             continue
-        comments = ((node.get("comments") or {}).get("nodes") or [])
-        first = comments[0] if comments and isinstance(comments[0], dict) else {}
+        first = _comment_at(node, "head")
+        last = _comment_at(node, "tail")
         author = ((first.get("author") or {}).get("login")) or "?"
-        body = first.get("body") or ""
         threads.append({
             "path": node.get("path") or "?",
             "line": node.get("line"),
             "author": author,
-            "body": body,
+            "body": first.get("body") or "",
+            "last_author": ((last.get("author") or {}).get("login")) or "?",
+            "last_body": last.get("body") or "",
         })
     return threads, truncated
 
@@ -271,6 +274,37 @@ def _clean_body(body: str) -> str:
     text = _HTML_TAG_RE.sub("", text)
     text = text.replace("**", "").replace("`", "")
     return " ".join(text.split())
+
+
+def _comment_at(node: dict, alias: str) -> dict:
+    nodes = ((node.get(alias) or {}).get("nodes") or [])
+    return nodes[0] if nodes and isinstance(nodes[0], dict) else {}
+
+
+# The reply vocabulary this hook already asks for. A thread whose newest comment
+# opens with one of these has been dispositioned on the PR itself, which is the
+# terminal state — without it the advisory re-fires on every push forever, and
+# neither escape hatch is available: resolving contradicts the carry-over rule
+# below, and regrading would mean editing a review bot's own comment.
+_DISPOSITION_PREFIXES = ("fixed —", "not fixed —", "false positive —")
+
+
+def _is_dispositioned(t: dict) -> bool:
+    """True when someone other than the thread's opener already recorded a verdict.
+
+    The author check is what keeps a bot's own follow-up from reading as a
+    disposition; the bot never writes this vocabulary, but a quoted excerpt of
+    an earlier reply could. A later comment from anyone else re-arms the
+    advisory, which is correct: a fresh objection deserves a fresh answer.
+    """
+    if t.get("last_author", "?") == t.get("author", "?"):
+        return False
+    head = _clean_body(t.get("last_body", "")).lstrip("*_> \t").lower()
+    return head.startswith(_DISPOSITION_PREFIXES)
+
+
+def _thread_needs_reply(t: dict) -> bool:
+    return not _is_dispositioned(t) and _needs_reply(t["body"])
 
 
 def _needs_reply(body: str) -> bool:
@@ -293,6 +327,26 @@ def _format_thread(t: dict) -> str:
     loc = path if t["line"] is None else f"{path}:{t['line']}"
     excerpt = _clean_body(t["body"])[:_BODY_EXCERPT]
     return f"    - {loc} (@{_sanitize(t['author'])}) {excerpt}"
+
+
+def _model_context(pr: dict, needs: list) -> str:
+    listing = "\n".join(_format_thread(t) for t in needs)
+    return (
+        f"Unresolved review threads on {pr['url']} still need a per-finding "
+        f"disposition, and reporting this work as done before they have one "
+        f"leaves each finding reading as open:\n"
+        f"{listing}\n"
+        f"  Read each thread, explain to the user what it says (grade first, "
+        f"detail only for blocking ones), and ask which disposition applies. "
+        f"Then record the answer as a reply inside that thread:\n"
+        f"    Fixed — <short-sha> <one line on what changed>\n"
+        f"    Not fixed — <reason>\n"
+        f"    Not fixed — follow-up issue #N (draft it; do not file it unasked)\n"
+        f"    False positive — <the refuting probe and its output>\n"
+        f"  Leave a thread that is not actually closed open — the open thread "
+        f"carries the carry-over, and this advisory stops listing it once its "
+        f"newest comment is one of the lines above."
+    )
 
 
 def _format_truncation_only(pr: dict) -> str:
@@ -408,10 +462,15 @@ def main() -> int:
             sys.stderr.write(_format_truncation_only(pr))
         return 0
 
-    needs = [t for t in threads if _needs_reply(t["body"])]
-    fyi = [t for t in threads if not _needs_reply(t["body"])]
+    needs = [t for t in threads if _thread_needs_reply(t)]
+    fyi = [t for t in threads if not _thread_needs_reply(t)]
 
     sys.stderr.write(_format_advisory(pr, needs, fyi, truncated))
+    # stderr at exit 0 reaches the debug log only, so the actor never sees it.
+    # One additionalContext document per process — a second call would emit
+    # invalid JSON.
+    if needs:
+        emit_additional_context(_model_context(pr, needs), event_name="PostToolUse")
     strict = os.environ.get(_STRICT_ENV, "").strip() == "1"
     return 2 if (strict and needs) else 0
 
