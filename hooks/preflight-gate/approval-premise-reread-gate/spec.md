@@ -181,12 +181,15 @@ That text is the command minus two regions, both of which are a program in
 another language rather than anything the shell runs:
 
 - a heredoc body whose **opening segment**'s `argv[0]` is an interpreter;
-- the quoted argument of `-c` / `-e` on an interpreter.
+- the quoted argument of `-c` / `-e` on an interpreter, path prefix or not.
+  This strip runs on the shell text after heredoc bodies are split off, so a
+  manifest line shaped like `python3 -c "prod"` is still manifest text.
 
 Bodies bind to openers **by source order, not by delimiter name** — one command
 can open two heredocs both called `EOF` — and the opener is the segment holding
-the `<<` token, so `python3 -m x && kubectl apply -f - <<'EOF'` credits the body
-to `kubectl`.
+the heredoc operator, so `python3 -m x && kubectl apply -f - <<'EOF'` credits the
+body to `kubectl`. The operator is counted with the same reader that finds the
+bodies, so an attached `-<<A` (one token) opens a heredoc on both sides.
 
 Two exclusions from the carve-out are decisions, not omissions:
 
