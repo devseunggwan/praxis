@@ -399,7 +399,7 @@ approve blindly.
 
   "The latest turn in which the assistant wrote text" rather than "the turn
   right before the last user message" is deliberate. An interrupt arrives as a
-  `text` block with no `isMeta` and no `origin` (1554 such entries across 5262
+  `text` block with no `isMeta` and no `origin` (263 such entries across 868
   local transcripts), so `_human_user_indices` counts it as a human message:
   in briefing → interrupt → `continue` the turn before `continue` is empty and
   the briefing sits one further back. Keyed on the turn right before, the
@@ -408,12 +408,12 @@ approve blindly.
   user approved; the clause names it, and changing that decision is out of
   this scope.
 
-  Replayed over every recorded `gh pr merge` in local transcripts (4786 calls
-  across 5262 transcripts, each transcript cut right before the merge and fed
+  Replayed over every recorded `gh pr merge` in local transcripts (791 calls
+  across 867 transcripts, each transcript cut right before the merge and fed
   to the pre-change and changed builds): 0 decision disagreements, 0
-  tracebacks. Of the 1127 denies, 599 gain the clause — 581 not an approval
-  reply, 6 an intervening user message, 6 the briefed turn names a different
-  PR, 6 the serial-merge cut. The replay matters because this code runs inside
+  tracebacks. Of the 187 denies, 99 gain the clause — 96 not an approval
+  reply, 1 an intervening user message, 1 the briefed turn names a different
+  PR, 1 the serial-merge cut. The replay matters because this code runs inside
   a `@fail_open` hook: an exception here would not surface as an error, it
   would release the merge.
 
