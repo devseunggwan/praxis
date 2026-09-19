@@ -423,7 +423,7 @@
       "mode": {
         "strict_env": "PRAXIS_PR_STATE_REFETCH_STRICT",
         "external_commands": [
-          "gh pr view <N> --json state,mergeStateStatus"
+          "gh pr view <N> --json state,mergeStateStatus,mergeable,isDraft"
         ]
       }
     },
