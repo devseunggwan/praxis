@@ -3,8 +3,8 @@ name: merge-briefing
 description: >
   On-demand home for the pre-merge approval procedure — the three-surface
   pre-ask probe, grading every open finding by its blocking decoration, carrying
-  the anchor's `Unverified` gaps into a follow-up, and the six-part briefing that
-  ends in an explicit approve-ask.
+  the anchor's `Unverified` gaps into a follow-up, the six-part briefing, and the
+  `AskUserQuestion` approve-ask that ends it.
 when_to_use: >
   Triggers on "merge briefing", "pre-merge briefing", "머지 브리핑",
   "머지해도 되나", "approve merge", "pre-ask probe", "merge approval".
@@ -12,12 +12,14 @@ when_to_use: >
   "merge conflict resolution".
 allowed-tools:
   - Grep
+  - AskUserQuestion
+  - Skill
   - Bash(gh pr checks *)
   - Bash(gh pr view *)
   - Bash(gh api graphql *)
 verified-against-runtime: true
-runtime-verified-at: 2026-08-13
-runtime-verified-note: "gh 2.97.0 — `gh pr view --json mergeable,mergeStateStatus,headRefOid,reviews,comments` and the paginated `reviewThreads` GraphQL both returned live rows (thread query positive-controlled on a PR with 3 known threads); `GH_DEBUG=api` showed that same `pr view` sends `comments(first: 100)` / `reviews(first: 100)` with no cursor variable."
+runtime-verified-at: 2026-09-19
+runtime-verified-note: "AskUserQuestion approve-ask (2026-09-19) — the Step 5 shapes were replayed through `momentum-rule-retrieval-gate/impl.py` on `gh pr merge 999 --squash --delete-branch` after an executed merge: a picked `승인 — 머지` emitted no decision (allow), a picked `보류 — 추가 확인 후` and a picked `진행 보류` both denied, a picked `진행 — 나중에 다시 확인` allowed (the leading-segment hazard the hold row names), and the same briefing moved out of the text block into the question body denied with `not preceded by the Pre-Merge Reporting briefing`. gh 2.97.0 — `gh pr view --json mergeable,mergeStateStatus,headRefOid,reviews,comments` and the paginated `reviewThreads` GraphQL both returned live rows (thread query positive-controlled on a PR with 3 known threads); `GH_DEBUG=api` showed that same `pr view` sends `comments(first: 100)` / `reviews(first: 100)` with no cursor variable."
 ---
 
 # merge-briefing
@@ -213,7 +215,9 @@ derived from the author's dotfiles PR-workflow template):
 4. **Risk / blast radius** — who breaks if this is wrong
 5. **Open items** — every finding Step 2 graded and left open, on all three
    surfaces; the gaps from Step 3
-6. **Explicit ask** — `Approve merge?` on its own line
+6. **Explicit ask** — `Approve merge?` on its own line, in the text, with the
+   `AskUserQuestion` call of Step 5 right after it (the line stays even though
+   the tool asks, because it is the item the gate scores)
 
 Part 3 is the one under pressure, and it is the reason the briefing exists.
 Anti-patterns: "완료했습니다, 머지할까요?" with no evidence; a skipped check
@@ -223,30 +227,68 @@ at PR-ready time.
 **Calibrate the length.** A typo, comment-only, or single-line config PR gets
 two lines — the bar is "enough context to decide", not "long report".
 
-### Step 5: Ask, then wait
+### Step 5: Ask through `AskUserQuestion`, then wait
 
-Ask for this PR. Do not bundle, and do not read a neighbouring approval as
-covering it — a companion PR, a dependency-completing half, a regenerated or
-mechanical PR, and a hotfix blocker each need their own briefing and their own
-answer. A cluster instruction ("do a+b+c") authorizes the intent, not each
-shared-state mutation inside it.
+**Brief in prose, ask in the tool** — and in that order. The six-part briefing
+stays in the turn's own text, because the merge gate scores assistant `text`
+blocks only (`_assistant_text`,
+[`momentum-rule-retrieval-gate/impl.py`](../../hooks/advisory-nudge/momentum-rule-retrieval-gate/impl.py)).
+A briefing written into the question body instead counts as **zero items** and
+the merge is denied for a briefing the user actually read.
+
+Then call `AskUserQuestion` for this PR. Four fields decide whether the answer
+is readable as an approval at all:
+
+| Field | What it carries | Why it is not free-form |
+| --- | --- | --- |
+| `question` | the PR number — `PR #999 를 머지할까요?` | the gate resolves the answer against the PR the merge targets; an unnamed question answers no merge |
+| approval option `label` | **leads** with an approval token — `승인 — 머지`, `Approve merge`, `머지 — Carried: none` | only the segment before the first `— – : , ( -` is read (`_ask_label_approves`); a token buried mid-label is not an approval |
+| hold option `label` | a leading segment that is **not** an approval token — `보류 — 추가 확인 후`, `취소` | the same split runs on the hold: `진행 — 나중에 다시 확인` is read as an approval and releases the merge |
+| `multiSelect` | `false` | one PR, one answer |
+
+The tool is the surface, not a softer gate. Everything the prose ask carried
+still binds:
+
+- **One PR per question.** Do not put two PRs in one question and do not read a
+  neighbouring approval as covering this one — a companion PR, a
+  dependency-completing half, a regenerated or mechanical PR, and a hotfix
+  blocker each need their own briefing and their own answer. A cluster
+  instruction ("do a+b+c") authorizes the intent, not each shared-state
+  mutation inside it.
+- **No option may skip a step.** An option reading "브리핑 생략하고 머지" turns
+  the user's pick into consent for a bypass, which is what an option list makes
+  look approved.
+- **No session-end option** — that surface is restricted independently
+  (`block-ask-end-option`).
+- The Step 3 follow-up decision (`Carried: #N` / `Carried: none — <사유>`) may
+  ride along as a second question in the same call; it is about this same merge.
+
+**A pick is not always a listed label.** The runtime lets the user answer in
+their own words, and that text arrives in place of a label — grade it yourself
+rather than branching on an option. Anything short of an approval, an answer
+that adds a condition, or an answer you cannot grade leaves the merge
+unapproved: ask again.
 
 Re-asking later re-runs Step 1. The state moved while you waited.
 
-### Step 6: Merge, then chain the cleanup
+### Step 6: On approval, chain the cleanup — never merge by hand
 
-On approval, the merge call itself and everything after it belong to the
-cleanup procedure — the base-worktree call site, the head-worktree removal that
-`--delete-branch` requires, the squash-ancestry stale-HEAD guard, and the
-no-`&&`-chain rule:
+On approval the **next action is the skill call**, before any `gh pr merge`
+reaches a Bash call:
 
 ```text
 Skill(skill="praxis:worktree-merge-cleanup")
 ```
 
-Chain it as the next action after the user's approval; do not hand-roll the
-merge command from memory. If approval does not come, stop — there is nothing
-to clean up.
+That skill owns the merge call itself and everything after it — the
+base-worktree call site, the head-worktree removal that `--delete-branch`
+requires, the squash-ancestry stale-HEAD guard, and the no-`&&`-chain rule.
+Composing the merge command here from memory skips all four, and each one fails
+quietly enough to look like a clean merge.
+
+The turn closes on three items, not one: **approval answered · cleanup skill
+loaded · merge executed through it.** If approval does not come, stop — there
+is nothing to clean up.
 
 ## Relationship to enforcement
 
@@ -264,6 +306,15 @@ user is already looking at a prompt you should have preceded with a briefing.
 
 `commit-title-length-check` additionally advises when `--squash` is used and the
 PR title exceeds 50 chars — the PR title becomes the squash commit title.
+
+**The `AskUserQuestion` answer of Step 5 is a surface the merge gate already
+reads.** Once a merge has run in the session, `momentum-rule-retrieval-gate`
+requires an approval of *this* merge on top of the item count, and it accepts
+either a typed reply or a non-`is_error` `AskUserQuestion` result whose question
+names the PR and whose picked label leads with an approval token
+(`_ask_answer_approves` / `_ask_label_approves`). That is why Step 5's field
+table is a contract and not a style preference: the same pick, phrased outside
+it, leaves the merge unanswered.
 
 **Do not reach for a bypass token to get past a block.**
 `PRAXIS_MOMENTUM_MERGE_ADVISORY=1` and `# briefing-surfaced: <reason>` assert
@@ -285,6 +336,10 @@ decorative.
 | Anchor gap silently dies at merge | `Unverified` item never carried | `Carried: #N` / `Carried: none — <사유>` before merging (Step 3) |
 | User discovers a conflict you missed | Briefing composed from an entry-time probe | Re-probe at compose time, every re-ask |
 | Companion PR merged on the neighbour's approval | Approval transfer | One briefing per PR (Step 5) |
+| A progress signal (`ok`, `계속`) consumed as merge consent | The ask was prose, so any short reply landed on it | Ask through `AskUserQuestion` (Step 5) |
+| The gate counts 0 briefing items although a full briefing was written | The briefing lived in the question body; only `text` blocks are scored | Brief in prose, ask in the tool (Step 5) |
+| A picked hold read as approval | The hold label's leading segment was an approval token (`진행 — 나중에`) | Hold labels never lead with one (Step 5) |
+| `--delete-branch` run from the wrong worktree after approval | Step 6 read as advice, merge command hand-rolled | Chain `worktree-merge-cleanup` as the next action (Step 6) |
 
 ## Limitations
 
