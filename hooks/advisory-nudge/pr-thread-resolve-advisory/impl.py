@@ -345,8 +345,13 @@ def _format_thread(t: dict) -> str:
     return f"    - {loc} (@{_sanitize(t['author'])}) {excerpt}"
 
 
-def _model_context(pr: dict, needs: list) -> str:
+def _model_context(pr: dict, needs: list, truncated: bool) -> str:
     listing = "\n".join(_format_thread(t) for t in needs)
+    if truncated:
+        listing += (
+            f"\n    Note: more than {_THREAD_PAGE} threads — only the first page "
+            f"was read, so this list is not complete."
+        )
     return (
         f"Unresolved review threads on {pr['url']} still need a per-finding "
         f"disposition, and reporting this work as done before they have one "
@@ -486,7 +491,9 @@ def main() -> int:
     # One additionalContext document per process — a second call would emit
     # invalid JSON.
     if needs:
-        emit_additional_context(_model_context(pr, needs), event_name="PostToolUse")
+        emit_additional_context(
+            _model_context(pr, needs, truncated), event_name="PostToolUse"
+        )
     strict = os.environ.get(_STRICT_ENV, "").strip() == "1"
     return 2 if (strict and needs) else 0
 

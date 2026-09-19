@@ -389,6 +389,32 @@ Not fixed — 후속 이슈 #7')")"
 check_json "quote-then-disposition-no-context" expect-empty \
   "$(stdout_of "git push origin main" "$OK")"
 
+# --- a truncated first page says so on the model channel too --------------
+# context_has <name> <present|absent> <needle> <stdout>
+context_has() {
+  local name="$1" mode="$2" needle="$3" out="$4" ok=1 body
+  body=$(printf '%s' "$out" | python3 -c 'import json,sys
+try:
+    print(json.load(sys.stdin)["hookSpecificOutput"]["additionalContext"])
+except Exception:
+    pass' 2>/dev/null)
+  case "$mode" in
+    present) printf '%s' "$body" | grep -qF -- "$needle" || ok=0 ;;
+    absent)  printf '%s' "$body" | grep -qF -- "$needle" && ok=0 ;;
+  esac
+  if [ "$ok" -eq 1 ]; then
+    echo "PASS  [$name]"; PASS=$((PASS + 1))
+  else
+    echo "FAIL  [$name] mode=$mode needle=<$needle> body=<$body>"; FAIL=$((FAIL + 1))
+  fi
+}
+
+setup_repo
+HAS_NEXT=true stub_gh "$PR_LIST" "$(HAS_NEXT=true threads_json \
+  "$(thread false a.py 1 'issue (blocking): x')")"
+context_has "context-carries-truncation" present "not complete" \
+  "$(stdout_of "git push origin main" "$OK")"
+
 echo "----"
 echo "PASS: $PASS / FAIL: $FAIL"
 [ "$FAIL" -eq 0 ]
