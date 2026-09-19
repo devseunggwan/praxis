@@ -269,8 +269,10 @@ def _is_mutation_command(cmd: str) -> bool:
         }
         if flags & _REHEARSAL_FLAGS:
             continue
+        # Basename, so `/usr/bin/man git push` is the same read as `man git push`.
         if any(
-            tok.role is TokenRole.COMMAND and tok.text in _INSPECTION_COMMANDS
+            tok.role is TokenRole.COMMAND
+            and tok.text.rsplit("/", 1)[-1] in _INSPECTION_COMMANDS
             for tok in segment
         ):
             continue

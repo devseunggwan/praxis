@@ -113,6 +113,11 @@ elif evidence == "api-write-equals-method":
         "gh api --method=POST repos/o/r/pulls/868/comments -f body=fixed"))
 elif evidence == "api-write-equals-x":
     events.append(bash_ev("gh api -X=PATCH repos/o/r/pulls/868/comments -f body=fixed"))
+elif evidence == "man-push":
+    events.append(bash_ev("man git push origin issue-868"))
+elif evidence == "man-path-push":
+    # The command word carries its path; the inspection test must still see `man`.
+    events.append(bash_ev("/usr/bin/man git push origin issue-868"))
 elif evidence == "write":
     events.append({"message": {"role": "assistant", "content": [
         {"type": "tool_use", "name": "Write",
@@ -283,6 +288,12 @@ run_case block "push-dry-run-still-fires" '{}'
 
 build_transcript "리뷰 코멘트 전부 반영했습니다." push-echoed
 run_case block "echoed-push-still-fires" '{}'
+
+build_transcript "리뷰 코멘트 전부 반영했습니다." man-push
+run_case block "man-page-push-still-fires" '{}'
+
+build_transcript "리뷰 코멘트 전부 반영했습니다." man-path-push
+run_case block "path-prefixed-man-push-still-fires" '{}'
 
 # --- incidental tokens no longer void a real mutation (#1434) ---------------
 # Each of these turns DID mutate the PR surface; the whole-string rehearsal

@@ -182,7 +182,7 @@ no mutation evidence blocks, per the Escalation section above.
 bash tests/hooks/completion-verify/test_pr_claim_mutation_gate.sh
 ```
 
-42 cases: the motivating incident verbatim (KR, zero mutation → block),
+44 cases: the motivating incident verbatim (KR, zero mutation → block),
 4 EN/KR claim variants without mutation (block), claim cleared by `git
 push` / `gh pr comment` / `gh pr review` / write-method `gh api` / GitHub MCP
 comment tool (silent, 5 cases).
@@ -194,6 +194,10 @@ write-method `gh api` on a `.../labels` endpoint, a consolidated MCP reader
 one half of a matched pair — a failed push (`is_error`) blocks while an
 otherwise identical succeeded push stays silent, so what the pair
 distinguishes is the result correlation, not the command text.
+
+Two pin the inspection command: `man git push` blocks, and so does
+`/usr/bin/man git push` — the command word is compared by basename, since an
+exact match let the path-prefixed form read as a real push.
 
 Three pin the equals form, which the separate-token exclusion cannot reach: a
 `git commit --message=` quoting a mutation still blocks, and `--method=POST` /
