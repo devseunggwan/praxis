@@ -119,6 +119,51 @@ run_case "ro_env_prefix"     "$(verdict "$(bash_payload 'FOO=1 kubectl get pods 
 run_case "ro_abs_path"       "$(verdict "$(bash_payload '/usr/bin/kubectl get pods --profile prod')")"   "quiet"
 run_case "ro_pipe_both_read" "$(verdict "$(bash_payload 'kubectl get pods --profile prod | grep Running')")" "quiet"
 
+# --- Bash: a marker inside a non-shell interpreter's own program (#1428) ---
+# A `prod` literal in a Python or Node program is a string in another language,
+# not an argument to anything the shell runs. These calls touch only /tmp.
+run_case "py_heredoc_scratch" \
+  "$(verdict "$(bash_payload $'python3 - <<\'EOF\'\nimport pathlib\np = pathlib.Path("/tmp/s.md")\np.write_text(p.read_text().replace("dev", "prod"))\nEOF')")" "quiet"
+run_case "py_heredoc_branch_literal" \
+  "$(verdict "$(bash_payload $'python3 - <<\'EOF\'\nopen("/tmp/s.txt", "w").write("prod-1434")\nEOF')")" "quiet"
+run_case "py_inline_c" \
+  "$(verdict "$(bash_payload "python3 -c \"print('prod')\" > /tmp/s.txt")")" "quiet"
+run_case "py_inline_c_abs_path" \
+  "$(verdict "$(bash_payload "/usr/bin/python3 -c \"print('prod')\" > /tmp/s.txt")")" "quiet"
+run_case "node_inline_e" \
+  "$(verdict "$(bash_payload "node -e \"console.log('prod')\" > /tmp/s.txt")")" "quiet"
+
+# --- Bash: what the interpreter carve-out must NOT reach -------------------
+# A shell is not an interpreter here: its inline program IS a command, and a
+# heredoc opened by anything else is the call's own payload.
+run_case "sh_c_is_not_interpreter" \
+  "$(verdict "$(bash_payload "sh -c 'kubectl --context prod-x delete pod p'")")" "ask"
+run_case "kubectl_heredoc_manifest" \
+  "$(verdict "$(bash_payload $'kubectl apply -f - <<\'EOF\'\nmetadata:\n  namespace: prod-a\nEOF')")" "ask"
+# An inline-program shape inside a manifest is manifest text, not a program.
+run_case "manifest_body_keeps_inline_program_text" \
+  "$(verdict "$(bash_payload $'kubectl apply -f - <<\'EOF\'\ncommand: python3 -c "prod"\nEOF')")" "ask"
+# The heredoc belongs to the segment carrying `<<`, not to whatever ran first.
+run_case "chain_heredoc_owner" \
+  "$(verdict "$(bash_payload $'python3 -m x && kubectl apply -f - <<\'EOF\'\nns: prod-a\nEOF')")" "ask"
+# `-<<A` is one token; its heredoc still belongs to `kubectl`, not to the
+# interpreter that opens the next one.
+run_case "attached_heredoc_operator_binds" \
+  "$(verdict "$(bash_payload $'kubectl apply -f -<<A && python3 - <<B\nmetadata:\n  namespace: prod-a\nA\nprint(1)\nB')")" "ask"
+# An unquoted heredoc is expanded by the shell before the interpreter reads
+# it, so a command substitution in it is the shell's own call.
+run_case "py_unquoted_heredoc_cmdsub" \
+  "$(verdict "$(bash_payload $'python3 - <<EOF\nx = "$(hubctl dev trigger --phase prod)"\nEOF')")" "ask"
+run_case "py_unquoted_heredoc_backtick" \
+  "$(verdict "$(bash_payload $'python3 - <<EOF\nx = "`hubctl dev trigger --phase prod`"\nEOF')")" "ask"
+run_case "py_quoted_heredoc_cmdsub_is_literal" \
+  "$(verdict "$(bash_payload $'python3 - <<\'EOF\'\nx = "$(hubctl dev trigger --phase prod)"\nEOF')")" "quiet"
+run_case "py_unquoted_heredoc_plain_literal" \
+  "$(verdict "$(bash_payload $'python3 - <<EOF\nprint("prod")\nEOF')")" "quiet"
+# Blanking the body must not blank the shell line the body hangs off.
+run_case "py_heredoc_argv_marker_survives" \
+  "$(verdict "$(bash_payload $'python3 - --profile prod <<\'EOF\'\nprint(1)\nEOF')")" "ask"
+
 # --- Bash: every segment must be read-only, not just the first -------------
 # A pipeline or chain whose later segment mutates is the case this filter must
 # never wave through -- the first segment reads, and reading only that is how a
