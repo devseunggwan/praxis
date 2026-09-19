@@ -415,6 +415,19 @@ HAS_NEXT=true stub_gh "$PR_LIST" "$(HAS_NEXT=true threads_json \
 context_has "context-carries-truncation" present "not complete" \
   "$(stdout_of "git push origin main" "$OK")"
 
+# --- the model channel carries the objection that reopened the thread -----
+setup_repo
+stub_gh "$PR_LIST" "$(threads_json "$(thread false a.py 1 'issue (blocking): original finding' \
+  rev2 'still broken after that change')")"
+context_has "context-carries-latest-objection" present "still broken after that change" \
+  "$(stdout_of "git push origin main" "$OK")"
+
+# an untouched thread does not get a redundant "latest" line
+setup_repo
+stub_gh "$PR_LIST" "$(threads_json "$(thread false a.py 1 'issue (blocking): x')")"
+context_has "context-omits-redundant-latest" absent "latest (@" \
+  "$(stdout_of "git push origin main" "$OK")"
+
 echo "----"
 echo "PASS: $PASS / FAIL: $FAIL"
 [ "$FAIL" -eq 0 ]

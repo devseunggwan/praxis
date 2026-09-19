@@ -345,8 +345,24 @@ def _format_thread(t: dict) -> str:
     return f"    - {loc} (@{_sanitize(t['author'])}) {excerpt}"
 
 
+def _format_thread_for_model(t: dict) -> str:
+    """`_format_thread`, plus the newest comment when it is not the first one.
+
+    stderr keeps the one-line form; the model channel is the only surface the
+    actor reads, so a thread reopened by a later objection has to carry that
+    objection — answering the original finding would be answering the wrong
+    question.
+    """
+    line = _format_thread(t)
+    latest = _first_unquoted_line(t.get("last_body", ""))
+    if not latest or _clean_body(latest) == _clean_body(t["body"]):
+        return line
+    excerpt = _clean_body(latest)[:_BODY_EXCERPT]
+    return f"{line}\n      latest (@{_sanitize(t.get('last_author', '?'))}): {excerpt}"
+
+
 def _model_context(pr: dict, needs: list, truncated: bool) -> str:
-    listing = "\n".join(_format_thread(t) for t in needs)
+    listing = "\n".join(_format_thread_for_model(t) for t in needs)
     if truncated:
         listing += (
             f"\n    Note: more than {_THREAD_PAGE} threads — only the first page "
