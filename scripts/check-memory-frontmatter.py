@@ -86,6 +86,10 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / "hooks" / "_lib"))
 from _memory_dir import resolve_memory_dir  # type: ignore[import-not-found]  # noqa: E402
+from _memory_frontmatter import (  # type: ignore[import-not-found]  # noqa: E402
+    hookable_is_truthy,
+    hookkeywords_shape,
+)
 
 FENCE_RE = re.compile(r"^---\s*$", re.MULTILINE)
 KEY_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)\s*:\s*(.*)$")
@@ -104,21 +108,40 @@ TAXONOMY_FIELDS = (
 # rejects any other shape outright (see module docstring, check 3).
 BRACKET_FIELDS = ("hookKeywords", "hookEvents")
 
-# Mirrors hooks/advisory-nudge/memory-hint/impl.py:60 exactly (TRUTHY_VALUES) —
-# the runtime's own truthy set for `hookable:`, after the same normalization
-# that impl.py:108-113 applies: strip an inline `# comment` (via
-# _strip_inline_comment, mirrored below), then strip whitespace, lowercase,
-# and strip quotes. Before issue #1094 this lint omitted the inline-comment
-# strip, so `hookable: true # enabled` read as non-truthy here while the
-# runtime read it as truthy — leaving a hookable-but-no-hookKeywords memory
-# (which impl.py silently drops) unflagged.
-HOOKABLE_TRUTHY_VALUES = {"true", "yes"}
+# Verdict comes from the shared predicate; the wording stays this script's, and
+# each line names the consequence rather than only the shape. `absent` is not
+# here: the key being missing entirely is reported by its own check below,
+# which runs whether or not the occurrences loop saw a `hookKeywords` line.
+HOOKKEYWORDS_MESSAGE = {
+    "block-list": (
+        "`hookKeywords:` has no inline value (multi-line YAML-block `- item` form) — "
+        "the memory-hint parser rejects this shape and silently drops the entire memory "
+        "from the hint index; use single-line `[a, b]` form"
+    ),
+    "scalar": (
+        "`hookKeywords:` is scalar form, not `[a, b]` — the memory-hint parser rejects "
+        "this shape and silently drops the entire memory from the hint index"
+    ),
+    "unclosed": (
+        "`hookKeywords:` has no closing `]` — the memory-hint parser requires a closing "
+        "bracket and silently drops the entire memory from the hint index when it is "
+        "absent (issue #1094)"
+    ),
+    "empty": (
+        "`hookKeywords:` is an empty list — the memory-hint parser treats an empty "
+        "hookKeywords the same as absent and silently drops the entire memory from the "
+        "hint index (issue #942 F1)"
+    ),
+}
 
-# Mirrors hooks/advisory-nudge/memory-hint/impl.py:81 (INLINE_COMMENT_RE) — a
-# YAML inline comment is a `#` preceded by whitespace (YAML 1.2). impl.py
-# strips this from the `hookable:` value before the truthiness test; the lint
-# must do the same or it diverges from the runtime (issue #1094).
-HOOKABLE_INLINE_COMMENT_RE = re.compile(r"\s+#.*$")
+# The `hookable:` truthiness test is no longer mirrored here — it is imported
+# from `hooks/_lib/_memory_frontmatter.py`, which `memory-hint` itself now
+# imports too (#1426). These used to be two hand-kept copies of the runtime's
+# TRUTHY_VALUES and INLINE_COMMENT_RE, and issue #1094 is what that cost: the
+# copy here omitted the inline-comment strip, so `hookable: true # enabled`
+# read as non-truthy in the lint and truthy at runtime, leaving a
+# hookable-but-no-hookKeywords memory — which the runtime silently drops —
+# unflagged by the very check written to find it.
 
 
 def frontmatter_block(raw: str) -> str | None:
@@ -171,7 +194,23 @@ def check_file(path: Path) -> list[str]:
         for nested, value in occs:
             if not nested:
                 errors.append(f"`{field}` is at the top level — must nest under `metadata:`")
-        if field in BRACKET_FIELDS:
+        if field == "hookKeywords":
+            # Delegated to the shared predicate (#1426). The line-based check
+            # this replaces asked whether the value on THIS line was a bracket
+            # list, and the runtime's own regex spans a newline — so
+            #
+            #     hookKeywords:
+            #       [git, push]
+            #
+            # is indexed, while the lint reported it as dropped. The message
+            # asserted a runtime behaviour that was not true, which is the
+            # #1094 failure again in the opposite direction: not a dark memory
+            # left unflagged, but a live one flagged as dark. The helper is
+            # the runtime's own decision, so the two cannot disagree.
+            shape = hookkeywords_shape(block)
+            if shape is not None and shape in HOOKKEYWORDS_MESSAGE:
+                errors.append(HOOKKEYWORDS_MESSAGE[shape])
+        elif field in BRACKET_FIELDS:
             # hookKeywords and hookEvents fail differently at runtime (F2,
             # issue #942, caught by an independent codex-review pass): a
             # malformed hookKeywords drops the WHOLE memory (impl.py:117-139
@@ -200,30 +239,6 @@ def check_file(path: Path) -> list[str]:
                         f"`{field}: {value}` is scalar form, not `[a, b]` — the memory-hint parser "
                         f"rejects this shape and {consequence}"
                     )
-                elif field == "hookKeywords":
-                    close_idx = value.find("]")
-                    if close_idx == -1:
-                        # Unclosed bracket (issue #1094): a `[`-opened value
-                        # with no closing `]` (`hookKeywords: [kubectl, helm`)
-                        # makes impl.py:127-129 return None outright — the
-                        # whole memory is dropped from the hint index. The
-                        # prior lint took `value[1:]` as the inner list, saw
-                        # non-empty content, and reported clean, diverging
-                        # from the runtime it exists to mirror. Treat a
-                        # missing `]` as a drop, matching the runtime's None.
-                        errors.append(
-                            f"`{field}: {value}` has no closing `]` — the memory-hint parser "
-                            "requires a closing bracket and silently drops the entire memory "
-                            "from the hint index when it is absent (issue #1094)"
-                        )
-                    else:
-                        inner = value[1:close_idx].strip()
-                        if not inner:
-                            errors.append(
-                                f"`{field}: {value}` is an empty list — the memory-hint parser treats "
-                                "an empty hookKeywords the same as absent and silently drops the entire "
-                                "memory from the hint index (issue #942 F1)"
-                            )
 
     # F1 (issue #942): `hookable: true` with `hookKeywords` entirely absent is
     # the most direct silent-dark shape and was previously invisible to this
@@ -234,13 +249,10 @@ def check_file(path: Path) -> list[str]:
     hookable_truthy = False
     if "hookable" in occurrences:
         _, hookable_value = occurrences["hookable"][0]
-        # Strip an inline `# comment` before the truthiness test, mirroring
-        # impl.py:108-111 (issue #1094): otherwise `hookable: true # note`
-        # reads non-truthy here but truthy at runtime, so a hookable memory
-        # with no hookKeywords — which the runtime silently drops — goes
-        # unflagged.
-        hookable_value = HOOKABLE_INLINE_COMMENT_RE.sub("", hookable_value)
-        hookable_truthy = hookable_value.strip().strip("\"'").lower() in HOOKABLE_TRUTHY_VALUES
+        # The shared predicate reads a whole frontmatter block; this loop has
+        # already reduced `hookable:` to its value, so it is handed back as a
+        # one-line block rather than re-parsed. Same normalization either way.
+        hookable_truthy = hookable_is_truthy(f"hookable: {hookable_value}")
     if hookable_truthy and "hookKeywords" not in occurrences:
         errors.append(
             "`hookable: true` but `hookKeywords` is missing — the memory-hint parser requires "
