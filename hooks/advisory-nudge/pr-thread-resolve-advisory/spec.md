@@ -73,6 +73,14 @@ self-authored match would let a thread silence itself. A later comment from
 anyone else re-arms the advisory, which is the intended behaviour: a fresh
 objection deserves a fresh answer.
 
+The verdict is read from the comment's **first non-blockquote line**, not from
+its first characters. Quoting the text you are answering is the ordinary shape
+of a review reply, so a reviewer who disagrees writes the quoted verdict first
+and the objection underneath — and matching the quote would let precisely that
+disagreement silence the thread. The raw body is what gets scanned for this,
+because `_clean_body` deletes newlines along with the other control bytes and
+so fuses a quoted line into the text below it.
+
 ## What is emitted
 
 Advisory text on stderr, exit 0 by default. `PRAXIS_PR_THREAD_ADVISORY_STRICT=1`
@@ -85,6 +93,17 @@ document per process; a second call would put two JSON objects on stdout.
 The for-reference group is not emitted there: it is context, not an ask, and it
 is what a dispositioned thread is demoted into, so emitting it would restore the
 per-push nudge this hook is designed to stop.
+
+Two things the stderr advisory carries reach that channel as well, because the
+actor reads only this one:
+
+- **The newest comment**, rendered under its thread line whenever it is not the
+  thread's first comment. A thread reopened by a later objection has to carry
+  that objection; the original finding is often already handled, and answering
+  it would answer the wrong question.
+- **The page-truncation note**, whenever more than `_THREAD_PAGE` threads exist
+  and only the first page was read. A partial list read as a complete one turns
+  "these are the open findings" into a false negative.
 
 Two dispatch behaviours bound that channel's delivery, both fail-open (stderr is
 unaffected, so the hook degrades to its pre-#1448 reach):
