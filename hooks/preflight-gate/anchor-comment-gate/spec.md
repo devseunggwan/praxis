@@ -191,11 +191,12 @@ survivors to the forms that do publish one: `pr comment` / `issue comment`, and
 a `gh api` write whose endpoint is `repos/<o>/<r>/issues/<n>/comments` or
 `repos/<o>/<r>/issues/comments/<id>` — the same set PreToolUse decodes.
 
-The cost is that an anchor published by a **wrapper script** is no longer
-checked here, which is the gap the GitHub MCP path has always had. Widening the
-parser to chase it is the move the two-event split above exists to avoid; the
-PreToolUse structure check still sees a wrapped post's body if the body is on
-the command line, and nothing sees it otherwise.
+The cost is that an anchor published by a **wrapper script** is not checked at
+either event, which is the gap the GitHub MCP path has always had. Widening the
+parser to chase it is the move the two-event split above exists to avoid: both
+`_comment_posts` and `_is_comment_publication` skip a segment whose executable
+is not `gh`, so a wrapper's arguments are never inspected — putting the body on
+the wrapper's command line does not bring it back into view.
 
 ### A closed pull request has nothing left to fix
 
