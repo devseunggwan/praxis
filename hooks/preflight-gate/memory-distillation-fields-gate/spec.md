@@ -151,8 +151,15 @@ That lint checks the *position* of a different field set — the taxonomy fields
 `node_type`, `type`, `originSessionId`, `hookable`, `hookKeywords`,
 `hookEvents`, `modified` — and never the *presence* of these three. Its own
 docstring records that the memory directory is structurally absent in CI, so it
-prints N/A and exits 0 there. The two do not overlap: neither the field set nor
-the property being asserted is shared.
+prints N/A and exits 0 there.
+
+They share exactly one check: the `hookKeywords` shape. Both call
+`hookkeywords_shape` / `dark_memory_shape` from `_lib/_memory_frontmatter.py`,
+so they cannot disagree on whether an entry is dark (see "One predicate" above).
+Everything else stays separate — the lint's field-*position* checks on the
+taxonomy fields, and this gate's field-*presence* check on the three
+distillation fields — and so does when they run: the lint when someone runs it,
+the gate on every write.
 
 `bulk-write-memory-checkpoint` also does not cover this. It matches the memory
 directory by exact path component `.claude`, so a store under
