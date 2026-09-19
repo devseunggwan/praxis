@@ -332,6 +332,15 @@ run_case "UNKNOWN advises" pass \
 run_case "UNKNOWN does not block under strict mode" pass \
   "$Q_MERGE" map "714 OPEN UNKNOWN MERGEABLE false" 1 'advisory only'
 
+# Strict is on and every reason is the soft kind, so nothing blocks — but the
+# closing line used to tell that reader to set the variable they had set.
+run_case "strict mode is not reported as disabled when it is on" pass \
+  "$Q_MERGE" map "714 OPEN UNKNOWN MERGEABLE false" 1 'Strict mode is on' 0 \
+  'Strict mode disabled'
+
+run_case "the same line still reads 'disabled' when strict is off" pass \
+  "$Q_MERGE" map "714 OPEN UNKNOWN MERGEABLE false" 0 'Strict mode disabled'
+
 # An `isDraft` the response never carried is not a "not a draft" answer. Every
 # other unanswered field above routes to a soft reason; this one resolved
 # toward the ask.

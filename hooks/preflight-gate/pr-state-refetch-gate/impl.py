@@ -298,7 +298,7 @@ def _stale_lines(stale: list[tuple[str, str, bool]]) -> str:
     return "\n".join(lines)
 
 
-def _advisory_msg(stale: list[tuple[str, str, bool]]) -> str:
+def _advisory_msg(stale: list[tuple[str, str, bool]], strict_set: bool) -> str:
     return (
         "[advisory] This AskUserQuestion names a PR number alongside a "
         "merge-intent keyword (merge/squash/머지), so its premise depends on "
@@ -313,7 +313,16 @@ def _advisory_msg(stale: list[tuple[str, str, bool]]) -> str:
         "or HAS_HOOKS. Resolve the condition first, or re-author the question "
         "to reflect the live state, instead of surfacing this menu.\n"
         "\n"
-        "Strict mode disabled. Set PRAXIS_PR_STATE_REFETCH_STRICT=1 to block.\n"
+        # Strict can be on and still reach here: it blocks only on a reason
+        # that names a real condition, and every reason above may be the soft
+        # kind. Telling that reader to set the variable they already set is
+        # what makes the next false line believable.
+        + (
+            "Strict mode is on; no reason above is one it blocks on "
+            "(GitHub has not finished computing them).\n"
+            if strict_set
+            else "Strict mode disabled. Set PRAXIS_PR_STATE_REFETCH_STRICT=1 to block.\n"
+        )
     )
 
 
@@ -397,7 +406,7 @@ def main() -> int:
         sys.stderr.write(_block_msg(stale))
         return 2
 
-    sys.stderr.write(_advisory_msg(stale))
+    sys.stderr.write(_advisory_msg(stale, strict_set))
     return 0
 
 
