@@ -1073,6 +1073,24 @@ run_case_detail "gh api item 3 says the heredoc reaches approval, not a block" \
   'gh api --method PATCH repos/owner/repo/issues/comments/123 -F body=@/tmp/a.md' \
   'it enters this approval path'
 
+# `--input` sends a whole JSON request body; `-F body=@` sends one field, so
+# prescribing it would change the request rather than how it is delivered.
+run_case_detail "gh api --input item 3 keeps --input" \
+  'gh api --method PATCH repos/owner/repo/issues/comments/123 --input payload.json' \
+  'Keep --input: create the JSON payload file with the Write tool first'
+
+run_case_detail_absent "gh api --input item 3 drops the -F body=@ prescription" \
+  'gh api --method PATCH repos/owner/repo/issues/comments/123 --input payload.json' \
+  '-F body=@'
+
+run_case_detail "gh api -f body= write still prescribes -F body=@" \
+  'gh api --method PATCH repos/owner/repo/issues/comments/123 -f body=hi' \
+  '-F body=@/tmp/<slug>.md'
+
+run_case_detail "gh api --input on a placeholder endpoint keeps --input" \
+  'gh api --method PATCH repos/{owner}/{repo}/issues/comments/123 --input payload.json' \
+  'Keep --input'
+
 run_case_detail "non-api item 3 keeps the heredoc block wording" \
   'gh pr comment 1 --repo other/target --body-file /tmp/a.md' \
   'is blocked by the praxis hook chain'

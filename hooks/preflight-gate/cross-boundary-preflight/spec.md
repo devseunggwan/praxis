@@ -110,6 +110,12 @@ used for reads, and widening it would buy false positives only.
 would name a remedy the caller cannot follow, so the api arm takes the ask, and
 item ③ of its checklist states the form that does apply (`-F body=@<file>`).
 
+When the call carries `--input <file>`, item ③ instead says to create the JSON
+payload file with the Write tool first and keep `--input`, and omits the
+`-F body=@` prescription. `--input` sends the whole request body, while
+`-F body=@` sends one field — swapping one for the other changes the request,
+not just how its body is delivered.
+
 #### HEREDOC_BODY — hard block (exit 2)
 
 | Command                                                      | Action                                  |

@@ -859,8 +859,13 @@ def _build_checklist(
     from_flag: bool = True,
     selector: str = "",
     host: str | None = None,
+    api_input: bool = False,
 ) -> str:
     """Render the pre-flight ask text for `subcommand` against `repo`.
+
+    `api_input` marks a `gh api --input <file>` call: that flag sends a whole
+    JSON request body, so item ③ keeps it rather than prescribing `-F body=@`,
+    which would send a different request.
 
     `host` is the platform this run is executing on, used only to drop item ②
     where its gate is not installed. None (an unresolvable or unknown host)
@@ -917,13 +922,17 @@ def _build_checklist(
             "     Without this line the hook hard-blocks the command.",
             "",
         ]
+    if is_api and api_input:
+        body_rule = (
+            "     Keep --input: create the JSON payload file with the Write tool first."
+        )
+    elif is_api:
+        body_rule = "     Use -F body=@/tmp/<slug>.md (write body via Write tool first)."
+    else:
+        body_rule = "     Use --body-file /tmp/<slug>.md (write body via Write tool first)."
     parts += [
         "  ③ Body delivery format",
-        (
-            "     Use -F body=@/tmp/<slug>.md (write body via Write tool first)."
-            if is_api
-            else "     Use --body-file /tmp/<slug>.md (write body via Write tool first)."
-        ),
+        body_rule,
         # The hard block at Check 1 exempts `gh api` (`subcommand[0] !=
         # GH_API_OBJECT`), so telling an API caller their heredoc is blocked
         # sends them to rewrite a command that would have reached this prompt.
@@ -1031,6 +1040,7 @@ def main() -> int:
 
         subcommand = _gh_write_subcommand(seg, seg_argv)
         api_repo: str | None = None
+        api_input = False
         if subcommand is None:
             # `gh api` arm (issue #1435). The shape test is the shared one the
             # advisory hooks already use, so a write surface is recognized in
@@ -1056,6 +1066,7 @@ def main() -> int:
             else:
                 continue
             subcommand = (GH_API_OBJECT, api_verb)
+            api_input = api_call.has_input
 
         # Check 1: heredoc in same segment → hard block (marker-independent).
         # Scoped to the noun/verb writes: the block message prescribes
@@ -1089,6 +1100,7 @@ def main() -> int:
                     from_flag=False,
                     selector="the `gh api` endpoint path",
                     host=runtime_host(),
+                    api_input=api_input,
                 )
                 + compound_cascade_hint(command)
             )
@@ -1097,7 +1109,9 @@ def main() -> int:
         has_repo, repo_val = _has_repo_flag(seg)
         if has_repo:
             _emit_ask(
-                _build_checklist(subcommand, repo_val, host=runtime_host())
+                _build_checklist(
+                    subcommand, repo_val, host=runtime_host(), api_input=api_input
+                )
                 + compound_cascade_hint(command)
             )
             return 0
@@ -1125,6 +1139,7 @@ def main() -> int:
                     "UNRESOLVED — a `GH_REPO` change in this command could not be evaluated",
                     from_flag=False,
                     host=runtime_host(),
+                    api_input=api_input,
                 )
                 + compound_cascade_hint(command)
             )
@@ -1141,6 +1156,7 @@ def main() -> int:
                     "UNRESOLVED — a `cd` in this command could not be modeled",
                     from_flag=False,
                     host=runtime_host(),
+                    api_input=api_input,
                 )
                 + compound_cascade_hint(command)
             )
@@ -1167,6 +1183,7 @@ def main() -> int:
                     from_flag=False,
                     selector=selector,
                     host=runtime_host(),
+                    api_input=api_input,
                 )
                 + compound_cascade_hint(command)
             )
