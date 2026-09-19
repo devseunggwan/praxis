@@ -1086,6 +1086,28 @@ run_case_detail "gh api placeholder repo resolves from the checkout" \
   'gh api repos/{owner}/{repo}/issues/1/comments -f body=hi' \
   'devseunggwan/praxis'
 
+# gh fills only the placeholder it knows, so a half-filled slot names neither
+# the checkout's repo nor anything this hook can read.
+run_case_detail "gh api half-placeholder repo slot is UNRESOLVED" \
+  'gh api --method PATCH repos/{owner}/other/issues/comments/1 -f body=hi' \
+  'UNRESOLVED'
+
+run_case_detail_absent "gh api half-placeholder repo slot does not name the checkout" \
+  'gh api --method PATCH repos/{owner}/other/issues/comments/1 -f body=hi' \
+  'devseunggwan/praxis'
+
+run_case_detail "gh api variable repo slot is UNRESOLVED" \
+  'gh api --method PATCH repos/$OWNER/$REPO/issues/comments/1 -f body=hi' \
+  'UNRESOLVED'
+
+run_case_detail_absent "gh api variable repo slot does not name the checkout" \
+  'gh api --method PATCH repos/$OWNER/$REPO/issues/comments/1 -f body=hi' \
+  'devseunggwan/praxis'
+
+run_case_detail_absent "gh api literal repo slot is not UNRESOLVED" \
+  'gh api --method PATCH repos/other/target/issues/comments/1 -f body=hi' \
+  'UNRESOLVED'
+
 # An endpoint built at run time names no repo this hook can read, and it may
 # not be a comment endpoint at all — so a write-method call asks UNRESOLVED
 # rather than falling through as "not a write".

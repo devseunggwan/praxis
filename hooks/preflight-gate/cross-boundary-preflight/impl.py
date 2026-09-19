@@ -166,22 +166,30 @@ GH_API_OBJECT = "api"
 _API_REPO_PATH_RE = re.compile(r"(?:^|/)repos/([^/\s]+)/([^/\s]+)(?:/|$)")
 
 
-def _gh_api_repo_slug(path: str | None) -> str | None:
-    """`owner/repo` named literally in a `gh api` endpoint, else None.
+_API_PLACEHOLDER_SLOT = ("{owner}", "{repo}")
+_API_PARTIAL_REPO = (
+    "UNRESOLVED — the `gh api` endpoint's owner/repo is not fully literal"
+)
 
-    None means "this endpoint does not name a repo this hook can read" — either
-    it carries gh's placeholders, or the segments are not git-config-safe names.
-    Both resolve through the checkout, never through a guess.
+
+def _gh_api_repo_slot(path: str | None) -> tuple[bool, str | None]:
+    """(readable, slug) for the `repos/<owner>/<repo>` slot of a `gh api` endpoint.
+
+    Only two forms are readable: both segments literal names (→ that slug), or
+    exactly gh's `{owner}/{repo}` pair (→ None, resolved through the checkout).
+    A half-filled slot — `{owner}/other`, `$OWNER/$REPO` — is neither: gh
+    substitutes only the part it knows, so the checkout's repo is NOT the target
+    and naming it would put a wrong repo in front of the approval.
     """
-    if not path:
-        return None
-    m = _API_REPO_PATH_RE.search(path)
+    m = _API_REPO_PATH_RE.search(path or "")
     if not m:
-        return None
+        return False, None
     owner, repo = m.group(1), m.group(2)
-    if not (_NAME_SEGMENT_RE.match(owner) and _NAME_SEGMENT_RE.match(repo)):
-        return None
-    return f"{owner}/{repo}"
+    if _NAME_SEGMENT_RE.match(owner) and _NAME_SEGMENT_RE.match(repo):
+        return True, f"{owner}/{repo}"
+    if (owner, repo) == _API_PLACEHOLDER_SLOT:
+        return True, None
+    return False, None
 
 
 _DEFAULT_GH_HOST = "github.com"
@@ -985,8 +993,11 @@ def main() -> int:
             if api_call is None:
                 continue
             if is_gh_api_external_write(api_argv):
-                api_repo = _qualify_api_target(
-                    _gh_api_repo_slug(api_call.path), _gh_api_hostname(api_argv)
+                readable, slug = _gh_api_repo_slot(api_call.path)
+                api_repo = (
+                    _qualify_api_target(slug, _gh_api_hostname(api_argv))
+                    if readable
+                    else _API_PARTIAL_REPO
                 )
             elif _is_dynamic_api_write(api_call):
                 api_repo = _API_DYNAMIC_ENDPOINT

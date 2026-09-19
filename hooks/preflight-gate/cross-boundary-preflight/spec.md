@@ -57,13 +57,17 @@ endpoint:
 | Endpoint head | Target | Arm |
 | --- | --- | --- |
 | `repos/<owner>/<repo>/…` with git-config-safe names | that repo, named literally | asked immediately, selector `the gh api endpoint path` — no git probe |
-| `repos/{owner}/{repo}/…` (gh's placeholders) | whatever gh resolves from the checkout | falls through to `IMPLICIT_REPO_WRITE` resolution (GH_REPO → `gh-resolved` → remote order) |
-| anything else | not readable | falls through to the same resolution |
+| `repos/{owner}/{repo}/…` (exactly gh's placeholder pair) | whatever gh resolves from the checkout | falls through to `IMPLICIT_REPO_WRITE` resolution (GH_REPO → `gh-resolved` → remote order) |
+| anything else — a partly dynamic slot (`{owner}/other`, `$OWNER/$REPO`, a backtick) or a non-name segment | not readable | asked immediately as `UNRESOLVED` — never resolved from the checkout |
 | built at run time (`"$ENDPOINT"`, `$(…)`, backticks) with a write method | unknown — neither the repo nor whether it is a comment endpoint | asked immediately as `UNRESOLVED` |
 
 A braced placeholder names nothing on its own, so treating it as a literal would
 put the string `{owner}/{repo}` in front of an approval. The fall-through is what
-makes the two forms answer with the same repo.
+makes the two forms answer with the same repo. The fall-through is limited to
+the exact pair: gh substitutes only the placeholder it knows, so
+`repos/{owner}/other/…` lands on `<checkout owner>/other`, and a shell variable
+in the slot is filled by the shell. Resolving either from the checkout named
+the checkout's repo, which the write never touches.
 
 `--hostname` changes which server the endpoint names, so a host other than
 `github.com` is prefixed to the literal repo (`ghe.example/owner/repo`) — a bare
