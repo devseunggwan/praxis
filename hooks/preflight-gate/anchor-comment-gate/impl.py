@@ -893,7 +893,13 @@ def _post_tool_use(payload: dict) -> int:
 
         heading = _heading_match(post["body"])
         if not heading:
-            problems += found
+            # A malformed heading is a structure finding like any other, so on a
+            # closed PR it earns the same demotion the SHA-freshness path gets
+            # below. This branch used to return before the state lookup, which
+            # left an unfixable "fix the comment" on a merged PR.
+            if post["pr"]:
+                _, _, state, _ = _head_and_base(post, deadline)
+            problems += _demote_on_closed(found, state)
             continue
         if not post["pr"]:
             found.append((_UNKNOWN, tag + "SHA 신선도 확인 불가 (코멘트의 PR 번호를 찾지 못함)"))

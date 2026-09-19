@@ -733,6 +733,38 @@ run_case "57 report: state OPEN 이면 같은 앵커가 그대로 블로킹" \
   "report:와 다름" PostToolUse "$OPEN_GH" "gh pr comment 42 --body-file anchor.md" \
   "$FIX" Bash "$COMMENT_URL"
 
+# A malformed heading took an earlier `continue`, so it never reached the state
+# lookup and stayed blocking on a PR nobody can edit into shape (#1451).
+BADREV_CLOSED_GH=$(mktemp -d) || { echo "FATAL: mktemp -d failed" >&2; exit 1; }
+echo "$BADREV_CLOSED_GH" >>"$GH_DIRS_FILE"
+cat >"$BADREV_CLOSED_GH/gh" <<EOF
+#!/usr/bin/env bash
+if [ "\$1" = "api" ]; then cat "$FIX/en-badrev.md"; exit 0; fi
+echo "$SHA main MERGED"
+exit 0
+EOF
+chmod +x "$BADREV_CLOSED_GH/gh"
+
+run_case "58a context(advisory): 머지된 PR 의 malformed heading 은 블로킹하지 않음" \
+  "context:PR state MERGED" PostToolUse "$BADREV_CLOSED_GH" \
+  "gh pr comment 42 --body-file anchor.md" "$FIX" Bash "$COMMENT_URL"
+
+# Positive control: the identical fake differing only in the state field still
+# blocks, so the case above measures the state and not the fixture.
+BADREV_OPEN_GH=$(mktemp -d) || { echo "FATAL: mktemp -d failed" >&2; exit 1; }
+echo "$BADREV_OPEN_GH" >>"$GH_DIRS_FILE"
+cat >"$BADREV_OPEN_GH/gh" <<EOF
+#!/usr/bin/env bash
+if [ "\$1" = "api" ]; then cat "$FIX/en-badrev.md"; exit 0; fi
+echo "$SHA main OPEN"
+exit 0
+EOF
+chmod +x "$BADREV_OPEN_GH/gh"
+
+run_case "58b report: state OPEN 이면 같은 malformed heading 이 그대로 블로킹" \
+  "report:" PostToolUse "$BADREV_OPEN_GH" \
+  "gh pr comment 42 --body-file anchor.md" "$FIX" Bash "$COMMENT_URL"
+
 # A `gh` that answers with two fields predates the state request. Unknown state
 # keeps the old tier rather than buying silence — cases 30-41b run on exactly
 # such a fake, so this is what keeps them meaningful.
