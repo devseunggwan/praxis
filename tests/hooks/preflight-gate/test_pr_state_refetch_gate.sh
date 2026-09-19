@@ -93,13 +93,28 @@ EOF
       cat >"$d/gh" <<'EOF'
 #!/usr/bin/env bash
 echo "$@" >> "$PRSRG_CALL_LOG"
-num="$3"
 map_file="${PRSRG_MAP_FILE:-$(dirname "$0")/.map}"
-python3 - "$num" "$map_file" <<'PY'
+python3 - "$map_file" "$@" <<'PY'
 import json
 import sys
 
-num, map_file = sys.argv[1], sys.argv[2]
+# gh returns only the fields `--json` names, so this shim must too. Emitting
+# all four regardless is what let the hook's query narrow without a single
+# case failing — the shim answered for a query nobody had asked.
+map_file, argv = sys.argv[1], sys.argv[2:]
+num = None
+requested: list[str] = []
+i = 0
+while i < len(argv):
+    tok = argv[i]
+    if tok == "--json" and i + 1 < len(argv):
+        requested = [f for f in argv[i + 1].split(",") if f]
+        i += 2
+        continue
+    if num is None and tok not in ("pr", "view") and not tok.startswith("-"):
+        num = tok
+    i += 1
+
 state = None
 fields = {}
 with open(map_file) as f:
@@ -125,6 +140,8 @@ with open(map_file) as f:
 if state is None:
     sys.stderr.write("gh: no pull requests found\n")
     sys.exit(1)
+if requested:
+    fields = {k: v for k, v in fields.items() if k in requested}
 print(json.dumps(fields))
 PY
 EOF
@@ -135,10 +152,12 @@ EOF
 }
 
 # run_case <name> <expected: block|pass> <questions-json> <gh-mode> <gh-map> \
-#          <strict: 0|1> [need_grep] [expect_no_gh_call: 0|1] [not_grep]
+#          <strict: 0|1> [need_grep] [expect_no_gh_call: 0|1] [not_grep] \
+#          [call_grep: pattern the gh argv must match]
 run_case() {
   local name="$1" expected="$2" questions_json="$3" gh_mode="$4" gh_map="$5" \
-        strict="$6" need_grep="${7:-}" expect_no_call="${8:-0}" not_grep="${9:-}"
+        strict="$6" need_grep="${7:-}" expect_no_call="${8:-0}" not_grep="${9:-}" \
+        call_grep="${10:-}"
 
   local payload fake_bin call_log err_file rc
   payload=$(build_payload "$questions_json")
@@ -173,6 +192,11 @@ run_case() {
   fi
   if [ "$ok" -eq 1 ] && [ "$expect_no_call" = "1" ]; then
     [ -z "$call_content" ] || ok=0
+  fi
+  # The argv the hook actually sent. Every other assertion here reads the
+  # shim's answer, which the shim decides — only this one can see the query.
+  if [ "$ok" -eq 1 ] && [ -n "$call_grep" ]; then
+    printf '%s' "$call_content" | grep -Eq -- "$call_grep" || ok=0
   fi
 
   if [ "$ok" -eq 1 ]; then
@@ -303,6 +327,12 @@ run_case "UNKNOWN advises" pass \
 
 run_case "UNKNOWN does not block under strict mode" pass \
   "$Q_MERGE" map "714 OPEN UNKNOWN MERGEABLE false" 1 'advisory only'
+
+# Only this case can see the query itself; every other assertion reads the
+# shim's answer, and the shim used to answer for a query nobody had asked.
+run_case "the live query names every field the verdict reads" pass \
+  "$Q_MERGE" map "714 OPEN CLEAN MERGEABLE false" 0 '' 0 '' \
+  '--json state,mergeStateStatus,mergeable,isDraft'
 
 
 # ---------------------------------------------------------------------------
