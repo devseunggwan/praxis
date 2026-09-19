@@ -1102,6 +1102,26 @@ run_case_detail "gh api dynamic endpoint names no repo" \
 run_case "gh api GET on a variable endpoint is silent" pass \
   'gh api "$ENDPOINT"'
 
+# `--hostname` decides which server the endpoint lives on, so an approval that
+# names only `owner/repo` reads as the github.com repo of the same name.
+run_case_detail "gh api --hostname names the host with the repo" \
+  'gh api --hostname ghe.example repos/other/target/issues/1/comments -f body=hi' \
+  'ghe.example/other/target'
+
+run_case_detail "gh api --hostname= form names the host too" \
+  'gh api --hostname=ghe.example repos/other/target/issues/1/comments -f body=hi' \
+  'ghe.example/other/target'
+
+run_case_detail_absent "gh api --hostname github.com keeps the bare repo" \
+  'gh api --hostname github.com repos/other/target/issues/1/comments -f body=hi' \
+  'github.com/other/target'
+
+# A placeholder resolves from the checkout, whose remote may sit on another
+# host than the one `--hostname` sends to.
+run_case_detail "gh api --hostname with a placeholder endpoint is UNRESOLVED" \
+  'gh api --hostname ghe.example repos/{owner}/{repo}/issues/1/comments -f body=hi' \
+  'UNRESOLVED'
+
 # A read is not a write. Both the default GET and an explicit one stay silent.
 run_case "gh api GET by default is silent" pass \
   'gh api repos/owner/repo/issues/comments/123'

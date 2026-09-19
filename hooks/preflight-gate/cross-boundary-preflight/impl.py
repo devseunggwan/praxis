@@ -184,6 +184,34 @@ def _gh_api_repo_slug(path: str | None) -> str | None:
     return f"{owner}/{repo}"
 
 
+_DEFAULT_GH_HOST = "github.com"
+
+
+def _gh_api_hostname(argv: list[str]) -> str | None:
+    """The `--hostname` value on a `gh api` call, in either spelling."""
+    for i, tok in enumerate(argv):
+        if tok == "--hostname":
+            return argv[i + 1] if i + 1 < len(argv) else None
+        if tok.startswith("--hostname="):
+            return tok.split("=", 1)[1]
+    return None
+
+
+def _qualify_api_target(slug: str | None, host: str | None) -> str | None:
+    """`slug` as the approval should name it once `--hostname` is known.
+
+    The host decides which server the write lands on, so a bare `owner/repo`
+    reads as the github.com repo of that name. A placeholder endpoint would
+    resolve through the checkout's remote, which need not be on that host, so
+    it is UNRESOLVED rather than a guess.
+    """
+    if not host or host.lower() == _DEFAULT_GH_HOST:
+        return slug
+    if slug is None:
+        return f"UNRESOLVED — `--hostname {host}` with an endpoint that names no repo"
+    return f"{host}/{slug}"
+
+
 _API_DYNAMIC_ENDPOINT = "UNRESOLVED — the `gh api` endpoint is built at run time"
 
 
@@ -957,7 +985,9 @@ def main() -> int:
             if api_call is None:
                 continue
             if is_gh_api_external_write(api_argv):
-                api_repo = _gh_api_repo_slug(api_call.path)
+                api_repo = _qualify_api_target(
+                    _gh_api_repo_slug(api_call.path), _gh_api_hostname(api_argv)
+                )
             elif _is_dynamic_api_write(api_call):
                 api_repo = _API_DYNAMIC_ENDPOINT
             else:

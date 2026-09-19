@@ -65,6 +65,12 @@ A braced placeholder names nothing on its own, so treating it as a literal would
 put the string `{owner}/{repo}` in front of an approval. The fall-through is what
 makes the two forms answer with the same repo.
 
+`--hostname` changes which server the endpoint names, so a host other than
+`github.com` is prefixed to the literal repo (`ghe.example/owner/repo`) — a bare
+`owner/repo` reads as the github.com repo of that name. With a placeholder
+endpoint the target is `UNRESOLVED` instead: the checkout's remote need not sit
+on the host the call is sent to.
+
 A run-time endpoint is the one case the comment-endpoint test cannot answer, so
 it is decided by the method alone: a write method asks, and a read stays silent.
 Reading it as "not a comment endpoint" let `gh api "$ENDPOINT" -f body=hi`
