@@ -3,9 +3,9 @@
 
 A memory with `hookable: true` whose `hookKeywords:` the hint parser cannot
 read is not rejected anywhere — it is silently absent from the index, while
-looking well-formed on disk. Measured over 4452 local entries in 138 memory
-directories: 420 carry `hookable: true`, 396 are indexed, and 24 (5.7%) are
-dark — 18 in multi-line block-list form, 6 with no `hookKeywords:` key at all.
+looking well-formed on disk. Measured over 742 local entries in 23 memory
+directories: 70 carry `hookable: true`, 66 are indexed, and 4 (5.7%) are
+dark — 3 in multi-line block-list form, 1 with no `hookKeywords:` key at all.
 
 Three readers need the same answer and, before this module, each had its own
 copy of it:

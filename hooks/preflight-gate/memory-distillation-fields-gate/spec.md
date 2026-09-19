@@ -115,26 +115,28 @@ verdict from the helper and keeps its own per-shape wording.
 
 ### Corpus
 
-Every local memory entry — 4452 files across 138 memory directories under
-`~/.claude*/projects/*/memory/*.md`, measured with the shipped helper:
+Every local memory entry — 742 files across 23 memory directories under
+`~/.claude*/projects/*/memory/*.md`, deduplicated by real path (the
+`~/.claude-N/projects` directories on the measuring host are symlinks to
+`~/.claude/projects`), measured with the shipped helper:
 
 ```text
-   4026  (hookable not true — out of scope)
-    396  indexed
-     18  block-list
-      6  (no frontmatter)
-      6  absent
+    671  (hookable not true — out of scope)
+     66  indexed
+      3  block-list
+      1  absent
+      1  (no frontmatter)
 
-hookable: true entries : 420
-  indexed              : 396
-  gate would block     : 24  (5.7%)
+hookable: true entries : 70
+  indexed              : 66
+  gate would block     : 4  (5.7%)
 ```
 
 Two notes on reading it. The `absent` shape — `hookable: true` with no
-`hookKeywords:` key at all — is 6 of the 24, and a predicate keyed on "the
-file has a `hookKeywords` key" cannot see any of them; that is why the gate's
+`hookKeywords:` key at all — is 1 of the 4, and a predicate keyed on "the
+file has a `hookKeywords` key" cannot see it; that is why the gate's
 predicate is keyed on `hookable:` instead. And this is a population, not a
-backlog: the gate runs at write time, so it does not retro-fix the 24 entries
+backlog: the gate runs at write time, so it does not retro-fix the 4 entries
 that already exist.
 
 ## Why a block rather than an advisory

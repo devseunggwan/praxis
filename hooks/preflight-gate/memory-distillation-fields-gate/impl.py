@@ -31,8 +31,8 @@ A second, unrelated way a memory goes dark (issue #1426). An entry with
 `hookable: true` whose `hookKeywords:` the hint index cannot read is dropped by
 `memory-hint` outright — indexed nowhere, firing never — and nothing says so.
 The shapes are the multi-line `- item` block form, the scalar form, an unclosed
-`[`, an empty list, and no `hookKeywords:` key at all. Measured over 4452 local
-entries: 420 carry `hookable: true` and 24 of them (5.7%) are dark this way.
+`[`, an empty list, and no `hookKeywords:` key at all. Measured over 742 local
+entries: 70 carry `hookable: true` and 4 of them (5.7%) are dark this way.
 
 That predicate is not re-derived here. `_lib/_memory_frontmatter.py` holds it
 and `memory-hint` itself imports it, so this gate asks the runtime's own
