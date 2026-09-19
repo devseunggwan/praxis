@@ -54,7 +54,7 @@ in [`../SECURITY.md`](../SECURITY.md).
 | `PRAXIS_ANCHOR_GATE_ADVISORY` | `anchor-comment-gate` | Demote the *blocking* published-anchor findings from exit 2 to exit 0. `advisory` / `unknown` findings already exit 0 via `additionalContext` and are unaffected, as is the PreToolUse structure block. Exact value `1` only, mirroring the retired `PRAXIS_ANCHOR_GATE_STRICT` it replaces |
 | `PRAXIS_PR_CLAIM_ADVISORY` | `pr-claim-mutation-gate` | Demote the PR-claim mutation gate from block to advisory (systemMessage, non-blocking); mirrors `PRAXIS_NEGATIVE_EXISTENCE_ADVISORY` |
 | `PRAXIS_PR_ANCHOR_BYPASS` | `pr-anchor-existence-gate` | Skip the PR-anchor existence gate entirely |
-| `PRAXIS_PR_ANCHOR_ADVISORY` | `pr-anchor-existence-gate` | Pin the PR-anchor existence gate to advisory forever — no escalation to block on repeat fires this session |
+| `PRAXIS_PR_ANCHOR_ADVISORY` | `pr-anchor-existence-gate` | How many Stop fires advise before the block: `=<N>` (default 1), `=forever` never escalates. An unreadable value reads as `N=1`, never as silence (#1443) |
 | `PRAXIS_PROPOSAL_PREMISE_BYPASS` | `proposal-premise-gate` | Skip the prose-proposal premise advisory |
 | `PRAXIS_PROSE_OPTION_MENU_BYPASS` | `prose-option-menu-advisory` | Skip the prose option-menu advisory |
 | `PRAXIS_DENIED_ACTION_BYPASS` | `denied-action-report-gate` | Skip the denied-action report gate. Exact value `1` after stripping; read before the strict variable, so it wins when both are set |

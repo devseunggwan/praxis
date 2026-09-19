@@ -588,6 +588,36 @@ def _has_confirmed_edit(state: _ScanState, after_create: int) -> bool:
     )
 
 
+_ADVISORY_FOREVER = "forever"
+
+
+def _advisory_cap() -> int | None:
+    """How many advisories precede the block. `None` means never escalate.
+
+    The variable used to be a switch: any value pinned the gate to advisory for
+    the rest of the session. A Stop advisory leaves through `systemMessage`,
+    which the fire ledger records and the actor does not read, so the pin was
+    spelled as a softer tier while being, from the actor's side, an off switch
+    (#1443: 12 fires on two PRs, 0 reactions, both merged unanchored).
+
+    So it now counts instead. Unset is cap 1 — the first fire advises and the
+    second blocks, exactly as before. A value the gate cannot read also falls
+    to 1 rather than to silence: this hook's own finding is that a tier nobody
+    reads is indistinguishable from an uninstalled hook, and inheriting that
+    state from a typo is the failure it reports.
+    """
+    raw = os.environ.get(_ADVISORY_ENV, "").strip()
+    if not raw:
+        return 1
+    if raw.lower() == _ADVISORY_FOREVER:
+        return None
+    try:
+        value = int(raw)
+    except ValueError:
+        return 1
+    return value if value > 0 else 1
+
+
 def _build_message(unanchored: list[str], blocking: bool) -> str:
     verb = "차단" if blocking else "안내"
     verb_en = "blocking" if blocking else "advisory"
@@ -603,7 +633,8 @@ def _build_message(unanchored: list[str], blocking: bool) -> str:
         "것은 존재이지 PASS 가 아닙니다 — 환경 불통/자격증명 부재로 검증이 막혔다면 "
         "`BLOCKED` 행을 담은 앵커도 유효합니다.\n"
         f"{_PREFIX} Draft PRs are outside this gate / 드래프트 PR 은 이 게이트 대상이 아닙니다.\n"
-        f"{_PREFIX} 항상 advisory 로: {_ADVISORY_ENV}=1 | bypass: {_BYPASS_ENV}=1\n"
+        f"{_PREFIX} advisory 횟수 상한: {_ADVISORY_ENV}=<N> (그 다음 Stop 부터 차단), "
+        f"영구 advisory: {_ADVISORY_ENV}={_ADVISORY_FOREVER} | bypass: {_BYPASS_ENV}=1\n"
     )
 
 
@@ -643,14 +674,15 @@ def main() -> int:
                 _fire_ledger.suppress_coarse_duplicate()
         return 0
 
-    force_advisory = bool(os.environ.get(_ADVISORY_ENV, "").strip())
+    cap = _advisory_cap()
 
-    already_advised = (
-        has_session
-        and _fire_ledger.count_session_fires(_HOOK_NAME, session_id, _fire_ledger.DECISION_ADVISE) > 0
+    advised = (
+        _fire_ledger.count_session_fires(_HOOK_NAME, session_id, _fire_ledger.DECISION_ADVISE)
+        if has_session
+        else 0
     )
 
-    if force_advisory or not already_advised:
+    if cap is None or advised < cap:
         emit_stop_advisory(_build_message(unanchored, blocking=False))
         decision = _fire_ledger.DECISION_ADVISE
     else:
