@@ -1435,6 +1435,18 @@
       }
     },
     {
+      "name": "retraction-probe-advisory",
+      "role": "completion-verify",
+      "event": "Stop",
+      "timeout": 10,
+      "review_by": "2026-12-18",
+      "mode": {
+        "bypass_env": [
+          "PRAXIS_RETRACTION_PROBE_BYPASS"
+        ]
+      }
+    },
+    {
       "name": "joint-liability-attribution-gate",
       "role": "completion-verify",
       "event": "Stop",
