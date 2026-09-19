@@ -703,6 +703,7 @@ run_case "54 report: 쓰기 메서드 gh api 는 그대로 검사된다" \
 # differs. There it exits 2 with "fix the comment now"; a merged PR cannot be
 # edited into a mergeable one, so the finding stays but stops asking for a write.
 CLOSED_GH=$(mktemp -d) || { echo "FATAL: mktemp -d failed" >&2; exit 1; }
+echo "$CLOSED_GH" >>"$GH_DIRS_FILE"
 cat >"$CLOSED_GH/gh" <<EOF
 #!/usr/bin/env bash
 if [ "\$1" = "api" ]; then cat "$FIX/stale.md"; exit 0; fi
@@ -722,6 +723,7 @@ run_case "56 context: 데모트된 메시지가 PR state 를 밝힌다" \
 # Positive control for 47: the identical fake differing only in the state field
 # still blocks, so `silent`/`context` above measures the state and not the fake.
 OPEN_GH=$(mktemp -d) || { echo "FATAL: mktemp -d failed" >&2; exit 1; }
+echo "$OPEN_GH" >>"$GH_DIRS_FILE"
 cat >"$OPEN_GH/gh" <<EOF
 #!/usr/bin/env bash
 if [ "\$1" = "api" ]; then cat "$FIX/stale.md"; exit 0; fi
