@@ -99,6 +99,30 @@ A write-method `gh api` on a non-review endpoint (`.../labels`,
 `.../milestones`) mutates GitHub but not the surface the claim is about, so
 the endpoint segment is required rather than decorative.
 
+### Where the rehearsal test looks (issue #1434)
+
+Both tests above are decided **per command segment** (`&&`, `||`, `;`, `|`,
+newline) via `tokenize_with_roles`, and the rehearsal flags are compared
+**case-sensitively against that segment's `FLAG`-role tokens** — not searched
+for in the raw command string.
+
+The earlier whole-string form had no locality and no quoting awareness, so a
+token that was never a flag on the mutating call still voided it: a `-n` in a
+neighbouring `[ -n "$CLAUDE_SESSION_ID" ]` guard, a `sed -n` inside the heredoc
+that builds a comment body, a `tail -N` quoted inside `--body`, and — through
+`re.IGNORECASE` — `gh api`'s own `-H` header flag. The same gap ran in reverse:
+a mutation verb quoted inside `git commit -m` or a heredoc body counted as a
+real mutation and silenced a turn that touched nothing on the PR.
+
+Two consequences of the token view worth stating, because both are deliberate:
+
+- **Flag values are excluded from the scanned text.** A `--body` that merely
+  quotes `gh pr comment` is prose, not a call. The one exception is
+  `resolveReviewThread`, which reaches `gh` only inside `-f query=...`; that
+  pattern alone is matched against the segment *including* values.
+- **`--method` / `-X` are absent from the tokenizer's value spec**, so `POST` /
+  `PATCH` stays a positional and the write-method pattern can still see it.
+
 A **read-only** `gh api .../comments` call (no explicit write method — the
 default HTTP verb is GET) does **not** clear the gate: listing comments is
 not resolving them. `Read`/`Write`/generic `Bash` tool calls with no
@@ -147,7 +171,7 @@ no mutation evidence blocks, per the Escalation section above.
 bash tests/hooks/completion-verify/test_pr_claim_mutation_gate.sh
 ```
 
-33 cases: the motivating incident verbatim (KR, zero mutation → block),
+39 cases: the motivating incident verbatim (KR, zero mutation → block),
 4 EN/KR claim variants without mutation (block), claim cleared by `git
 push` / `gh pr comment` / `gh pr review` / write-method `gh api` / GitHub MCP
 comment tool (silent, 5 cases).
@@ -159,6 +183,14 @@ write-method `gh api` on a `.../labels` endpoint, a consolidated MCP reader
 one half of a matched pair — a failed push (`is_error`) blocks while an
 otherwise identical succeeded push stays silent, so what the pair
 distinguishes is the result correlation, not the command text.
+
+Six more pin the scan's locality (#1434), and each fails against the
+pre-fix implementation in the direction its name states. Four are turns that
+genuinely mutated the PR and must stay **silent**: a push beside a `[ -n ... ]`
+guard, a `gh pr comment` whose body quotes `tail -N`, a write-method `gh api`
+after a heredoc containing `sed -n`, and a `gh api` carrying `-H`. Two are
+turns that mutated nothing and must still **block**: a `git commit -m` whose
+message quotes `gh pr comment`, and a heredoc body quoting `git push`.
 
 The rest: `Write` tool_use does not count as PR mutation (block), mutation in
 the **previous** turn does not back a claim in this one (block — turn-scoped
