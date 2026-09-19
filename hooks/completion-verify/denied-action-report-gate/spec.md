@@ -1,8 +1,9 @@
 # Stop Denied-Action Report Gate
 
 `hooks/completion-verify/denied-action-report-gate/impl.py` runs on `Stop` and
-`SubagentStop`. It fires when a tool call was **structurally refused during this
-turn** and the final assistant message never says so.
+`SubagentStop`. It fires when a tool call was **structurally denied during this
+turn** — refused by the user, or blocked by a `PreToolUse` hook or a permission
+rule — and the final assistant message never says so.
 
 Supported hosts: all
 
@@ -28,10 +29,83 @@ No judgement about meaning is made at any point.
 
 | Step | Oracle |
 | ---- | ------ |
-| Was something refused? | `_transcript.scan_user_rejections` — `toolDenialKind`, `is_error: true`, and the runtime's fixed refusal sentence, three co-agreeing markers |
+| Was something denied? | `_transcript.scan_user_rejections(kinds=DENIAL_KINDS)` — `toolDenialKind` is `user-rejected` or `permission-rule`, and `is_error: true` |
+| Is the record a real refusal? | for `user-rejected`, the runtime's fixed refusal sentence as well — three co-agreeing markers. `permission-rule` has no fixed sentence, so it agrees on two (below) |
 | Was it refused *this turn*? | the rejection's `tool_use_id` appears among the `tool_result` ids in `load_stop_turn(payload)` |
 | Is it in scope? | `tool_name` is not `AskUserQuestion` |
 | Did the report own it? | the final message names the refused tool — or carries acknowledgement vocabulary, when this is the turn's only in-scope refusal |
+
+### The second denial kind (issue #1422)
+
+The runtime records a `PreToolUse` hook block, and a permission-rule denial, as
+`toolDenialKind: "permission-rule"`. Before #1422 the scan read only
+`user-rejected`, so a blocked call was invisible here. In the turn #1422
+observed, a label gate blocked `gh pr create`, the input was rewritten and
+re-run successfully, the closing report listed two *other* skipped steps and
+never mentioned the block, and this gate stayed silent. The omission surfaced
+only when a later retrospect replayed the transcript.
+
+The two kinds leave the same hole for the same reason: the call had no outcome,
+so there is no error to explain and no correction to narrate. That is the whole
+premise of this gate, and it is indifferent to who did the refusing.
+
+**Why the third marker is dropped for this kind, and only this kind.** A
+`user-rejected` record carries a fixed runtime sentence; a `permission-rule`
+record carries the *blocking hook's own prose*. The corpus below holds exactly
+two shapes for it and no third:
+
+```text
+PreToolUse:Bash hook error: [<plugin>/hooks/_dispatch.sh PreToolUse Bash claude]: …
+Permission to use Bash with command <cmd> has been denied.
+```
+
+Requiring a sentence across those would be a natural-language judgement, which
+this scan makes nowhere. Two structural markers instead of three; the field that
+separates the kinds is one the runtime writes, not one this hook infers.
+
+**Why the blocking hook is not named in the message.** Issue #1422 proposed
+parsing the hook's name, "which the dispatcher prefixes with the hook path". It
+does not: the prefix is the *dispatcher's* path (`…/hooks/_dispatch.sh PreToolUse
+Bash claude`), the same string for all ~100 hooks, and past it the message is
+per-hook prose with no common field. There is no name to parse, so the existing
+acknowledgement machinery is reused instead and the advisory names the tool.
+
+**One behaviour change to the pre-existing class.** A turn holding one user
+refusal *and* one hook block now has two in-scope candidates, so `sole` is false
+and a bare acknowledgement word no longer clears the user refusal on its own —
+each is then cleared only by its own tool name. That is the existing rule ("a
+word has one referent") reaching a case it could not reach before, not a new
+one, but it is a change and it is stated rather than left for a reader to find.
+
+### Corpus measurement (issue #1422 asks for it)
+
+Every local transcript, 877 files under `~/.claude-2/projects/*/*.jsonl`:
+
+```text
+denial records (both kinds)          : 2793
+  excluded (AskUserQuestion)         : 72
+  considered by the gate             : 2721
+  unacknowledged by the turn's report: 1501
+turns holding a considered denial    : 1158
+  of those, turns that would fire    : 672  (58.0%)
+sessions holding >=1 such turn       : 328  (37.4% of transcripts)
+  permission-rule  considered=2436  unacknowledged=1437
+  user-rejected    considered=285   unacknowledged=64
+```
+
+Read it as a population, not as a defect count: a turn "would fire" means the
+report carried no acknowledgement, and whether each of those 672 is a genuine
+omission was not read one by one. The proxy's turn boundary is the next *human*
+user message, and its report is the last assistant text before it — which is
+what `stop_last_assistant_text` hands the gate when the denial's turn ends
+there, and an approximation otherwise. Same caveat as the #1392 estimate below,
+at 20× the corpus.
+
+Two numbers are worth keeping side by side. The new kind is 90% of the
+population (2436 of 2721), which is why the gate could be right about its rule
+and silent in practice. And 37.4% of sessions would carry at least one fire —
+close enough to the 59.5% that forced `negative-existence-verdict-gate` to
+narrow that the default tier stays advisory here rather than block.
 
 ### Turn scoping, and why the cursor cannot supply it
 
@@ -155,7 +229,7 @@ drops sidechain markers itself.
 | Hook | Overlap |
 | ---- | ------- |
 | `retrospect-mix-check` Gate-12 | same rule and same oracle, but reachable only inside a retrospect's Stage-3 fences. This gate is the ordinary-report half; neither subsumes the other |
-| `rejected-mutation-reconsent-gate` | the same `scan_user_rejections` oracle, but `PreToolUse`: it blocks *re-attempting* a refused mutation. Different surface, different claim |
+| `rejected-mutation-reconsent-gate` | the same `scan_user_rejections` oracle, but `PreToolUse`: it blocks *re-attempting* a refused mutation. Different surface, different claim — and it keeps the `user-rejected`-only default, because re-issuing a corrected call after a hook block is the intended recovery, not a reconsent case. That is why `kinds` is a parameter rather than a widening in place |
 | `negative-existence-verdict-gate` | source of the narrow-trigger discipline the turn scoping implements |
 
 ## Tests

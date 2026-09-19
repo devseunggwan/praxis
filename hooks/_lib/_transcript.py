@@ -50,7 +50,8 @@ Public API:
   extract_last_assistant_text(turn)                      -> str
   has_tool_in_turn(turn, tool_name)                      -> bool
   read_last_user_message(transcript_path)                -> str | None
-  scan_user_rejections(path, max_bytes, max_records)     -> list[dict] | None
+  scan_user_rejections(path, max_bytes, max_records, *, kinds)
+                                                         -> list[dict] | None
   stop_scan_cursor_path(hook, session_id)               -> str | None
   reduce_transcript_resumable(path, cursor_path, new_state, reduce_event, encode, decode)
 """
@@ -820,8 +821,23 @@ def read_last_user_message(transcript_path: str) -> str | None:
 # stated plainly: should the runtime reword that sentence, this scan goes silent
 # rather than guessing, and both consumers degrade to their pre-#1007 behaviour
 # (no ask / no lane rows) — the fail-open direction ETHOS requires of a gate.
+#
+# That count is per kind (#1422). `user-rejected` keeps all three. The other
+# kind the runtime records, `permission-rule` — a PreToolUse hook or a
+# permission rule refusing the call before it ran — has no fixed sentence to
+# match, so it agrees on two: the field and `is_error: true`. Both remain
+# structural; neither reads the message's prose.
 
 REJECTION_DENIAL_KIND = "user-rejected"
+# The second denial kind the runtime records (issue #1422): a PreToolUse hook or
+# a permission rule refused the call before it ran. The record's shape is the
+# same — role:user, `is_error: true`, a `tool_result` naming the tool_use id —
+# but the CONTENT is the blocking hook's own prose, which has no fixed sentence
+# to match on. So the refusal-sentence marker is required only for the kind that
+# has one; for this kind the `toolDenialKind` field plus `is_error: true` are
+# the two co-agreeing markers, and both are still structural.
+HOOK_BLOCK_DENIAL_KIND = "permission-rule"
+DENIAL_KINDS = (REJECTION_DENIAL_KIND, HOOK_BLOCK_DENIAL_KIND)
 # Fixed runtime string, copied from a live record. Its apostrophe is ASCII.
 REJECTION_PHRASE = "doesn't want to proceed"
 _DENIAL_KIND_MARKER = '"toolDenialKind"'
@@ -903,11 +919,14 @@ def _note_tool_uses(state: dict, ev: dict) -> None:
         del recent[: len(recent) - REJECTION_RECENT_TOOL_USES]
 
 
-def _note_rejection(state: dict, ev: dict, max_records: int) -> None:
+def _note_rejection(
+    state: dict, ev: dict, max_records: int, kinds: tuple[str, ...]
+) -> None:
     """Append the record's rejection, resolved against the recent ring."""
-    if ev.get("toolDenialKind") != REJECTION_DENIAL_KIND:
+    kind = ev.get("toolDenialKind")
+    if not isinstance(kind, str) or kind not in kinds:
         return
-    block = _rejected_tool_result(ev)
+    block = _rejected_tool_result(ev, kind)
     if block is None:
         return
     tool_use_id = block.get("tool_use_id")
@@ -921,6 +940,7 @@ def _note_rejection(state: dict, ev: dict, max_records: int) -> None:
         "tool_name": "",
         "tool_input": {},
         "text": "",
+        "kind": kind,
         "source_uuid": source_uuid,
         "timestamp": timestamp if isinstance(timestamp, str) else "",
     }
@@ -942,7 +962,9 @@ def _note_rejection(state: dict, ev: dict, max_records: int) -> None:
         del rejections[: len(rejections) - max_records]
 
 
-def _reduce_rejection_event(state: dict, ev: dict, max_records: int) -> None:
+def _reduce_rejection_event(
+    state: dict, ev: dict, max_records: int, kinds: tuple[str, ...]
+) -> None:
     """Route one record: assistant records feed the tool_use ring, the rest
     are tested as rejections. `message` is guarded like every other reader
     here — a record whose `message` is a string must not abort the scan."""
@@ -951,7 +973,7 @@ def _reduce_rejection_event(state: dict, ev: dict, max_records: int) -> None:
     if ev.get("type") == "assistant" or role == "assistant":
         _note_tool_uses(state, ev)
         return
-    _note_rejection(state, ev, max_records)
+    _note_rejection(state, ev, max_records, kinds)
 
 
 _REJECTION_NEEDLES = (_TOOL_USE_MARKER_B, _DENIAL_KIND_MARKER_B)
@@ -962,8 +984,16 @@ def scan_user_rejections(
     max_bytes: int = REJECTION_SCAN_MAX_BYTES,
     max_records: int = REJECTION_SCAN_MAX_RECORDS,
     cursor_path: str | None = None,
+    *,
+    kinds: tuple[str, ...] = (REJECTION_DENIAL_KIND,),
 ) -> list[dict] | None:
-    """Return structurally-recorded user tool rejections, oldest → newest.
+    """Return structurally-recorded tool denials, oldest → newest.
+
+    `kinds` selects which `toolDenialKind` values count, and defaults to the
+    user's own refusal alone — the behaviour every caller had before #1422, and
+    the one `rejected-mutation-reconsent-gate` needs: re-issuing a corrected
+    call after a hook block is the intended recovery, not a reconsent case. A
+    caller that wants hook blocks too passes `DENIAL_KINDS`.
 
     Each entry:
       tool_use_id  — the rejected tool_use block's id
@@ -973,6 +1003,7 @@ def scan_user_rejections(
                      `text` is still carried)
       text         — every string leaf of `tool_input`, newline-joined and
                      bounded; the identifier/keyword surface both consumers read
+      kind         — the record's `toolDenialKind`, one of `kinds`
       source_uuid  — `sourceToolAssistantUUID` ("" when absent)
       timestamp    — record timestamp ("" when absent)
 
@@ -1008,7 +1039,7 @@ def scan_user_rejections(
             path,
             cursor_path,
             _rejection_state,
-            lambda st, ev: _reduce_rejection_event(st, ev, max_records),
+            lambda st, ev: _reduce_rejection_event(st, ev, max_records, kinds),
             needle=_REJECTION_NEEDLES,
             max_bytes=max_bytes,
         )
@@ -1026,12 +1057,18 @@ def scan_user_rejections(
     return [dict(r) for r in rejections]
 
 
-def _rejected_tool_result(ev: dict) -> dict | None:
+def _rejected_tool_result(ev: dict, kind: str = REJECTION_DENIAL_KIND) -> dict | None:
     """Return the rejection's tool_result block, or None if it does not qualify.
 
-    Belt-and-braces: the block must be a `tool_result` with `is_error: true`
-    AND carry the fixed refusal sentence. `toolDenialKind` is checked by the
-    caller — three independent markers, no natural-language judgement.
+    Belt-and-braces: the block must be a `tool_result` with `is_error: true`,
+    and for a `user-rejected` record it must also carry the fixed refusal
+    sentence. `toolDenialKind` is checked by the caller.
+
+    A hook block carries no such sentence — its content is the blocking hook's
+    own prose, and the corpus #1422 measured holds at least four unrelated
+    formats — so demanding one there would be a natural-language judgement,
+    which this scan makes nowhere. Two structural markers instead of three, and
+    the field that distinguishes them is the one the runtime writes.
     """
     msg = ev.get("message")
     if not isinstance(msg, dict):
@@ -1044,7 +1081,9 @@ def _rejected_tool_result(ev: dict) -> dict | None:
             continue
         if block.get("is_error") is not True:
             continue
-        if REJECTION_PHRASE not in _flatten_strings(block.get("content")):
+        if kind == REJECTION_DENIAL_KIND and REJECTION_PHRASE not in _flatten_strings(
+            block.get("content")
+        ):
             continue
         return block
     return None
