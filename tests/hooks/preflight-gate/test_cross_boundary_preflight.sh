@@ -1124,6 +1124,24 @@ run_case_detail "gh api dynamic endpoint names no repo" \
 run_case "gh api GET on a variable endpoint is silent" pass \
   'gh api "$ENDPOINT"'
 
+# A method the shell fills in is not a literal member of the write set, yet on
+# a comment endpoint it may well be PATCH — so the endpoint decides, and asks.
+run_case "gh api run-time method on a comment endpoint asks" ask \
+  'gh api --method "$METHOD" repos/o/r/issues/comments/1 -f body=hi'
+
+run_case_detail "gh api run-time method names the method as unknown" \
+  'gh api --method "$METHOD" repos/o/r/issues/comments/1 -f body=hi' \
+  'method is decided at run time'
+
+run_case "gh api -X with a command-substituted method asks" ask \
+  'gh api -X "$(echo PATCH)" repos/o/r/pulls/7/reviews -f body=hi'
+
+run_case "gh api run-time method on a non-comment endpoint is silent" pass \
+  'gh api --method "$METHOD" repos/o/r/issues/42 -f state=closed'
+
+run_case "gh api literal GET on a variable endpoint is silent" pass \
+  'gh api --method GET "$ENDPOINT" -f x=1'
+
 # `--hostname` decides which server the endpoint lives on, so an approval that
 # names only `owner/repo` reads as the github.com repo of the same name.
 run_case_detail "gh api --hostname names the host with the repo" \

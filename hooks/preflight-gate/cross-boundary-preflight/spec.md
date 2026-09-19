@@ -80,6 +80,15 @@ it is decided by the method alone: a write method asks, and a read stays silent.
 Reading it as "not a comment endpoint" let `gh api "$ENDPOINT" -f body=hi`
 through without the checklist.
 
+The mirror case — a literal comment/review endpoint with a run-time method
+(`--method "$METHOD"`, `-X "$(…)"`) — is decided by the endpoint instead: it
+asks with the target `UNRESOLVED — the gh api method is decided at run time`,
+and the header names the method `<run-time method>` rather than echoing a
+variable name. A run-time method is not a literal member of `POST`/`PATCH`/
+`PUT`, so the write test alone said no and the call went through unasked. A
+run-time method on a non-comment endpoint stays silent, as does a literal
+`--method GET` on a run-time endpoint.
+
 **Reads stay silent.** The method must be a write method. gh sends `GET` by
 default and `POST` as soon as a field or `--input` is added, and an explicit
 `--method GET` wins over that inference — all three are already modeled in

@@ -87,6 +87,7 @@ from _hosts import (  # type: ignore[import-not-found]  # noqa: E402
 from _payload import read_bash_payload  # type: ignore[import-not-found]  # noqa: E402
 from _external_write_body import (  # type: ignore[import-not-found]  # noqa: E402
     GH_API_WRITE_METHODS,
+    GH_API_WRITE_PATH_RE,
     is_gh_api_external_write,
     parse_gh_api,
 )
@@ -234,6 +235,26 @@ def _is_dynamic_api_write(call) -> bool:
         call.method in GH_API_WRITE_METHODS
         and bool(call.path)
         and has_shell_expansion(call.path)
+    )
+
+
+_API_DYNAMIC_METHOD = "UNRESOLVED — the `gh api` method is decided at run time"
+# Header verb for that case. parse_gh_api upper-cases the method, so echoing it
+# would print `$METHOD` for a command that says `$method`.
+_API_RUNTIME_VERB = "<run-time method>"
+
+
+def _is_dynamic_method_api_write(call) -> bool:
+    """A comment/review endpoint whose `--method` value the shell fills in.
+
+    `--method "$METHOD"` is not a literal member of the write set, so the write
+    test said no and the call went through unasked — while the endpoint alone
+    says a PATCH or POST here posts a public body.
+    """
+    return (
+        has_shell_expansion(call.method)
+        and bool(call.path)
+        and bool(GH_API_WRITE_PATH_RE.search(call.path))
     )
 
 
@@ -992,6 +1013,7 @@ def main() -> int:
             api_call = parse_gh_api(api_argv)
             if api_call is None:
                 continue
+            api_verb = api_call.method
             if is_gh_api_external_write(api_argv):
                 readable, slug = _gh_api_repo_slot(api_call.path)
                 api_repo = (
@@ -999,11 +1021,14 @@ def main() -> int:
                     if readable
                     else _API_PARTIAL_REPO
                 )
+            elif _is_dynamic_method_api_write(api_call):
+                api_repo = _API_DYNAMIC_METHOD
+                api_verb = _API_RUNTIME_VERB
             elif _is_dynamic_api_write(api_call):
                 api_repo = _API_DYNAMIC_ENDPOINT
             else:
                 continue
-            subcommand = (GH_API_OBJECT, api_call.method)
+            subcommand = (GH_API_OBJECT, api_verb)
 
         # Check 1: heredoc in same segment → hard block (marker-independent).
         # Scoped to the noun/verb writes: the block message prescribes
