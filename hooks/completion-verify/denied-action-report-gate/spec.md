@@ -93,6 +93,12 @@ sessions holding >=1 such turn       : 328  (37.4% of transcripts)
   user-rejected    considered=285   unacknowledged=64
 ```
 
+The corpus is live, so these are a snapshot, not a constant. Re-running the
+same probe minutes later over the same 877 files gave 2798 / 674 / 58.1%: the
+session doing the measuring is itself one of the transcripts. Re-measure before
+quoting the numbers; what is stable is the shape (the new kind is ~90% of the
+population) rather than the third digit.
+
 Read it as a population, not as a defect count: a turn "would fire" means the
 report carried no acknowledgement, and whether each of those 672 is a genuine
 omission was not read one by one. The proxy's turn boundary is the next *human*
