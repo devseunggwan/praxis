@@ -37,12 +37,12 @@ fall back to a naive contiguous non-flag token subsequence match.
 
 ### Example
 
-Gate `gh pr create` behind `laplace-dev-hub:create-hub-pr` AND
+Gate `gh pr create` behind `example-dev-hub:create-hub-pr` AND
 `gh pr merge` behind `praxis:codex-review-wrap`:
 
 ```bash
 export PRAXIS_SKILL_GATED_COMMANDS="\
-gh pr create=>laplace-dev-hub:create-hub-pr,\
+gh pr create=>example-dev-hub:create-hub-pr,\
 gh pr merge=>praxis:codex-review-wrap"
 ```
 

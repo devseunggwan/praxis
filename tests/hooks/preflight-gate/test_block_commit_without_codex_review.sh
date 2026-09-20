@@ -37,7 +37,7 @@ printf '%s\n' '{"type":"assistant","message":{"role":"assistant","content":[{"ty
 printf '%s\n' '{"type":"user","message":{"role":"user","content":"should I run /praxis:codex-review-wrap? (prose, not invocation)"}}' >>"$TX_WITHOUT"
 
 TX_WRONG_SKILL=$(mktemp)
-printf '%s\n' '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"Skill","input":{"skill":"laplace-dev-hub:code-review"}}]}}' >"$TX_WRONG_SKILL"
+printf '%s\n' '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"Skill","input":{"skill":"example-dev-hub:code-review"}}]}}' >"$TX_WRONG_SKILL"
 
 TX_GARBAGE_PLUS_SKILL=$(mktemp)
 printf '%s\n' 'not valid json at all' >"$TX_GARBAGE_PLUS_SKILL"

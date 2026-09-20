@@ -18,7 +18,7 @@ Config env vars:
     (e.g. ``org:skill-name``) and arrow-right is unambiguous.  The command
     pattern is matched after normalisation (see below).  Example:
 
-      "gh pr create=>laplace-dev-hub:create-hub-pr,gh pr merge=>praxis:codex-review-wrap"
+      "gh pr create=>example-dev-hub:create-hub-pr,gh pr merge=>praxis:codex-review-wrap"
 
     Supported patterns (matched against the normalised token sequence):
       "gh pr create"   — matches ``gh [global-flags] pr create ...``

@@ -86,8 +86,8 @@ carry the author's private namespace as code, not config:
 | --- | --- | --- |
 | `preflight-gate/block-gh-issue-create-without-dup-search/impl.py:121` | `_PERSONAL_REPO_RE = ^devseunggwan/` | The blast-radius exemption only works for the author's namespace; every other installer gets the strict path unconditionally |
 | `advisory-nudge/secret-print-redaction-advisory/impl.py` (fetch-CLI regex) | `hubctl token fetch` as first alternative | `hubctl` is an org-internal tool; the other alternatives (aws/vault/op/gh/kubectl) are public |
-| `completion-verify/completion-signal-gate/impl.py` | `laplace-dev-hub`, `laplace-wiki`, `oh-my-claudecode`, `_KNOWN_FOREIGN_SKILLS` | Rule 2 (foreign-plugin slash command) is gated on cwd == praxis, so contained — but the namespace list is still personal |
-| `advisory-nudge/model-routing-advisory/spec.md`, `merge-menu-review-options-advisory/impl.py` | `laplace-dev-hub:*`, `oh-my-claudecode:security-reviewer` named in emitted guidance | Advice text tells any installer to run plugins they do not have |
+| `completion-verify/completion-signal-gate/impl.py` | `example-dev-hub`, `example-wiki`, `oh-my-claudecode`, `_KNOWN_FOREIGN_SKILLS` | Rule 2 (foreign-plugin slash command) is gated on cwd == praxis, so contained — but the namespace list is still personal |
+| `advisory-nudge/model-routing-advisory/spec.md`, `merge-menu-review-options-advisory/impl.py` | `example-dev-hub:*`, `oh-my-claudecode:security-reviewer` named in emitted guidance | Advice text tells any installer to run plugins they do not have |
 | `preflight-gate/side-effect-scan` (`wrapper-commit` category) | `iceberg-schema migrate/promote`, `omc ralph` | Author-toolchain command names in a shipped trigger table |
 | `hooks/_lib/_memory_dir.py:49-50` | a real personal `/Users/<name>/.claude` path in a docstring example | Fixed with this audit (R1) — replaced by a placeholder in code, spec, and test fixtures |
 | four hooks (`pr-report-destination-gate`, `protected-paths-guard` exclusion, `external-write-falsify-check`, `postcompact-context` docs) | `.omc/plans/` scratch path | omc-convention path assumed to be where planning artifacts live |
