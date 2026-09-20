@@ -131,7 +131,9 @@ print(d.get("permissionDecisionReason", ""))
   fi
 }
 
-SLACK='mcp__laplace-slack__slack_send_message'
+# Any MCP server whose tool name matches the shared Slack-write pattern;
+# the server segment is a placeholder, not a real deployment's name.
+SLACK='mcp__chat-server__slack_send_message'
 SLACK_INPUT='{"channel": "C0", "text": "두 소비자 레포의 bump PR 입니다"}'
 GH_INPUT='{"command": "gh pr comment 1 --repo o/r --body 요약"}'
 
