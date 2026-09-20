@@ -33,7 +33,11 @@ from __future__ import annotations
 
 import json
 import sys
+from pathlib import Path as _Path
 from typing import Optional, TextIO
+
+sys.path.insert(0, str(_Path(__file__).resolve().parent))
+from _block_repeat import record_reason as _record_repeat  # type: ignore[import-not-found]  # noqa: E402
 
 
 def format_decision(
@@ -73,8 +77,16 @@ def emit_decision(
 
     Mirrors `block_message.emit_block`: `stream` is injectable for testing and
     defaults to `sys.stdout`. Does NOT exit — the caller owns the exit code.
+
+    A `deny` repeated within one session carries the escalation notice appended
+    to its reason (issue #1420). `ask` does not: an approval prompt is *meant*
+    to come back every time, so counting it would scold the actor for obeying
+    the gate. `format_decision` is left alone, because its byte-identity
+    guarantee above is what the hand-rolled copies are compared against.
     """
     out = stream if stream is not None else sys.stdout
+    if decision == "deny":
+        reason += _record_repeat(reason)
     json.dump(format_decision(decision, reason, event_name), out)
     out.write("\n")
 
