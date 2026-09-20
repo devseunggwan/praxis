@@ -215,6 +215,7 @@ run_case silent "question with no answer yet" "$SLACK" "$SLACK_INPUT"
 # build_scoped_transcript <answer> <tail_kind>
 #   Ask + free-text <answer>, then a tail chosen by <tail_kind>:
 #     human-turn      — a person's next message, starting a new turn
+#     quoted-question — a follow-up AskUserQuestion quoting <answer> verbatim
 #     sidechain-only  — the Ask/answer pair itself is a subagent's
 #     sidechain-quote — a subagent's prose quoting <answer>
 #     none            — nothing after the answer (the armed control)
@@ -245,6 +246,11 @@ events = [{"message": {"role": "user", "content": "요약 문구 정리해줘"}}
 
 if tail_kind == "human-turn":
     events.append({"message": {"role": "user", "content": "이제 다른 PR 상태를 확인해줘"}})
+elif tail_kind == "quoted-question":
+    events.append({"message": {"role": "assistant", "content": [
+        {"type": "tool_use", "id": "q2", "name": "AskUserQuestion",
+         "input": {"questions": [{"question": f"앞서 {answer} 라고 하셨는데 맞나요?",
+                                  "options": [{"label": "맞다"}]}]}}]}})
 elif tail_kind == "sidechain-quote":
     events.append({"isSidechain": True,
                    "message": {"role": "assistant",
@@ -261,6 +267,18 @@ PY
 # that message removed, and the answer still arms.
 build_scoped_transcript "$ANSWER" human-turn
 run_case silent "a new user turn ends the correction's life" "$SLACK" "$SLACK_INPUT"
+
+# An answer holding a quote character is still quoted verbatim in the
+# follow-up question. Comparing it against a JSON-serialised input compares it
+# against `\"` instead, and the quotation is never recognised.
+QUOTED_ANSWER='아니지 "bump" 만 언급해요 다른거도 있는데'
+build_scoped_transcript "$QUOTED_ANSWER" quoted-question
+run_case silent "a quoted answer is recognised in the follow-up question" "$SLACK" "$SLACK_INPUT"
+
+# Same shape with no quote character — this one passed before the fix too, and
+# is what says the row above is about the escaping and not about the quoting.
+build_scoped_transcript "$ANSWER" quoted-question
+run_case silent "a plain answer is recognised in the follow-up question" "$SLACK" "$SLACK_INPUT"
 
 # A subagent's Ask and answer are its own conversation; the main agent was
 # never corrected, so its write must not be stopped.

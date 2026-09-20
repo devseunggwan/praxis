@@ -64,7 +64,6 @@ Bypass: `PRAXIS_NEGATION_ANSWER_BYPASS=1`.
 """
 from __future__ import annotations
 
-import json
 import os
 import re
 import sys
@@ -164,6 +163,23 @@ def quotes(text: str, answer: str) -> bool:
     return answer.strip()[:QUOTE_PREFIX_CHARS] in text
 
 
+def _strings(value: object) -> list[str]:
+    """Every string leaf of a tool_input, in no particular order.
+
+    A follow-up question is compared against the answer as the runtime stored
+    it — decoded. Serialising the input to JSON first compares it against an
+    escaped form instead, so an answer holding a quote or a newline never
+    matches its own verbatim quotation.
+    """
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, dict):
+        return [s for item in value.values() for s in _strings(item)]
+    if isinstance(value, list):
+        return [s for item in value for s in _strings(item)]
+    return []
+
+
 def is_human_turn_start(event: dict) -> bool:
     """True for a user event that is a person typing, not a tool result.
 
@@ -217,8 +233,9 @@ def pending_negation_answer(events: list[dict]) -> str | None:
             if kind == "tool_use":
                 if block.get("name") == "AskUserQuestion":
                     ask_ids.add(str(block.get("id")))
-                    question = json.dumps(block.get("input"), ensure_ascii=False)
-                    if armed and quotes(question, armed):
+                    if armed and any(
+                        quotes(text, armed) for text in _strings(block.get("input"))
+                    ):
                         armed = None
             elif kind == "text":
                 body = block.get("text")
