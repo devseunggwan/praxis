@@ -168,11 +168,17 @@ def pending_negation_answer(events: list[dict]) -> str | None:
     """The newest negation answer that nothing has quoted back since.
 
     One pass, oldest to newest: an answer arms the state and a later quote —
-    in assistant prose or in a following question — disarms it.
+    in assistant prose or in a following question — disarms it. A delegated
+    agent's events ride inline in the main transcript under `isSidechain`, and
+    they are another conversation: its answers are not corrections the main
+    agent received, and its prose is not the main agent showing a reading.
+    Counting them arms a write nobody corrected and disarms one nobody quoted.
     """
     ask_ids: set[str] = set()
     armed: str | None = None
     for event in events:
+        if event.get("isSidechain"):
+            continue
         message = event.get("message")
         if not isinstance(message, dict):
             continue

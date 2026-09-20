@@ -208,6 +208,66 @@ build_transcript "__none__"
 run_case silent "question with no answer yet" "$SLACK" "$SLACK_INPUT"
 
 # =====================================================================
+# Sidechain isolation — a delegated agent's events ride inline in the
+# main transcript and are not the main chain's own correction.
+# =====================================================================
+
+# build_scoped_transcript <answer> <tail_kind>
+#   Ask + free-text <answer>, then a tail chosen by <tail_kind>:
+#     sidechain-only  — the Ask/answer pair itself is a subagent's
+#     sidechain-quote — a subagent's prose quoting <answer>
+#     none            — nothing after the answer (the armed control)
+build_scoped_transcript() {
+  local answer="$1" tail_kind="$2"
+  TRANSCRIPT="$(mktemp)"
+  python3 - "$TRANSCRIPT" "$answer" "$tail_kind" <<'PY'
+import json, sys
+path, answer, tail_kind = sys.argv[1:4]
+escaped = answer.replace("\\", "\\\\").replace('"', '\\"')
+result = f'The user answered: "이 문구로 올릴까요?"="{escaped}". Read the answers carefully.'
+side = tail_kind == "sidechain-only"
+
+
+def mark(event):
+    if side:
+        event["isSidechain"] = True
+    return event
+
+
+ask = mark({"message": {"role": "assistant", "content": [
+    {"type": "tool_use", "id": "q1", "name": "AskUserQuestion",
+     "input": {"questions": [{"question": "이 문구로 올릴까요?",
+                              "options": [{"label": "올린다"}]}]}}]}})
+reply = mark({"message": {"role": "user", "content": [
+    {"type": "tool_result", "tool_use_id": "q1", "content": result}]}})
+events = [{"message": {"role": "user", "content": "요약 문구 정리해줘"}}, ask, reply]
+
+if tail_kind == "sidechain-quote":
+    events.append({"isSidechain": True,
+                   "message": {"role": "assistant",
+                               "content": [{"type": "text", "text": answer}]}})
+with open(path, "w", encoding="utf-8") as f:
+    for e in events:
+        f.write(json.dumps(e, ensure_ascii=False) + "\n")
+PY
+}
+
+# A subagent's Ask and answer are its own conversation; the main agent was
+# never corrected, so its write must not be stopped.
+build_scoped_transcript "$ANSWER" sidechain-only
+run_case silent "a sidechain answer does not arm the main chain" "$SLACK" "$SLACK_INPUT"
+
+# Positive control for the row above: the same transcript with the marker
+# gone still arms, so the silence is the filter and not a broken fixture.
+build_scoped_transcript "$ANSWER" none
+run_case "ask:$ANSWER" "the same pair on the main chain still arms" "$SLACK" "$SLACK_INPUT"
+
+# The mirror direction: a subagent quoting the answer is not the main agent
+# showing its reading, so it must not clear the main chain's state.
+build_scoped_transcript "$ANSWER" sidechain-quote
+run_case "ask:$ANSWER" "a sidechain quote does not disarm the main chain" "$SLACK" "$SLACK_INPUT"
+
+# =====================================================================
 # Write-surface and guards
 # =====================================================================
 
