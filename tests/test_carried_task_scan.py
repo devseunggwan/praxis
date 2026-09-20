@@ -130,6 +130,23 @@ class TestCursorShapes:
         ])})
         assert [t["cycle"] for t in tasks] == ["90th 2026-09-01", "90th 2026-09-01"]
 
+    def test_a_cycle_tag_does_not_reach_the_next_field(self):
+        """`note` and `cycle_note` are separate blocks of prose.
+
+        A header is provenance for the lines under it, and `cycle_note` starts
+        a new block — so the last header in `note` says nothing about it. The
+        first row is the control: the reset must not cost `note` its own tag.
+        """
+        tasks = mod.carried_tasks({
+            "note": "\n".join([
+                "[90th 2026-09-01] 사이클",
+                "- 첫 과제가 다음 패스 과제",
+            ]),
+            "cycle_note": "- 헤더 없는 과제가 다음 패스 과제",
+        })
+        assert [t["cycle"] for t in tasks] == ["90th 2026-09-01", None]
+        assert [t["field"] for t in tasks] == ["note", "cycle_note"]
+
 
 class TestFailureModes:
     def test_missing_cursor_is_not_an_error(self, tmp_path: Path):

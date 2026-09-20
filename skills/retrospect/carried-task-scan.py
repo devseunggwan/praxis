@@ -62,9 +62,15 @@ _CYCLE_TAG_RE = re.compile(r"^\s*\[([^\]]{3,60})\]")
 MIN_TASK_CHARS = 8
 
 
-def note_lines(cursor: dict[str, object]) -> list[tuple[str, str]]:
-    """Every carry-forward line as `(field, line)`, in file order."""
-    lines: list[tuple[str, str]] = []
+def note_fields(cursor: dict[str, object]) -> list[tuple[str, list[str]]]:
+    """Each carry-forward field's lines, in file order.
+
+    Grouped by field rather than flattened, because a cycle header reaches only
+    the lines under it *within its own field*: `note` and `cycle_note` are
+    separate prose blocks, so the last header in `note` says nothing about a
+    line in `cycle_note`.
+    """
+    fields: list[tuple[str, list[str]]] = []
     for field in NOTE_FIELDS:
         value = cursor.get(field)
         if isinstance(value, str):
@@ -73,26 +79,29 @@ def note_lines(cursor: dict[str, object]) -> list[tuple[str, str]]:
             parts = [part for part in value if isinstance(part, str)]
         else:
             continue
-        lines.extend((field, part) for part in parts)
-    return lines
+        fields.append((field, parts))
+    return fields
 
 
 def carried_tasks(cursor: dict[str, object]) -> list[dict[str, str | None]]:
     """Carried tasks with no disposition yet, oldest first."""
     found: list[dict[str, str | None]] = []
-    cycle: str | None = None
-    for field, line in note_lines(cursor):
-        tag = _CYCLE_TAG_RE.match(line)
-        if tag:
-            cycle = tag.group(1).strip()
-        text = line.strip()
-        if len(text) < MIN_TASK_CHARS:
-            continue
-        if not _CARRIED_RE.search(text):
-            continue
-        if _ANCHOR_CARRIED_RE.match(text) or _DISPOSITION_RE.search(text):
-            continue
-        found.append({"cycle": cycle, "text": text.lstrip("-* ").strip(), "field": field})
+    for field, lines in note_fields(cursor):
+        cycle: str | None = None
+        for line in lines:
+            tag = _CYCLE_TAG_RE.match(line)
+            if tag:
+                cycle = tag.group(1).strip()
+            text = line.strip()
+            if len(text) < MIN_TASK_CHARS:
+                continue
+            if not _CARRIED_RE.search(text):
+                continue
+            if _ANCHOR_CARRIED_RE.match(text) or _DISPOSITION_RE.search(text):
+                continue
+            found.append(
+                {"cycle": cycle, "text": text.lstrip("-* ").strip(), "field": field}
+            )
     return found
 
 
