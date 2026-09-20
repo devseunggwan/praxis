@@ -877,6 +877,37 @@ run_merge_escalation_case "merge_serial_loop_answered_denies" \
 # A later hold replaces an earlier approval ("ok" then "PR #999 머지 보류").
 run_merge_escalation_case "merge_serial_hold_after_ok_denies" \
   "yes" "" "momentum-merge-serial-hold-after-ok.jsonl" "gh pr merge 999 --squash --delete-branch"
+
+# --- a PR number is not a PR: every repo has a #999 (issue #1419) ------------
+# The window probed orgA/repoA's #999 and the approval is prose, which names no
+# repo. A merge naming orgB/repoB is therefore a different PR reusing that
+# approval — in all three forms the repo can arrive in.
+run_merge_escalation_case "merge_cross_repo_flag_denies" \
+  "yes" "" "momentum-merge-repo-probed-approved.jsonl" "gh pr merge --repo orgB/repoB 999 --squash"
+run_merge_escalation_case "merge_cross_repo_short_flag_denies" \
+  "yes" "" "momentum-merge-repo-probed-approved.jsonl" "gh pr merge -R orgB/repoB 999 --squash"
+run_merge_escalation_case "merge_cross_repo_pull_url_denies" \
+  "yes" "" "momentum-merge-repo-probed-approved.jsonl" "gh pr merge https://github.com/orgB/repoB/pull/999 --squash"
+# …the same repo still merges, and `[HOST/]OWNER/REPO` is the same repo.
+run_merge_escalation_case "merge_same_repo_passes" \
+  "no" "" "momentum-merge-repo-probed-approved.jsonl" "gh pr merge --repo orgA/repoA 999 --squash"
+run_merge_escalation_case "merge_same_repo_with_host_passes" \
+  "no" "" "momentum-merge-repo-probed-approved.jsonl" "gh pr merge --repo github.com/orgA/repoA 999 --squash"
+# …and a merge that names no repo has nothing to disagree with.
+run_merge_escalation_case "merge_no_repo_after_repo_probe_passes" \
+  "no" "" "momentum-merge-repo-probed-approved.jsonl" "gh pr merge 999 --squash"
+# The serial path carries the same rule: the approval that released #833 in
+# orgA/repoA does not release orgB/repoB's #999.
+run_merge_escalation_case "merge_cross_repo_serial_denies" \
+  "yes" "" "momentum-merge-repo-serial-approved.jsonl" "gh pr merge --repo orgB/repoB 999 --squash"
+run_merge_escalation_case "merge_same_repo_serial_passes" \
+  "no" "" "momentum-merge-repo-serial-approved.jsonl" "gh pr merge --repo orgA/repoA 999 --squash"
+# An unresolvable side is NOT a mismatch. Measured over the local corpus, 96 of
+# the 123 repo-less merges sit in a window that names a repo — the ordinary
+# `gh pr checks 999` → `gh pr merge --repo o/r 999` shape — so treating `None`
+# as a disagreement would deny all of them to reach the 14 genuine ones.
+run_merge_escalation_case "merge_repo_against_bare_probe_passes" \
+  "no" "" "momentum-merge-bare-probe-repo-merge.jsonl" "gh pr merge --repo orgA/repoA 999 --squash"
 # The block names the gap: a reply that approves nothing is not a missing message.
 _reason_out=$(python3 -c 'import json, sys; print(json.dumps({"tool_name": "Bash", "tool_input": {"command": "gh pr merge 999 --squash --delete-branch"}, "transcript_path": sys.argv[1], "session_id": "test-momentum-merge"}))' \
   "$FIXTURES_DIR/momentum-merge-serial-status-request.jsonl" | python3 "$HOOK" 2>/dev/null)
