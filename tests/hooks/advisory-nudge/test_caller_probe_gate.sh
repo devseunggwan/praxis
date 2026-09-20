@@ -271,7 +271,7 @@ run_case "env-prefix FOO=1 gh issue comment (warn)" \
 # still carry the shapes that used to warn.
 run_case "MCP slack send is out of scope (silent)" \
   "silent" "advisory" \
-  '{"tool_name":"mcp__laplace-slack__slack_send_message","tool_input":{"text":"heads up: pool.py fails to release the handle"}}'
+  '{"tool_name":"mcp__slack__slack_send_message","tool_input":{"text":"heads up: pool.py fails to release the handle"}}'
 
 run_case "MCP notion create page is out of scope (silent)" \
   "silent" "advisory" \

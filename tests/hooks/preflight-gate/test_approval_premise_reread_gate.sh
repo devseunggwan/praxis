@@ -233,24 +233,24 @@ run_case "bash_ack" \
   "quiet"
 write_ack '{"premise": "run 16 already recovered; blast radius re-measured here"}'
 run_case "mcp_ack" \
-  "$(verdict "$(mcp_payload 'mcp__laplace-airflow__airflow_trigger_dag' '{"conf":{"phase":"prod"}}')")" \
+  "$(verdict "$(mcp_payload 'mcp__airflow__airflow_trigger_dag' '{"conf":{"phase":"prod"}}')")" \
   "quiet"
 
 # The ack is consumed on read, so a mutation the gate would not have asked
 # about must not eat the premise written for the production call.
 write_ack '{"premise": "re-measured on this target"}'
 run_case "mcp_ack_survives_unmarked_call" \
-  "$(verdict "$(mcp_payload 'mcp__laplace-slack__slack_send_message' '{"channel":"dev-alerts"}')")" \
+  "$(verdict "$(mcp_payload 'mcp__slack__slack_send_message' '{"channel":"dev-alerts"}')")" \
   "quiet"
 
 run_case "mcp_ack_used_by_marked_call" \
-  "$(verdict "$(mcp_payload 'mcp__laplace-airflow__airflow_trigger_dag' '{"conf":{"phase":"prod"}}')")" \
+  "$(verdict "$(mcp_payload 'mcp__airflow__airflow_trigger_dag' '{"conf":{"phase":"prod"}}')")" \
   "quiet"
 
 # Consumed on read: the same call a second time has nothing left to stand on,
 # which is what stops one acknowledgement from becoming an off switch.
 run_case "mcp_ack_consumed_once" \
-  "$(verdict "$(mcp_payload 'mcp__laplace-airflow__airflow_trigger_dag' '{"conf":{"phase":"prod"}}')")" \
+  "$(verdict "$(mcp_payload 'mcp__airflow__airflow_trigger_dag' '{"conf":{"phase":"prod"}}')")" \
   "ask"
 
 # --- The acknowledgement is a statement, and it is read only on the surface
@@ -307,51 +307,51 @@ run_case "ack_bash_comment_no_space" \
 
 rm -f "$ACK_FILE"
 run_case "ack_mcp_stray_marker" \
-  "$(verdict "$(mcp_payload 'mcp__laplace-airflow__airflow_trigger_dag' '{"phase":"prod","note":"see # approval-premise:ack in runbook"}')")" \
+  "$(verdict "$(mcp_payload 'mcp__airflow__airflow_trigger_dag' '{"phase":"prod","note":"see # approval-premise:ack in runbook"}')")" \
   "ask"
 # The synthetic argument is gone: a server that validates its schema rejects
 # an undeclared field, so a call carrying it was never reachable at runtime.
 rm -f "$ACK_FILE"
 run_case "ack_mcp_argument_ignored" \
-  "$(verdict "$(mcp_payload 'mcp__laplace-airflow__airflow_trigger_dag' '{"phase":"prod","approval_premise_ack":"re-read"}')")" \
+  "$(verdict "$(mcp_payload 'mcp__airflow__airflow_trigger_dag' '{"phase":"prod","approval_premise_ack":"re-read"}')")" \
   "ask"
 
 write_ack '{"premise": true}'
 run_case "ack_mcp_file_boolean" \
-  "$(verdict "$(mcp_payload 'mcp__laplace-airflow__airflow_trigger_dag' '{"phase":"prod"}')")" \
+  "$(verdict "$(mcp_payload 'mcp__airflow__airflow_trigger_dag' '{"phase":"prod"}')")" \
   "ask"
 
 write_ack '{"premise": "   "}'
 run_case "ack_mcp_file_blank" \
-  "$(verdict "$(mcp_payload 'mcp__laplace-airflow__airflow_trigger_dag' '{"phase":"prod"}')")" \
+  "$(verdict "$(mcp_payload 'mcp__airflow__airflow_trigger_dag' '{"phase":"prod"}')")" \
   "ask"
 
 write_ack 'not json at all'
 run_case "ack_mcp_file_malformed" \
-  "$(verdict "$(mcp_payload 'mcp__laplace-airflow__airflow_trigger_dag' '{"phase":"prod"}')")" \
+  "$(verdict "$(mcp_payload 'mcp__airflow__airflow_trigger_dag' '{"phase":"prod"}')")" \
   "ask"
 
 # Valid JSON that simply does not carry a premise says nothing about what the
 # premise now holds, which is the whole content of the attestation.
 write_ack '{}'
 run_case "ack_mcp_file_no_premise_key" \
-  "$(verdict "$(mcp_payload 'mcp__laplace-airflow__airflow_trigger_dag' '{"phase":"prod"}')")" \
+  "$(verdict "$(mcp_payload 'mcp__airflow__airflow_trigger_dag' '{"phase":"prod"}')")" \
   "ask"
 
 write_ack '{"other":"x"}'
 run_case "ack_mcp_file_other_key" \
-  "$(verdict "$(mcp_payload 'mcp__laplace-airflow__airflow_trigger_dag' '{"phase":"prod"}')")" \
+  "$(verdict "$(mcp_payload 'mcp__airflow__airflow_trigger_dag' '{"phase":"prod"}')")" \
   "ask"
 
 # The file is session-keyed: a valid premise written for one session must not
 # acknowledge another session's call, and must survive it unconsumed.
 write_ack '{"premise": "re-measured on this target"}'
 run_case "ack_mcp_other_session_asks" \
-  "$(verdict "$(mcp_payload_other_session 'mcp__laplace-airflow__airflow_trigger_dag' '{"phase":"prod"}')")" \
+  "$(verdict "$(mcp_payload_other_session 'mcp__airflow__airflow_trigger_dag' '{"phase":"prod"}')")" \
   "ask"
 
 run_case "ack_mcp_own_session_still_honoured" \
-  "$(verdict "$(mcp_payload 'mcp__laplace-airflow__airflow_trigger_dag' '{"phase":"prod"}')")" \
+  "$(verdict "$(mcp_payload 'mcp__airflow__airflow_trigger_dag' '{"phase":"prod"}')")" \
   "quiet"
 
 # --- one acknowledgement cannot pass two concurrent calls ------------------
@@ -367,7 +367,7 @@ hook = os.environ["HOOK"]
 ack = os.path.join(os.environ["PRAXIS_HOME"], "cache", "approval-premise-ack-race.json")
 os.makedirs(os.path.dirname(ack), exist_ok=True)
 payload = json.dumps({"session_id": "race",
-                      "tool_name": "mcp__laplace-airflow__airflow_trigger_dag",
+                      "tool_name": "mcp__airflow__airflow_trigger_dag",
                       "tool_input": {"conf": {"phase": "prod"}}})
 
 
@@ -485,7 +485,7 @@ run_case "sub_arithmetic_quiet" \
 # --- MCP: mutation classification by token, not by substring ---------------
 # Each of these was misclassified by substring matching on the 374-tool surface.
 run_case "mcp_trigger_fires" \
-  "$(verdict "$(mcp_payload 'mcp__laplace-airflow__airflow_trigger_dag' '{"dag_id":"dag_sync_v0","conf":{"phase":"prod"}}')")" \
+  "$(verdict "$(mcp_payload 'mcp__airflow__airflow_trigger_dag' '{"dag_id":"dag_sync_v0","conf":{"phase":"prod"}}')")" \
   "ask"
 run_case "mcp_label_fires" \
   "$(verdict "$(mcp_payload 'mcp__claude_ai_Gmail__label_message' '{"phase":"prod"}')")" \
@@ -494,10 +494,10 @@ run_case "mcp_list_labels_quiet" \
   "$(verdict "$(mcp_payload 'mcp__claude_ai_Gmail__list_labels' '{"phase":"prod"}')")" \
   "quiet"
 run_case "mcp_count_records_quiet" \
-  "$(verdict "$(mcp_payload 'mcp__laplace-s3__s3_count_records' '{"phase":"prod"}')")" \
+  "$(verdict "$(mcp_payload 'mcp__s3__s3_count_records' '{"phase":"prod"}')")" \
   "quiet"
 run_case "mcp_component_sets_quiet" \
-  "$(verdict "$(mcp_payload 'mcp__laplace-figma__figma_get_component_sets' '{"phase":"prod"}')")" \
+  "$(verdict "$(mcp_payload 'mcp__figma__figma_get_component_sets' '{"phase":"prod"}')")" \
   "quiet"
 
 # The verbs this repository's own write vocabularies already name -- `merge`
@@ -528,11 +528,11 @@ run_case "mcp_closed_at_quiet" \
 
 # --- MCP: a read-only call is out of scope even carrying the marker --------
 run_case "mcp_query_quiet" \
-  "$(verdict "$(mcp_payload 'mcp__laplace-trino__trino_query' '{"phase":"prod","sql":"select 1"}')")" \
+  "$(verdict "$(mcp_payload 'mcp__trino__trino_query' '{"phase":"prod","sql":"select 1"}')")" \
   "quiet"
 # ... and a mutation without the marker is equally out of scope.
 run_case "mcp_mutation_no_marker_quiet" \
-  "$(verdict "$(mcp_payload 'mcp__laplace-slack__slack_send_message' '{"channel":"dev-alerts"}')")" \
+  "$(verdict "$(mcp_payload 'mcp__slack__slack_send_message' '{"channel":"dev-alerts"}')")" \
   "quiet"
 
 # --- Fail open: a payload the gate cannot read must not block the session ---

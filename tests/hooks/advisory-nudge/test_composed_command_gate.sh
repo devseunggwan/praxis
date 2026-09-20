@@ -408,7 +408,7 @@ MCP_PAYLOAD=$(TRANSCRIPT="$TRANSCRIPT" python3 -c '
 import json, os
 body = "```\n$ grep -rn unrelated_symbol hooks/\nno match\n```"
 print(json.dumps({
-    "tool_name": "mcp__laplace-slack__slack_send_message",
+    "tool_name": "mcp__slack__slack_send_message",
     "tool_input": {"text": body},
     "transcript_path": os.environ["TRANSCRIPT"],
 }))')
