@@ -281,7 +281,9 @@ def test_posttooluse_group_forwards_member_stderr_and_context(tmp_path, monkeypa
     quiet = member("quiet", "def main():\n    return 0\n")
     roster = [talkative, quiet]
     timeouts = {(r, n): 5.0 for r, n, _i in roster}
-    monkeypatch.setattr(_dispatch, "load_group", lambda e, m, h=None: (roster, 25.0, timeouts))
+    monkeypatch.setattr(
+        _dispatch, "load_group", lambda e, m, h=None, i=None: (roster, 25.0, timeouts)
+    )
     monkeypatch.setattr(_dispatch, "_record_fires", lambda *a, **k: None)
 
     rc = _dispatch.run_group("PostToolUse", "Bash", NOOP_PAYLOAD)
@@ -679,7 +681,7 @@ def _patch_members(monkeypatch, members, budget=15.0, timeouts=None):
     monkeypatch.setattr(
         _dispatch,
         "load_group",
-        lambda _e, _m, _h=None: (members, budget, dict(timeouts or {})),
+        lambda _e, _m, _h=None, _if=None: (members, budget, dict(timeouts or {})),
     )
 
 
@@ -1534,15 +1536,39 @@ def test_main_maps_no_matcher_sentinel_to_none(monkeypatch):
     # entry — errorlessly resolving an empty group.
     captured: dict = {}
 
-    def fake_run_group(event, matcher, payload_raw, host=None):
-        captured.update(event=event, matcher=matcher, host=host)
+    def fake_run_group(event, matcher, payload_raw, host=None, if_pattern=None):
+        captured.update(event=event, matcher=matcher, host=host, if_pattern=if_pattern)
         return 0
 
     monkeypatch.setattr(_dispatch, "run_group", fake_run_group)
     monkeypatch.setattr(sys, "argv", ["_dispatch.py", "Stop", _dispatch.NO_MATCHER_ARG, "claude"])
     monkeypatch.setattr(sys, "stdin", io.StringIO(STOP_PAYLOAD))
     assert _dispatch.main() == 0
-    assert captured == {"event": "Stop", "matcher": None, "host": "claude"}
+    # argv[4] absent — the shape every node the build emits today has — so the
+    # node resolves the members that declare no `if` pattern (issue #1335).
+    assert captured == {
+        "event": "Stop", "matcher": None, "host": "claude", "if_pattern": None
+    }
+
+
+def test_main_forwards_the_if_pattern_argv_slot(monkeypatch):
+    # argv[4] is how a tagged dispatcher node tells the fresh process which
+    # members are its own. Dropped here, the node would start on the right tool
+    # call and then run the UNTAGGED members (issue #1335).
+    captured: dict = {}
+
+    def fake_run_group(event, matcher, payload_raw, host=None, if_pattern=None):
+        captured.update(if_pattern=if_pattern)
+        return 0
+
+    monkeypatch.setattr(_dispatch, "run_group", fake_run_group)
+    monkeypatch.setattr(
+        sys, "argv",
+        ["_dispatch.py", "PreToolUse", "Bash", "claude", "Bash(git commit *)"],
+    )
+    monkeypatch.setattr(sys, "stdin", io.StringIO(NOOP_PAYLOAD))
+    assert _dispatch.main() == 0
+    assert captured == {"if_pattern": "Bash(git commit *)"}
 
 
 def test_main_argv_path_runs_matcherless_stop_group_end_to_end(tmp_path, monkeypatch, capsys):
