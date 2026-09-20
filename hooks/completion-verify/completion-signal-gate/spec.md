@@ -190,8 +190,18 @@ Fires in either of two forms when the cwd's active plugin is `praxis`
 (detected via `.claude-plugin/marketplace.json` or git remote slug):
 
 1. **Namespaced form**: `/namespace:command` where the namespace is one of the
-   known foreign plugins (`example-dev-hub`, `oh-my-claudecode`, `omc`,
-   `codex`, `scheduler`, `gemini`, `example-wiki`).
+   known foreign plugins. The shipped set carries publicly installable
+   plugins only — `oh-my-claudecode`, `omc`, `codex`, `scheduler`, `gemini`.
+   An organization's own plugin namespaces are **not** shipped (issue #1470);
+   they extend the set through **`PRAXIS_FOREIGN_PLUGINS`**, comma-separated
+   (`PRAXIS_FOREIGN_PLUGINS=acme-internal,acme-wiki`), the same shape
+   `PRAXIS_SECRET_FETCH_CLIS` established in #1157.
+
+   An extension env is admissible here and refused by the sibling read-only
+   allowlist (`approval-premise-reread-gate`) for a reason worth stating: an
+   entry here can only **add** an advisory, while an entry there **removes**
+   a question. Widening a detector is safe in a way widening an allowlist is
+   not.
 2. **Bare form**: `/command` (no namespace) where the slug is in
    `_KNOWN_FOREIGN_SKILLS`. Conservative curated set scoped to slugs that
    are unambiguously foreign — `release`, `hub-bulk-release`, `hub-scan-issues`,
