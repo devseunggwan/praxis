@@ -122,12 +122,34 @@ _HEDGE_RE = re.compile(
 # assistant assertion, and must not fire.
 _QUESTION_RE = re.compile(r"[?？]\s*$|했나요|됐나요|했습니까")
 
+# A fenced block is the other standard way of reproducing someone else's text,
+# so its lines are quoted for the same reason `>` lines are (issue #1444: a bot
+# comment ending in "리뷰 코멘트 처리 완료", pasted verbatim, blocked a message
+# that claimed nothing). CommonMark: up to 3 leading spaces, and a closing run
+# must use the same char and be at least as long as the opening one, so an inner
+# ``` inside a ```` block does not close it. An opening fence with no closer runs
+# to the end of the text, which is how the message renders.
+_FENCE_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
+
 
 def detect_claim(text: str) -> bool:
     """True if `text` asserts a PR-surface processed claim (subject + claim on
-    the same line, not negated, not hedged, not a question). Quoted lines
-    (`>` — reporting a claim rather than making one) are skipped."""
+    the same line, not negated, not hedged, not a question). Lines that
+    reproduce someone else's text rather than assert — a `>` blockquote or a
+    fenced block — are skipped."""
+    fence_char = ""
+    fence_len = 0
     for raw_line in text.splitlines():
+        m = _FENCE_RE.match(raw_line)
+        if m:
+            token = m.group(1)
+            if not fence_char:
+                fence_char, fence_len = token[0], len(token)
+            elif token[0] == fence_char and len(token) >= fence_len:
+                fence_char, fence_len = "", 0
+            continue
+        if fence_char:
+            continue
         line = raw_line.strip()
         if not line or line.startswith(">"):
             continue
