@@ -488,6 +488,16 @@ _ASK_ANSWER_RE = re.compile(r'"((?:[^"\\]|\\.)*)"=\s*"((?:[^"\\]|\\.)*)"')
 # agreeing, as "PR #999 머지 상태만 알려줘" shows.
 _LABEL_LEAD_RE = re.compile(r"\s*[—–:,(-]\s*")
 
+# …except that the qualifier can REVERSE the lead instead of narrowing it
+# ("승인 — 머지하지 않기", "Approve — do not merge"). Reading only the lead turns
+# that label into consent, so a negation anywhere in the label disqualifies the
+# whole thing. A label that declines is not an approval under any reading, so
+# the cost of matching too widely here is one more ask.
+_LABEL_NEGATION_RE = re.compile(
+    r"하지\s*(?:않|말)|취소|보류|중단|나중에|안\s*(?:함|하기|할)"
+    r"|(?<![A-Za-z])(?:not|don't|dont|never|cancel|hold|skip|abort)(?![A-Za-z])",
+    re.IGNORECASE)
+
 # A merge ask is one sentence that both names merging and asks ("Approve
 # merge?", "PR #999를 머지할까요?"). The briefing counter's approve-ask words
 # cannot stand in for it: "approve" also matches "PR #999 was approved", and
@@ -854,7 +864,10 @@ def _strip_pr_ref(text: str, pr: str) -> str:
 def _ask_label_approves(label: str, pr: str) -> bool:
     """True when a picked label is an approval: the whole label passes
     `_is_approval_reply`, or its leading segment is an approval token once a
-    reference to `pr` is removed (`PR #999 머지`, `Merge PR #999`)."""
+    reference to `pr` is removed (`PR #999 머지`, `Merge PR #999`) — and no
+    part of it negates the action (`승인 — 머지하지 않기`)."""
+    if _LABEL_NEGATION_RE.search(label):
+        return False
     if _is_approval_reply(label):
         return True
     lead = _LABEL_LEAD_RE.split(label.strip().lower(), maxsplit=1)[0]
