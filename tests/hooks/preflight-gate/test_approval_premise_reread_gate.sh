@@ -163,6 +163,19 @@ run_case "py_unquoted_heredoc_plain_literal" \
 # Blanking the body must not blank the shell line the body hangs off.
 run_case "py_heredoc_argv_marker_survives" \
   "$(verdict "$(bash_payload $'python3 - --profile prod <<\'EOF\'\nprint(1)\nEOF')")" "ask"
+# --- Bash: the three bypasses the narrowed carve-out closes (#1449) ---------
+# An interpreter reached through a substitution is not the command: the shell
+# runs it to build `kubectl --context`, so its program text is that argument.
+run_case "subst_inline_program_is_argument" \
+  "$(verdict "$(bash_payload "kubectl --context \"\$(python3 -c \"print('prod-x')\")\" delete pod p")")" "ask"
+# A heredoc body line can be valid program text shaped like an opener (a Python
+# bit-shift), so no body may be credited to a command read out of another body.
+run_case "body_line_shaped_like_opener" \
+  "$(verdict "$(bash_payload $'python3 - <<\'P\'\npython3 <<EOF\nP\nkubectl apply -f - <<\'K\'\nmetadata:\n  namespace: prod-a\nK')")" "ask"
+# An unquoted body holding a substitution is kept whole rather than extracted:
+# nesting deeper than one level is not parseable by the regex that tried.
+run_case "py_unquoted_heredoc_nested_cmdsub" \
+  "$(verdict "$(bash_payload $'python3 - <<EOF\nx = "$(hubctl dev trigger --phase prod $(echo $(true)))"\nEOF')")" "ask"
 
 # --- Bash: every segment must be read-only, not just the first -------------
 # A pipeline or chain whose later segment mutates is the case this filter must

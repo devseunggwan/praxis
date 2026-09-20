@@ -53,7 +53,6 @@ from _payload import read_payload  # type: ignore[import-not-found]  # noqa: E40
 from block_message import format_block  # type: ignore[import-not-found]  # noqa: E402
 from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
     has_state_changing_redirect,
-    heredoc_delimiters,
     heredoc_sources,
     iter_command_starts,
     safe_tokenize,
@@ -407,34 +406,34 @@ _INLINE_PROGRAM_RE = re.compile(
 )
 
 
-# `$(…)` (one level of nested parens) and backticks.
-_COMMAND_SUBSTITUTION_RE = re.compile(r"\$\((?:[^()]|\([^()]*\))*\)|`[^`]*`")
+# A `$(…)` or backtick run anywhere the shell reads: the shell runs its
+# contents, so nothing around it is program text any more.
+_SHELL_RUNS_RE = re.compile(r"\$\(|`")
 
 
 def _strip_inline_programs(text: str) -> str:
     return _INLINE_PROGRAM_RE.sub(lambda m: m.group(0).replace(m.group("prog"), ""), text)
 
 
-def _heredoc_opener_commands(command: str) -> list[str]:
-    """`argv[0]` of the command opening each heredoc, in source order.
+def _lone_interpreter(command: str, delimiters: frozenset[str]) -> bool:
+    """True when the whole command is one simple call to an interpreter.
 
-    Binding is positional rather than by delimiter name: one command can open
-    two heredocs that are both called `EOF`, and matching on the name would
-    attribute the second body to the first opener. The `<<` survives
-    tokenization inside its own segment, so `a && kubectl apply -f - <<'EOF'`
-    credits the body to `kubectl` rather than to whatever ran first.
+    Anything else — a pipeline, an `&&` chain, a substitution running a second
+    command — keeps all of its text, because binding a body or a program to
+    the command that owns it needs an analysis this gate does not have and
+    every earlier attempt at one produced a bypass (issue #1449): a `$(python3
+    -c …)` inside `kubectl --context` stripped the argument the gate exists to
+    read, and a heredoc body line shaped like `python3 <<EOF` was credited
+    with a `kubectl apply` manifest.
     """
-    openers: list[str] = []
-    for line in command.split("\n"):
-        if not heredoc_delimiters(line):
-            continue
-        for segment in iter_command_starts(safe_tokenize(line)):
-            argv = strip_prefix(segment)
-            # Counted with the reader `heredoc_sources` uses, so `-<<A` (one
-            # token) opens a heredoc here exactly as it does there.
-            opens = sum(len(heredoc_delimiters(token)) for token in segment)
-            openers.extend([argv[0] if argv else ""] * opens)
-    return openers
+    # A heredoc terminator survives `strip_heredoc_bodies` on its own line, so
+    # the tokenizer reads it as a second command; it is punctuation, not one.
+    segments = [seg for seg in iter_command_starts(safe_tokenize(command))
+                if not (len(seg) == 1 and seg[0] in delimiters)]
+    if len(segments) != 1:
+        return False
+    argv = strip_prefix(segments[0])
+    return bool(argv) and argv[0].rsplit("/", 1)[-1] in _INTERPRETERS
 
 
 def _bash_marker_text(command: str) -> str:
@@ -443,29 +442,29 @@ def _bash_marker_text(command: str) -> str:
     A prod marker inside a non-shell interpreter's program is a string literal
     in another language, not an argument to anything the shell runs — issue
     #1428, where `python3 - <<'EOF'` rewriting a scratch file asked about a
-    production target. Everything else is kept: a heredoc opened by anything
-    but an interpreter is the call's own payload, so a `namespace: prod-a` in
-    a `kubectl apply -f -` manifest still counts.
+    production target. The exclusion is deliberately narrow: only a command
+    that is nothing but that interpreter call drops any text, and only its own
+    single heredoc and inline `-c`/`-e` program. Everything else is kept.
 
-    The inline-program strip runs on the shell text only. Applied to the whole
-    command it also rewrote heredoc bodies, so a manifest line shaped like
-    `python3 -c "prod"` lost its marker.
+    An unquoted heredoc body holding a substitution is kept whole: bash runs
+    it before the interpreter ever sees the body, so that text is the shell's
+    own call, and extracting only the substitution missed a nesting the
+    extractor could not parse.
     """
     sources = heredoc_sources(command)
-    shell_text = _strip_inline_programs(strip_heredoc_bodies(command))
-    if not sources:
-        return shell_text
-    openers = _heredoc_opener_commands(command)
-    kept = [shell_text]
-    for index, (_delim, body, quoted) in enumerate(sources):
-        opener = openers[index] if index < len(openers) else ""
-        if opener.rsplit("/", 1)[-1] not in _INTERPRETERS:
-            kept.append(body)
-        elif not quoted:
-            # bash expands an unquoted body before the interpreter sees it, so
-            # a substitution there is the shell's own call, not program text.
-            kept.extend(m.group(0) for m in _COMMAND_SUBSTITUTION_RE.finditer(body))
-    return "\n".join(kept)
+    if not _lone_interpreter(command, frozenset(delim for delim, _b, _q in sources)):
+        return command
+    if len(sources) > 1:
+        return command  # a second heredoc is not this interpreter's program
+    shell_text = strip_heredoc_bodies(command)
+    if _SHELL_RUNS_RE.search(shell_text):
+        return command  # the shell runs part of the argument text
+    stripped = _strip_inline_programs(shell_text)
+    if sources:
+        _delim, body, quoted = sources[0]
+        if not quoted and _SHELL_RUNS_RE.search(body):
+            return command
+    return stripped
 
 
 # The two questions are the whole point of the gate, so they live in the
