@@ -686,3 +686,87 @@ def test_e2e_hook_block_acknowledged_is_silent(tmp_path):
     )
     assert proc.returncode == 0
     assert proc.stdout.strip() == ""
+
+
+def test_cursor_identity_carries_the_kinds(tmp_path):
+    """A cursor advanced by the narrower default must not make this gate's
+    widened scan resume past an earlier `permission-rule` denial.
+
+    The cursor stores an offset and nothing about which kinds produced it, and
+    `_cursor_matches` checks only inode / size / newline — so before #1422 the
+    part was the shared default and a mid-session upgrade from the narrower
+    build silently dropped every hook block already on disk.
+    """
+    sys.path.insert(0, str(REPO / "hooks" / "_lib"))
+    import _transcript as tr  # noqa: PLC0415
+
+    def assistant(uuid, tuid, name):
+        return {
+            "type": "assistant",
+            "uuid": uuid,
+            "message": {
+                "role": "assistant",
+                "content": [
+                    {"type": "tool_use", "id": tuid, "name": name, "input": {"command": "x"}}
+                ],
+            },
+        }
+
+    def denial(tuid, src, kind):
+        body = (
+            "The user doesn't want to proceed with this tool use."
+            if kind == "user-rejected"
+            else "Blocked by a hook"
+        )
+        return {
+            "type": "user",
+            "toolUseResult": "User rejected tool use",
+            "toolDenialKind": kind,
+            "sourceToolAssistantUUID": src,
+            "message": {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": tuid,
+                        "is_error": True,
+                        "content": body,
+                    }
+                ],
+            },
+        }
+
+    t = tmp_path / "t.jsonl"
+    t.write_text(
+        "\n".join(
+            json.dumps(r)
+            for r in (
+                assistant("u1", "toolu_block", "Bash"),
+                denial("toolu_block", "u1", "permission-rule"),
+                assistant("u2", "toolu_rej", "Write"),
+                denial("toolu_rej", "u2", "user-rejected"),
+            )
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    # The narrower build's cursor, at the part it used: the bare default.
+    narrow = tmp_path / "narrow.json"
+    assert tr.scan_user_rejections(str(t), cursor_path=str(narrow)) is not None
+    assert narrow.exists(), "the narrow scan must have advanced a cursor"
+
+    # This gate's cursor part must not be that one, or the offset above is
+    # inherited and the block below is never read.
+    assert gate._CURSOR_PART != "root"
+    assert "permission-rule" in gate._CURSOR_PART
+
+    wide = tmp_path / "wide.json"
+    got = tr.scan_user_rejections(str(t), cursor_path=str(wide), kinds=tr.DENIAL_KINDS)
+    kinds = sorted(r["kind"] for r in got)
+    assert kinds == ["permission-rule", "user-rejected"], kinds
+
+    # Positive control for the failing direction: reuse the narrow cursor and
+    # the block is provably dropped — this is the defect, pinned.
+    dropped = tr.scan_user_rejections(str(t), cursor_path=str(narrow), kinds=tr.DENIAL_KINDS)
+    assert [r["kind"] for r in dropped] == ["user-rejected"]

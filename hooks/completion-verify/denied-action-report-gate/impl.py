@@ -64,6 +64,11 @@ _ROLE = "completion-verify"
 _STRICT_ENV = "PRAXIS_DENIED_ACTION_STRICT"
 _BYPASS_ENV = "PRAXIS_DENIED_ACTION_BYPASS"
 
+# The scan cursor records an offset, never which kinds produced it, so a cursor
+# advanced by a narrower scan resumes past denials the wider one never read.
+# Naming the kinds in the cursor retires the old file whenever the set changes.
+_CURSOR_PART = "-".join(DENIAL_KINDS)
+
 # A refused AskUserQuestion is the user dismissing the menu and answering in
 # their own words. Nothing was prevented and nothing goes unreported, so it is
 # not the class this gate is about — and it is half the corpus: 7 of the 14
@@ -218,7 +223,7 @@ def main() -> int:
     session_id = session_id if isinstance(session_id, str) else ""
     rejections = scan_user_rejections(
         transcript_path,
-        cursor_path=scan_cursor_path(_HOOK_NAME, session_id),
+        cursor_path=scan_cursor_path(_HOOK_NAME, session_id, _CURSOR_PART),
         kinds=DENIAL_KINDS,
     )
     turn = load_stop_turn(payload)
