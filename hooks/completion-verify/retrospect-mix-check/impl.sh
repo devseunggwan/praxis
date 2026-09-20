@@ -1382,6 +1382,39 @@ PY
   fi
 fi
 
+# Gate-13 (future-tense falsification, issue #1424). `Falsification:` exists to
+# record an observation that could have refuted the finding and did not. A line
+# promising the check for Stage 4 inverts that: the user spends an approval on a
+# premise nobody tested, and the refutation arrives after the decision. In the
+# motivating cycle 7 of 8 lines were of that shape, and two approved findings
+# were refuted at Stage 4 by one cheap command each — one by replaying the
+# hook's own output, one by `ls hooks/completion-verify`.
+#
+# Structure only, like every other lane here: it cannot tell whether a
+# past-tense line is true, only that the author is not promising the check.
+#
+# Same Stage-4 carve-out as Gate-8/Gate-11/Gate-12 — the Stage 4 report legibly
+# describes future work, and blocking a completed cycle on that would be
+# retroactive.
+GATE13_VIOLATION=""
+if [ "$STAGE4_AFTER_REPORT" != "1" ]; then
+  # `will not fire` / `will be noisy` are claims about behaviour, not promises
+  # to check, so the verb list is deliberately narrow: only verbs that name the
+  # verification act itself.
+  ft_re='(will|plan to|going to|intend to)[[:space:]]+(check|verify|confirm|run|test|measure|probe)'
+  ft_re="$ft_re"'|to be (checked|verified|confirmed|tested)'
+  ft_re="$ft_re"'|pending (verification|a probe|the probe)'
+  ft_re="$ft_re"'|[Ss]tage[[:space:]]*4[^.]*(에서[[:space:]]*)?(확인|검증|측정)'
+  ft_re="$ft_re"'|(확인|검증|측정|재현)[[:space:]]*예정'
+  ft_re="$ft_re"'|(확인|검증)(하겠|할 것|할 예정)'
+  GATE13_LINE=$(printf '%s\n' "$MOST_RECENT_BLOCK" \
+    | grep -E '^[[:space:]]*[-*]?[[:space:]]*(\*\*)?Falsification:' \
+    | grep -iE "$ft_re" | head -1)
+  if [ -n "$GATE13_LINE" ]; then
+    GATE13_VIOLATION="a Falsification: line promises the check instead of reporting one (issue #1424): \"$(printf '%s' "$GATE13_LINE" | cut -c1-160)\" — run the disconfirming command BEFORE the approval menu and paste what it returned; a premise checked only at Stage 4 spends the user's approval on an untested claim"
+  fi
+fi
+
 # Decide block.
 should_block=false
 reason_parts=()
@@ -1476,6 +1509,10 @@ if [ -n "$GATE12_VIOLATION" ]; then
   should_block=true
   reason_parts+=("Gate-12: $GATE12_VIOLATION")
 fi
+if [ -n "$GATE13_VIOLATION" ]; then
+  should_block=true
+  reason_parts+=("Gate-13: $GATE13_VIOLATION")
+fi
 
 # Gate-4b demotions ride along with a block reason when one exists (they are a
 # separate finding about separate rows, and dropping them because some other
@@ -1507,7 +1544,7 @@ if [ "$should_block" = "true" ]; then
     fi
   done
 
-  full_reason="Retrospect mix-check gate triggered. ${reason}. Fix guide: Gate-1 → relabel finding category via skills/retrospect/references/stage1-2-analysis.md; Gate-2 → supply either (a) 5-line 'not <action>: <reason>' rationale (Schema A) or (b) 1-2 'not-others: <dim-tags>' lines (Schema B, issue #285) in Stage 2.5; Gate-3 verdict → return to skills/retrospect/references/stage2.5-audit.md and re-evaluate evidence robustness for 2-action findings; Gate-3 backing_repo → return to skills/retrospect/references/stage1-2-analysis.md action assignment (step 7) and add 'backing_repo: <owner/repo>' to Rationale cell; Gate-4 → return to skills/retrospect/references/stage2.5-audit.md Gate-4 and re-run external-repo classification; ensure gate_4_verdict is emitted in the distribution card; Gate-7 → post-compaction session: emit a '<!-- retrospect:transcript_receipt begin/end -->' fence with the real full-transcript scan output (or the 'retrospect:transcript_receipt_skipped: transcript unreachable' line when the jsonl is genuinely unreachable); include both 'is_error_count: N' and 'content_error_count: N' fields; when content_error_count > 0 add a '<!-- retrospect:content_error_enum begin/end -->' block with per-signal promote/note/dismiss disposition rows (issue #670); Gate-8 → emit a '<!-- retrospect:suppression_ledger begin/end -->' fence carrying 'worst_agent_failure:', 'self_adversarial:', and 'critic_diff:' lines (the Stage 2 self-incrimination pass plus conditional externalized critic tier record, mandatory on every path incl. the clean one), and do not claim none-found/clean when live transcript signals exceed tolerance — surface or justify those signals before Stage 3; Gate-11 → emit a '<!-- retrospect:remedy_reach begin/end -->' fence with one row per remedy-layer finding ('- finding #N: reach=full|partial|none | surface: <layer> | unreached: <axis or none> | worse_axis: yes|no|na'), naming the axis the remedy's surface structurally cannot reach instead of describing the shortfall as legitimate; Gate-12 → run pre-scan lane 6 (denied_actions) and emit a '<!-- retrospect:denied_actions begin/end -->' fence with one disposed row per structurally-rejected tool call in the transcript ('- denied: \"<verbatim question>\" | tool: <name> | source: user_rejection | confessed: yes|no | disposition: promoted (finding #N)|noted|dismissed (<reason>)') — a refused action has no outcome, so nothing was written about it and the friction scan cannot reach it. See skills/retrospect/references/stage1-2-analysis.md self-incrimination pass and skills/retrospect/references/stage3-reporting.md."
+  full_reason="Retrospect mix-check gate triggered. ${reason}. Fix guide: Gate-1 → relabel finding category via skills/retrospect/references/stage1-2-analysis.md; Gate-2 → supply either (a) 5-line 'not <action>: <reason>' rationale (Schema A) or (b) 1-2 'not-others: <dim-tags>' lines (Schema B, issue #285) in Stage 2.5; Gate-3 verdict → return to skills/retrospect/references/stage2.5-audit.md and re-evaluate evidence robustness for 2-action findings; Gate-3 backing_repo → return to skills/retrospect/references/stage1-2-analysis.md action assignment (step 7) and add 'backing_repo: <owner/repo>' to Rationale cell; Gate-4 → return to skills/retrospect/references/stage2.5-audit.md Gate-4 and re-run external-repo classification; ensure gate_4_verdict is emitted in the distribution card; Gate-7 → post-compaction session: emit a '<!-- retrospect:transcript_receipt begin/end -->' fence with the real full-transcript scan output (or the 'retrospect:transcript_receipt_skipped: transcript unreachable' line when the jsonl is genuinely unreachable); include both 'is_error_count: N' and 'content_error_count: N' fields; when content_error_count > 0 add a '<!-- retrospect:content_error_enum begin/end -->' block with per-signal promote/note/dismiss disposition rows (issue #670); Gate-8 → emit a '<!-- retrospect:suppression_ledger begin/end -->' fence carrying 'worst_agent_failure:', 'self_adversarial:', and 'critic_diff:' lines (the Stage 2 self-incrimination pass plus conditional externalized critic tier record, mandatory on every path incl. the clean one), and do not claim none-found/clean when live transcript signals exceed tolerance — surface or justify those signals before Stage 3; Gate-11 → emit a '<!-- retrospect:remedy_reach begin/end -->' fence with one row per remedy-layer finding ('- finding #N: reach=full|partial|none | surface: <layer> | unreached: <axis or none> | worse_axis: yes|no|na'), naming the axis the remedy's surface structurally cannot reach instead of describing the shortfall as legitimate; Gate-12 → run pre-scan lane 6 (denied_actions) and emit a '<!-- retrospect:denied_actions begin/end -->' fence with one disposed row per structurally-rejected tool call in the transcript ('- denied: \"<verbatim question>\" | tool: <name> | source: user_rejection | confessed: yes|no | disposition: promoted (finding #N)|noted|dismissed (<reason>)') — a refused action has no outcome, so nothing was written about it and the friction scan cannot reach it; Gate-13 → run the disconfirming command BEFORE the approval menu and write what it returned on the 'Falsification:' line (issue #1424); 'will check in Stage 4' promises the check instead of reporting one, and the user spends the approval on an untested premise. See skills/retrospect/references/stage1-2-analysis.md self-incrimination pass and skills/retrospect/references/stage3-reporting.md."
   # shellcheck disable=SC2034  # read by the EXIT trap installed in sourced record_fire.sh
   PRAXIS_FIRE_DECISION=block
   jq -n --arg r "$full_reason" '{decision: "block", reason: $r}'

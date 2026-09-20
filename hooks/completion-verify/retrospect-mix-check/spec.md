@@ -56,6 +56,29 @@ of the following hold:
 
 | Gate-12 (issue #1013): the live transcript carries at least one structurally-rejected tool call and the report has no `retrospect:denied_actions` fence, has more than one, has a malformed one, or carries no schema-valid disposed row (the whole row is matched — `denied` / `tool` / `source: user_rejection` / `confessed: yes\|no` / `disposition`, anchored at the list marker — so a lone `disposition:` line cannot buy the gate off) | Every other lane keys on something that happened; a refused action has no outcome, so it leaves no error, no correction and no confession, and selection by ease of recall never reaches it. Shares Gate-8's Stage-4 carve-out |
 
+| Gate-13 (issue #1424): a `Falsification:` line in the Stage 3 report promises the check instead of reporting one — `will verify/check/run …`, `to be verified`, `pending verification`, `Stage 4에서 확인`, `확인 예정` | The line exists to record an observation that could have refuted the finding and did not; a promise spends the user's approval on an untested premise and lets the refutation arrive after the decision. Shares Gate-8's Stage-4 carve-out |
+
+### Gate-13 future-tense falsification (issue #1424)
+
+In the motivating cycle 7 of 8 `Falsification:` lines were of the form "will
+check in Stage 4", and two approved findings were then refuted at Stage 4 by one
+cheap command each — a replay of the hook's own output (`permissionDecision:
+ask`, not the asserted exit 0) and `ls hooks/completion-verify` (an existing gate
+already covered half the proposal). Both commands were available before the menu
+was shown; the user had to cancel at re-ask.
+
+The gate reads **tense, never truth**. It cannot tell whether a past-tense line
+is accurate — only that the author is not deferring the check. The verb list is
+deliberately narrow (`check`, `verify`, `confirm`, `run`, `test`, `measure`,
+`probe`), so a behavioural claim that happens to use `will` — *the advisory will
+not fire on the quoted form* — passes. Future-tense prose outside a
+`Falsification:` line passes too: Stage 3 legitimately describes what Stage 4
+will do.
+
+Its prose counterpart, the `Probe:` receipt required of mechanism and novelty
+claims, lives in `skills/retrospect/references/stage3-reporting.md` and is not
+mechanized here — a command's *presence* is checkable, its *relevance* is not.
+
 ### Gate-11 remedy-reach receipt (issue #917)
 
 A remedy only works on the surface it lives on. The recurring failure this gate
