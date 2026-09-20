@@ -164,6 +164,27 @@ def quotes(text: str, answer: str) -> bool:
     return answer.strip()[:QUOTE_PREFIX_CHARS] in text
 
 
+def is_human_turn_start(event: dict) -> bool:
+    """True for a user event that is a person typing, not a tool result.
+
+    A correction is consumed by the work the user asks for next, so it does not
+    carry into the turn after it. Without this boundary the scanned tail reaches
+    back past the answer's own turn and arms a write that never touched it.
+    """
+    message = event.get("message")
+    if not isinstance(message, dict) or message.get("role") != "user":
+        return False
+    content = message.get("content")
+    if isinstance(content, str):
+        return True
+    if not isinstance(content, list):
+        return False
+    return not any(
+        isinstance(block, dict) and block.get("type") == "tool_result"
+        for block in content
+    )
+
+
 def pending_negation_answer(events: list[dict]) -> str | None:
     """The newest negation answer that nothing has quoted back since.
 
@@ -178,6 +199,10 @@ def pending_negation_answer(events: list[dict]) -> str | None:
     armed: str | None = None
     for event in events:
         if event.get("isSidechain"):
+            continue
+        if is_human_turn_start(event):
+            armed = None
+            ask_ids.clear()
             continue
         message = event.get("message")
         if not isinstance(message, dict):

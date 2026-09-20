@@ -214,6 +214,7 @@ run_case silent "question with no answer yet" "$SLACK" "$SLACK_INPUT"
 
 # build_scoped_transcript <answer> <tail_kind>
 #   Ask + free-text <answer>, then a tail chosen by <tail_kind>:
+#     human-turn      — a person's next message, starting a new turn
 #     sidechain-only  — the Ask/answer pair itself is a subagent's
 #     sidechain-quote — a subagent's prose quoting <answer>
 #     none            — nothing after the answer (the armed control)
@@ -242,7 +243,9 @@ reply = mark({"message": {"role": "user", "content": [
     {"type": "tool_result", "tool_use_id": "q1", "content": result}]}})
 events = [{"message": {"role": "user", "content": "요약 문구 정리해줘"}}, ask, reply]
 
-if tail_kind == "sidechain-quote":
+if tail_kind == "human-turn":
+    events.append({"message": {"role": "user", "content": "이제 다른 PR 상태를 확인해줘"}})
+elif tail_kind == "sidechain-quote":
     events.append({"isSidechain": True,
                    "message": {"role": "assistant",
                                "content": [{"type": "text", "text": answer}]}})
@@ -251,6 +254,13 @@ with open(path, "w", encoding="utf-8") as f:
         f.write(json.dumps(e, ensure_ascii=False) + "\n")
 PY
 }
+
+# A correction is consumed by the work asked for next: the person's own next
+# message ends its turn, and a write in the turn after it was never corrected.
+# The `none` control below is this row's positive control too — same fixture,
+# that message removed, and the answer still arms.
+build_scoped_transcript "$ANSWER" human-turn
+run_case silent "a new user turn ends the correction's life" "$SLACK" "$SLACK_INPUT"
 
 # A subagent's Ask and answer are its own conversation; the main agent was
 # never corrected, so its write must not be stopped.
