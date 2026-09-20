@@ -1407,8 +1407,12 @@ if [ "$STAGE4_AFTER_REPORT" != "1" ]; then
   ft_re="$ft_re"'|[Ss]tage[[:space:]]*4[^.]*(에서[[:space:]]*)?(확인|검증|측정)'
   ft_re="$ft_re"'|(확인|검증|측정|재현)[[:space:]]*예정'
   ft_re="$ft_re"'|(확인|검증)(하겠|할 것|할 예정)'
+  # The canonical Stage 3 card renders the line inside a blockquote and puts the
+  # colon outside the bold (`> - **Falsification**: ...`, report-template.md),
+  # so both the `>` prefix and the `**Falsification**:` spelling have to match —
+  # without them the gate misses the exact shape its own template produces.
   GATE13_LINE=$(printf '%s\n' "$MOST_RECENT_BLOCK" \
-    | grep -E '^[[:space:]]*[-*]?[[:space:]]*(\*\*)?Falsification:' \
+    | grep -E '^[[:space:]]*(>[[:space:]]*)*[-*]?[[:space:]]*(\*\*)?Falsification(\*\*)?:' \
     | grep -iE "$ft_re" | head -1)
   if [ -n "$GATE13_LINE" ]; then
     GATE13_VIOLATION="a Falsification: line promises the check instead of reporting one (issue #1424): \"$(printf '%s' "$GATE13_LINE" | cut -c1-160)\" — run the disconfirming command BEFORE the approval menu and paste what it returned; a premise checked only at Stage 4 spends the user's approval on an untested claim"

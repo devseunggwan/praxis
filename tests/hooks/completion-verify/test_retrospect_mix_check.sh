@@ -3509,6 +3509,19 @@ run_case "FT6_pass_future_tense_outside_the_line" "pass" \
     "Falsification: ran the probe, premise held
 Verification plan: will verify the written file in Stage 4")")"
 
+# FT7: block — the shape `references/report-template.md` actually renders: the
+# line sits inside the card's blockquote and the colon is outside the bold.
+# Both features were unmatched, so the gate missed its own canonical form.
+run_case "FT7_block_canonical_blockquote_bold_colon" "block" \
+  "$(mk_assistant "$(mk_stage3_with_falsification \
+    '> - **Falsification**: 기존 게이트 유무는 확인 예정')")"
+
+# FT8: pass — the control for FT7. Same blockquote, same bold spelling, an
+# observation already made: what FT7 catches is the tense, not the rendering.
+run_case "FT8_pass_canonical_blockquote_past_tense" "pass" \
+  "$(mk_assistant "$(mk_stage3_with_falsification \
+    '> - **Falsification**: premise survived — `ls hooks/completion-verify` 에 해당 게이트 없음')")"
+
 echo
 echo "================================"
 echo "Cases:    $PASS passed, $FAIL failed"
