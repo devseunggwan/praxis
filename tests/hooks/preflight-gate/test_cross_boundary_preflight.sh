@@ -18,6 +18,9 @@ set +e
 # repo-less case away from its fixture. Unset it once, up front; the cases
 # that need it set it per-invocation.
 unset GH_REPO
+# `GH_HOST` decides the `gh api` target host the same way, so it is cleared
+# for the same reason; the cases that need it set it per-invocation.
+unset GH_HOST
 
 REPO_ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
 HOOK="$REPO_ROOT/hooks/preflight-gate/cross-boundary-preflight/impl.py"
@@ -1038,6 +1041,199 @@ else
   FAIL=$((FAIL+1)); FAILED_NAMES+=("fail-open guard wrapping")
 fi
 
+
+# ---------------------------------------------------------------------------
+# `gh api` arm (issue #1435)
+#
+# The approval gate knew only the (noun, verb) pairs, so the one write path the
+# anchor convention *requires* — a rev >=2 PATCH by comment id — reached the
+# network ungated. Detection is the shared `_lib/_external_write_body` one, so
+# these cases pin the wiring and the repo attribution, not the parser.
+# ---------------------------------------------------------------------------
+
+run_case "gh api PATCH comment by id (literal repo)" ask \
+  'gh api --method PATCH repos/owner/repo/issues/comments/123 -F body=@/tmp/a.md'
+
+run_case_detail "gh api literal repo names that repo, not the checkout" \
+  'gh api --method PATCH repos/other/target/issues/comments/123 -F body=@/tmp/a.md' \
+  'other/target'
+
+run_case_detail "gh api ask renders the api form, not a --repo flag" \
+  'gh api --method PATCH repos/owner/repo/issues/comments/123 -F body=@/tmp/a.md' \
+  'gh api --method PATCH <endpoint>'
+
+run_case_detail "gh api item 3 prescribes -F body=@, not --body-file" \
+  'gh api --method PATCH repos/owner/repo/issues/comments/123 -F body=@/tmp/a.md' \
+  '-F body=@/tmp/<slug>.md'
+
+# Check 1's hard block exempts `gh api`, so the API checklist must not repeat
+# the `pr/issue create` wording — it would send the caller to rewrite a command
+# that already reached this prompt.
+run_case_detail "gh api item 3 says the heredoc reaches approval, not a block" \
+  'gh api --method PATCH repos/owner/repo/issues/comments/123 -F body=@/tmp/a.md' \
+  'it enters this approval path'
+
+# `--input` sends a whole JSON request body; `-F body=@` sends one field, so
+# prescribing it would change the request rather than how it is delivered.
+run_case_detail "gh api --input item 3 keeps --input" \
+  'gh api --method PATCH repos/owner/repo/issues/comments/123 --input payload.json' \
+  'Keep --input: create the JSON payload file with the Write tool first'
+
+run_case_detail_absent "gh api --input item 3 drops the -F body=@ prescription" \
+  'gh api --method PATCH repos/owner/repo/issues/comments/123 --input payload.json' \
+  '-F body=@'
+
+run_case_detail "gh api -f body= write still prescribes -F body=@" \
+  'gh api --method PATCH repos/owner/repo/issues/comments/123 -f body=hi' \
+  '-F body=@/tmp/<slug>.md'
+
+run_case_detail "gh api --input on a placeholder endpoint keeps --input" \
+  'gh api --method PATCH repos/{owner}/{repo}/issues/comments/123 --input payload.json' \
+  'Keep --input'
+
+run_case_detail "non-api item 3 keeps the heredoc block wording" \
+  'gh pr comment 1 --repo other/target --body-file /tmp/a.md' \
+  'is blocked by the praxis hook chain'
+
+run_case "gh api POST issue comments (method implied by a field)" ask \
+  'gh api repos/owner/repo/issues/42/comments -f body=hi'
+
+run_case "gh api POST pr review" ask \
+  'gh api --method POST repos/owner/repo/pulls/7/reviews -f body=lgtm'
+
+# gh fills `{owner}`/`{repo}` from the checkout, so the endpoint names nothing
+# on its own — it must resolve exactly like a repo-less write.
+run_case_detail "gh api placeholder repo resolves from the checkout" \
+  'gh api repos/{owner}/{repo}/issues/1/comments -f body=hi' \
+  'devseunggwan/praxis'
+
+# gh fills only the placeholder it knows, so a half-filled slot names neither
+# the checkout's repo nor anything this hook can read.
+run_case_detail "gh api half-placeholder repo slot is UNRESOLVED" \
+  'gh api --method PATCH repos/{owner}/other/issues/comments/1 -f body=hi' \
+  'UNRESOLVED'
+
+run_case_detail_absent "gh api half-placeholder repo slot does not name the checkout" \
+  'gh api --method PATCH repos/{owner}/other/issues/comments/1 -f body=hi' \
+  'devseunggwan/praxis'
+
+run_case_detail "gh api variable repo slot is UNRESOLVED" \
+  'gh api --method PATCH repos/$OWNER/$REPO/issues/comments/1 -f body=hi' \
+  'UNRESOLVED'
+
+run_case_detail_absent "gh api variable repo slot does not name the checkout" \
+  'gh api --method PATCH repos/$OWNER/$REPO/issues/comments/1 -f body=hi' \
+  'devseunggwan/praxis'
+
+run_case_detail_absent "gh api literal repo slot is not UNRESOLVED" \
+  'gh api --method PATCH repos/other/target/issues/comments/1 -f body=hi' \
+  'UNRESOLVED'
+
+# An endpoint built at run time names no repo this hook can read, and it may
+# not be a comment endpoint at all — so a write-method call asks UNRESOLVED
+# rather than falling through as "not a write".
+run_case "gh api write to a variable endpoint asks" ask \
+  'ENDPOINT=repos/other/target/issues/1/comments; gh api "$ENDPOINT" -f body=hi'
+
+run_case "gh api write to a command-substituted endpoint asks" ask \
+  'gh api "$(echo repos/other/target/issues/1/comments)" -f body=hi'
+
+run_case_detail "gh api dynamic endpoint names no repo" \
+  'gh api "$ENDPOINT" -f body=hi' \
+  'UNRESOLVED'
+
+run_case "gh api GET on a variable endpoint is silent" pass \
+  'gh api "$ENDPOINT"'
+
+# A method the shell fills in is not a literal member of the write set, yet on
+# a comment endpoint it may well be PATCH — so the endpoint decides, and asks.
+run_case "gh api run-time method on a comment endpoint asks" ask \
+  'gh api --method "$METHOD" repos/o/r/issues/comments/1 -f body=hi'
+
+run_case_detail "gh api run-time method names the method as unknown" \
+  'gh api --method "$METHOD" repos/o/r/issues/comments/1 -f body=hi' \
+  'method is decided at run time'
+
+run_case "gh api -X with a command-substituted method asks" ask \
+  'gh api -X "$(echo PATCH)" repos/o/r/pulls/7/reviews -f body=hi'
+
+run_case "gh api run-time method on a non-comment endpoint is silent" pass \
+  'gh api --method "$METHOD" repos/o/r/issues/42 -f state=closed'
+
+run_case "gh api literal GET on a variable endpoint is silent" pass \
+  'gh api --method GET "$ENDPOINT" -f x=1'
+
+# `--hostname` decides which server the endpoint lives on, so an approval that
+# names only `owner/repo` reads as the github.com repo of the same name.
+run_case_detail "gh api --hostname names the host with the repo" \
+  'gh api --hostname ghe.example repos/other/target/issues/1/comments -f body=hi' \
+  'ghe.example/other/target'
+
+run_case_detail "gh api --hostname= form names the host too" \
+  'gh api --hostname=ghe.example repos/other/target/issues/1/comments -f body=hi' \
+  'ghe.example/other/target'
+
+run_case_detail_absent "gh api --hostname github.com keeps the bare repo" \
+  'gh api --hostname github.com repos/other/target/issues/1/comments -f body=hi' \
+  'github.com/other/target'
+
+# A placeholder resolves from the checkout, whose remote may sit on another
+# host than the one `--hostname` sends to.
+run_case_detail "gh api --hostname with a placeholder endpoint is UNRESOLVED" \
+  'gh api --hostname ghe.example repos/{owner}/{repo}/issues/1/comments -f body=hi' \
+  'UNRESOLVED'
+
+# `GH_HOST` sends the request to another host just as `--hostname` does, and
+# `--hostname` outranks it (`gh api --help`).
+run_case_detail "gh api inline GH_HOST names the host with the repo" \
+  'GH_HOST=ghe.example gh api --method PATCH repos/o/r/issues/comments/1 -f body=x' \
+  'ghe.example/o/r'
+
+GH_HOST=ghe.env run_case_detail "gh api exported GH_HOST names the host with the repo" \
+  'gh api --method PATCH repos/o/r/issues/comments/1 -f body=x' \
+  'ghe.env/o/r'
+
+run_case_detail "gh api --hostname beats GH_HOST" \
+  'GH_HOST=ghe.example gh api --hostname other.example repos/o/r/issues/comments/1 -f body=x' \
+  'other.example/o/r'
+
+run_case_detail_absent "gh api --hostname beats GH_HOST (GH_HOST not named)" \
+  'GH_HOST=ghe.example gh api --hostname other.example repos/o/r/issues/comments/1 -f body=x' \
+  'ghe.example'
+
+run_case_detail "gh api run-time GH_HOST is UNRESOLVED" \
+  'GH_HOST=$H gh api --method PATCH repos/o/r/issues/comments/1 -f body=x' \
+  'host is decided at run time'
+
+run_case_detail_absent "gh api GH_HOST=github.com keeps the bare repo" \
+  'GH_HOST=github.com gh api --method PATCH repos/o/r/issues/comments/1 -f body=x' \
+  'github.com/o/r'
+
+# A read is not a write. Both the default GET and an explicit one stay silent.
+run_case "gh api GET by default is silent" pass \
+  'gh api repos/owner/repo/issues/comments/123'
+
+run_case "gh api explicit GET with a field is silent" pass \
+  'gh api --method GET repos/owner/repo/issues/comments/1 -f x=1'
+
+# An endpoint family that carries no public body buys nothing but false
+# positives, so it is deliberately outside the detector.
+run_case "gh api PATCH on a non-comment endpoint is silent" pass \
+  'gh api --method PATCH repos/owner/repo/issues/42 -f state=closed'
+
+# Role-aware tokenization: the same text inside a quoted argument is not a call.
+run_case "gh api inside an echo string is silent" pass \
+  'echo "gh api --method PATCH repos/owner/repo/issues/comments/1 -f body=x"'
+
+# The heredoc hard block prescribes --body-file, which `gh api` does not accept.
+# Blocking there would name a remedy the caller cannot follow, so the api arm
+# takes the ask instead — with its own item 3.
+run_case "gh api with a heredoc asks rather than hard-blocking" ask \
+  'gh api --method PATCH repos/owner/repo/issues/comments/1 -F body=@- <<EOF'
+
+# The opt-out marker covers the api arm on the same terms as every other write.
+run_case "gh api with the ack marker passes" pass \
+  'gh api --method PATCH repos/owner/repo/issues/comments/1 -F body=@/tmp/a.md  # cross-boundary:ack'
 
 
 # ---------------------------------------------------------------------------
