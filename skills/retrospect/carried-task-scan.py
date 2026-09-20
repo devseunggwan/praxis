@@ -97,12 +97,25 @@ def carried_tasks(cursor: dict[str, object]) -> list[dict[str, str | None]]:
 
 
 def load_cursor(path: Path) -> dict[str, object] | None:
-    """The cursor as a dict, or None when there is none to read."""
-    if not path.exists():
-        return None
+    """The cursor as a dict, or None when there is genuinely none to read.
+
+    `Path.exists()` answers False for a path it cannot stat, so a cursor behind
+    an unreadable directory looks exactly like a first run — and a first run
+    returns no tasks and exit 0, which is the same output Stage 1.5 reads as
+    "nothing carried". Only an absent file is a first run, so the open decides
+    it: `FileNotFoundError` means no cursor, and every other OSError is a
+    failure to read one, which exits 2 rather than reporting an absence.
+    """
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as exc:
+        raw = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        print(f"cursor unreadable: {path} — {exc}", file=sys.stderr)
+        raise SystemExit(2) from exc
+    try:
+        data = json.loads(raw)
+    except ValueError as exc:
         print(f"cursor unreadable: {path} — {exc}", file=sys.stderr)
         raise SystemExit(2) from exc
     if not isinstance(data, dict):

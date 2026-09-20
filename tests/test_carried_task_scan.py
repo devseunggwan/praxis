@@ -150,6 +150,35 @@ class TestFailureModes:
         assert result.returncode == 2
         assert "not a JSON object" in result.stderr
 
+    def test_an_unreadable_cursor_exits_2_rather_than_reporting_none(
+        self, tmp_path: Path
+    ):
+        """A cursor that cannot be READ is not a cursor that is not THERE.
+
+        Both come back as an empty list and exit 0 if the check is
+        `Path.exists()`, which answers False for anything it cannot stat — and
+        Stage 1.5 reads that output as "nothing carried".
+        """
+        locked = tmp_path / "locked"
+        locked.mkdir()
+        path = write_cursor(locked, {"note": "- 과제 하나가 다음 패스 과제"})
+
+        # Positive control: while it is readable, that task IS reported. Without
+        # this the assertion below cannot tell a fixed gate from a bad fixture.
+        before = run(path)
+        assert before.returncode == 0
+        assert len(json.loads(before.stdout)) == 1
+
+        locked.chmod(0o000)
+        try:
+            if Path(path).exists():  # pragma: no cover - root, or a lenient FS
+                pytest.skip("the directory mode did not make the cursor unstattable")
+            result = run(path)
+        finally:
+            locked.chmod(0o700)
+        assert result.returncode == 2
+        assert "cursor unreadable" in result.stderr
+
 
 def test_text_format(tmp_path: Path):
     path = write_cursor(tmp_path, {"note": "\n".join(["[82nd 2026-08-05] x", CYCLE_82_LINE])})
