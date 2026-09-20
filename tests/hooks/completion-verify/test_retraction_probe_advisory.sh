@@ -119,6 +119,71 @@ run_case advisory "payload last_assistant_message is the text graded" \
   "{\"last_assistant_message\": \"$RETRACTION\"}"
 
 # =====================================================================
+# Sidechain isolation — a delegated agent's events are not the main
+# chain's evidence. A main-session turn carries them inline, marked
+# `isSidechain`, and both counts the hook makes are claims about the
+# retracting agent.
+# =====================================================================
+
+# build_sidechain_transcript <final_text> <sidechain_output> [main_output]
+# The tool_use/tool_result pair carrying <sidechain_output> is marked
+# isSidechain; <main_output>, when given, gets an unmarked pair as well.
+build_sidechain_transcript() {
+  local final_text="$1" side_output="$2" main_output="${3-__none__}"
+  TRANSCRIPT="$(mktemp)"
+  python3 - "$TRANSCRIPT" "$final_text" "$side_output" "$main_output" <<'PY'
+import json, sys
+path, final_text, side_output, main_output = sys.argv[1:5]
+events = [{"message": {"role": "user", "content": "the command ran fine"}}]
+
+
+def pair(tuid, output, sidechain):
+    use = {"message": {"role": "assistant", "content": [
+        {"type": "tool_use", "id": tuid, "name": "Bash",
+         "input": {"command": "gh pr view 1 --json state"}}]}}
+    res = {"message": {"role": "user", "content": [
+        {"type": "tool_result", "tool_use_id": tuid, "content": output}]}}
+    if sidechain:
+        use["isSidechain"] = True
+        res["isSidechain"] = True
+    return [use, res]
+
+
+if main_output != "__none__":
+    events += pair("t_main", main_output, False)
+events += pair("t_side", side_output, True)
+events.append({"message": {"role": "assistant",
+                           "content": [{"type": "text", "text": final_text}]}})
+with open(path, "w", encoding="utf-8") as f:
+    for e in events:
+        f.write(json.dumps(e, ensure_ascii=False) + "\n")
+PY
+}
+
+SIDE_OUTPUT="state=MERGED  mergedAt=2026-09-20T01:28:38Z"
+MAIN_OUTPUT="headRefOid=1b11401eb32e33f0aca69b641754941c49ccadf5"
+
+# False positive: the main chain ran nothing. Without the filter the
+# subagent's tool_use is counted and the advisory fires on a turn whose
+# retracting agent never ran a probe at all — the "no tool call this
+# turn" case above is the control that says this must stay silent.
+build_sidechain_transcript "$RETRACTION" "$SIDE_OUTPUT"
+run_case silent "a sidechain tool call is not the main chain's probe" '{}'
+
+# False negative: the main chain did run a probe, and the retraction
+# quotes the SUBAGENT's output instead. Quoting someone else's
+# measurement is not evidence the retracting agent measured anything.
+build_sidechain_transcript "$RETRACTION
+$SIDE_OUTPUT" "$SIDE_OUTPUT" "$MAIN_OUTPUT"
+run_case advisory "quoting a sidechain output does not clear the advisory" '{}'
+
+# Positive control for the pair above: same transcript, the main
+# chain's own output quoted, and the advisory correctly goes silent.
+build_sidechain_transcript "$RETRACTION
+$MAIN_OUTPUT" "$SIDE_OUTPUT" "$MAIN_OUTPUT"
+run_case silent "quoting the main chain's own output still clears it" '{}'
+
+# =====================================================================
 # Guards and fail-open
 # =====================================================================
 

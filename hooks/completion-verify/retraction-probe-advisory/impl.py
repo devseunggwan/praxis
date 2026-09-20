@@ -107,16 +107,28 @@ def _blocks(event: dict, role: str) -> list[dict]:
 
 
 def turn_tool_outputs(turn: list[dict]) -> tuple[int, list[str]]:
-    """(tool calls, tool output texts) for the turn."""
+    """(tool calls, tool output texts) the MAIN chain ran this turn.
+
+    A main-session turn carries a delegated agent's own events inline, marked
+    `isSidechain`, and both counts here are claims about the retracting agent:
+    a subagent's run is not a probe the main agent made, and a line quoted out
+    of one is not evidence the main agent measured anything. Counting them
+    fires the advisory on a turn whose main chain ran no tool at all, and
+    silences it whenever a retraction happens to quote a subagent's output.
+    `extract_last_assistant_text` excludes them on the same grounds. On the
+    SubagentStop path the marker is already gone (`load_stop_turn` drops it as
+    the per-agent tail is parsed), so this filter is a no-op there.
+    """
+    main = [event for event in turn if not event.get("isSidechain")]
     calls = sum(
         1
-        for event in turn
+        for event in main
         for block in _blocks(event, "assistant")
         if block.get("type") == "tool_use"
     )
     outputs = [
         _tool_result_text(block)
-        for event in turn
+        for event in main
         for block in _blocks(event, "user")
         if block.get("type") == "tool_result"
     ]
