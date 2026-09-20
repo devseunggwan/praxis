@@ -331,11 +331,15 @@ def _has_evidence_block(
 # Slash-command pattern: /word or /namespace:word
 _SLASH_CMD_RE = re.compile(r"(?<![A-Za-z0-9_/])/([A-Za-z][A-Za-z0-9_-]*(?::[A-Za-z][A-Za-z0-9_-]*)?)")
 
-# Prefixes that indicate foreign plugin namespaces
-_FOREIGN_PREFIXES = frozenset(
+# Prefixes that indicate foreign plugin namespaces. The shipped set carries
+# publicly installable plugins only; an author's own org plugins extend it via
+# PRAXIS_FOREIGN_PLUGINS (issue #1470), comma-separated.
+#
+# An extension here is additive and safe in a way the sibling read-only
+# allowlist is not: every entry can only ADD an advisory, never remove a gate,
+# so a wrong entry costs a false advisory rather than a silent pass.
+_BUILTIN_FOREIGN_PREFIXES = frozenset(
     {
-        "laplace-dev-hub",
-        "laplace-wiki",
         "oh-my-claudecode",
         "omc",
         "codex",
@@ -344,15 +348,27 @@ _FOREIGN_PREFIXES = frozenset(
     }
 )
 
+
+def _foreign_prefixes() -> frozenset[str]:
+    extra = {
+        entry.strip()
+        for entry in os.environ.get("PRAXIS_FOREIGN_PLUGINS", "").split(",")
+        if entry.strip()
+    }
+    return _BUILTIN_FOREIGN_PREFIXES | extra
+
+
+_FOREIGN_PREFIXES = _foreign_prefixes()
+
 # Bare-form skill slugs known to belong to foreign plugins. A bare `/release`
-# (without the `laplace-dev-hub:` prefix) was the original Event 2 trigger
+# (without its plugin's namespace prefix) was the original Event 2 trigger
 # (see issue #392). Conservative scope — only high-confidence foreign cases.
 # False-positive risk: a praxis-owned skill with the same bare slug would be
 # silently mis-flagged; add it to praxis's skill set first if such a name is
 # ever introduced.
 _KNOWN_FOREIGN_SKILLS = frozenset(
     {
-        # laplace-dev-hub
+        # a hub-style release plugin
         "release",
         "hub-bulk-release",
         "hub-scan-issues",
@@ -414,7 +430,7 @@ def _detect_foreign_slash_commands(text: str, cwd_plugin: str | None) -> list[st
 
     foreign: list[str] = []
     for cmd in matches:
-        # Namespaced command like laplace-dev-hub:release
+        # Namespaced command like example-dev-hub:release
         if ":" in cmd:
             prefix = cmd.split(":")[0]
             # If the prefix is explicitly foreign

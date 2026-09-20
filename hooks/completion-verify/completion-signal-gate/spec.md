@@ -24,14 +24,14 @@ require a narrower terminal-position match; this hook catches the broader
 claim vocabulary.
 
 **Event 2 — Cross-plugin slash command surfacing**: While working in the
-praxis repo, the assistant surfaced `/release` (a laplace-dev-hub skill) as
+praxis repo, the assistant surfaced `/release` (a example-dev-hub skill) as
 an option. The flat `available-skills` namespace across multiple loaded
 plugins means foreign-namespace commands get suggested without repo-context
 filtering. This sub-rule emits an advisory when either form appears in
 praxis cwd output:
 
 1. A namespaced `/plugin:command` whose plugin prefix is a known foreign
-   namespace (`laplace-dev-hub:release`, `oh-my-claudecode:ralph`, ...).
+   namespace (`example-dev-hub:release`, `oh-my-claudecode:ralph`, ...).
 2. A **bare** `/command` whose slug is in the curated `_KNOWN_FOREIGN_SKILLS`
    set — the original Event 2 trigger (`/release` with no prefix). Scope is
    intentionally narrow to avoid false positives on `/bin`, `/usr`, and
@@ -190,8 +190,8 @@ Fires in either of two forms when the cwd's active plugin is `praxis`
 (detected via `.claude-plugin/marketplace.json` or git remote slug):
 
 1. **Namespaced form**: `/namespace:command` where the namespace is one of the
-   known foreign plugins (`laplace-dev-hub`, `oh-my-claudecode`, `omc`,
-   `codex`, `scheduler`, `gemini`, `laplace-wiki`).
+   known foreign plugins (`example-dev-hub`, `oh-my-claudecode`, `omc`,
+   `codex`, `scheduler`, `gemini`, `example-wiki`).
 2. **Bare form**: `/command` (no namespace) where the slug is in
    `_KNOWN_FOREIGN_SKILLS`. Conservative curated set scoped to slugs that
    are unambiguously foreign — `release`, `hub-bulk-release`, `hub-scan-issues`,
@@ -225,7 +225,7 @@ stdout. The hook always exits 0 — it never blocks.
 **Rule 2 advisory (systemMessage body):**
 
 ```text
-[praxis:completion-signal-gate] cross-plugin slash command(s) /laplace-dev-hub:close-hub-issue surfaced while cwd plugin is 'praxis'.
+[praxis:completion-signal-gate] cross-plugin slash command(s) /example-dev-hub:close-hub-issue surfaced while cwd plugin is 'praxis'.
 [praxis:completion-signal-gate] Rule: CLAUDE.md 'Plugin-context anchoring' — do not surface skill commands from foreign plugin namespaces. Verify you are working in the correct repo/plugin context before recommending slash commands.
 ```
 
@@ -392,7 +392,7 @@ regression case asserts it still fires.
 
 **Rule 2:**
 
-- Foreign `/laplace-dev-hub:close-hub-issue` in praxis cwd → advisory
+- Foreign `/example-dev-hub:close-hub-issue` in praxis cwd → advisory
 
 **Fail-safe paths (4):**
 

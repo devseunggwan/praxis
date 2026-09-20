@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -818,11 +819,11 @@ def test_rule1b_partial_negation_is_not_a_refusal(payload: str, tmp_path: Path) 
 
 
 def test_rule2_foreign_plugin_command(tmp_path: Path) -> None:
-    """Foreign plugin /laplace-dev-hub:release in praxis cwd → advisory."""
+    """Foreign plugin /example-dev-hub:release in praxis cwd → advisory."""
     events = [
         mk_user("다음 단계는 뭔가요?"),
         mk_assistant(
-            "현재 이슈를 닫으려면 /laplace-dev-hub:close-hub-issue 를 실행하거나 "
+            "현재 이슈를 닫으려면 /example-dev-hub:close-hub-issue 를 실행하거나 "
             "/release 스킬을 사용할 수 있습니다."
         ),
     ]
@@ -853,6 +854,47 @@ def test_rule2_foreign_plugin_command(tmp_path: Path) -> None:
     )
     assert "{praxis}" not in msg, (
         f"Rule 2 must not leak the literal placeholder; stdout={result.stdout!r}"
+    )
+
+
+def _rule2_run(text: str, tmp_path: Path, env_extra: dict[str, str] | None = None):
+    """Run the hook over one assistant message from the praxis worktree."""
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    tp = write_jsonl([mk_user("다음 단계는?"), mk_assistant(text)], tmp_path)
+    payload = json.dumps(
+        {"transcript_path": tp, "stop_hook_active": False, "session_id": "test-rule2-env"}
+    )
+    env = {**os.environ, **(env_extra or {})}
+    return subprocess.run(
+        [sys.executable, str(HOOK_PATH)],
+        input=payload,
+        capture_output=True,
+        text=True,
+        timeout=10,
+        cwd=str(REPO_ROOT),
+        env=env,
+    )
+
+
+def test_rule2_org_prefix_needs_the_env(tmp_path: Path) -> None:
+    """An org plugin namespace is not shipped: silent without the env, advisory with it.
+
+    Both halves matter (issue #1470). Without the negative half, an advisory
+    that fires for some *other* reason — a bare slug in the same sentence, say —
+    would read as proof the env works.
+    """
+    text = "배포는 /acme-internal:ship 으로 합니다."
+
+    silent = _rule2_run(text, tmp_path / "a")
+    assert silent.returncode == 0
+    assert "[praxis:completion-signal-gate]" not in _msg(silent.stdout), (
+        f"an unlisted namespace must stay silent; stdout={silent.stdout!r}"
+    )
+
+    fires = _rule2_run(text, tmp_path / "b", {"PRAXIS_FOREIGN_PLUGINS": "acme-internal"})
+    assert fires.returncode == 0
+    assert "[praxis:completion-signal-gate]" in _msg(fires.stdout), (
+        f"PRAXIS_FOREIGN_PLUGINS must widen the namespace set; stdout={fires.stdout!r}"
     )
 
 
@@ -906,17 +948,17 @@ def test_rule2_bare_unknown_command_silent(tmp_path: Path) -> None:
 
 
 def test_rule2_namespaced_foreign_silent_in_non_praxis_cwd(tmp_path: Path) -> None:
-    """Namespaced foreign command in laplace-dev-hub cwd → no advisory.
+    """Namespaced foreign command in example-dev-hub cwd → no advisory.
 
     Rule 2 namespaced branch fires only when cwd_plugin == 'praxis'.
-    When working inside another plugin (e.g. laplace-dev-hub), the hook
+    When working inside another plugin (e.g. example-dev-hub), the hook
     must remain silent even if a foreign-namespaced command appears in output.
     """
-    # Simulate laplace-dev-hub cwd by creating a .claude-plugin/marketplace.json
+    # Simulate example-dev-hub cwd by creating a .claude-plugin/marketplace.json
     plugin_dir = tmp_path / ".claude-plugin"
     plugin_dir.mkdir()
     (plugin_dir / "marketplace.json").write_text(
-        json.dumps({"name": "laplace-dev-hub"})
+        json.dumps({"name": "example-dev-hub"})
     )
     events = [
         mk_user("다음 단계는 뭔가요?"),
@@ -938,7 +980,7 @@ def test_rule2_namespaced_foreign_silent_in_non_praxis_cwd(tmp_path: Path) -> No
         capture_output=True,
         text=True,
         timeout=10,
-        cwd=str(tmp_path),  # laplace-dev-hub cwd, NOT praxis
+        cwd=str(tmp_path),  # example-dev-hub cwd, NOT praxis
     )
     assert result.returncode == 0
     assert result.stdout == "", (
