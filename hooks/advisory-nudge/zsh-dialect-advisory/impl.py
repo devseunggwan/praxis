@@ -141,6 +141,44 @@ def _mask_double_bracket(text: str) -> str:
     return "".join(out)
 
 
+def _mask_arithmetic(text: str) -> str:
+    """`text` with `(( … ))` and `$(( … ))` blanked, length preserved.
+
+    Arithmetic is parsed by the shell itself, so `==` there is an operator —
+    `(( x == y ))` runs cleanly and must not be reported as a path lookup.
+    """
+    out = list(text)
+    depth = 0
+    i = 0
+    while i < len(text) - 1:
+        pair = text[i:i + 2]
+        if pair == "((":
+            depth += 1
+            i += 2
+            continue
+        if pair == "))" and depth:
+            depth -= 1
+            i += 2
+            continue
+        if depth:
+            out[i] = " "
+        i += 1
+    return "".join(out)
+
+
+_COMMENT_RE = re.compile(r"(?:^|(?<=\s))#[^\n]*", re.MULTILINE)
+
+
+def _mask_comments(text: str) -> str:
+    """`text` with shell comments blanked, length preserved.
+
+    A comment starts at an unquoted `#` that begins a word; run this after
+    `_mask_quoted`, so a `#` inside quotes is already gone. `${w#pat}` and `$#`
+    are untouched because their `#` does not begin a word.
+    """
+    return _COMMENT_RE.sub(lambda m: " " * len(m.group(0)), text)
+
+
 def unsplit_params(command: str) -> list[str]:
     """Names of the parameters zsh would pass unsplit, in source order."""
     text = _mask_quoted(strip_heredoc_bodies(command))
@@ -156,7 +194,8 @@ def unsplit_params(command: str) -> list[str]:
 
 def equals_words(command: str) -> list[str]:
     """Words zsh will try to resolve as a command path, in source order."""
-    text = _mask_double_bracket(_mask_quoted(strip_heredoc_bodies(command)))
+    text = _mask_quoted(strip_heredoc_bodies(command))
+    text = _mask_arithmetic(_mask_double_bracket(_mask_comments(text)))
     found: list[str] = []
     for match in _EQUALS_WORD_RE.finditer(text):
         word = match.group(1)

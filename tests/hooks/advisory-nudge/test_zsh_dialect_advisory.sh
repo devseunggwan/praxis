@@ -125,6 +125,17 @@ run_case "a quoted == is safe" silent \
   "print '=='"
 run_case "= inside a long flag is not word-leading" silent \
   'git diff --stat=2'
+# Arithmetic and comments are not words zsh expands, so `==` there runs fine.
+run_case "== inside (( )) is an arithmetic operator" silent \
+  '(( x == y )) && print yes'
+run_case "== inside \$(( )) is an arithmetic operator" silent \
+  'print $(( 1 == 1 ))'
+run_case "== inside a comment is never expanded" silent \
+  'print hi # a==b'
+# Control for the comment mask: `${#x}` holds a `#` that begins no word, so
+# the real =word after it must still ask.
+run_case "a # inside \${#x} is not a comment" "ask:==z" \
+  'print ${#x} ==z'
 
 # === ASK — an unmatched [ inside a pattern operator =========================
 
