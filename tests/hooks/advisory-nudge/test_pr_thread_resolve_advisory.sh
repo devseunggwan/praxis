@@ -180,7 +180,7 @@ assert_grep "line-null-renders-path-only" "api/z.py (@rev)"
 # all ten threads rendered as the same 90 chars of badge markup.
 setup_repo
 CODEX_BODY='**<sub><sub>![P1 Badge](https://img.shields.io/badge/P1-orange?style=flat)</sub></sub> Prevent nil deref on the remote diagnose path**'
-stub_gh "$PR_LIST" "$(threads_json "$(thread false hubctl/x.go 478 "$CODEX_BODY")")"
+stub_gh "$PR_LIST" "$(threads_json "$(thread false orgctl/x.go 478 "$CODEX_BODY")")"
 run_advisory "git push origin main" "$OK"
 assert_grep "badge-stripped" "Prevent nil deref"
 if printf '%s' "$LAST_ERR" | grep -q "img.shields.io"; then
