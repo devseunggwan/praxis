@@ -59,8 +59,41 @@ If the cursor exists, before scanning any feedback file:
 1. Use `next_batch_pointer` as the schedule
 2. Exclude `scanned_recent_batch`
 3. Carry the `note` field forward into Stage 3 input
+4. Run the carried-task scan below and add each candidate to this cycle's
+   finding set
 
 Silent skip of the cursor read is a Red Flag.
+
+### Carried-task scan (MUST — issue #1427)
+
+Carrying the note forward for *display* is not consumption. A line written
+there as the next pass's task had no path to becoming a finding, so it was
+re-discovered instead of resumed: cycle 82 (2026-08-05) recorded
+`hookable:true 인 다른 메모리 전수 점검이 다음 패스 과제`, and thirteen cycles
+later the same defect class was found from scratch and reported as
+"pre-existing, out of scope".
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/skills/retrospect/carried-task-scan.py" \
+  --cursor .omc/state/retrospect-hygiene-cursor.json
+```
+
+The script prints the note lines that claim a next pass (`carried:`,
+`다음 패스`, `next pass`) and carry no disposition yet, each with the cycle tag
+it sat under. It decides nothing else.
+
+For each candidate:
+
+- Emit it as a `category: memory_hygiene` finding with `origin: carried` and
+  the originating cycle on the finding's evidence line
+- The finding's claim is "this task was recorded in cycle N and has not been
+  executed since" — do not re-derive the original evidence from scratch
+- When this cycle's own scan independently produced the same defect, keep one
+  finding and record both origins rather than filing two
+- Zero candidates is a normal result and needs no trail line of its own
+
+An unread carried task is a Red Flag in the same way a skipped cursor read is:
+the note is input, not decoration.
 
 ### Cursor write mandate (exit — read-modify-write union under concurrency, MUST)
 

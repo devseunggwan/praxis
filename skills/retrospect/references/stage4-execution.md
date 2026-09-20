@@ -383,6 +383,7 @@ For each approved action:
    | Hook code | Script file exists + settings.json registration confirmed (dry-run varies by hook type — no generic check). If Action 6 step (a) created a worktree, report the worktree path and confirm the file exists there. |
    | Global `~/.claude/CLAUDE.md` draft | **Project target (`AGENTS.md`)**: Diff shown + explicit approval received + Edit applied. **Global target (`~/.claude/CLAUDE.md`)**: Staging file created at `/tmp/claude-md-draft-{slug}.md` → AskUserQuestion 3-option presented → `apply`: Edit applied + diff shown; `보류`: staging file path logged in completion report. |
    | Skill idea note | File exists in `.omc/plans/` |
+   | Carried finding (`origin: carried`) | The cursor note line carries a `[carried-done <cycle>]` or `[carried-skipped <cycle>: <reason>]` suffix, and re-running `carried-task-scan.py` no longer prints it |
 
    Report verification results in the completion table.
 
@@ -402,3 +403,30 @@ For each approved action:
 
 Session learnings captured. Next session will benefit from these improvements.
 ```
+
+## Carried-task disposition write-back (MUST — issue #1427)
+
+Stage 1.5 promotes each unconsumed carry-forward line into a finding with
+`origin: carried` (see
+[`stage1-2-analysis.md`](stage1-2-analysis.md#carried-task-scan-must--issue-1427)).
+Those findings close on the cursor, not on an artifact: nothing else records
+that the task was dealt with, so an executed carried task reappears next cycle
+exactly as it did this one. Cycle 82 (2026-08-05) wrote
+`hookable:true 인 다른 메모리 전수 점검이 다음 패스 과제`, and thirteen cycles
+later the same defect class was re-discovered from scratch and reported as
+pre-existing.
+
+For every finding whose row carries `origin: carried`, append a disposition to
+**the note line it came from**, inside the Stage 1.5 cursor write (the union
+merge already rewrites the note, so this needs no second write):
+
+| Outcome | Suffix to append |
+| --- | --- |
+| Any action executed for the finding | `[carried-done <cycle>]` |
+| Stage 3 pick was `⏭ Skip`, or the finding was dropped | `[carried-skipped <cycle>: <reason>]` |
+| Stage 3 pick was `🕐 Defer` | nothing — the task is still owed, so it must resurface |
+
+`<cycle>` is this cycle's tag (`96th 2026-09-20`). Keep the original text: the
+line is the record of what was carried and for how long, and the scan skips it
+on the suffix alone. Rewriting or deleting the line loses that history and, for
+a deletion, silently discharges a task nobody executed.
