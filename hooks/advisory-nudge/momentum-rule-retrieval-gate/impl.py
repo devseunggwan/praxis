@@ -901,6 +901,60 @@ def _ask_answer_approves(content: object, pr: str) -> bool:
                for q, a in _ASK_ANSWER_RE.findall(_user_message_text(content)))
 
 
+def _ask_answer_holds(content: object, pr: str) -> bool:
+    """True when an AskUserQuestion result answers a question about `pr` or about
+    merging with something that is not an approval (`보류`)."""
+    return any((_mentions_pr(q, pr) or _MERGE_WORD_RE.search(q))
+               and not _ask_label_approves(a, pr)
+               for q, a in _ASK_ANSWER_RE.findall(_user_message_text(content)))
+
+
+def _ask_question_text(block: dict) -> str:
+    """The question texts of an AskUserQuestion tool_use, joined.
+
+    A declined question comes back `is_error` with no `"q"="a"` pair, so the
+    only place its subject survives is the call that raised it."""
+    inp = block.get("input")
+    questions = inp.get("questions") if isinstance(inp, dict) else None
+    if not isinstance(questions, list):
+        return ""
+    return " ".join(q["question"] for q in questions
+                    if isinstance(q, dict) and isinstance(q.get("question"), str))
+
+
+def _ask_held_after(entries: list[dict], index: int, pr: str) -> bool:
+    """True when an AskUserQuestion answer after `index` holds or declines this
+    merge — a `보류` pick, or a declined question about the PR or about merging.
+
+    The typed-message scan cannot see either: an answer arrives as a tool_result,
+    which `_human_user_indices` skips by design (issue #1418 F2). Without this,
+    a typed `ok` survived the very question that took it back.
+    """
+    asks: dict[str, str] = {}
+    for i, ev in enumerate(entries):
+        msg = ev.get("message")
+        if not isinstance(msg, dict) or ev.get("isSidechain"):
+            continue
+        content = msg.get("content")
+        if not isinstance(content, list):
+            continue
+        for b in content:
+            if not isinstance(b, dict):
+                continue
+            if b.get("type") == "tool_use" and b.get("name") == "AskUserQuestion":
+                if isinstance(b.get("id"), str):
+                    asks[b["id"]] = _ask_question_text(b)
+            elif (i > index and b.get("type") == "tool_result"
+                  and b.get("tool_use_id") in asks):
+                question = asks[b["tool_use_id"]]
+                if b.get("is_error"):
+                    if _mentions_pr(question, pr) or _MERGE_WORD_RE.search(question):
+                        return True
+                elif _ask_answer_holds(b.get("content"), pr):
+                    return True
+    return False
+
+
 def _merge_target_pr(entries: list[dict], command: object, floor: int) -> str | None:
     """PR number a single `gh pr merge` targets, resolved the way
     `_correlated_prior_turn_text` resolves it; None when it cannot be named.
@@ -925,7 +979,10 @@ def _is_typed_approval(content: object, pr: str) -> bool:
 
 def _held_after(entries: list[dict], idxs: list[int], index: int, pr: str) -> bool:
     """True when a later user message about this PR or merging is not an approval
-    ("PR #999 머지 보류"): the latest decision replaces an earlier approval."""
+    ("PR #999 머지 보류"): the latest decision replaces an earlier approval. A
+    picked or declined AskUserQuestion answer withdraws it the same way."""
+    if _ask_held_after(entries, index, pr):
+        return True
     for j in idxs:
         if j <= index:
             continue

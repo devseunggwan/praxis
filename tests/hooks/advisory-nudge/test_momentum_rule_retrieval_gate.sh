@@ -891,6 +891,12 @@ run_merge_escalation_case "merge_serial_loop_answered_denies" \
 # A later hold replaces an earlier approval ("ok" then "PR #999 머지 보류").
 run_merge_escalation_case "merge_serial_hold_after_ok_denies" \
   "yes" "" "momentum-merge-serial-hold-after-ok.jsonl" "gh pr merge 999 --squash --delete-branch"
+# …and it replaces it through AskUserQuestion too, which the typed-message scan
+# never sees: a `보류` pick and a declined question each take the "ok" back.
+run_merge_escalation_case "merge_serial_ask_hold_after_ok_denies" \
+  "yes" "" "momentum-merge-serial-ask-hold-after-ok.jsonl" "gh pr merge 999 --squash --delete-branch"
+run_merge_escalation_case "merge_serial_ask_decline_after_ok_denies" \
+  "yes" "" "momentum-merge-serial-ask-decline-after-ok.jsonl" "gh pr merge 999 --squash --delete-branch"
 # The block names the gap: a reply that approves nothing is not a missing message.
 _reason_out=$(python3 -c 'import json, sys; print(json.dumps({"tool_name": "Bash", "tool_input": {"command": "gh pr merge 999 --squash --delete-branch"}, "transcript_path": sys.argv[1], "session_id": "test-momentum-merge"}))' \
   "$FIXTURES_DIR/momentum-merge-serial-status-request.jsonl" | python3 "$HOOK" 2>/dev/null)

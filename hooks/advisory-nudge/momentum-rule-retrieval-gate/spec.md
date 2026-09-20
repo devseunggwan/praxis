@@ -323,7 +323,11 @@ approve blindly.
   named it and either asked to merge that PR, or is answered by an approval
   that names merging itself (`머지 진행`), and no later user message about the
   PR or about merging is something other than an approval — the latest decision
-  wins, so `ok` followed by `PR #999 머지 보류` leaves the merge unanswered. A
+  wins, so `ok` followed by `PR #999 머지 보류` leaves the merge unanswered. An
+  `AskUserQuestion` answer withdraws it the same way — a picked label that is
+  not an approval, or a declined (`is_error`) question, about the PR or about
+  merging — which the typed-message scan cannot see, since that answer arrives
+  as a tool_result. A
   merge that repeats or chains merge segments is never answered this way: one
   answer releases one merge.
   Asking to merge is one question sentence (ending in `?`, `할까요`, `될까요`,
