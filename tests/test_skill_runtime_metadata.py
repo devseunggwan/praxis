@@ -607,7 +607,9 @@ def test_current_repo_runtime_sensitive_skill_set_is_stable():
         "debt": ("external-cli-wrapper",),
         # Skill(...) since #978: the approved merge chains into
         # worktree-merge-cleanup, which owns the merge call itself.
-        "merge-briefing": ("Skill(...)", "external-cli-wrapper"),
+        # AskUserQuestion since #1445: the approve-ask is a tool call, and its
+        # question and label shapes are what the merge gate reads as an answer.
+        "merge-briefing": ("AskUserQuestion", "Skill(...)", "external-cli-wrapper"),
         # external-cli-wrapper from the `git diff` / `git rev-parse` steps that
         # resolve the review's inputs; helper-executable from the envelope
         # validator, which is the one place the closed contract is enforced.
