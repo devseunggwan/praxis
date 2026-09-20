@@ -205,20 +205,41 @@ def equals_words(command: str) -> list[str]:
 
 
 def _has_unmatched_bracket(pattern: str) -> bool:
-    """True when `pattern` opens a `[` class it never closes."""
-    depth = 0
-    escaped = False
-    for ch in pattern:
-        if escaped:
-            escaped = False
-            continue
+    """True when `pattern` opens a `[` class it never closes.
+
+    Inside a class `[` is an ordinary member, and a `]` right after the opener
+    (or after `!`/`^`) is a member too — so `[[]` is a closed class matching a
+    literal `[`, while `[[` is still left open. `[:alpha:]` is skipped whole.
+    An open class whose first member is that `]` (`[]`, `[!]`) is not reported:
+    zsh 5.9 treats it as a no-match rather than a bad pattern (measured).
+    """
+    in_class = False
+    class_start = 0
+    leading_bracket = False
+    i = 0
+    while i < len(pattern):
+        ch = pattern[i]
         if ch == "\\":
-            escaped = True
-        elif ch == "[":
-            depth += 1
-        elif ch == "]" and depth:
-            depth -= 1
-    return depth > 0
+            i += 2
+            continue
+        if not in_class:
+            if ch == "[":
+                in_class = True
+                class_start = i + 1
+                if class_start < len(pattern) and pattern[class_start] in "!^":
+                    class_start += 1
+                leading_bracket = pattern[class_start:class_start + 1] == "]"
+            i += 1
+            continue
+        if ch == "[" and pattern.startswith("[:", i):
+            end = pattern.find(":]", i + 2)
+            if end != -1:
+                i = end + 2
+                continue
+        if ch == "]" and i != class_start:
+            in_class = False
+        i += 1
+    return in_class and not leading_bracket
 
 
 def bad_patterns(command: str) -> list[str]:

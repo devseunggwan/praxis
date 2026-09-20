@@ -152,6 +152,18 @@ run_case "a default value is not parsed as a pattern" silent \
   'print ${w:-[[}'
 run_case "single quotes do protect it" silent \
   "print '\${w#[[}'"
+# Inside a class `[` is a member and a leading `]` is a member, so these close.
+run_case "[[] is a closed class matching a literal [" silent \
+  'print ${w#[[]}'
+run_case "a leading ] is a class member" silent \
+  'print ${w#[]]}'
+run_case "a POSIX class inside a class closes" silent \
+  'print ${w#[[:alpha:]]}'
+run_case "an open POSIX class is still unmatched" 'ask:${w#[[:alpha:]}' \
+  'print ${w#[[:alpha:]}'
+# zsh 5.9 treats an open class led by `]` as a no-match, not a bad pattern.
+run_case "an open class led by ] is not a bad pattern" silent \
+  'print ${w#[]}'
 
 # === ASK — a heredoc opener shadowed by its own delimiter ===================
 
