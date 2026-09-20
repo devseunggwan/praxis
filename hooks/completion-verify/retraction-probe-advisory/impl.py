@@ -69,7 +69,10 @@ _RETRACTION_RE = re.compile(
 )
 
 # Same question exemption as pr-claim-mutation-gate: asking is not asserting.
-_QUESTION_RE = re.compile(r"[?？]\s*$|했나요|됐나요|했습니까")
+# `건가요` earns its place because it is the ending a question ABOUT a retraction
+# takes ("제가 틀렸습니다라고 한 건가요"), so the line carries the retraction
+# vocabulary while asserting nothing. With a question mark it was already out.
+_QUESTION_RE = re.compile(r"[?？]\s*$|했나요|됐나요|했습니까|건가요")
 
 
 def retraction_line(text: str) -> str | None:

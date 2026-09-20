@@ -95,6 +95,16 @@ run_case silent "retraction inside a > quote" '{}'
 build_transcript "제 판단이 틀렸습니까?" "$OUTPUT"
 run_case silent "retraction phrased as a question" '{}'
 
+# The same exemption without the mark. `건가요` is how a question ABOUT a
+# retraction ends, so the line carries the vocabulary while asserting nothing.
+build_transcript "제가 앞에서 틀렸습니다라고 한 건가요" "$OUTPUT"
+run_case silent "a 건가요 question carrying the vocabulary" '{}'
+
+# Control for the row above: the same sentence as a statement still advises,
+# so the silence is the ending and not the words around it.
+build_transcript "제가 앞에서 틀렸습니다" "$OUTPUT"
+run_case advisory "the same words as a statement still advise" '{}'
+
 build_transcript "명령이 실행됐고 라벨이 붙었습니다." "$OUTPUT"
 run_case silent "no retraction vocabulary" '{}'
 
