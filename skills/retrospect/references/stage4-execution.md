@@ -426,6 +426,13 @@ merge already rewrites the note, so this needs no second write):
 | Stage 3 pick was `⏭ Skip`, or the finding was dropped | `[carried-skipped <cycle>: <reason>]` |
 | Stage 3 pick was `🕐 Defer` | nothing — the task is still owed, so it must resurface |
 
+The line is found by the scanner's own three output values together — `field`
+names the prose block, `cycle` the header it sat under, and `text` the line
+itself with its bullet stripped. Do not address it by line index: the union
+merge reassembles the note, so an index captured at scan time can point at a
+different line by write-back time, and it does so silently — a text match that
+misses is visible, a wrong index writes successfully.
+
 `<cycle>` is this cycle's tag (`96th 2026-09-20`). Keep the original text: the
 line is the record of what was carried and for how long, and the scan skips it
 on the suffix alone. Rewriting or deleting the line loses that history and, for
