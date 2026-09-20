@@ -101,7 +101,9 @@ and 486 advisory-grade word-split fires (0.33%).
 | An opener inside an open body reusing the outer delimiter, with its own terminator | `ask` |
 | `set -- $var`, `set - ${var}`, `for x in $var` | Advisory (`additionalContext` + stderr) |
 | `[[ $x == y ]]`, `test 1 = 1`, `print a=b`, `--stat=2` | Silent — not the shape |
-| `${w#[a-z]}`, `${w:-[[}`, `'${w#[[}'` | Silent — valid pattern, non-pattern operator, or protected |
+| `(( x == y ))`, `$(( 1 == 1 ))`, `print hi # a==b` | Silent — arithmetic and comments are not expanded words |
+| `${w#[a-z]}`, `${w#[[]}`, `${w#[]]}`, `${w#[[:alpha:]]}`, `${w:-[[}`, `'${w#[[}'` | Silent — valid pattern, non-pattern operator, or protected |
+| `${w#[]}`, `${w#[!]}` | Silent — an open class led by `]` is a no-match in zsh 5.9, not a bad pattern |
 | A nested heredoc with a different delimiter, or a body that mentions one | Silent |
 | `"$var"`, `${=var}`, `$=var`, `${(s: :)var}`, `$@`, `$1` | Silent |
 | Inside a heredoc body | Silent for shapes 1, 2 and 4 — data, not words |
@@ -118,6 +120,27 @@ An unquoted `$var` handed to an ordinary command (`gh pr view $args`) is the
 same mechanism as shape 4, but it is also the overwhelmingly common *correct*
 usage, so warning there would bury the two shapes where the intent is legible
 from the syntax itself.
+
+The detectors are regex scans over quote-masked text, not a shell parser, and
+stay that way on purpose: an `ask` is only worth its interruption on a shape
+that is cheap to recognise and certain to fail. Known gaps, each measured
+against zsh 5.9 and left in place:
+
+- **Missed `=word` after a control operator** — `true;=foo` and
+  `true&&=foo` fail in zsh, but only a word preceded by whitespace or the start
+  of the command is scanned.
+- **Missed `==` after a literal `[[` argument** — `echo [[ $x == y ]]` fails
+  in zsh, but every `[[ … ]]` span is masked as a condition, including one that
+  is only an argument to another command.
+- **Heredoc shapes inside a quoted string** — a multi-line quoted string
+  containing two `<<EOF` openers and two `EOF` lines is read as a shadowed
+  heredoc and asks, although it is only data. The opener scan is not
+  quote-aware, and `<<-` terminators are compared after a full `strip()`
+  rather than tab-only removal.
+
+Closing any of them needs a real tokenizer (quotes, comments, control
+operators, arithmetic and conditional contexts in one pass). That is a
+different hook, not a patch to this one.
 
 Reference: issues [#1405](https://github.com/devseunggwan/praxis/issues/1405)
 and [#1425](https://github.com/devseunggwan/praxis/issues/1425).
