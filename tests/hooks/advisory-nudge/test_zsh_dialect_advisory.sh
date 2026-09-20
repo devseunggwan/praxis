@@ -1,21 +1,23 @@
 #!/bin/bash
-# test_zsh_word_split_advisory.sh — coverage for the advisory hook (#1405).
+# test_zsh_dialect_advisory.sh — coverage for the dialect hook (#1405, #1425).
 #
 # Synthesizes Claude Code PreToolUse(Bash) payloads and asserts:
-#   advisory → exit 0 + stderr carries the hook tag and the ${=var} remedy
-#   silent   → exit 0 + stderr empty
+#   ask      → exit 0 + stdout permissionDecision=ask carrying the given marker
+#   advisory → exit 0 + stdout additionalContext + stderr with the tag + remedy
+#   silent   → exit 0 + both streams empty
 #
-# $SHELL is forced per case: the whole premise is zsh-specific, so the
-# non-zsh cases are part of the contract rather than environment noise.
+# $SHELL is forced per case: three of the four shapes are zsh-specific, so the
+# non-zsh cases are part of the contract rather than environment noise. The
+# nested-heredoc shape is shell-general and is asserted under bash too.
 #
-# Usage: bash tests/hooks/advisory-nudge/test_zsh_word_split_advisory.sh
+# Usage: bash tests/hooks/advisory-nudge/test_zsh_dialect_advisory.sh
 # Exit:  0 = all pass; 1 = at least one fail
 
 set +e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/../../.." && pwd)"
-HOOK="$ROOT_DIR/hooks/advisory-nudge/zsh-word-split-advisory/impl.py"
+HOOK="$ROOT_DIR/hooks/advisory-nudge/zsh-dialect-advisory/impl.py"
 
 if [ ! -x "$HOOK" ]; then
   echo "FAIL: hook not executable: $HOOK" >&2
@@ -27,6 +29,8 @@ FAIL=0
 FAILED_NAMES=()
 
 # run_case name expected command [shell]
+#   expected — `silent`, `advisory`, or `ask:<marker>`; the marker is matched
+#   against the DECODED reason, because the emitted JSON escapes non-ASCII.
 run_case() {
   # `${4-...}` not `${4:-...}`: the SHELL-unset case passes an EMPTY fourth
   # argument, and the `:-` form would substitute the default for it — the
@@ -53,10 +57,28 @@ print(json.dumps({
 
   local ok=1
   case "$expected" in
+    ask:*)
+      local marker="${expected#ask:}"
+      [ "$rc" -eq 0 ] || ok=0
+      local decoded
+      decoded=$(printf '%s' "$out" | python3 -c '
+import json, sys
+try:
+    d = json.load(sys.stdin)["hookSpecificOutput"]
+except Exception:
+    sys.exit(0)
+print(d.get("permissionDecision", ""))
+print(d.get("permissionDecisionReason", ""))
+') || ok=0
+      case "$decoded" in ask*) ;; *) ok=0 ;; esac
+      case "$decoded" in *"$marker"*) ;; *) ok=0 ;; esac
+      ;;
     advisory)
       [ "$rc" -eq 0 ] || ok=0
-      [ -z "$out" ]   || ok=0
-      echo "$err" | grep -q "\[zsh-word-split-advisory\]" || ok=0
+      # The advisory reaches the actor only through additionalContext; stderr
+      # is what the fire ledger grades the fire on. Both, or neither counts.
+      echo "$out" | grep -q '"additionalContext"' || ok=0
+      echo "$err" | grep -q "\[zsh-dialect-advisory\]" || ok=0
       # The remedy is what makes the advisory actionable — assert it, not
       # merely that something was printed.
       echo "$err" | grep -q '\${=' || ok=0
@@ -82,7 +104,77 @@ print(json.dumps({
   fi
 }
 
-# === ADVISORY — the two measured shapes =====================================
+# === ASK — `=word` is a command path lookup =================================
+
+run_case "a separator line of equals signs" "ask:======" \
+  'echo ======'
+run_case "an argument starting with =" "ask:=foo" \
+  'echo =foo'
+run_case "== outside [[ ]] is such a word" "ask:==" \
+  '[ "$x" == a ] && print yes'
+run_case "an assignment whose value starts with =" "ask:=foo" \
+  'V==foo print hi'
+
+run_case "== inside [[ ]] is an operator" silent \
+  '[[ $x == a ]] && print yes'
+run_case "an ordinary assignment is not the shape" silent \
+  'print a=b'
+run_case "a bare = is not expanded" silent \
+  'test 1 = 1'
+run_case "a quoted == is safe" silent \
+  "print '=='"
+run_case "= inside a long flag is not word-leading" silent \
+  'git diff --stat=2'
+
+# === ASK — an unmatched [ inside a pattern operator =========================
+
+run_case "unmatched [[ in a # pattern" 'ask:${w#[[}' \
+  'print ${w#[[}'
+run_case "double quotes do not protect the pattern" 'ask:${w#[[}' \
+  'print "${w#[[}"'
+run_case "unmatched [ in a / pattern" 'ask:${w/[[/Z}' \
+  'print ${w/[[/Z}'
+
+run_case "a closed character class is a valid pattern" silent \
+  'print ${w#[a-z]}'
+run_case "a default value is not parsed as a pattern" silent \
+  'print ${w:-[[}'
+run_case "single quotes do protect it" silent \
+  "print '\${w#[[}'"
+
+# === ASK — a heredoc opener shadowed by its own delimiter ===================
+
+run_case "nested opener reusing the outer delimiter" "ask:EOF" \
+  "cat <<'EOF'
+x
+cat <<'EOF'
+hi
+EOF
+EOF"
+run_case "the same shape under bash, which shares it" "ask:PY" \
+  "python3 - <<'PY'
+x = 1
+python3 - <<'PY'
+y = 2
+PY
+PY" /bin/bash
+
+run_case "a nested heredoc with its own delimiter is fine" silent \
+  "cat <<'OUTER'
+py <<'EOF'
+x
+EOF
+OUTER"
+run_case "a body that merely mentions the delimiter" silent \
+  "python3 - <<'PY'
+print(\"write it as: cat <<'PY'\")
+PY"
+run_case "a single ordinary heredoc" silent \
+  "cat <<'EOF'
+plain
+EOF"
+
+# === ADVISORY — word split, where intent is not decidable ===================
 
 run_case "set -- with an unquoted var" advisory \
   'set -- $spec; gh pr view "$@"'
@@ -124,11 +216,15 @@ run_case "SHELL unset does not warn" silent \
   'set -- $spec' ''
 run_case "same payload under zsh does warn" advisory \
   'set -- $spec' /bin/zsh
+run_case "the = shape is zsh-only too" silent \
+  'echo ======' /bin/bash
 
 # === SILENT — masked or opted out ===========================================
 
-run_case "opt-out marker silences it" silent \
+run_case "the original opt-out marker still silences it" silent \
   'set -- $spec # word-split:ok'
+run_case "the shared marker silences every detector" silent \
+  'echo ====== # zsh-dialect:ok'
 run_case "heredoc body is data, not words" silent \
   'cat <<EOF
 set -- $spec

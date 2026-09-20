@@ -513,7 +513,7 @@
       "review_by": "2026-12-04"
     },
     {
-      "name": "zsh-word-split-advisory",
+      "name": "zsh-dialect-advisory",
       "role": "advisory-nudge",
       "event": "PreToolUse",
       "matcher": "Bash",
