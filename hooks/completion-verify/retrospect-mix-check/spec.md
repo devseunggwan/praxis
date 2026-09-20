@@ -75,6 +75,12 @@ not fire on the quoted form* — passes. Future-tense prose outside a
 `Falsification:` line passes too: Stage 3 legitimately describes what Stage 4
 will do.
 
+The line is recognized in the shape the Stage 3 card actually renders it —
+inside the card's blockquote, with the colon outside the bold
+(`> - **Falsification**: …`, `skills/retrospect/references/report-template.md`)
+— as well as the hand-written `Falsification:` / `**Falsification:**` variants.
+Matching only the hand-written ones left the gate blind to its own template.
+
 Its prose counterpart, the `Probe:` receipt required of mechanism and novelty
 claims, lives in `skills/retrospect/references/stage3-reporting.md` and is not
 mechanized here — a command's *presence* is checkable, its *relevance* is not.
