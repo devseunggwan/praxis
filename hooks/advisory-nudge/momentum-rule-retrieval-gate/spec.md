@@ -329,7 +329,8 @@ approve blindly.
   Asking to merge is one question sentence (ending in `?`, `할까요`, `될까요`,
   `하시겠` or `해도 되`) with `merge` as a whole word, `머지` or `병합`, that
   neither negates it nor asks whether it happened or how it stands
-  (`머지하지 말까요?`, `머지됐나요?`, `PR #999 merge status?`, `머지 상태`),
+  (`머지하지 말까요?`, `머지됐나요?`, `머지했나요?`, `Did we merge PR #999?`,
+  `PR #999 merge status?`, `머지 상태`),
   and that is about the PR. When the merge verb takes PR references as its
   object — a list right before `머지`/`병합` or right after `merge` — the ask is
   about exactly those PRs (`#833, #999 를 머지할까요?` asks about both;

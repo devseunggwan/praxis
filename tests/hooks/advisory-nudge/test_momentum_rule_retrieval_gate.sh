@@ -863,6 +863,12 @@ run_merge_escalation_case "merge_serial_ask_label_names_merge_passes" \
 # A question about the merge's state asks nothing ("PR #999 merge status?").
 run_merge_escalation_case "merge_serial_merge_status_ok_denies" \
   "yes" "" "momentum-merge-serial-merge-status-ok.jsonl" "gh pr merge 999 --squash --delete-branch"
+# Nor does one asking whether it already happened ("PR #999 머지했나요?",
+# "Did we merge PR #999?"): the answer reports history, it does not consent.
+run_merge_escalation_case "merge_serial_past_merge_ask_denies" \
+  "yes" "" "momentum-merge-serial-past-merge-ask.jsonl" "gh pr merge 999 --squash --delete-branch"
+run_merge_escalation_case "merge_serial_past_merge_ask_en_denies" \
+  "yes" "" "momentum-merge-serial-past-merge-ask-en.jsonl" "gh pr merge 999 --squash --delete-branch"
 # A merge ask is about the PRs its verb takes, not every PR in the sentence…
 run_merge_escalation_case "merge_serial_mixed_pr_ask_denies" \
   "yes" "" "momentum-merge-serial-mixed-pr-ask.jsonl" "gh pr merge 999 --squash --delete-branch"

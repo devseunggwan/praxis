@@ -494,11 +494,13 @@ _LABEL_LEAD_RE = re.compile(r"\s*[—–:,(-]\s*")
 # "승인" matches "테스트 승인할까요?", and neither of those asks to merge.
 # "merge" is a whole word so "emergency" and "merged" stay out, and a question
 # that negates merging or asks whether it happened ("머지하지 말까요?",
-# "머지됐나요?") is not an ask to merge.
+# "머지됐나요?", "머지했나요?", "Did we merge #999?") is not an ask to merge.
 _MERGE_WORD_RE = re.compile(r"(?<![A-Za-z])merge(?![A-Za-z-])|머지|병합", re.IGNORECASE)
 _NOT_MERGE_ASK_RE = re.compile(
     r"(?<![A-Za-z])(?:not|don't|dont|never)(?![A-Za-z])"
-    r"|(?:머지|병합)\s*(?:됐|되었|된|되어|되나|하지|안\b|말|상태|충돌|결과)|(?:안|말)\s*(?:머지|병합)|말까요"
+    r"|(?:머지|병합)\s*(?:됐|되었|된|되어|되나|했|하셨|하였|하지|안\b|말|상태|충돌|결과)"
+    r"|(?:안|말)\s*(?:머지|병합)|말까요"
+    r"|(?<![A-Za-z])(?:did|have|has)\s+(?:we|you|i|they|it)\s+(?:already\s+)?merg"
     r"|(?<![A-Za-z])merge\s+(?:status|state|conflicts?|results?)(?![A-Za-z])",
     re.IGNORECASE)
 _ASK_SENTENCE_RE = re.compile(r"[^.!?。\n]*(?:\?|할까요|될까요|하시겠|해도 되)")
