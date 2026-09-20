@@ -68,13 +68,25 @@ fires. Both are ways of reproducing text, but inline code is far more often an
 identifier than a whole sentence, and a four-space indent is ambiguous inside
 list items — neither was the reported case (#1444).
 
-**Known gap — fence handling is the seventh local copy.** Six other hooks carry
-their own `_FENCE_RE` with subtly different rules (`^ {0,3}` vs `^(\s*)`,
-with and without the closing char/length check). This hook mirrors the most
-complete of them (`exclusion-probe-gate`) with CommonMark's three-space bound.
-Consolidating all seven into `hooks/_lib/` is a separate change: it touches
-six hooks and each has its own fixtures, so folding it into #1444 would bundle
-a cross-hook refactor into a one-narrowing fix.
+**Known gap — fence handling is the seventh local copy.** Six other hooks
+compile their own fence-opener regex, with subtly different rules — the leading
+bound is `^ {0,3}`, `^(\s*)`, `^[ \t]*` or nothing, and only some check that
+the closing run matches the opening character and length:
+`composed-command-gate`, `exclusion-probe-gate`,
+`menu-mutation-tier-advisory`, `artifact-verdict-evidence-gate`,
+`block-pr-without-caller-evidence`, `block-pr-without-precommit-evidence`.
+That list is what this scan returns:
+
+```sh
+grep -rn 'r"[^"]*`{3,}' hooks --include='*.py'
+```
+
+`anchor-comment-gate` handles fences too, with a fixed three-backtick pattern
+the scan above does not reach. This hook mirrors the most complete of the six
+(`exclusion-probe-gate`) with CommonMark's three-space bound.
+Consolidating them into `hooks/_lib/` is a separate change: it touches six
+hooks, each with its own fixtures, so folding it into #1444 would bundle a
+cross-hook refactor into a one-narrowing fix.
 
 **Known accepted gap — double negation.** `처리하지 않은 게 아닙니다`
 ("it is not the case that it was not processed" — i.e. affirmative) still
