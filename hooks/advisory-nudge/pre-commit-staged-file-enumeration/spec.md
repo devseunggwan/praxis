@@ -61,8 +61,8 @@ bound is counted on the bytes actually read.
 ## `git commit` detection
 
 Command tokenization uses the shared `_hook_utils` pipeline (`safe_tokenize`,
-`iter_command_starts`, `strip_prefix`) — the same detection surface as
-`block-rename-sweep-survivors`. The binary is matched bare or path-prefixed
+`iter_command_starts`, `strip_prefix`) — the same detection surface every
+`git commit` hook in this family shares. The binary is matched bare or path-prefixed
 (`git`, `/usr/bin/git`), git global value flags (`-C`, `-c`, `--git-dir`, …)
 are skipped to find the subcommand position, terminal global flags (`--help`,
 `--version`) short-circuit, and only the `commit` subcommand — absent
@@ -121,13 +121,12 @@ get the check.
 ## Detection boundaries (shared tokenizer)
 
 `git commit` detection uses the shared `safe_tokenize` / `iter_command_starts`
-pipeline, so it inherits that tokenizer's boundaries — the same ones the
-blocking sibling `block-rename-sweep-survivors._find_git_commits` has. Verified
-by probing the sibling on identical inputs (all three match this hook exactly):
+pipeline, so it inherits that tokenizer's boundaries — the same ones every
+other consumer of the pipeline has:
 
 | Input | Result | Consequence |
 | --- | --- | --- |
-| `result=$(git commit -m x)` (commit inside an assignment's command substitution) | **not detected** | a commit whose stdout is captured into a shell variable is missed (false-negative) — even the blocking sibling misses it |
+| `result=$(git commit -m x)` (commit inside an assignment's command substitution) | **not detected** | a commit whose stdout is captured into a shell variable is missed (false-negative) |
 | `git commit --only <path>` / `git commit -- <pathspec>` / `git commit <path>` (partial commit) | detected, but **all** staged additions are listed | additions the pathspec excludes are over-surfaced (advisory noise) |
 | `cat > f <<'EOF'` … `git commit` … `EOF` (commit literal inside a heredoc body) | **not detected** (fixed in #985) | heredoc bodies are blanked in `_hook_utils.safe_tokenize`, so data no longer reads as a command — this row is kept as the record of what changed |
 
@@ -145,7 +144,6 @@ would require a fragile git-argument parser — deliberately rejected (memory
 | Hook | Scope | Overlap |
 | --- | --- | --- |
 | `block-commit-without-codex-review` | blocks commit lacking a codex-review-wrap pass | None — different precondition; shares the `git commit` detection idiom |
-| `block-rename-sweep-survivors` | blocks commit with incomplete rename sweeps | None — different staged-content analysis; shares command detection |
 | `side-effect-scan` | flags collateral mutations (`git commit/push`, `gh pr merge`) | Complementary — this hook inspects *what is staged*, not the mutation itself |
 
 ## Parsing guarantees (fail-open)

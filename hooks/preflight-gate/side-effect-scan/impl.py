@@ -33,15 +33,15 @@ alone (issue #1153):
     changes".
 
 The sibling commit gates are context, not ground (issue #1153): coverage is a
-property of the installation rather than of the command. Eight sibling
+property of the installation rather than of the command. Seven sibling
 PreToolUse(Bash) hooks gate a `git commit` argv on their own — derived from
 the `"gates": ["git-commit"]` field each carries in `hooks/manifest.json`,
 each verified to key on the `commit` subcommand:
-block-commit-without-codex-review, block-rename-sweep-survivors,
+block-commit-without-codex-review,
 commit-decomposition-advisory, commit-message-paren-check,
 commit-title-format-check, commit-title-length-check,
 pre-commit-staged-file-enumeration, verify-commit-flag-override.
-Four of the eight siblings are also the checklist
+Four of the seven siblings are also the checklist
 `verify-commit-flag-override` prints on its own deny (issue #941). No
 sibling hook gates `kubectl apply` at all. This enumeration is a copy
 of the manifest's, kept honest by scripts/check-sibling-commit-gates.py
@@ -55,7 +55,7 @@ by the checker) carries the per-host counts.
 
 The wrapper CLIs that used to share the `git-commit` label do NOT follow it
 down; they carry their own `wrapper-commit` category at ASK. The reversibility
-ground fails for them, and the sibling context does too: the eight sibling
+ground fails for them, and the sibling context does too: the seven sibling
 gates match a literal
 `git commit` argv, so a commit made *inside* a wrapper process is invisible
 to every one of them. Splitting the category is a deliberate narrowing of
@@ -103,7 +103,7 @@ CATEGORIES = {
         "reason": "local git state mutation — 현재 브랜치/HEAD 확인 필요",
     },
     # Split out of `git-commit` by issue #874: these commit from *inside*
-    # another process, so the eight sibling `git commit` argv gates never see
+    # another process, so the seven sibling `git commit` argv gates never see
     # them and the coverage half of the demotion rationale does not hold.
     "wrapper-commit": {
         "tier": TIER_ASK,
