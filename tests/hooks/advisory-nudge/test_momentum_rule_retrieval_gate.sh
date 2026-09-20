@@ -869,6 +869,10 @@ run_merge_escalation_case "merge_serial_past_merge_ask_denies" \
   "yes" "" "momentum-merge-serial-past-merge-ask.jsonl" "gh pr merge 999 --squash --delete-branch"
 run_merge_escalation_case "merge_serial_past_merge_ask_en_denies" \
   "yes" "" "momentum-merge-serial-past-merge-ask-en.jsonl" "gh pr merge 999 --squash --delete-branch"
+# `merging` is the same verb, so "Proceed with merging PR #999?" is an ask —
+# only the past participle `merged` stays out.
+run_merge_escalation_case "merge_serial_merging_ask_passes" \
+  "no" "" "momentum-merge-serial-merging-ask.jsonl" "gh pr merge 999 --squash --delete-branch"
 # A merge ask is about the PRs its verb takes, not every PR in the sentence…
 run_merge_escalation_case "merge_serial_mixed_pr_ask_denies" \
   "yes" "" "momentum-merge-serial-mixed-pr-ask.jsonl" "gh pr merge 999 --squash --delete-branch"

@@ -492,10 +492,14 @@ _LABEL_LEAD_RE = re.compile(r"\s*[—–:,(-]\s*")
 # merge?", "PR #999를 머지할까요?"). The briefing counter's approve-ask words
 # cannot stand in for it: "approve" also matches "PR #999 was approved", and
 # "승인" matches "테스트 승인할까요?", and neither of those asks to merge.
-# "merge" is a whole word so "emergency" and "merged" stay out, and a question
-# that negates merging or asks whether it happened ("머지하지 말까요?",
+# The merge word is `merge` or `merging` bounded by non-letters, so "emergency"
+# and "merge-base" stay out. `merged` stays out on purpose: it is the past
+# participle, and every question built on it asks whether the merge happened
+# ("Was #999 merged?") rather than asking to do it — which is the same reason a
+# question that negates merging or asks after its state ("머지하지 말까요?",
 # "머지됐나요?", "머지했나요?", "Did we merge #999?") is not an ask to merge.
-_MERGE_WORD_RE = re.compile(r"(?<![A-Za-z])merge(?![A-Za-z-])|머지|병합", re.IGNORECASE)
+_MERGE_WORD_RE = re.compile(r"(?<![A-Za-z])merg(?:e|ing)(?![A-Za-z-])|머지|병합",
+                            re.IGNORECASE)
 _NOT_MERGE_ASK_RE = re.compile(
     r"(?<![A-Za-z])(?:not|don't|dont|never)(?![A-Za-z])"
     r"|(?:머지|병합)\s*(?:됐|되었|된|되어|되나|했|하셨|하였|하지|안\b|말|상태|충돌|결과)"
@@ -514,7 +518,7 @@ _REF_LIST = (r"(?:#|(?<![A-Za-z])pr\s*#?\s*)\d+(?![A-Za-z0-9_])"
              r"(?:\s*(?:,|과|와|및|and|&)\s*(?:#|pr\s*#?\s*)?\d+(?![A-Za-z0-9_]))*")
 _MERGE_OBJECT_RE = re.compile(
     rf"({_REF_LIST})\s*(?:을|를|은|는|도)?\s*(?:머지|병합)"
-    rf"|(?<![A-Za-z])merge\s+(?:pr\s*)?({_REF_LIST})", re.IGNORECASE)
+    rf"|(?<![A-Za-z])merg(?:e|ing)\s+(?:pr\s*)?({_REF_LIST})", re.IGNORECASE)
 
 # A single positional token that is a bare PR number or a …/pull/N URL.
 _PULL_TOKEN_RE = re.compile(r"^(?:\S*/pull/(\d+)|(\d+))$")

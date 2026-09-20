@@ -327,7 +327,8 @@ approve blindly.
   merge that repeats or chains merge segments is never answered this way: one
   answer releases one merge.
   Asking to merge is one question sentence (ending in `?`, `할까요`, `될까요`,
-  `하시겠` or `해도 되`) with `merge` as a whole word, `머지` or `병합`, that
+  `하시겠` or `해도 되`) with `merge` or `merging` as a whole word, `머지` or
+  `병합`, that
   neither negates it nor asks whether it happened or how it stands
   (`머지하지 말까요?`, `머지됐나요?`, `머지했나요?`, `Did we merge PR #999?`,
   `PR #999 merge status?`, `머지 상태`),
