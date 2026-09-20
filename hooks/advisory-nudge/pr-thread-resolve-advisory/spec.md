@@ -47,14 +47,82 @@ Comments](https://conventionalcomments.org/) label:
 thread as a blocker is how a merge stalls on a nit. An unlabeled thread is not
 auto-demoted — silence about a grade is not a low grade, so a human reads it.
 
+### A recorded disposition demotes the thread
+
+The grade above decides whether a thread *ever* needed a reply. A second check
+decides whether it still does: the thread's **newest** comment is fetched
+alongside its first, and a thread whose newest comment opens with this hook's
+own reply vocabulary — `Fixed —`, `Not fixed —`, `False positive —` — is moved
+to the for-reference group.
+
+Without it the advisory has no terminal state. Neither escape hatch that
+normally ends a finding is available here:
+
+- **Resolving** contradicts the advisory's own carry-over instruction, which
+  tells the actor to leave a deferred thread open.
+- **Regrading** means editing the thread's *first* comment, and in practice
+  that comment belongs to a review bot — which the project's rules forbid
+  editing.
+
+So the disposition has to end the nudge from where it is allowed to live: a
+reply, recorded on the PR, in the vocabulary this hook already asks for.
+
+The newest comment must come from someone other than the thread's opener. A bot
+never writes this vocabulary, but it can quote an earlier reply, and a
+self-authored match would let a thread silence itself. A later comment from
+anyone else re-arms the advisory, which is the intended behaviour: a fresh
+objection deserves a fresh answer.
+
+The verdict is read from the comment's **first non-blockquote line**, not from
+its first characters. Quoting the text you are answering is the ordinary shape
+of a review reply, so a reviewer who disagrees writes the quoted verdict first
+and the objection underneath — and matching the quote would let precisely that
+disagreement silence the thread. The raw body is what gets scanned for this,
+because `_clean_body` deletes newlines along with the other control bytes and
+so fuses a quoted line into the text below it.
+
 ## What is emitted
 
 Advisory text on stderr, exit 0 by default. `PRAXIS_PR_THREAD_ADVISORY_STRICT=1`
 exits 2 instead, and only when the needs-a-reply group is non-empty.
 
+The needs-a-reply group is additionally emitted through
+`hookSpecificOutput.additionalContext` at exit 0, which is the only exit-0
+channel the actor can read — stderr at exit 0 reaches the debug log alone. One
+document per process; a second call would put two JSON objects on stdout.
+The for-reference group is not emitted there: it is context, not an ask, and it
+is what a dispositioned thread is demoted into, so emitting it would restore the
+per-push nudge this hook is designed to stop.
+
+Two things the stderr advisory carries reach that channel as well, because the
+actor reads only this one:
+
+- **The newest comment**, rendered under its thread line whenever it is not the
+  thread's first comment. A thread reopened by a later objection has to carry
+  that objection; the original finding is often already handled, and answering
+  it would answer the wrong question.
+- **The page-truncation note**, whenever more than `_THREAD_PAGE` threads exist
+  and only the first page was read. A partial list read as a complete one turns
+  "these are the open findings" into a false negative.
+
+Two dispatch behaviours bound that channel's delivery, both fail-open (stderr is
+unaffected, so the hook degrades to its pre-#1448 reach):
+
+- Members of a dispatch group merge their `additionalContext` into one object,
+  but if **any** member of the group exits 2, the dispatcher writes that
+  member's stdout and returns — later members' context is dropped. In the
+  `PostToolUse|Bash` group, `anchor-comment-gate` exits 2 in its blocking tier
+  and runs earlier, so a PR with a missing or stale verification anchor is
+  exactly the case where this context does not arrive.
+- `PRAXIS_PR_THREAD_ADVISORY_STRICT=1` makes this hook itself exit 2, so its
+  own context takes that same blocking-stdout lane rather than the merge lane.
+- The group shares a time budget; an earlier member that exhausts it makes this
+  hook budget-skip entirely.
+
 | Condition | Result |
 | --------- | ------ |
-| Push succeeded, open PR on the branch, >=1 unresolved thread | `[pr-thread-resolve-advisory]` advisory listing both groups |
+| Push succeeded, open PR on the branch, >=1 unresolved thread | `[pr-thread-resolve-advisory]` advisory listing both groups; `additionalContext` when the needs-a-reply group is non-empty |
+| Every unresolved thread already carries a disposition reply | advisory listing them for reference, no `additionalContext` |
 | More than 100 threads on the PR | advisory + explicit truncation note (no silent cap) |
 | First 100 threads all resolved, more pages unread | truncation-only advisory — "no unresolved threads" is not a claim this hook can make over a surface it did not finish reading |
 | All review threads resolved | silent |
