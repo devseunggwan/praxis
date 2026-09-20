@@ -169,6 +169,66 @@ Bare `production` is still deliberately **not** a marker. The read-only filter
 below narrows the Bash branch but does not make it exhaustive, and a marker that
 common would lean on the filter for every namespace query.
 
+## The Bash branch does not scan a non-shell interpreter's own program
+
+Issue #1428: a `python3 - <<'EOF'` call whose only effect was a string
+replacement on a scratch file asked about a production target, because the
+marker sat in the Python source. A regex over the whole command string cannot
+tell an argument from a string literal quoted inside it.
+
+So the Bash branch scans `_bash_marker_text(command)` rather than `command`.
+The carve-out is deliberately narrow, because every attempt to bind a body or a
+program to the command that owns it produced a bypass (issue #1449, three of
+them). Text is dropped only when **all** of these hold:
+
+- the whole command is a **single simple command** — one segment after
+  `iter_command_starts`, ignoring a lone heredoc terminator, so no pipeline, no
+  `&&`/`;` chain, no second command anywhere;
+- that segment's `argv[0]` basename, after `strip_prefix`, is one of the
+  interpreters (path prefix allowed: `/usr/bin/python3` counts);
+- the command opens **at most one heredoc**, which is then that interpreter's
+  own;
+- no `$(` and no backtick appears in the shell text, and, when the single
+  heredoc is **unquoted**, none appears in its body either.
+
+What is dropped under those conditions is the heredoc body and the quoted
+argument of `-c` / `-e`. In every other case the whole command is scanned.
+
+Three exclusions from the carve-out are decisions, not omissions:
+
+- **A shell is not an interpreter.** `sh -c` / `bash -c` / `zsh -c` take a real
+  command as their program, so `sh -c 'kubectl --context prod-x delete pod p'`
+  must keep asking.
+- **A heredoc opened by anything else keeps its body in scope.** A
+  `namespace: prod-a` inside a `kubectl apply -f - <<'EOF'` manifest is the
+  call's actual target. Calling `strip_heredoc_bodies` on the whole command is
+  the one-line version of this change and would silence exactly that call.
+- **An unquoted body holding a substitution is kept whole.** bash expands
+  `<<EOF` (unquoted) before the interpreter reads it, so
+  `$(hubctl dev trigger --phase prod)` there runs as the shell's own call.
+  Extracting just the substitution was tried and could not parse nesting past
+  one level (`$(a $(b $(c)))`), so the whole body stays.
+
+Two gaps are accepted:
+
+- **An interpreter program that itself reaches production** —
+  `subprocess.run([..., "--phase", "prod"])` in a Python heredoc — does not
+  ask. Reading it would mean treating every string literal as an argument
+  again, which is the false positive #1428 removed.
+- **A compound command mixing an interpreter with anything else asks**, even
+  when the marker only ever sat in the interpreter's program:
+  `python3 -c "print('prod')" && ls`, or a scratch heredoc built through
+  `$(date)`. This is a false positive by construction. The alternative is
+  per-segment binding, which is what #1449's three bypasses came from — a
+  `$(python3 -c …)` inside `kubectl --context` stripped the very argument the
+  gate reads, and a body line shaped like `python3 <<EOF` (a valid Python
+  bit-shift) was credited with a following `kubectl apply` manifest. One extra
+  question costs less than a silenced production delete.
+
+The MCP branch is unchanged and still scans the serialized `tool_input`: that
+is JSON, not shell, and the quoted-form alternatives of `PROD_MARKER_RE` exist
+for it.
+
 ## The Bash branch recognises read-only shapes, not mutating ones
 
 Both branches now require a mutation. The MCP side asks whether the leaf name
