@@ -196,7 +196,8 @@ finalized. Run sequentially: `completion-verify` → `retrospect-mix-check` →
 `artifact-verdict-evidence-gate` →
 `pr-report-destination-gate` → `pr-claim-mutation-gate` →
 `pr-anchor-existence-gate` → `proposal-premise-gate` →
-`prose-option-menu-advisory` → `joint-liability-attribution-gate` → `denied-action-report-gate` →
+`prose-option-menu-advisory` → `retraction-probe-advisory` →
+`joint-liability-attribution-gate` → `denied-action-report-gate` →
 `strike-counter stop`.
 Also includes session-lifecycle enforcement.
 
@@ -227,6 +228,7 @@ One documented exception: `bypass-route-signal` is observe-only and emits
 | [pr-anchor-existence-gate](../../hooks/completion-verify/pr-anchor-existence-gate/spec.md) | Stop | Advisory on the 1st Stop, block on the 2nd+ when a successful non-draft `gh pr create` this session received no verification-anchor post (`gh pr comment` / write `gh api .../{issues,pulls}/<N>/comments`) — existence only, not the anchor's shape (that's `anchor-comment-gate`); bypass `PRAXIS_PR_ANCHOR_BYPASS`, pin-advisory `PRAXIS_PR_ANCHOR_ADVISORY` (#1113) |
 | [proposal-premise-gate](../../hooks/completion-verify/proposal-premise-gate/spec.md) | Stop | Advisory when a prose proposal block rests on code-checkable premises that were never probed in the current turn — prose proposals have no PreToolUse surface, so the Stop lane is the only firing point (#846) |
 | [prose-option-menu-advisory](../../hooks/completion-verify/prose-option-menu-advisory/spec.md) | Stop | Advisory when the last assistant text hands the user an option menu as prose — adjacent `(a)`/`(b)` lines plus an explicit choice demand, with no `AskUserQuestion` in the turn, so no PreToolUse gate saw it; bypass `PRAXIS_PROSE_OPTION_MENU_BYPASS` (#1405) |
+| [retraction-probe-advisory](../../hooks/completion-verify/retraction-probe-advisory/spec.md) | Stop | Advisory when the last assistant text retracts an earlier verdict (`틀렸습니다` / `철회합니다` / `I was wrong`, outside `>` quotes and questions) in a turn that ran tools but quotes none of their output — a retraction is a claim too; bypass `PRAXIS_RETRACTION_PROBE_BYPASS` (#1442) |
 | [joint-liability-attribution-gate](../../hooks/completion-verify/joint-liability-attribution-gate/spec.md) | Stop + SubagentStop | Advisory when the **first paragraph** of the final message both names a sibling session/worktree/agent and disowns it — attribution as the report's opening move; cleared only when the most recent user message asked for routing; `PRAXIS_JOINT_LIABILITY_STRICT=1` blocks (#1391) |
 | [denied-action-report-gate](../../hooks/completion-verify/denied-action-report-gate/spec.md) | Stop + SubagentStop | Advisory when a tool call was structurally refused during the turn and the final report never says so — a refusal leaves no error, no correction and no confession, so recall never reaches it; `retrospect-mix-check` Gate-12 covers only the retrospect surface (#1392) |
 | [strike-counter](../../hooks/completion-verify/strike-counter/spec.md) | SessionStart + UserPromptSubmit + Stop | Session-scoped three-strike discipline — hard-blocks at strike 3, requires reflection before reset |
