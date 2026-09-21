@@ -1251,6 +1251,65 @@ def _correlated_prior_turn_text(entries: list[dict], idxs: list[int],
     return prev_text
 
 
+def _last_spoken_turn(entries: list[dict], idxs: list[int]) -> tuple[int, int] | None:
+    """Bounds of the latest turn before the last human message with assistant text.
+
+    Turns with no assistant text are skipped: an interrupt marker arrives as a
+    human message, so the turn between it and the next reply is empty and the
+    briefing the user actually read sits one turn further back.
+    """
+    for k in range(len(idxs) - 1, -1, -1):
+        lo = idxs[k - 1] + 1 if k >= 1 else 0
+        if _assistant_text(entries, lo, idxs[k]).strip():
+            return lo, idxs[k]
+    return None
+
+
+def _excerpt(entries: list[dict], index: int) -> str:
+    text = _sanitize(_user_message_text(entries[index].get("message", {}).get("content")))
+    text = re.sub(r"\s+", " ", text).strip().replace("`", "'")
+    return text if len(text) <= 30 else text[:30] + "…"
+
+
+def _excluded_briefing_reason(entries: list[dict], idxs: list[int], command: object,
+                              threshold: int, floor: int = 0) -> str | None:
+    """Why a briefing the user was shown fell outside the scored window, else None.
+
+    Message-only (issue #1433): every check below is one the decision already
+    made, asked again in the same order so the named reason is the one that
+    actually excluded the briefing. None when no such briefing exists, so a merge
+    that was never briefed keeps its message unchanged.
+    """
+    if not idxs:
+        return None
+    spoken = _last_spoken_turn(entries, idxs)
+    if spoken is None:
+        return None
+    lo, hi = spoken
+    if _briefing_item_count(_assistant_text(entries, lo, hi)) < threshold:
+        return None
+    if len(_merge_segments(command)) != 1 or _has_repetition(command):
+        return "one approval releases one merge, and this command runs more than one"
+    if not _is_approval_reply(entries[idxs[-1]].get("message", {}).get("content")):
+        return (f"the last user message (`{_excerpt(entries, idxs[-1])}`) is not an "
+                "approval reply, so no earlier turn was scored")
+    if len(idxs) >= 2 and lo < idxs[-2] + 1:
+        return (f"a user message (`{_excerpt(entries, hi)}`) came between the briefing "
+                "and the approval, and only the turn right before the approval is scored")
+    if _correlated_prior_turn_text(entries, idxs, command) is None:
+        return "the briefed turn does not name the PR this merge targets"
+    if floor > lo:
+        return ("it precedes a merge that already ran in this session, and one "
+                "briefing releases one merge")
+    return None
+
+
+def _with_exclusion(why: str, reason: str | None) -> str:
+    if reason is None:
+        return why
+    return f"{why}. A briefing was shown earlier but not scored: {reason}"
+
+
 def _merge_escalation_reason(payload: dict) -> str | None:
     """Return a deny reason when the pre-merge briefing is incomplete, else None."""
     # Demote-to-advisory escape hatch (false-positive relief without full bypass).
@@ -1355,9 +1414,12 @@ def _merge_escalation_reason(payload: dict) -> str | None:
     if marker_ok:
         return format_block(
             rule_name="Pre-Merge Reporting briefing",
-            why="this gh pr merge carries `# briefing-surfaced` but no briefing "
+            why=_with_exclusion(
+                "this gh pr merge carries `# briefing-surfaced` but no briefing "
                 "is present in the window — the marker attests that a briefing "
                 "was complete, not that one exists, and none was found",
+                _excluded_briefing_reason(entries, idxs, code,
+                                          MERGE_BRIEFING_MARKER_MIN_ITEMS, floor)),
             correct_path="surface the 6-item briefing and an explicit 'Approve "
                 "merge?' question in this turn, then re-run the merge",
             bypass_env=MERGE_ADVISORY_ENV,
@@ -1389,10 +1451,12 @@ def _merge_escalation_reason(payload: dict) -> str | None:
 
     return format_block(
         rule_name="Pre-Merge Reporting briefing",
-        why="this gh pr merge is not preceded by the Pre-Merge Reporting "
+        why=_with_exclusion(
+            "this gh pr merge is not preceded by the Pre-Merge Reporting "
             "briefing — fewer than "
             f"{MERGE_BRIEFING_MIN_ITEMS} of 6 items present (What changed / "
             "verified / NOT verified / Risk / Open items / explicit approve-ask)",
+            _excluded_briefing_reason(entries, idxs, code, MERGE_BRIEFING_MIN_ITEMS)),
         correct_path="surface the 6-item briefing and an explicit 'Approve "
             "merge?' question, then re-run the merge",
         bypass_env=MERGE_ADVISORY_ENV,

@@ -1526,6 +1526,79 @@ else
   FAIL=$((FAIL + 1)); FAILED_NAMES+=("main() is wrapped by the shared @fail_open guard")
 fi
 
+# --- why a briefing the user saw was not scored (issue #1433) ----------------
+#
+# Message-only: each case asserts the decision is still deny AND the reason
+# names the check that excluded the briefing. `-` asserts the clause is ABSENT,
+# which is what keeps a never-briefed merge's message unchanged.
+#
+# The interrupt fixtures carry the marker in the shape measured in local
+# transcripts (a `text` block, no isMeta, no origin), which the gate counts as a
+# human message — so the turn right before the reply is empty and the briefing
+# sits one turn further back.
+run_exclusion_case() {
+  local name="$1" fixture="$2" command="$3" expected="$4"
+  local reason
+  reason=$(python3 -c '
+import json, sys
+print(json.dumps({"tool_name": "Bash", "tool_input": {"command": sys.argv[2]},
+                  "transcript_path": sys.argv[1], "session_id": "test-momentum-1433"}))' \
+    "$FIXTURES_DIR/$fixture" "$command" \
+    | python3 "$HOOK" 2>/dev/null \
+    | python3 -c '
+import json, sys
+out = json.load(sys.stdin)["hookSpecificOutput"]
+# A non-deny decision prints nothing, so the empty-reason check below fails it.
+print(out["permissionDecisionReason"] if out.get("permissionDecision") == "deny" else "")')
+  local ok=1
+  [ -n "$reason" ] || ok=0
+  if [ "$expected" = "-" ]; then
+    printf '%s' "$reason" | grep -qF "but not scored" && ok=0
+  else
+    printf '%s' "$reason" | grep -qF "$expected" || ok=0
+  fi
+  if [ "$ok" -eq 1 ]; then
+    echo "PASS  [$name]"; PASS=$((PASS + 1))
+  else
+    echo "FAIL  [$name] reason: $(printf '%s' "$reason" | head -c 300)"
+    FAIL=$((FAIL + 1)); FAILED_NAMES+=("$name")
+  fi
+}
+
+# The reproduction in the issue: briefing → interrupt → `continue` → merge.
+run_exclusion_case "exclusion_interrupt_then_continue" \
+  "momentum-merge-interrupt-continue.jsonl" "gh pr merge 833 --squash --delete-branch" \
+  'the last user message (`continue`) is not an approval reply'
+# Same, answered `ok`: the gate still denies, and the reason must name the
+# interrupt — "not an approval reply" would be false here.
+run_exclusion_case "exclusion_interrupt_then_ok" \
+  "momentum-merge-interrupt-ok.jsonl" "gh pr merge 833 --squash --delete-branch" \
+  'a user message (`[Request interrupted by user]`) came between the briefing and the approval'
+run_exclusion_case "exclusion_continue_without_interrupt" \
+  "momentum-merge-prior-turn-continue.jsonl" "gh pr merge 833 --squash --delete-branch" \
+  'the last user message (`continue`) is not an approval reply'
+run_exclusion_case "exclusion_substantive_reply" \
+  "momentum-merge-substantive-reply.jsonl" "gh pr merge 833 --squash" \
+  'is not an approval reply'
+run_exclusion_case "exclusion_briefing_names_other_pr" \
+  "momentum-merge-prior-turn-wrong-pr.jsonl" "gh pr merge 833 --squash" \
+  'the briefed turn does not name the PR this merge targets'
+run_exclusion_case "exclusion_compound_merge" \
+  "momentum-merge-prior-turn-briefing.jsonl" "gh pr merge 833 --squash && gh pr merge 834 --squash" \
+  'one approval releases one merge'
+run_exclusion_case "exclusion_serial_cut_on_marker" \
+  "momentum-merge-serial-second.jsonl" \
+  "gh pr merge 999 --squash --delete-branch # briefing-surfaced: prior turn" \
+  'it precedes a merge that already ran in this session'
+# Guards: nothing was briefed, so there is nothing to explain.
+run_exclusion_case "exclusion_absent_without_briefing" \
+  "momentum-merge-fidelity-unreliable.jsonl" "gh pr merge --squash --delete-branch" "-"
+run_exclusion_case "exclusion_absent_below_threshold" \
+  "momentum-merge-serial-second.jsonl" "gh pr merge 999 --squash --delete-branch" "-"
+
+# The decision is unchanged for the approved flow: `ok` right after the briefing
+# still releases the merge (merge_escalation_prior_turn_briefing_passes above).
+
 # ===========================================================================
 # Summary
 # ===========================================================================
