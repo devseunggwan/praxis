@@ -116,7 +116,7 @@ _NORM_STRIP_RE = re.compile(r"[\"'\[\](),]")
 def _extra_fetch_re() -> re.Pattern[str] | None:
     """Compile PRAXIS_SECRET_FETCH_CLIS into extra fetch alternatives.
 
-    Org/author-internal fetch CLIs (e.g. `hubctl token fetch`) stay out of
+    Org/author-internal fetch CLIs (e.g. `orgctl token fetch`) stay out of
     the shipped regex — the builtin list carries public tools only. The env
     var takes comma-separated command phrases; each phrase matches its
     whitespace-separated tokens in order, word-bounded (issue #1157).

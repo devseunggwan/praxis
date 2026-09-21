@@ -85,18 +85,18 @@ mcp_payload_other_session() {
 echo "test_approval_premise_reread_gate"
 
 # --- Bash: the marker's spacing, casing and flag-name variants -------------
-run_case "flag_space"        "$(verdict "$(bash_payload 'hubctl dev trigger --phase prod')")"            "ask"
-run_case "flag_equals"       "$(verdict "$(bash_payload 'hubctl dev trigger --phase=prod')")"            "ask"
-run_case "flag_double_space" "$(verdict "$(bash_payload 'hubctl dev trigger --phase  prod')")"           "ask"
-run_case "flag_uppercase"    "$(verdict "$(bash_payload 'hubctl dev trigger --phase PROD')")"            "ask"
-run_case "flag_short"        "$(verdict "$(bash_payload 'hubctl dev trigger -p prod')")"                 "ask"
+run_case "flag_space"        "$(verdict "$(bash_payload 'orgctl deploy --phase prod')")"            "ask"
+run_case "flag_equals"       "$(verdict "$(bash_payload 'orgctl deploy --phase=prod')")"            "ask"
+run_case "flag_double_space" "$(verdict "$(bash_payload 'orgctl deploy --phase  prod')")"           "ask"
+run_case "flag_uppercase"    "$(verdict "$(bash_payload 'orgctl deploy --phase PROD')")"            "ask"
+run_case "flag_short"        "$(verdict "$(bash_payload 'orgctl deploy -p prod')")"                 "ask"
 run_case "flag_profile"      "$(verdict "$(bash_payload 'aws s3 rm s3://bucket/key --profile prod')")"   "ask"
 run_case "flag_env_suffixed" "$(verdict "$(bash_payload 'deploy --env prod-apne2')")"                    "ask"
-run_case "flag_production"   "$(verdict "$(bash_payload 'hubctl dev trigger --phase production-mirror')")" "ask"
+run_case "flag_production"   "$(verdict "$(bash_payload 'orgctl deploy --phase production-mirror')")" "ask"
 
 # --- Bash: what must stay quiet -------------------------------------------
 run_case "no_marker"         "$(verdict "$(bash_payload 'ls -la')")"                                     "quiet"
-run_case "dev_phase"         "$(verdict "$(bash_payload 'hubctl dev trigger --phase dev')")"             "quiet"
+run_case "dev_phase"         "$(verdict "$(bash_payload 'orgctl deploy --phase dev')")"             "quiet"
 # Bare `production` is deliberately not a marker: this branch has no mutation
 # filter, so a read-only query carrying it would fire on every namespace call.
 run_case "bare_production"   "$(verdict "$(bash_payload 'kubectl get pods -n production')")"             "quiet"
@@ -107,7 +107,21 @@ run_case "bare_production"   "$(verdict "$(bash_payload 'kubectl get pods -n pro
 # rule set already names as a sanctioned read-only production call.
 run_case "ro_kubectl_get"    "$(verdict "$(bash_payload 'kubectl get pods -n prod-apne2')")"             "quiet"
 run_case "ro_kubectl_logs"   "$(verdict "$(bash_payload 'kubectl logs pod-x --profile prod')")"          "quiet"
-run_case "ro_hubctl_token"   "$(verdict "$(bash_payload 'hubctl token fetch datadog --phase prod')")"    "quiet"
+# An org-internal CLI is no longer on the allowlist (issue #1470), so it takes
+# the fall-through the paragraph above describes: one question, not silence.
+run_case "internal_cli_asks" "$(verdict "$(bash_payload 'orgctl token fetch datadog --phase prod')")"   "ask"
+# `orgctl` was never allowlisted, so the case above passes with the removed entry
+# restored too. Pinning the key set catches a new allowlist binary by any name;
+# adding a public read-only CLI means updating this line on purpose.
+run_case "allowlist_binaries_pinned" \
+  "$(python3 - "$HOOK" <<'EOF'
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("gate", sys.argv[1])
+gate = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(gate)
+print(",".join(sorted(gate.READONLY_SUBCOMMANDS)))
+EOF
+)" "aws,docker,gh,git,kubectl"
 run_case "ro_aws_sts"        "$(verdict "$(bash_payload 'aws sts get-caller-identity --profile prod')")" "quiet"
 run_case "ro_git_log"        "$(verdict "$(bash_payload 'git log --oneline --phase prod')")"             "quiet"
 run_case "ro_gh_pr_view"     "$(verdict "$(bash_payload 'gh pr view 1 --profile prod')")"                "quiet"
@@ -153,11 +167,11 @@ run_case "attached_heredoc_operator_binds" \
 # An unquoted heredoc is expanded by the shell before the interpreter reads
 # it, so a command substitution in it is the shell's own call.
 run_case "py_unquoted_heredoc_cmdsub" \
-  "$(verdict "$(bash_payload $'python3 - <<EOF\nx = "$(hubctl dev trigger --phase prod)"\nEOF')")" "ask"
+  "$(verdict "$(bash_payload $'python3 - <<EOF\nx = "$(orgctl deploy --phase prod)"\nEOF')")" "ask"
 run_case "py_unquoted_heredoc_backtick" \
-  "$(verdict "$(bash_payload $'python3 - <<EOF\nx = "`hubctl dev trigger --phase prod`"\nEOF')")" "ask"
+  "$(verdict "$(bash_payload $'python3 - <<EOF\nx = "`orgctl deploy --phase prod`"\nEOF')")" "ask"
 run_case "py_quoted_heredoc_cmdsub_is_literal" \
-  "$(verdict "$(bash_payload $'python3 - <<\'EOF\'\nx = "$(hubctl dev trigger --phase prod)"\nEOF')")" "quiet"
+  "$(verdict "$(bash_payload $'python3 - <<\'EOF\'\nx = "$(orgctl deploy --phase prod)"\nEOF')")" "quiet"
 run_case "py_unquoted_heredoc_plain_literal" \
   "$(verdict "$(bash_payload $'python3 - <<EOF\nprint("prod")\nEOF')")" "quiet"
 # Blanking the body must not blank the shell line the body hangs off.
@@ -175,7 +189,7 @@ run_case "body_line_shaped_like_opener" \
 # An unquoted body holding a substitution is kept whole rather than extracted:
 # nesting deeper than one level is not parseable by the regex that tried.
 run_case "py_unquoted_heredoc_nested_cmdsub" \
-  "$(verdict "$(bash_payload $'python3 - <<EOF\nx = "$(hubctl dev trigger --phase prod $(echo $(true)))"\nEOF')")" "ask"
+  "$(verdict "$(bash_payload $'python3 - <<EOF\nx = "$(orgctl deploy --phase prod $(echo $(true)))"\nEOF')")" "ask"
 
 # --- Bash: every segment must be read-only, not just the first -------------
 # A pipeline or chain whose later segment mutates is the case this filter must
@@ -229,7 +243,7 @@ run_case "api_valueless_reads" "$(verdict "$(bash_payload 'gh api repos/o/prod-s
 
 # --- The acknowledgement is honoured on both surfaces ----------------------
 run_case "bash_ack" \
-  "$(verdict "$(bash_payload 'hubctl dev trigger --phase prod # approval-premise:ack run already recovered, re-checked')")" \
+  "$(verdict "$(bash_payload 'orgctl deploy --phase prod # approval-premise:ack run already recovered, re-checked')")" \
   "quiet"
 write_ack '{"premise": "run 16 already recovered; blast radius re-measured here"}'
 run_case "mcp_ack" \
@@ -256,8 +270,8 @@ run_case "mcp_ack_consumed_once" \
 # --- The acknowledgement is a statement, and it is read only on the surface
 # where it is declared. A bare marker attests nothing; a marker sitting in an
 # unrelated MCP field was never written as an attestation. ----------------
-run_case "ack_bash_bare"        "$(verdict "$(bash_payload 'hubctl dev trigger --phase prod # approval-premise:ack')")"       "ask"
-run_case "ack_bash_whitespace"  "$(verdict "$(bash_payload 'hubctl dev trigger --phase prod # approval-premise:ack   ')")"    "ask"
+run_case "ack_bash_bare"        "$(verdict "$(bash_payload 'orgctl deploy --phase prod # approval-premise:ack')")"       "ask"
+run_case "ack_bash_whitespace"  "$(verdict "$(bash_payload 'orgctl deploy --phase prod # approval-premise:ack   ')")"    "ask"
 # The marker has to open a real shell comment. A quoted occurrence is data --
 # a request body, a string argument -- and nobody wrote it as an attestation.
 run_case "ack_bash_quoted_body" \

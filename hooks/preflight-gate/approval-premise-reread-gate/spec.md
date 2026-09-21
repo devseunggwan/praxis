@@ -134,7 +134,7 @@ exposed in one session and an enumerated list of marker spellings.
 `_` and `-` and intersecting with the verb set is a strict subset of substring
 matching on that surface: it dropped eight read-only tools — `list_labels` via
 "label", `s3_count_records` via "record", `figma_get_component_sets` and
-`signoz_query_alert_preset` via "set", `shared_memory_read` via "share" — and
+`metrics_query_alert_preset` via "set", `shared_memory_read` via "share" — and
 lost no true positive. Three false positives survive on purpose, each because
 silencing it costs a real mutation: `airflow_import_errors` reads import errors
 rather than importing, but dropping "import" loses `gitbook_git_import`;
@@ -205,7 +205,7 @@ Three exclusions from the carve-out are decisions, not omissions:
   the one-line version of this change and would silence exactly that call.
 - **An unquoted body holding a substitution is kept whole.** bash expands
   `<<EOF` (unquoted) before the interpreter reads it, so
-  `$(hubctl dev trigger --phase prod)` there runs as the shell's own call.
+  `$(orgctl deploy --phase prod)` there runs as the shell's own call.
   Extracting just the substitution was tried and could not parse nesting past
   one level (`$(a $(b $(c)))`), so the whole body stays.
 

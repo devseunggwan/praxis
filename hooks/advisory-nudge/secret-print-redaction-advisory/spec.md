@@ -45,10 +45,10 @@ silent:
 
    The builtin list carries **public tools only**. Org/author-internal fetch
    CLIs extend it via `PRAXIS_SECRET_FETCH_CLIS` — comma-separated command
-   phrases (e.g. `hubctl token fetch`), each matched as its
+   phrases (e.g. `orgctl token fetch`), each matched as its
    whitespace-separated tokens in order, word-bounded, on both the raw and
-   normalized copies (issue #1157; `hubctl` used to be a shipped literal).
-   The `hubctl` examples through the rest of this spec assume that env is
+   normalized copies (issue #1157; `orgctl` used to be a shipped literal).
+   The `orgctl` examples through the rest of this spec assume that env is
    set, as the test suite sets it for the incident-replica fixtures.
 2. **Unmasked output flow** — one of:
    - a variable captured from a fetch (`VAR=$(fetch)` / backtick / python
@@ -56,7 +56,7 @@ silent:
      (`echo`, `printf`, `print(`, `logger.*(`, `logging.*(`,
      `console.log(`);
    - the fetch is substituted inline into an output command with no capture
-     (`echo "$(hubctl token fetch x)"`);
+     (`echo "$(orgctl token fetch x)"`);
    - **authored tier only**: a bare no-capture fetch line (incl.
      `fetch | jq -r .SecretString` passthrough) — the script's stdout lands
      in the transcript when executed.
@@ -65,12 +65,12 @@ silent:
 
 | Tier | Scope | Rules applied |
 | ------ | ------- | --------------- |
-| **Live Bash command** | the command text outside heredoc bodies | var-flow + inline no-capture substitution only. A bare interactive fetch (`hubctl token fetch p --phase dev`) is **SILENT** — it is the sanctioned read-only usage (the *Read-only prod calls auto-proceed* rule, [`ETHOS.md` → Rules praxis carries](../../../ETHOS.md#rules-praxis-carries)) |
+| **Live Bash command** | the command text outside heredoc bodies | var-flow + inline no-capture substitution only. A bare interactive fetch (`orgctl token fetch p --phase dev`) is **SILENT** — it is the sanctioned read-only usage (the *Read-only prod calls auto-proceed* rule, [`ETHOS.md` → Rules praxis carries](../../../ETHOS.md#rules-praxis-carries)) |
 | **Authored content** | Write `content`, Edit `new_string`, heredoc bodies inside a Bash command, echo/printf-appended quoted strings (accumulated per redirect target, so a capture appended by one `echo >>` and a sink appended by the next are linked) | var-flow + inline substitution **plus** bare no-capture fetch lines |
 
 ## Exclusions (silent — no advisory)
 
-- **Bare interactive fetch (live tier)**: `hubctl token fetch p --phase
+- **Bare interactive fetch (live tier)**: `orgctl token fetch p --phase
   dev` alone — sanctioned read-only use.
 - **File-type gate**: Write/Edit targets — and heredoc/append redirect
   targets — ending `.md` / `.txt` / `.rst` are not scanned. Documentation
@@ -97,9 +97,9 @@ silent:
 | --------- | ----------- |
 | Heredoc-authored script with capture+echo (incident replica) | **ADVISORY** — heredoc bodies are the primary detection target |
 | Live `VAR=$(fetch); echo "$VAR"` | **ADVISORY** — var-flow in the live command |
-| `echo "$(hubctl token fetch x)"` (inline, no capture) | **ADVISORY** — fetch substituted into an output command |
+| `echo "$(orgctl token fetch x)"` (inline, no capture) | **ADVISORY** — fetch substituted into an output command |
 | Authored bare `aws secretsmanager get-secret-value ... \| jq -r .SecretString` | **ADVISORY** — passthrough line, stdout reaches transcript on execution |
-| Live bare `hubctl token fetch p --phase dev` | Silent — sanctioned interactive read |
+| Live bare `orgctl token fetch p --phase dev` | Silent — sanctioned interactive read |
 | `curl -H "Authorization: Bearer $TOKEN"` after a fetch | Silent — not an output sink |
 | Masked echo / python slice / digest sink | Silent — masking recognized |
 | Write to `.md` / `.txt` / `.rst` | Silent — file-type gate |
@@ -120,14 +120,14 @@ operator (mirrors `pipefail-advisory`).
 
 | Input | Action |
 | ------- | -------- |
-| Bash heredoc: `TOKEN=$(hubctl token fetch p)` + `echo "[SKIP] $id: $TOKEN"` | **ADVISORY** |
-| Write `verify.py`: `token = subprocess.check_output(["hubctl", "token", "fetch", "p"])` + `print(f"{i}: {token}")` | **ADVISORY** |
+| Bash heredoc: `TOKEN=$(orgctl token fetch p)` + `echo "[SKIP] $id: $TOKEN"` | **ADVISORY** |
+| Write `verify.py`: `token = subprocess.check_output(["orgctl", "token", "fetch", "p"])` + `print(f"{i}: {token}")` | **ADVISORY** |
 | `SECRET=$(vault kv get -field=token secret/x); echo "$SECRET"` | **ADVISORY** |
 | `token = client.get_secret_value(SecretId="x")` + `logger.info("token=%s", token)` | **ADVISORY** |
-| `echo 'TOKEN=$(hubctl token fetch p)' >> verify.sh` + `echo 'echo "$TOKEN"' >> verify.sh` | **ADVISORY** — appended strings accumulated per target |
-| `TOKEN=$(hubctl token fetch p); echo "${TOKEN:0:6}****${TOKEN: -4}"` | **SILENT** — masked |
-| `TOKEN=$(hubctl token fetch p); echo "$TOKEN" \| wc -c` | **SILENT** — digest |
-| `hubctl token fetch p --phase dev` | **SILENT** — live bare interactive fetch |
+| `echo 'TOKEN=$(orgctl token fetch p)' >> verify.sh` + `echo 'echo "$TOKEN"' >> verify.sh` | **ADVISORY** — appended strings accumulated per target |
+| `TOKEN=$(orgctl token fetch p); echo "${TOKEN:0:6}****${TOKEN: -4}"` | **SILENT** — masked |
+| `TOKEN=$(orgctl token fetch p); echo "$TOKEN" \| wc -c` | **SILENT** — digest |
+| `orgctl token fetch p --phase dev` | **SILENT** — live bare interactive fetch |
 | Write `spec.md` containing fetch+echo example text | **SILENT** — file-type gate |
 | `P=$(aws ssm get-parameter --name x); echo "$P"` (no `--with-decryption`) | **SILENT** — encrypted value, not a plaintext fetch |
 
