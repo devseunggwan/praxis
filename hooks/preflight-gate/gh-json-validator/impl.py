@@ -364,8 +364,13 @@ def _check_segment(
 
     sample = sorted(valid_fields)[:15]
     suffix = f" (+ {len(valid_fields) - 15} more)" if len(valid_fields) > 15 else ""
+    # The leading marker is this gate's id, and it is what the repeat counter
+    # keys on (`_block_repeat.reason_key`). Without it the whole first line is
+    # keyed instead — and this reason names the subcommand and the bad field,
+    # so every deny would land under its own key and never repeat.
     reason = (
-        f"BLOCKED: {subcmd_display} --json has invalid field(s): "
+        f"[praxis:gh-json-validator] BLOCKED: {subcmd_display} "
+        "--json has invalid field(s): "
         + ", ".join(parts)
         + f". Run '{subcmd_display} --json help' to see all valid fields."
         + f" Sample valid fields: {', '.join(sample)}{suffix}."
