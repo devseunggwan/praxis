@@ -149,7 +149,7 @@ consulted on demand.
 | Requirements ambiguous (no files/criteria) | `oh-my-claudecode:deep-interview` | Socratic, math-gated |
 | Investigation + requirements | `oh-my-claudecode:research` | canonical research lane |
 | Generic planning | `oh-my-claudecode:plan` | optional interview |
-| Project-specific planning | see project CLAUDE.md | laplace-dev-hub:*, praxis:*, etc. |
+| Project-specific planning | see project CLAUDE.md | example-dev-hub:*, praxis:*, etc. |
 
 ### Execute (write code)
 
@@ -172,7 +172,7 @@ the Stop hook gates on.
 
 | Condition | Skill | Notes |
 | --- | --- | --- |
-| Project-specific review/PR | see project CLAUDE.md | laplace-dev-hub:code-review, laplace-dev-hub:create-hub-pr, etc. |
+| Project-specific review/PR | see project CLAUDE.md | example-dev-hub:code-review, example-dev-hub:create-hub-pr, etc. |
 | Code review (general, MANDATORY before commit) | `oh-my-claudecode:code-reviewer` agent | spec compliance + security + logic + SOLID, severity-rated |
 | Second independent review (MANDATORY before commit) | `praxis:codex-review-wrap` skill | independent Codex pass, premise-verification gate + A→B→A flip detection |
 | Security-sensitive change (auth / token / secret / SQL / XSS) | `oh-my-claudecode:security-reviewer` agent | additional pass beyond generic review |

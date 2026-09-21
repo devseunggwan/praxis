@@ -209,6 +209,12 @@ python3 process.
   the command so the runtime applies the same `hosts` filter. The node `timeout`
   is the max of member timeouts (members run sequentially in one process, so the
   budget matches the slowest member's per-process budget, not the sum).
+  A member declaring `mode.if` (a permission-rule pattern the **host** evaluates
+  before spawning anything) gets its own node, carrying that pattern as the node's
+  `if` field and as a fourth command argument, with a budget over its own members
+  only — so a non-matching tool call costs no process at all. No member declares
+  one yet, so today every group still emits the single unfiltered node.
+  [ADR-0002 §6a](docs/adr/0002-hook-dispatch-consolidation.md) (issue #1335).
 - **Runtime path.** `hooks/_lib/_dispatch.py` reads the payload from stdin once,
   resolves the ordered member list for `(event, matcher)` from the manifest
   (host-filtered to match the build), imports each member's `impl.py`

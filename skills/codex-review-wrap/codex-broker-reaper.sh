@@ -420,7 +420,7 @@ cwd_snapshot_ensure() {
 #     failure mode restated.
 #   - component-boundary containment, not a bare string prefix: sibling
 #     worktrees routinely share a name prefix. On the author's host
-#     `laplace-dev-hub` string-prefixes `laplace-dev-hub-hub-4682` and
+#     `example-dev-hub` string-prefixes `example-dev-hub-hub-4682` and
 #     `-4687`, and a bare prefix test claimed 8 processes from those siblings
 #     as owners of the parent.
 #

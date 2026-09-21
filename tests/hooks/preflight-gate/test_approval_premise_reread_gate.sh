@@ -85,18 +85,18 @@ mcp_payload_other_session() {
 echo "test_approval_premise_reread_gate"
 
 # --- Bash: the marker's spacing, casing and flag-name variants -------------
-run_case "flag_space"        "$(verdict "$(bash_payload 'hubctl dev trigger --phase prod')")"            "ask"
-run_case "flag_equals"       "$(verdict "$(bash_payload 'hubctl dev trigger --phase=prod')")"            "ask"
-run_case "flag_double_space" "$(verdict "$(bash_payload 'hubctl dev trigger --phase  prod')")"           "ask"
-run_case "flag_uppercase"    "$(verdict "$(bash_payload 'hubctl dev trigger --phase PROD')")"            "ask"
-run_case "flag_short"        "$(verdict "$(bash_payload 'hubctl dev trigger -p prod')")"                 "ask"
+run_case "flag_space"        "$(verdict "$(bash_payload 'orgctl deploy --phase prod')")"            "ask"
+run_case "flag_equals"       "$(verdict "$(bash_payload 'orgctl deploy --phase=prod')")"            "ask"
+run_case "flag_double_space" "$(verdict "$(bash_payload 'orgctl deploy --phase  prod')")"           "ask"
+run_case "flag_uppercase"    "$(verdict "$(bash_payload 'orgctl deploy --phase PROD')")"            "ask"
+run_case "flag_short"        "$(verdict "$(bash_payload 'orgctl deploy -p prod')")"                 "ask"
 run_case "flag_profile"      "$(verdict "$(bash_payload 'aws s3 rm s3://bucket/key --profile prod')")"   "ask"
 run_case "flag_env_suffixed" "$(verdict "$(bash_payload 'deploy --env prod-apne2')")"                    "ask"
-run_case "flag_production"   "$(verdict "$(bash_payload 'hubctl dev trigger --phase production-mirror')")" "ask"
+run_case "flag_production"   "$(verdict "$(bash_payload 'orgctl deploy --phase production-mirror')")" "ask"
 
 # --- Bash: what must stay quiet -------------------------------------------
 run_case "no_marker"         "$(verdict "$(bash_payload 'ls -la')")"                                     "quiet"
-run_case "dev_phase"         "$(verdict "$(bash_payload 'hubctl dev trigger --phase dev')")"             "quiet"
+run_case "dev_phase"         "$(verdict "$(bash_payload 'orgctl deploy --phase dev')")"             "quiet"
 # Bare `production` is deliberately not a marker: this branch has no mutation
 # filter, so a read-only query carrying it would fire on every namespace call.
 run_case "bare_production"   "$(verdict "$(bash_payload 'kubectl get pods -n production')")"             "quiet"
@@ -107,7 +107,21 @@ run_case "bare_production"   "$(verdict "$(bash_payload 'kubectl get pods -n pro
 # rule set already names as a sanctioned read-only production call.
 run_case "ro_kubectl_get"    "$(verdict "$(bash_payload 'kubectl get pods -n prod-apne2')")"             "quiet"
 run_case "ro_kubectl_logs"   "$(verdict "$(bash_payload 'kubectl logs pod-x --profile prod')")"          "quiet"
-run_case "ro_hubctl_token"   "$(verdict "$(bash_payload 'hubctl token fetch datadog --phase prod')")"    "quiet"
+# An org-internal CLI is no longer on the allowlist (issue #1470), so it takes
+# the fall-through the paragraph above describes: one question, not silence.
+run_case "internal_cli_asks" "$(verdict "$(bash_payload 'orgctl token fetch datadog --phase prod')")"   "ask"
+# `orgctl` was never allowlisted, so the case above passes with the removed entry
+# restored too. Pinning the key set catches a new allowlist binary by any name;
+# adding a public read-only CLI means updating this line on purpose.
+run_case "allowlist_binaries_pinned" \
+  "$(python3 - "$HOOK" <<'EOF'
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("gate", sys.argv[1])
+gate = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(gate)
+print(",".join(sorted(gate.READONLY_SUBCOMMANDS)))
+EOF
+)" "aws,docker,gh,git,kubectl"
 run_case "ro_aws_sts"        "$(verdict "$(bash_payload 'aws sts get-caller-identity --profile prod')")" "quiet"
 run_case "ro_git_log"        "$(verdict "$(bash_payload 'git log --oneline --phase prod')")"             "quiet"
 run_case "ro_gh_pr_view"     "$(verdict "$(bash_payload 'gh pr view 1 --profile prod')")"                "quiet"
@@ -153,11 +167,11 @@ run_case "attached_heredoc_operator_binds" \
 # An unquoted heredoc is expanded by the shell before the interpreter reads
 # it, so a command substitution in it is the shell's own call.
 run_case "py_unquoted_heredoc_cmdsub" \
-  "$(verdict "$(bash_payload $'python3 - <<EOF\nx = "$(hubctl dev trigger --phase prod)"\nEOF')")" "ask"
+  "$(verdict "$(bash_payload $'python3 - <<EOF\nx = "$(orgctl deploy --phase prod)"\nEOF')")" "ask"
 run_case "py_unquoted_heredoc_backtick" \
-  "$(verdict "$(bash_payload $'python3 - <<EOF\nx = "`hubctl dev trigger --phase prod`"\nEOF')")" "ask"
+  "$(verdict "$(bash_payload $'python3 - <<EOF\nx = "`orgctl deploy --phase prod`"\nEOF')")" "ask"
 run_case "py_quoted_heredoc_cmdsub_is_literal" \
-  "$(verdict "$(bash_payload $'python3 - <<\'EOF\'\nx = "$(hubctl dev trigger --phase prod)"\nEOF')")" "quiet"
+  "$(verdict "$(bash_payload $'python3 - <<\'EOF\'\nx = "$(orgctl deploy --phase prod)"\nEOF')")" "quiet"
 run_case "py_unquoted_heredoc_plain_literal" \
   "$(verdict "$(bash_payload $'python3 - <<EOF\nprint("prod")\nEOF')")" "quiet"
 # Blanking the body must not blank the shell line the body hangs off.
@@ -175,7 +189,7 @@ run_case "body_line_shaped_like_opener" \
 # An unquoted body holding a substitution is kept whole rather than extracted:
 # nesting deeper than one level is not parseable by the regex that tried.
 run_case "py_unquoted_heredoc_nested_cmdsub" \
-  "$(verdict "$(bash_payload $'python3 - <<EOF\nx = "$(hubctl dev trigger --phase prod $(echo $(true)))"\nEOF')")" "ask"
+  "$(verdict "$(bash_payload $'python3 - <<EOF\nx = "$(orgctl deploy --phase prod $(echo $(true)))"\nEOF')")" "ask"
 
 # --- Bash: every segment must be read-only, not just the first -------------
 # A pipeline or chain whose later segment mutates is the case this filter must
@@ -229,35 +243,35 @@ run_case "api_valueless_reads" "$(verdict "$(bash_payload 'gh api repos/o/prod-s
 
 # --- The acknowledgement is honoured on both surfaces ----------------------
 run_case "bash_ack" \
-  "$(verdict "$(bash_payload 'hubctl dev trigger --phase prod # approval-premise:ack run already recovered, re-checked')")" \
+  "$(verdict "$(bash_payload 'orgctl deploy --phase prod # approval-premise:ack run already recovered, re-checked')")" \
   "quiet"
 write_ack '{"premise": "run 16 already recovered; blast radius re-measured here"}'
 run_case "mcp_ack" \
-  "$(verdict "$(mcp_payload 'mcp__laplace-airflow__airflow_trigger_dag' '{"conf":{"phase":"prod"}}')")" \
+  "$(verdict "$(mcp_payload 'mcp__airflow__airflow_trigger_dag' '{"conf":{"phase":"prod"}}')")" \
   "quiet"
 
 # The ack is consumed on read, so a mutation the gate would not have asked
 # about must not eat the premise written for the production call.
 write_ack '{"premise": "re-measured on this target"}'
 run_case "mcp_ack_survives_unmarked_call" \
-  "$(verdict "$(mcp_payload 'mcp__laplace-slack__slack_send_message' '{"channel":"dev-alerts"}')")" \
+  "$(verdict "$(mcp_payload 'mcp__slack__slack_send_message' '{"channel":"dev-alerts"}')")" \
   "quiet"
 
 run_case "mcp_ack_used_by_marked_call" \
-  "$(verdict "$(mcp_payload 'mcp__laplace-airflow__airflow_trigger_dag' '{"conf":{"phase":"prod"}}')")" \
+  "$(verdict "$(mcp_payload 'mcp__airflow__airflow_trigger_dag' '{"conf":{"phase":"prod"}}')")" \
   "quiet"
 
 # Consumed on read: the same call a second time has nothing left to stand on,
 # which is what stops one acknowledgement from becoming an off switch.
 run_case "mcp_ack_consumed_once" \
-  "$(verdict "$(mcp_payload 'mcp__laplace-airflow__airflow_trigger_dag' '{"conf":{"phase":"prod"}}')")" \
+  "$(verdict "$(mcp_payload 'mcp__airflow__airflow_trigger_dag' '{"conf":{"phase":"prod"}}')")" \
   "ask"
 
 # --- The acknowledgement is a statement, and it is read only on the surface
 # where it is declared. A bare marker attests nothing; a marker sitting in an
 # unrelated MCP field was never written as an attestation. ----------------
-run_case "ack_bash_bare"        "$(verdict "$(bash_payload 'hubctl dev trigger --phase prod # approval-premise:ack')")"       "ask"
-run_case "ack_bash_whitespace"  "$(verdict "$(bash_payload 'hubctl dev trigger --phase prod # approval-premise:ack   ')")"    "ask"
+run_case "ack_bash_bare"        "$(verdict "$(bash_payload 'orgctl deploy --phase prod # approval-premise:ack')")"       "ask"
+run_case "ack_bash_whitespace"  "$(verdict "$(bash_payload 'orgctl deploy --phase prod # approval-premise:ack   ')")"    "ask"
 # The marker has to open a real shell comment. A quoted occurrence is data --
 # a request body, a string argument -- and nobody wrote it as an attestation.
 run_case "ack_bash_quoted_body" \
@@ -307,51 +321,51 @@ run_case "ack_bash_comment_no_space" \
 
 rm -f "$ACK_FILE"
 run_case "ack_mcp_stray_marker" \
-  "$(verdict "$(mcp_payload 'mcp__laplace-airflow__airflow_trigger_dag' '{"phase":"prod","note":"see # approval-premise:ack in runbook"}')")" \
+  "$(verdict "$(mcp_payload 'mcp__airflow__airflow_trigger_dag' '{"phase":"prod","note":"see # approval-premise:ack in runbook"}')")" \
   "ask"
 # The synthetic argument is gone: a server that validates its schema rejects
 # an undeclared field, so a call carrying it was never reachable at runtime.
 rm -f "$ACK_FILE"
 run_case "ack_mcp_argument_ignored" \
-  "$(verdict "$(mcp_payload 'mcp__laplace-airflow__airflow_trigger_dag' '{"phase":"prod","approval_premise_ack":"re-read"}')")" \
+  "$(verdict "$(mcp_payload 'mcp__airflow__airflow_trigger_dag' '{"phase":"prod","approval_premise_ack":"re-read"}')")" \
   "ask"
 
 write_ack '{"premise": true}'
 run_case "ack_mcp_file_boolean" \
-  "$(verdict "$(mcp_payload 'mcp__laplace-airflow__airflow_trigger_dag' '{"phase":"prod"}')")" \
+  "$(verdict "$(mcp_payload 'mcp__airflow__airflow_trigger_dag' '{"phase":"prod"}')")" \
   "ask"
 
 write_ack '{"premise": "   "}'
 run_case "ack_mcp_file_blank" \
-  "$(verdict "$(mcp_payload 'mcp__laplace-airflow__airflow_trigger_dag' '{"phase":"prod"}')")" \
+  "$(verdict "$(mcp_payload 'mcp__airflow__airflow_trigger_dag' '{"phase":"prod"}')")" \
   "ask"
 
 write_ack 'not json at all'
 run_case "ack_mcp_file_malformed" \
-  "$(verdict "$(mcp_payload 'mcp__laplace-airflow__airflow_trigger_dag' '{"phase":"prod"}')")" \
+  "$(verdict "$(mcp_payload 'mcp__airflow__airflow_trigger_dag' '{"phase":"prod"}')")" \
   "ask"
 
 # Valid JSON that simply does not carry a premise says nothing about what the
 # premise now holds, which is the whole content of the attestation.
 write_ack '{}'
 run_case "ack_mcp_file_no_premise_key" \
-  "$(verdict "$(mcp_payload 'mcp__laplace-airflow__airflow_trigger_dag' '{"phase":"prod"}')")" \
+  "$(verdict "$(mcp_payload 'mcp__airflow__airflow_trigger_dag' '{"phase":"prod"}')")" \
   "ask"
 
 write_ack '{"other":"x"}'
 run_case "ack_mcp_file_other_key" \
-  "$(verdict "$(mcp_payload 'mcp__laplace-airflow__airflow_trigger_dag' '{"phase":"prod"}')")" \
+  "$(verdict "$(mcp_payload 'mcp__airflow__airflow_trigger_dag' '{"phase":"prod"}')")" \
   "ask"
 
 # The file is session-keyed: a valid premise written for one session must not
 # acknowledge another session's call, and must survive it unconsumed.
 write_ack '{"premise": "re-measured on this target"}'
 run_case "ack_mcp_other_session_asks" \
-  "$(verdict "$(mcp_payload_other_session 'mcp__laplace-airflow__airflow_trigger_dag' '{"phase":"prod"}')")" \
+  "$(verdict "$(mcp_payload_other_session 'mcp__airflow__airflow_trigger_dag' '{"phase":"prod"}')")" \
   "ask"
 
 run_case "ack_mcp_own_session_still_honoured" \
-  "$(verdict "$(mcp_payload 'mcp__laplace-airflow__airflow_trigger_dag' '{"phase":"prod"}')")" \
+  "$(verdict "$(mcp_payload 'mcp__airflow__airflow_trigger_dag' '{"phase":"prod"}')")" \
   "quiet"
 
 # --- one acknowledgement cannot pass two concurrent calls ------------------
@@ -367,7 +381,7 @@ hook = os.environ["HOOK"]
 ack = os.path.join(os.environ["PRAXIS_HOME"], "cache", "approval-premise-ack-race.json")
 os.makedirs(os.path.dirname(ack), exist_ok=True)
 payload = json.dumps({"session_id": "race",
-                      "tool_name": "mcp__laplace-airflow__airflow_trigger_dag",
+                      "tool_name": "mcp__airflow__airflow_trigger_dag",
                       "tool_input": {"conf": {"phase": "prod"}}})
 
 
@@ -485,7 +499,7 @@ run_case "sub_arithmetic_quiet" \
 # --- MCP: mutation classification by token, not by substring ---------------
 # Each of these was misclassified by substring matching on the 374-tool surface.
 run_case "mcp_trigger_fires" \
-  "$(verdict "$(mcp_payload 'mcp__laplace-airflow__airflow_trigger_dag' '{"dag_id":"dag_sync_v0","conf":{"phase":"prod"}}')")" \
+  "$(verdict "$(mcp_payload 'mcp__airflow__airflow_trigger_dag' '{"dag_id":"dag_sync_v0","conf":{"phase":"prod"}}')")" \
   "ask"
 run_case "mcp_label_fires" \
   "$(verdict "$(mcp_payload 'mcp__claude_ai_Gmail__label_message' '{"phase":"prod"}')")" \
@@ -494,10 +508,10 @@ run_case "mcp_list_labels_quiet" \
   "$(verdict "$(mcp_payload 'mcp__claude_ai_Gmail__list_labels' '{"phase":"prod"}')")" \
   "quiet"
 run_case "mcp_count_records_quiet" \
-  "$(verdict "$(mcp_payload 'mcp__laplace-s3__s3_count_records' '{"phase":"prod"}')")" \
+  "$(verdict "$(mcp_payload 'mcp__s3__s3_count_records' '{"phase":"prod"}')")" \
   "quiet"
 run_case "mcp_component_sets_quiet" \
-  "$(verdict "$(mcp_payload 'mcp__laplace-figma__figma_get_component_sets' '{"phase":"prod"}')")" \
+  "$(verdict "$(mcp_payload 'mcp__figma__figma_get_component_sets' '{"phase":"prod"}')")" \
   "quiet"
 
 # The verbs this repository's own write vocabularies already name -- `merge`
@@ -528,11 +542,11 @@ run_case "mcp_closed_at_quiet" \
 
 # --- MCP: a read-only call is out of scope even carrying the marker --------
 run_case "mcp_query_quiet" \
-  "$(verdict "$(mcp_payload 'mcp__laplace-trino__trino_query' '{"phase":"prod","sql":"select 1"}')")" \
+  "$(verdict "$(mcp_payload 'mcp__trino__trino_query' '{"phase":"prod","sql":"select 1"}')")" \
   "quiet"
 # ... and a mutation without the marker is equally out of scope.
 run_case "mcp_mutation_no_marker_quiet" \
-  "$(verdict "$(mcp_payload 'mcp__laplace-slack__slack_send_message' '{"channel":"dev-alerts"}')")" \
+  "$(verdict "$(mcp_payload 'mcp__slack__slack_send_message' '{"channel":"dev-alerts"}')")" \
   "quiet"
 
 # --- Fail open: a payload the gate cannot read must not block the session ---

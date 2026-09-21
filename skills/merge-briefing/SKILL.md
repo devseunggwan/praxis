@@ -242,8 +242,8 @@ is readable as an approval at all:
 | Field | What it carries | Why it is not free-form |
 | --- | --- | --- |
 | `question` | the PR number — `PR #999 를 머지할까요?` | the gate resolves the answer against the PR the merge targets; an unnamed question answers no merge |
-| approval option `label` | **leads** with an approval token — `승인 — 머지`, `Approve merge`, `머지 — Carried: none` | only the segment before the first `— – : , ( -` is read (`_ask_label_approves`); a token buried mid-label is not an approval |
-| hold option `label` | a leading segment that is **not** an approval token — `보류 — 추가 확인 후`, `취소` | the same split runs on the hold: `진행 — 나중에 다시 확인` is read as an approval and releases the merge |
+| approval option `label` | **leads** with an approval token and negates nothing — `승인 — 머지`, `Approve merge`, `머지 — Carried: none` | only the segment before the first `— – : , ( -` is read (`_ask_label_approves`), so a token buried mid-label is not an approval; a negation anywhere in the label (`승인 — 머지하지 않기`) disqualifies the whole label |
+| hold option `label` | a leading segment that is **not** an approval token — `보류 — 추가 확인 후`, `취소` | the same split runs on the hold, so keep the refusal in the lead; a trailing `나중에`/`취소`/`하지 않` is caught as a negation, but do not rely on the qualifier to carry the refusal |
 | `multiSelect` | `false` | one PR, one answer |
 
 The tool is the surface, not a softer gate. Everything the prose ask carried
@@ -311,8 +311,10 @@ PR title exceeds 50 chars — the PR title becomes the squash commit title.
 reads.** Once a merge has run in the session, `momentum-rule-retrieval-gate`
 requires an approval of *this* merge on top of the item count, and it accepts
 either a typed reply or a non-`is_error` `AskUserQuestion` result whose question
-names the PR and whose picked label leads with an approval token
-(`_ask_answer_approves` / `_ask_label_approves`). That is why Step 5's field
+names the PR and whose picked label leads with an approval token and negates
+nothing (`_ask_answer_approves` / `_ask_label_approves`). The same surface
+withdraws an approval: a hold pick, or a declined question, about this PR takes
+back an earlier `ok`. That is why Step 5's field
 table is a contract and not a style preference: the same pick, phrased outside
 it, leaves the merge unanswered.
 

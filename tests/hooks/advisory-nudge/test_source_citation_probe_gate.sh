@@ -149,11 +149,11 @@ run_case "gh issue list — not a write (silent)" \
 # still carry the shapes that used to warn.
 run_case "MCP slack send is out of scope (silent)" \
   "silent" "advisory" \
-  '{"tool_name":"mcp__laplace-slack__slack_send_message","tool_input":{"channel":"C1","text":"prod incident traced to handler.py:230"}}'
+  '{"tool_name":"mcp__slack__slack_send_message","tool_input":{"channel":"C1","text":"prod incident traced to handler.py:230"}}'
 
 run_case "MCP notion append is out of scope (silent)" \
   "silent" "advisory" \
-  '{"tool_name":"mcp__laplace-notion__notion_append_blocks","tool_input":{"children":[{"paragraph":{"rich_text":[{"text":{"content":"regression introduced at dag.py:14"}}]}}]}}'
+  '{"tool_name":"mcp__notion__notion_append_blocks","tool_input":{"children":[{"paragraph":{"rich_text":[{"text":{"content":"regression introduced at dag.py:14"}}]}}]}}'
 
 # --- False-positive guards (all silent) ---------------------------------------
 

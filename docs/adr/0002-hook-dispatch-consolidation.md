@@ -317,6 +317,53 @@ Decision record only. No code change.
 
 ---
 
+## 6a. Host-side pre-filtering with `mode.if` (issue #1335)
+
+"ONE dispatcher node per (event, matcher)" now reads "one per (event, matcher,
+`mode.if`)". A member may declare a permission-rule pattern
+(`"Bash(git commit *)"`, `"Edit(*.ts)"`) that the **host** evaluates before
+starting any process, so a non-matching tool call costs nothing at all — not the
+interpreter, not the imports, not the member's own cheap discriminator.
+
+A tagged member cannot share a node with untagged ones: the host would skip the
+node on a non-matching call and take every untagged member down with it. So the
+build partitions the collapsible members by their pattern and emits one node per
+distinct value, in first-appearance order. A member declaring nothing keeps the
+unfiltered node, with the same three-argument command it has always had — the
+mechanism is inert until a member is tagged.
+
+The pattern is emitted on **two** channels, and both are load-bearing:
+
+| Channel | Read by | What breaks without it |
+| --- | --- | --- |
+| the node's `if` field | the host, before spawning | no filtering at all; the node runs on every call |
+| argv[4] | the dispatcher, which re-reads the canonical manifest | the right process starts and runs the **wrong** members — `_iter_group_entries` resolves the untagged partition |
+
+Two consequences worth stating, because neither is visible from the node alone:
+
+- **Budget is per node, not per matcher.** A node holding one 3 s member takes a
+  3 s deadline, not the 15 s of a sibling node it never runs. `load_group`
+  derives it from the same partition the build used.
+- **Only tool events honour `if`.** The hooks reference: *"Only evaluated on tool
+  events: `PreToolUse`, `PostToolUse`, `PostToolUseFailure`,
+  `PermissionRequest`, and `PermissionDenied`. On other events, a hook with `if`
+  set never runs."* A pattern on a `Stop` or `UserPromptSubmit` member therefore
+  disables it silently, which is why the schema documents the restriction at the
+  field.
+
+What this deliberately does **not** do is re-derive which patterns a command
+would have matched. The host has already decided the node runs; praxis
+re-implementing the permission matcher would mean any disagreement drops a gate.
+Membership is therefore exact string equality on the declared pattern.
+
+Payoff bound, measured before the work (issue #1335 review): a pattern more
+specific than the command name runs the hook anyway when the command carries
+`$()`, a backtick, or `$VAR`. Across 147,984 Bash calls in the local transcript
+corpus that shape appears in 16.3% of `git` and `gh` calls, so subcommand-level
+tagging keeps its filter on the other 83.7%.
+
+---
+
 ## 7. Decision record
 
 | Date       | Decision                                                                                                              | Decided by         |
@@ -325,6 +372,7 @@ Decision record only. No code change.
 | 2026-09-03 | Scope extended to `PostToolUse(Bash)` (#1239); multi-matcher hooks split their `Bash` leg into the exact-`Bash` group | praxis maintainers |
 | 2026-09-05 | Status → Accepted. The design has been the live runtime path since `_dispatch.py` and the Rule 14 guard landed (#617); five groups are collapsed today and `ARCHITECTURE.md` documents it as current architecture | praxis maintainers |
 | 2026-09-06 | Scope extended to `Stop` (#1281): systemMessage lane, subprocess path for `impl.sh` members, shared turn parse        | praxis maintainers |
+| 2026-09-20 | One node per (event, matcher, `mode.if`) — host-side pre-filtering (#1335, §6a)                                       | praxis maintainers |
 
 ---
 

@@ -139,6 +139,10 @@ MEMORY.md defects that the session-scoped friction scan cannot see.
 - Use `next_batch_pointer` to choose the batch start
 - Exclude `scanned_recent_batch`
 - Carry forward the cursor `note` into Stage 3 input
+- Run `carried-task-scan.py` over the cursor and emit every candidate it prints
+  as a `memory_hygiene` finding with `origin: carried` — a line written into the
+  note as the next pass's task has no other path into a finding set, so without
+  this step it is displayed and then carried again
 
 **Cursor write mandate (exit — read-modify-write union under concurrency, MUST).**
 This is the cross-session complement of the single-session falsification gate.
@@ -150,6 +154,10 @@ This is the cross-session complement of the single-session falsification gate.
 - Advance `next_batch_pointer` to the **FURTHER of the two pointers**
 - Record the Stage 3 trail line:
   `concurrent advance detected — union-merged note`
+- Write back the disposition of every carried task Stage 4 executed or skipped
+  (`[carried-done <cycle>]` / `[carried-skipped <cycle>: <reason>]`), so the
+  line stays as the record without resurfacing next cycle — see
+  [`references/stage4-execution.md`](references/stage4-execution.md)
 - **Silent overwrite of a concurrently-advanced cursor** is a Red Flag
 
 If Stage 1.5 finds hygiene defects but Stage 2 finds zero friction events, take

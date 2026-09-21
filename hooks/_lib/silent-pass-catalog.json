@@ -22,7 +22,7 @@
       "scope": "assistant",
       "grep_pattern": "aws( +[^ ]+)* +secretsmanager +get-secret-value",
       "positive_fixture": "aws --profile prod secretsmanager get-secret-value --secret-id some/secret/<REDACTED>",
-      "negative_fixture": "hubctl token fetch some_provider --id <ID> --phase prod"
+      "negative_fixture": "orgctl token fetch some_provider --id <ID> --phase prod"
     },
     {
       "id": "create-delete-churn",

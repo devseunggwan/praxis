@@ -26,8 +26,8 @@ The agent surfaced this verdict to the user:
 
 > **게이트 결과가 나왔습니다 — 매핑 규칙이 없습니다.**
 
-The evidence was a read of `dags/tests/laplace/templates/sql` (**plural**, 1
-test). The real asset lives at `dags/tests/laplace/template/sql`
+The evidence was a read of `dags/tests/example/templates/sql` (**plural**, 1
+test). The real asset lives at `dags/tests/example/template/sql`
 (**singular**, 37 tests) — a one-character directory-name difference. Accepted
 as-is, the verdict would have discarded approach A entirely (the AC's kill
 branch); it was retracted only by the agent's own later probe.
@@ -57,7 +57,7 @@ surfaces its own error on the next query. The risk is a negative verdict that
 **answers a pre-registered decision question with a kill branch** — if that is
 wrong, the whole approach is discarded, and nothing downstream re-checks it.
 
-Three candidates were simulated over 200 laplace-dev-hub sessions:
+Three candidates were simulated over 200 example-dev-hub sessions:
 
 | Candidate | Rule | Fires | Motivating case caught |
 | --- | --- | --- | --- |

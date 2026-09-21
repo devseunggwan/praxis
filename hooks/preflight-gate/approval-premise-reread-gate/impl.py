@@ -140,10 +140,16 @@ MUTATING_MCP_VERBS = frozenset((
 # call it exists to catch.
 #
 # The entries mirror the sanctioned read-only production calls the rule set
-# already names — `kubectl get|describe|logs`, `hubctl token fetch`, Trino
-# SELECT, AWS describe/get/list — plus the inspection commands that carry no
-# side effect. Bare names take any argument; a name mapped to a set is read-only
-# only under those subcommands.
+# already names — `kubectl get|describe|logs`, AWS describe/get/list — plus the
+# inspection commands that carry no side effect. Bare names take any argument; a
+# name mapped to a set is read-only only under those subcommands.
+#
+# Author- or org-internal CLIs are deliberately absent and get no extension env
+# (issue #1470). The sibling `PRAXIS_SECRET_FETCH_CLIS` widens a *detector*, so
+# an extra entry only adds advisories; widening THIS list removes questions, and
+# the spec already refuses a bypass env on that ground. An internal CLI
+# therefore falls through and costs one question, which is what the paragraph
+# above says the fall-through is for.
 # `find`, `yq`, `sort`, `uniq` and `date` were here and were removed: each
 # writes under a flag or a second positional (`find -delete`, `yq -i`,
 # `sort -o`, `uniq in out`, `date -s`), so its read-onlyness is a property of
@@ -168,7 +174,6 @@ READONLY_SUBCOMMANDS = {
     "kubectl": frozenset({"get", "describe", "logs", "top", "explain", "api-resources"}),
     "aws": frozenset({"sts"}),
     "docker": frozenset({"ps", "images", "inspect", "logs"}),
-    "hubctl": frozenset({"token"}),
 }
 
 # `gh api` and `aws` reach every verb the service has, so the subcommand alone

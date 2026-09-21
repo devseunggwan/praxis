@@ -85,9 +85,9 @@ carry the author's private namespace as code, not config:
 | Location | Asset | Note |
 | --- | --- | --- |
 | `preflight-gate/block-gh-issue-create-without-dup-search/impl.py:121` | `_PERSONAL_REPO_RE = ^devseunggwan/` | The blast-radius exemption only works for the author's namespace; every other installer gets the strict path unconditionally |
-| `advisory-nudge/secret-print-redaction-advisory/impl.py` (fetch-CLI regex) | `hubctl token fetch` as first alternative | `hubctl` is an org-internal tool; the other alternatives (aws/vault/op/gh/kubectl) are public |
-| `completion-verify/completion-signal-gate/impl.py` | `laplace-dev-hub`, `laplace-wiki`, `oh-my-claudecode`, `_KNOWN_FOREIGN_SKILLS` | Rule 2 (foreign-plugin slash command) is gated on cwd == praxis, so contained — but the namespace list is still personal |
-| `advisory-nudge/model-routing-advisory/spec.md`, `merge-menu-review-options-advisory/impl.py` | `laplace-dev-hub:*`, `oh-my-claudecode:security-reviewer` named in emitted guidance | Advice text tells any installer to run plugins they do not have |
+| `advisory-nudge/secret-print-redaction-advisory/impl.py` (fetch-CLI regex) | `orgctl token fetch` as first alternative | `orgctl` is an org-internal tool; the other alternatives (aws/vault/op/gh/kubectl) are public |
+| `completion-verify/completion-signal-gate/impl.py` | `example-dev-hub`, `example-wiki`, `oh-my-claudecode`, `_KNOWN_FOREIGN_SKILLS` | Resolved (#1470) — the org namespaces moved behind `PRAXIS_FOREIGN_PLUGINS`; the shipped prefix set keeps only publicly installable plugins |
+| `advisory-nudge/model-routing-advisory/spec.md`, `merge-menu-review-options-advisory/impl.py` | `example-dev-hub:*`, `oh-my-claudecode:security-reviewer` named in emitted guidance | Advice text tells any installer to run plugins they do not have |
 | `preflight-gate/side-effect-scan` (`wrapper-commit` category) | `iceberg-schema migrate/promote`, `omc ralph` | Author-toolchain command names in a shipped trigger table |
 | `hooks/_lib/_memory_dir.py:49-50` | a real personal `/Users/<name>/.claude` path in a docstring example | Fixed with this audit (R1) — replaced by a placeholder in code, spec, and test fixtures |
 | four hooks (`pr-report-destination-gate`, `protected-paths-guard` exclusion, `external-write-falsify-check`, `postcompact-context` docs) | `.omc/plans/` scratch path | omc-convention path assumed to be where planning artifacts live |
@@ -99,7 +99,7 @@ no username in code.
 **Verdict: migrate literals to config with the author's values as *their*
 config, not the shipped default.** The `^devseunggwan/` regex is the clearest
 case — it changes enforcement behavior per-installer and already has a
-sibling pattern to copy (`PRAXIS_PERSONAL_REPO_OWNERS`). `hubctl` and the
+sibling pattern to copy (`PRAXIS_PERSONAL_REPO_OWNERS`). `orgctl` and the
 `wrapper-commit` command names belong in an env-extensible list
 (`PRAXIS_SECRET_FETCH_CLIS`, `PRAXIS_WRAPPER_COMMIT_CMDS` or similar). The
 docstring name is a one-line fix.
@@ -218,7 +218,7 @@ reproduce today's strict behavior for a non-author repo.
 Same shape, two sites, one PR:
 
 - `secret-print-redaction-advisory`: keep the public fetch-CLI alternatives
-  (aws/vault/op/infisical/kubectl/gh); move `hubctl` out of the builtin
+  (aws/vault/op/infisical/kubectl/gh); move `orgctl` out of the builtin
   regex into a comma-separated **`PRAXIS_SECRET_FETCH_CLIS`** extension env.
 - `side-effect-scan` `wrapper-commit` category: move `iceberg-schema
   migrate/promote` and `omc ralph` into **`PRAXIS_WRAPPER_COMMIT_CMDS`**;

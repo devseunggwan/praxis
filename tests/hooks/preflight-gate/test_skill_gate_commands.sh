@@ -36,13 +36,13 @@ printf '%s\n' \
 # Transcript WITH a different skill (for "wrong skill" tests)
 TX_WITH_WRONG_SKILL=$(mktemp)
 printf '%s\n' \
-  '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"Skill","input":{"skill":"laplace-dev-hub:code-review"}}]}}' \
+  '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"Skill","input":{"skill":"example-dev-hub:code-review"}}]}}' \
   >"$TX_WITH_WRONG_SKILL"
 
 # Transcript WITH a skill whose name contains a colon (org:skill-name)
 TX_WITH_COLON_SKILL=$(mktemp)
 printf '%s\n' \
-  '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"Skill","input":{"skill":"laplace-dev-hub:create-hub-pr"}}]}}' \
+  '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"Skill","input":{"skill":"example-dev-hub:create-hub-pr"}}]}}' \
   >"$TX_WITH_COLON_SKILL"
 
 # Transcript WITHOUT any matching skill
@@ -255,7 +255,7 @@ run_case "gh --repo owner/my-repo pr create (long global flag, block)" \
 # 9. Required skill name containing a colon → parsed correctly
 # ---------------------------------------------------------------------------
 
-CFG_COLON_SKILL="gh pr create=>laplace-dev-hub:create-hub-pr"
+CFG_COLON_SKILL="gh pr create=>example-dev-hub:create-hub-pr"
 
 run_case "skill with colon in name, not invoked (block)" \
   "block" \
@@ -522,8 +522,95 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# Repository-scoped mappings (issue #1423)
+#
+# The env var is normally set at user level, so an unscoped mapping reaches
+# every repository the account ever opens — including ones where the named
+# skill does not exist. A scoped entry has to fire in its own repo and stay
+# completely silent everywhere else.
+#
+# Two REAL git repos, because the scope is read from `git remote get-url
+# origin`: a stubbed resolver would test the stub.
+# ---------------------------------------------------------------------------
+
+REPO_MATCH=$(mktemp -d) || { echo "FATAL: mktemp -d failed" >&2; exit 1; }
+REPO_OTHER=$(mktemp -d) || { echo "FATAL: mktemp -d failed" >&2; exit 1; }
+NOT_A_REPO=$(mktemp -d) || { echo "FATAL: mktemp -d failed" >&2; exit 1; }
+git -c init.defaultBranch=main -C "$REPO_MATCH" init -q
+git -C "$REPO_MATCH" remote add origin https://github.com/acme/web.git
+git -c init.defaultBranch=main -C "$REPO_OTHER" init -q
+git -C "$REPO_OTHER" remote add origin git@github.com:acme/other.git
+
+# mk_payload_cwd <command> <transcript_path> <cwd>
+mk_payload_cwd() {
+  python3 -c '
+import json, sys
+print(json.dumps({"tool_name": "Bash",
+                  "tool_input": {"command": sys.argv[1]},
+                  "transcript_path": sys.argv[2],
+                  "cwd": sys.argv[3]}))
+' "$1" "$2" "$3"
+}
+
+CFG_SCOPED="repo=acme/web:gh pr create=>acme:code-review"
+
+run_case "scoped mapping blocks inside its own repo" \
+  "block" \
+  "$(mk_payload_cwd 'gh pr create --title "feat: x"' "$TX_WITHOUT" "$REPO_MATCH")" \
+  "PRAXIS_SKILL_GATED_COMMANDS=$CFG_SCOPED"
+
+run_case "scoped mapping is inert in another repo" \
+  "silent" \
+  "$(mk_payload_cwd 'gh pr create --title "feat: x"' "$TX_WITHOUT" "$REPO_OTHER")" \
+  "PRAXIS_SKILL_GATED_COMMANDS=$CFG_SCOPED"
+
+run_case "scoped mapping is inert outside a git repo" \
+  "silent" \
+  "$(mk_payload_cwd 'gh pr create --title "feat: x"' "$TX_WITHOUT" "$NOT_A_REPO")" \
+  "PRAXIS_SKILL_GATED_COMMANDS=$CFG_SCOPED"
+
+# The SSH origin form resolves to the same slug as the HTTPS one, and GitHub
+# treats owner/repo case-insensitively, so the comparison has to as well.
+run_case "scoped mapping matches the slug case-insensitively" \
+  "block" \
+  "$(mk_payload_cwd 'gh pr create --title "feat: x"' "$TX_WITHOUT" "$REPO_MATCH")" \
+  "PRAXIS_SKILL_GATED_COMMANDS=repo=ACME/Web:gh pr create=>acme:code-review"
+
+TX_WITH_SCOPED_SKILL=$(mktemp)
+printf '%s\n' \
+  '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"Skill","input":{"skill":"acme:code-review"}}]}}' \
+  >"$TX_WITH_SCOPED_SKILL"
+
+run_case "scoped mapping passes when the skill ran" \
+  "silent" \
+  "$(mk_payload_cwd 'gh pr create --title "feat: x"' "$TX_WITH_SCOPED_SKILL" "$REPO_MATCH")" \
+  "PRAXIS_SKILL_GATED_COMMANDS=$CFG_SCOPED"
+
+# A typo in the qualifier must not fall through to the global scope — that
+# would widen the gate to every repo, which is the defect being fixed.
+run_case "malformed qualifier skips the entry instead of widening it" \
+  "silent" \
+  "$(mk_payload_cwd 'gh pr create --title "feat: x"' "$TX_WITHOUT" "$REPO_MATCH")" \
+  "PRAXIS_SKILL_GATED_COMMANDS=repo=acme:gh pr create=>acme:code-review"
+
+# Unscoped entries keep today's behaviour, in any repo.
+run_case "unscoped mapping still blocks in an unrelated repo" \
+  "block" \
+  "$(mk_payload_cwd 'gh pr create --title "feat: x"' "$TX_WITHOUT" "$REPO_OTHER")" \
+  "PRAXIS_SKILL_GATED_COMMANDS=$CFG_PR_CREATE"
+
+# Mixed config: the scoped entry is inert here, the unscoped sibling is not.
+run_case "a scoped entry does not disarm its unscoped sibling" \
+  "block" \
+  "$(mk_payload_cwd 'gh pr merge 42 --squash' "$TX_WITHOUT" "$REPO_OTHER")" \
+  "PRAXIS_SKILL_GATED_COMMANDS=$CFG_SCOPED,$CFG_PR_MERGE"
+
+# ---------------------------------------------------------------------------
 # Cleanup + summary
 # ---------------------------------------------------------------------------
+
+rm -rf "$REPO_MATCH" "$REPO_OTHER" "$NOT_A_REPO"
+rm -f "$TX_WITH_SCOPED_SKILL"
 
 rm -f "$TX_WITH_CREATE_PR" "$TX_WITH_WRONG_SKILL" "$TX_WITH_COLON_SKILL" \
       "$TX_WITHOUT" "$TX_GARBAGE_THEN_SKILL" \

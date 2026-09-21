@@ -90,7 +90,7 @@ run_case block "f5-verdict-no-enumerated" '{}'
 
 # F5 WITH an Enumerated line in the same paragraph -> silent pass
 build_transcript "게이트 결과가 나왔습니다 — 매핑 규칙이 없습니다.
-Enumerated: dags/tests/laplace/templates/sql (테스트 1개)"
+Enumerated: dags/tests/example/templates/sql (테스트 1개)"
 run_case silent "f5-verdict-with-enumerated" '{}'
 
 # =====================================================================

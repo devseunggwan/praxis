@@ -92,25 +92,25 @@ write_input() {
 }
 
 # Since #1157 the builtin fetch-CLI list carries public tools only; the
-# hubctl fixtures below exercise the PRAXIS_SECRET_FETCH_CLIS extension
-# path (the incident replicas keep their original hubctl shape on purpose).
-export PRAXIS_SECRET_FETCH_CLIS="hubctl token fetch"
+# orgctl fixtures below exercise the PRAXIS_SECRET_FETCH_CLIS extension
+# path (the incident replicas keep their original orgctl shape on purpose).
+export PRAXIS_SECRET_FETCH_CLIS="orgctl token fetch"
 
 # === ADVISORY ==============================================================
 
 # P1 — incident replica: Bash heredoc authoring a script that fetches a
 # token and prints it per-item ([SKIP] <id>: <token>).
-P1_CMD=$(printf 'cat > /tmp/verify.sh <<'"'"'EOF'"'"'\nfor id in 1 2 3; do\n  TOKEN=$(hubctl token fetch fake-provider --phase dev)\n  echo "[SKIP] $id: $TOKEN"\ndone\nEOF')
+P1_CMD=$(printf 'cat > /tmp/verify.sh <<'"'"'EOF'"'"'\nfor id in 1 2 3; do\n  TOKEN=$(orgctl token fetch fake-provider --phase dev)\n  echo "[SKIP] $id: $TOKEN"\ndone\nEOF')
 run_case "P1: Bash heredoc authoring capture+echo (incident replica)" \
   advisory Bash "$(bash_input "$P1_CMD")"
 
 # P2 — Write .sh with the same capture+echo flow.
-P2_CONTENT=$(printf '#!/bin/bash\nTOKEN=$(hubctl token fetch fake-provider --phase dev)\necho "[SKIP] item-1: $TOKEN"\n')
+P2_CONTENT=$(printf '#!/bin/bash\nTOKEN=$(orgctl token fetch fake-provider --phase dev)\necho "[SKIP] item-1: $TOKEN"\n')
 run_case "P2: Write .sh capture+echo" \
   advisory Write "$(write_input "/tmp/verify.sh" "$P2_CONTENT")"
 
 # P3 — Write .py: subprocess list-form fetch assigned, then print(f-string).
-P3_CONTENT=$(printf 'import subprocess\ntoken = subprocess.check_output(["hubctl", "token", "fetch", "fake-provider"], text=True)\nfor i in range(3):\n    print(f"[SKIP] {i}: {token}")\n')
+P3_CONTENT=$(printf 'import subprocess\ntoken = subprocess.check_output(["orgctl", "token", "fetch", "fake-provider"], text=True)\nfor i in range(3):\n    print(f"[SKIP] {i}: {token}")\n')
 run_case "P3: Write .py subprocess fetch + print(f-string)" \
   advisory Write "$(write_input "/tmp/verify.py" "$P3_CONTENT")"
 
@@ -119,11 +119,11 @@ run_case "P4: live Bash aws secretsmanager capture + echo" \
   advisory Bash "$(bash_input 'TOKEN=$(aws secretsmanager get-secret-value --secret-id fake --query SecretString --output text); echo "$TOKEN"')"
 
 # P5 — inline no-capture substitution inside an output command.
-run_case "P5: live inline echo \$(hubctl token fetch)" \
-  advisory Bash "$(bash_input 'echo "tok: $(hubctl token fetch fake-provider)"')"
+run_case "P5: live inline echo \$(orgctl token fetch)" \
+  advisory Bash "$(bash_input 'echo "tok: $(orgctl token fetch fake-provider)"')"
 
 # P6 — echo-append authoring: capture appended by one echo, sink by the next.
-P6_CMD=$(printf "echo 'TOKEN=\$(hubctl token fetch fake-provider --phase dev)' >> verify.sh\necho 'echo \"[SKIP] \$id: \$TOKEN\"' >> verify.sh")
+P6_CMD=$(printf "echo 'TOKEN=\$(orgctl token fetch fake-provider --phase dev)' >> verify.sh\necho 'echo \"[SKIP] \$id: \$TOKEN\"' >> verify.sh")
 run_case "P6: echo-append authored capture+echo" \
   advisory Bash "$(bash_input "$P6_CMD")"
 
@@ -150,7 +150,7 @@ run_case "P9: Write .sh bare fetch | jq -r .SecretString" \
 # Edit new_string is scanned like Write content.
 run_case "Edit new_string capture+echo" \
   advisory Edit \
-  "$(python3 -c 'import json; print(json.dumps({"file_path": "/tmp/verify.sh", "old_string": "placeholder", "new_string": "TOKEN=$(hubctl token fetch fake-provider)\necho \"$TOKEN\""}))')"
+  "$(python3 -c 'import json; print(json.dumps({"file_path": "/tmp/verify.sh", "old_string": "placeholder", "new_string": "TOKEN=$(orgctl token fetch fake-provider)\necho \"$TOKEN\""}))')"
 
 # gh auth token / kubectl get secret variants.
 run_case "gh auth token capture + echo" \
@@ -164,11 +164,11 @@ run_case "authored bare kubectl get secret" \
 
 # N1 — fetched token used only as a curl auth header (legitimate usage).
 run_case "N1: fetch then curl -H Authorization only" \
-  silent Bash "$(bash_input 'TOKEN=$(hubctl token fetch fake-provider); curl -s -H "Authorization: Bearer $TOKEN" https://api.example.com/v1/ping')"
+  silent Bash "$(bash_input 'TOKEN=$(orgctl token fetch fake-provider); curl -s -H "Authorization: Bearer $TOKEN" https://api.example.com/v1/ping')"
 
 # N2 — masked echo (first6 + last4 substring expansion).
 run_case "N2: masked echo \${TOKEN:0:6}****\${TOKEN: -4}" \
-  silent Bash "$(bash_input 'TOKEN=$(hubctl token fetch fake-provider); echo "${TOKEN:0:6}****${TOKEN: -4}"')"
+  silent Bash "$(bash_input 'TOKEN=$(orgctl token fetch fake-provider); echo "${TOKEN:0:6}****${TOKEN: -4}"')"
 
 # N3 — literal placeholder assignment (no fetch anchor) + echo.
 run_case "N3: placeholder assignment without fetch + echo" \
@@ -180,20 +180,20 @@ run_case "N4: normal script, no fetch" \
   silent Write "$(write_input "/tmp/run.sh" "$N4_CONTENT")"
 
 # N5 — Write spec.md containing fetch+echo example text (file-type gate).
-N5_CONTENT=$(printf '# Example\n\nTOKEN=$(hubctl token fetch fake-provider)\necho "$TOKEN"\n')
+N5_CONTENT=$(printf '# Example\n\nTOKEN=$(orgctl token fetch fake-provider)\necho "$TOKEN"\n')
 run_case "N5: Write spec.md with fetch+echo example text" \
   silent Write "$(write_input "/tmp/spec.md" "$N5_CONTENT")"
 
 # N6 — digest sink: only a byte count reaches the transcript.
 run_case "N6: echo \"\$TOKEN\" | wc -c digest sink" \
-  silent Bash "$(bash_input 'TOKEN=$(hubctl token fetch fake-provider); echo "$TOKEN" | wc -c')"
+  silent Bash "$(bash_input 'TOKEN=$(orgctl token fetch fake-provider); echo "$TOKEN" | wc -c')"
 
 run_case "N6b: sha256sum digest sink" \
-  silent Bash "$(bash_input 'TOKEN=$(hubctl token fetch fake-provider); echo "$TOKEN" | sha256sum')"
+  silent Bash "$(bash_input 'TOKEN=$(orgctl token fetch fake-provider); echo "$TOKEN" | sha256sum')"
 
 # N7 — live bare interactive fetch (sanctioned read-only usage).
-run_case "N7: live bare hubctl token fetch" \
-  silent Bash "$(bash_input 'hubctl token fetch fake-provider --phase dev')"
+run_case "N7: live bare orgctl token fetch" \
+  silent Bash "$(bash_input 'orgctl token fetch fake-provider --phase dev')"
 
 # python masked slice sink.
 NPY_CONTENT=$(printf 'token = client.get_secret_value(SecretId="fake-id")\nprint(f"{token[:6]}...{token[-4:]}")\n')
@@ -201,7 +201,7 @@ run_case "python slice-masked print" \
   silent Write "$(write_input "/tmp/verify.py" "$NPY_CONTENT")"
 
 # heredoc redirected into a .md file (file-type gate on redirect target).
-NMD_CMD=$(printf 'cat > /tmp/notes.md <<'"'"'EOF'"'"'\nTOKEN=$(hubctl token fetch fake-provider)\necho "$TOKEN"\nEOF')
+NMD_CMD=$(printf 'cat > /tmp/notes.md <<'"'"'EOF'"'"'\nTOKEN=$(orgctl token fetch fake-provider)\necho "$TOKEN"\nEOF')
 run_case "heredoc body targeting .md is not scanned" \
   silent Bash "$(bash_input "$NMD_CMD")"
 
@@ -212,10 +212,10 @@ run_case "aws ssm get-parameter without --with-decryption" \
 # === #1157 env-extension boundary ==========================================
 # Negative control: with the extension env unset, an internal-CLI fetch is
 # not recognized (the builtin list carries public tools only) — proves the
-# hubctl detections above came from the env, not a shipped literal.
+# orgctl detections above came from the env, not a shipped literal.
 unset PRAXIS_SECRET_FETCH_CLIS
-run_case "hubctl capture+echo without env (silent — #1157)" \
-  silent Bash "$(bash_input 'TOKEN=$(hubctl token fetch fake-provider); echo "$TOKEN"')"
+run_case "orgctl capture+echo without env (silent — #1157)" \
+  silent Bash "$(bash_input 'TOKEN=$(orgctl token fetch fake-provider); echo "$TOKEN"')"
 # Builtin public CLI still fires without any env.
 run_case "vault kv get capture+echo without env (advisory)" \
   advisory Bash "$(bash_input 'TOKEN=$(vault kv get -field=token secret/fake); echo "$TOKEN"')"

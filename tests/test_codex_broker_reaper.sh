@@ -307,8 +307,8 @@ else
   done
   # Sibling worktrees routinely share a name prefix, and "ws-sib" is a bare
   # string prefix of "ws-sib-extra". Measured on the author's host: for
-  # workspace `laplace-dev-hub`, a bare-prefix test claimed 8 processes living
-  # in `laplace-dev-hub-hub-4682` / `-4687` as its owners. The owner below sits
+  # workspace `example-dev-hub`, a bare-prefix test claimed 8 processes living
+  # in `example-dev-hub-hub-4682` / `-4687` as its owners. The owner below sits
   # ONLY in the sibling, so the ws-sib broker must still be reaped.
   mkdir -p "$TMPD/ws-sib-extra"
   WS_ALIVE="$TMPD/ws-alive"; WS_GONE="$TMPD/ws-wsgone"
