@@ -864,7 +864,9 @@ def _rule2_run(text: str, tmp_path: Path, env_extra: dict[str, str] | None = Non
     payload = json.dumps(
         {"transcript_path": tp, "stop_hook_active": False, "session_id": "test-rule2-env"}
     )
-    env = {**os.environ, **(env_extra or {})}
+    # The silent half must not depend on the developer's own shell setting it.
+    env = {k: v for k, v in os.environ.items() if k != "PRAXIS_FOREIGN_PLUGINS"}
+    env.update(env_extra or {})
     return subprocess.run(
         [sys.executable, str(HOOK_PATH)],
         input=payload,
