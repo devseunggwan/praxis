@@ -41,6 +41,7 @@ drift.
 | Hook | Command | Purpose |
 | ------ | --------- | --------- |
 | `hooks/preflight-gate/pre-gh-pr-create-dedup-gate/impl.py` | `git remote get-url origin` | Resolve the repo owner/name for the dedup search |
+| `hooks/preflight-gate/skill-gate-commands/impl.py` | `git remote get-url origin` | Resolve the repo the mapping is scoped to, so a gate declared for one repository does not fire in another |
 | `hooks/preflight-gate/pre-edit-protected-branch-guard/impl.py` | `git rev-parse --show-toplevel` | Locate the git repo root |
 | `hooks/preflight-gate/pre-edit-protected-branch-guard/impl.py` | `git rev-parse --abbrev-ref HEAD` | Read the current branch name |
 | `hooks/preflight-gate/pre-edit-protected-branch-guard/impl.py` | `git status --porcelain` | Check for a dirty working tree |

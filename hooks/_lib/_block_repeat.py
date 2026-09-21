@@ -12,8 +12,10 @@ and the block's normalized signature absent from all 42 state files on disk.
 
 The count therefore has to happen where the block is produced. `emit_block` is
 that place for 23 of the 37 `preflight-gate` directories, so one call site
-covers most of the surface. The 14 gates that do not route through it stay
-uncovered.
+covers most of the surface. `emit_decision` is the second such place (issue
+#1420): the gates that deny through `permissionDecision` never render the
+five-field message, and for them the reason string — not stderr — is the only
+channel the model reads. The gates that hand-roll both stay uncovered.
 
 Session id: `CLAUDE_SESSION_ID` first, then the `.current-session` latch
 `completion-verify/strike-counter` writes at SessionStart — the same env-then-
@@ -30,9 +32,12 @@ degrade into a truncated file that reads back as a fresh, empty count.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import re
 import sys
+from collections.abc import Callable
 from pathlib import Path as _Path
 
 sys.path.insert(0, str(_Path(__file__).resolve().parent))
@@ -94,6 +99,58 @@ def _save(path: str, rules: dict[str, int]) -> None:
             pass
 
 
+_MARKER_RE = re.compile(r"^\s*\[([^\]\n]{1,64})\]")
+
+
+def reason_key(reason: str) -> tuple[str, str]:
+    """`(state key, display label)` for a deny reason; `("", "")` when empty.
+
+    A bracketed marker at the head of the reason (`[praxis:pipefail-advisory]`)
+    is the gate's own id, which is what "the same block" means for the model
+    reading it, so it keys directly. Without one the first non-empty line keys
+    it instead, hashed rather than stored: a reason routinely embeds the
+    command, a path, or a session id, and a state file carrying those verbatim
+    would leak them into a cache file nothing else redacts.
+    """
+    if not reason:
+        return "", ""
+    marker = _MARKER_RE.match(reason)
+    if marker:
+        label = marker.group(1).strip()
+        if label:
+            return f"reason:{label.lower()}", label
+    first = next((line.strip() for line in reason.splitlines() if line.strip()), "")
+    if not first:
+        return "", ""
+    digest = hashlib.sha1(" ".join(first.lower().split()).encode("utf-8")).hexdigest()[:12]
+    label = first if len(first) <= 60 else first[:59] + "…"
+    return f"reason:{digest}", label
+
+
+def record_reason(reason: str) -> str:
+    """Count a deny reason and return the escalation notice, or "" the first time.
+
+    `emit_block` covers the gates that render the five-field block message.
+    The ones that deny through `permissionDecision` never touch it, and their
+    reason string is the only channel the model reads — so the notice has to be
+    appended to the reason rather than written to stderr (issue #1420).
+    """
+    key, label = reason_key(reason)
+    if not key:
+        return ""
+    return record(key, notice=_decision_notice, label=label)
+
+
+def _decision_notice(label: str, count: int) -> str:
+    return (
+        f"\n\n🔁 Repeat: this gate has denied the same thing {count} times this session "
+        f"({label}).\n"
+        "Reshaping the call and throwing it again is guessing. Open the file this reason\n"
+        "names, restate its decision predicate in one line, and fix against that\n"
+        "predicate — a bypass token is only for a skip condition that file documents."
+    )
+
+
 def _notice(rule_name: str, count: int) -> str:
     return (
         f"\n\n🔁 Repeat: {rule_name.upper()} has blocked {count} times this session.\n"
@@ -104,7 +161,11 @@ def _notice(rule_name: str, count: int) -> str:
     )
 
 
-def record(rule_name: str) -> str:
+def record(
+    rule_name: str,
+    notice: Callable[[str, int], str] = _notice,
+    label: str | None = None,
+) -> str:
     """Count this block and return the repeat notice, or "" on the first one.
 
     Never raises: a counter that cannot be kept must not take a gate's block
@@ -122,6 +183,6 @@ def record(rule_name: str) -> str:
             count = rules.get(rule_name, 0) + 1
             rules[rule_name] = count
             _save(path, rules)
-        return _notice(rule_name, count) if count >= 2 else ""
+        return notice(label or rule_name, count) if count >= 2 else ""
     except Exception:
         return ""
