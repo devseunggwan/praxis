@@ -538,6 +538,19 @@ _MERGE_OBJECT_RE = re.compile(
 # A single positional token that is a bare PR number or a …/pull/N URL.
 _PULL_TOKEN_RE = re.compile(r"^(?:\S*/pull/(\d+)|(\d+))$")
 
+# A PR number alone does not identify a PR: every repo has a #999 (issue #1419).
+# The repo a `gh pr` segment names comes from `-R`/`--repo` or from a …/pull/N
+# URL positional; nothing else in a transcript resolves one, since an approval
+# is prose and names no repo. `gh -R` accepts `[HOST/]OWNER/REPO`, so two and
+# three segments both parse and the host is dropped — the same repo reached
+# with and without an explicit host is one target. The cost is that one
+# OWNER/REPO on two hosts (github.com and an enterprise server) also reads as
+# one target; keeping the host would instead split the far commoner
+# with-and-without-host pair into a false conflict.
+_REPO_FLAGS = frozenset({"-R", "--repo"})
+_REPO_SLUG_RE = re.compile(r"^(?:[A-Za-z0-9._-]+/)?([A-Za-z0-9._-]+/[A-Za-z0-9._-]+?)(?:\.git)?$")
+_PULL_URL_REPO_RE = re.compile(r"([A-Za-z0-9._-]+/[A-Za-z0-9._-]+)/pull/\d+$")
+
 # `gh pr merge` flags that consume a following value token — skipped when
 # scanning for the first positional (the merge target) so a flag value like
 # `--subject 833` is never mistaken for the PR number (issue #826, P2#6). The
@@ -557,6 +570,9 @@ _CONTEXT_VALUE_FLAGS = frozenset({
     "-b", "--body", "-F", "--body-file", "-t", "--title", "--subject",
     "--json", "--jq", "--template", "--repo", "-R",
 })
+# `_segment_repo` reads both merge and context segments, so it skips the values
+# of either verb family's flags.
+_SEGMENT_VALUE_FLAGS = _MERGE_VALUE_FLAGS | _CONTEXT_VALUE_FLAGS
 
 # Shell constructs that repeat a single textual merge segment at runtime
 # (`for pr in 833 999; do gh pr merge "$pr"; done`, `xargs gh pr merge`). One
@@ -721,6 +737,101 @@ def _gh_pr_positional(argv: list[str], verbs: frozenset[str],
     if i + 1 >= len(argv) or argv[i] != "pr" or argv[i + 1] not in verbs:
         return None
     return _first_positional(argv[i + 2:], value_flags)
+
+
+def _segment_repo(argv: list[str]) -> str | None:
+    """`owner/repo` a `gh pr` segment names, or None when it names none.
+
+    Reads `-R`/`--repo` in all three forms the sibling gates accept (separate
+    token, `--repo=X`, concatenated `-RX`) and a `…/pull/N` URL positional. The
+    host is dropped, so `gh -R github.com/o/r` and `gh -R o/r` are one repo.
+
+    Only a real positional is read as a URL: a flag's value can hold any text,
+    and a `--subject` quoting another repo's PR link does not retarget the merge.
+    """
+    argv = strip_prefix(argv)
+    skip_next = False
+    for i, tok in enumerate(argv):
+        if skip_next:
+            skip_next = False
+            continue
+        cand = ""
+        if "=" in tok:
+            name, _, val = tok.partition("=")
+            if name in _REPO_FLAGS:
+                cand = val
+            elif name.startswith("-"):
+                continue
+        elif tok in _REPO_FLAGS and i + 1 < len(argv):
+            cand = argv[i + 1]
+        elif tok.startswith("-R") and len(tok) > 2 and not tok.startswith("--"):
+            cand = tok[2:]
+        elif tok in _SEGMENT_VALUE_FLAGS:
+            skip_next = True
+            continue
+        elif tok.startswith("-"):
+            continue
+        if cand:
+            m = _REPO_SLUG_RE.match(cand.strip("'\""))
+            if m:
+                return m.group(1).lower()
+            continue
+        m = _PULL_URL_REPO_RE.search(tok)
+        if m:
+            return m.group(1).lower()
+    return None
+
+
+def _merge_target_repo(command: object) -> str | None:
+    """Repo the single `gh pr merge` segment names, or None (no repo, or not a
+    single segment — a compound command is already refused upstream)."""
+    if not isinstance(command, str):
+        return None
+    repos = [_segment_repo(argv)
+             for argv in iter_command_starts(safe_tokenize(command))
+             if _is_gh_pr_merge(strip_prefix(argv))]
+    return repos[0] if len(repos) == 1 else None
+
+
+def _context_repo_from_window(entries: list[dict], lo: int, hi: int) -> str | None:
+    """Repo named by the most recent read-only `gh pr <verb>` in the window, or
+    None. Mirrors `_context_pr_from_window`'s last-wins scan so the repo and the
+    number come from the same probe: a later probe that names no repo resets it
+    to None rather than leaving an earlier probe's repo paired with its number."""
+    found: str | None = None
+    for ev in entries[lo:hi]:
+        msg = ev.get("message")
+        if not isinstance(msg, dict) or msg.get("role") != "assistant" or ev.get("isSidechain"):
+            continue
+        content = msg.get("content", [])
+        if not isinstance(content, list):
+            continue
+        for b in content:
+            if not (isinstance(b, dict) and b.get("type") == "tool_use"
+                    and b.get("name") == "Bash"):
+                continue
+            cmd = (b.get("input") or {}).get("command")
+            if not isinstance(cmd, str):
+                continue
+            for argv in iter_command_starts(safe_tokenize(cmd)):
+                if _gh_pr_target(argv, _CONTEXT_VERBS, _CONTEXT_VALUE_FLAGS) is None:
+                    continue
+                found = _segment_repo(argv)
+    return found
+
+
+def _repo_conflict(merge_repo: str | None, window_repo: str | None) -> bool:
+    """True when both sides resolve a repo and they differ — the one case where a
+    PR number is provably not this session's PR (issue #1419).
+
+    Deliberately NOT a mismatch test against `None`. Measured over the local
+    corpus: of 393 `gh pr merge` calls naming a repo, 377 agree with the window's
+    probe and 14 differ; a further 123 name no repo, and 96 of those sit in a
+    window that does name one. Treating `None` as a mismatch would break
+    correlation for those 96 — the ordinary `gh pr checks 1234` →
+    `gh pr merge --repo o/r 1234` shape — to reach the same 14.
+    """
+    return bool(merge_repo) and bool(window_repo) and merge_repo != window_repo
 
 
 def _gh_pr_target(argv: list[str], verbs: frozenset[str],
@@ -1092,6 +1203,12 @@ def _correlated_prior_turn_text(entries: list[dict], idxs: list[int],
     prev_lo = max(prev_start, floor)
     if prev_lo >= idxs[-1]:
         return None
+    # A briefing about another repo's #999 is not this merge's briefing, however
+    # well the number matches (issue #1419). Only a resolvable disagreement
+    # counts — see `_repo_conflict` for why `None` is not a mismatch.
+    if _repo_conflict(_merge_target_repo(command),
+                      _context_repo_from_window(entries, prev_lo, len(entries))):
+        return None
     prev_text = _assistant_text(entries, prev_lo, idxs[-1])
     pos = segments[0]
     if pos is None:
@@ -1164,8 +1281,14 @@ def _merge_escalation_reason(payload: dict) -> str | None:
     # already consumed, so it no longer releases the next merge on text alone.
     last_merge = _last_executed_merge(entries)
     # One answer releases one merge: a loop or chained merge is never answered.
+    # An answer also does not cross repos — the prose names a number, never a
+    # repo, so a `--repo`-bearing merge whose window probed a DIFFERENT repo is
+    # reusing the earlier PR's approval (issue #1419).
     answered = last_merge is None or (
         len(_merge_segments(code)) == 1 and not _has_repetition(code)
+        and not _repo_conflict(
+            _merge_target_repo(code),
+            _context_repo_from_window(entries, last_merge + 1, len(entries)))
         and _answered_after(entries, idxs, last_merge,
                             _merge_target_pr(entries, code, last_merge + 1)))
     items = _briefing_item_count(current_text)
