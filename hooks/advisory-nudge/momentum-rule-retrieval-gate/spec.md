@@ -177,14 +177,38 @@ before approving). Safety gates on the extension:
   > #795 failure), not an adversarial security boundary — `deny` merely adds
   > teeth, and `PRAXIS_MOMENTUM_MERGE_ADVISORY=1` is a standing escape hatch. Two
   > CLI forms that only an adversarial target-swap would use are therefore left
-  > as documented gaps rather than chased across further rounds: (a) an
+  > as documented gaps rather than chased across further rounds: an
   > `xargs`-wrapped merge (`… | xargs -n1 gh pr merge`) is not recognized by the
   > trigger tokenizer (`xargs` is not a peeled prefix), so it bypasses the gate
-  > entirely; (b) a bare-number reference is not repo-scoped, so a cross-repo
-  > `gh -R org/other pr merge 833` after briefing *this* repo's #833 (or a
-  > `Closes #833` line in a different PR's briefing) can false-correlate. Both
-  > require an explicit-signal redesign to close soundly and are out of scope for
-  > the honest-agent nudge.
+  > entirely. Closing it soundly needs an explicit-signal redesign, out of scope
+  > for the honest-agent nudge. (A second gap listed here — an unscoped
+  > cross-repo number — is now handled by **Repo scoping** below, down to the
+  > residual that section names.)
+
+- **Repo scoping (#1419).** Every repo has a `#999`, so a number alone does not
+  identify a PR. When the *merge command* names a repo and the correlated
+  approval window names a **different** one, the approval does not transfer:
+  both `_correlated_prior_turn_text` (prior-turn path) and the `answered`
+  expression in `_merge_escalation_reason` (serial path) bail out via
+  `_repo_conflict`.
+  - The merge's repo is read from the command **only** — `-R`/`--repo` in any
+    spelling (`-R o/r`, `-RO/r`, `--repo=o/r`) or a `…/pull/N` URL argument. A
+    leading host is dropped (`github.com/o/r` == `o/r`) and comparison is
+    case-insensitive. `cd`-based inference is deliberately absent: `cwd` resets
+    between Bash calls, so it would be a guess.
+  - The window's repo comes from the same two sources over the correlated turn
+    range, last-wins — mirroring `_context_pr_from_window`.
+  - **Both sides must resolve, or it is not a conflict.** `None` vs `o/r` is
+    left alone. Measured over the local corpus (851 transcripts, 787 executed
+    `gh pr merge` calls): 393 merges name a repo — 377 agree with their window,
+    **14 differ** — while 123 name none, and **96 of those 123** sit in a window
+    that does name one (the ordinary `gh pr checks 999` → `gh pr merge --repo
+    o/r 999` shape). Treating `None` as a disagreement would therefore deny 96
+    honest merges to reach the same 14.
+  - **Residual:** the issue's literal repro — a briefing/approval window whose
+    prose names no repo at all, followed by `gh -R org/other pr merge 833` — is
+    *not* caught, because the window side is unresolved. What is caught is the
+    common shape where the window did probe a repo.
 - **No multi-target / loop transfer.** A compound `gh pr merge A && gh pr merge
   B` (≥2 merge segments) OR a shell loop / `xargs` repeating one segment
   (`for pr in 833 999; do gh pr merge "$pr"; done`, detected via whole-token
@@ -238,7 +262,7 @@ approve blindly.
   only for a **single** merge segment with no loop (No Approval Transfer). A
   `# briefing-surfaced` inside a heredoc body (`<<EOF … EOF`) is the one residual
   the scanner does not exclude — accepted under the non-adversarial threat model,
-  as with the `xargs`/cross-repo gaps above.
+  as with the `xargs` gap above.
 
   **The marker attests completeness, never existence (issue #940).** It used to
   short-circuit before the transcript was read, so it released the merge no
