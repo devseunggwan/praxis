@@ -491,11 +491,16 @@ _LABEL_LEAD_RE = re.compile(r"\s*[—–:,(-]\s*")
 # …except that the qualifier can REVERSE the lead instead of narrowing it
 # ("승인 — 머지하지 않기", "Approve — do not merge"). Reading only the lead turns
 # that label into consent, so a negation anywhere in the label disqualifies the
-# whole thing. A label that declines is not an approval under any reading, so
-# the cost of matching too widely here is one more ask.
+# whole thing. The reversal takes several shapes — the negator can precede the
+# verb ("안 머지"), follow it ("머지하지"), sit in a consequence ("머지하면 안
+# 됨"), or be a bare English determiner ("no merge"). A label that declines is
+# not an approval under any reading, so the cost of matching too widely here is
+# one more ask.
 _LABEL_NEGATION_RE = re.compile(
-    r"하지\s*(?:않|말)|취소|보류|중단|나중에|안\s*(?:함|하기|할)"
-    r"|(?<![A-Za-z])(?:not|don't|dont|never|cancel|hold|skip|abort)(?![A-Za-z])",
+    r"하지\s*(?:않|말)|취소|보류|중단|나중에|안\s*(?:함|하기|할|돼|되|됨|됩)"
+    r"|(?:안|말)\s*(?:머지|병합)|(?:머지|병합)\s*(?:하지|안\b)"
+    r"|(?<![A-Za-z])(?:not|don't|dont|never|cancel|hold|skip|abort)(?![A-Za-z])"
+    r"|(?<![A-Za-z])no\s+merg(?:e|ing)(?![A-Za-z])",
     re.IGNORECASE)
 
 # A merge ask is one sentence that both names merging and asks ("Approve

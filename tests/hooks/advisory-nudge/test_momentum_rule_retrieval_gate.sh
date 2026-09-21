@@ -882,6 +882,16 @@ run_merge_escalation_case "merge_serial_merging_ask_passes" \
 # `승인 — 머지하지 않기` picked for a merge ask is a refusal, not consent.
 run_merge_escalation_case "merge_serial_ask_negative_label_denies" \
   "yes" "" "momentum-merge-serial-ask-negative-label.jsonl" "gh pr merge 999 --squash --delete-branch"
+# The negator does not always follow the verb: it can precede it, sit in a
+# consequence clause, or be a bare English determiner. Each still declines, so
+# each is pinned separately — reading only the lead token turns all three into
+# consent.
+run_merge_escalation_case "merge_serial_ask_negative_label_ko_prefix_denies" \
+  "yes" "" "momentum-merge-serial-ask-negative-label-ko-prefix.jsonl" "gh pr merge 999 --squash --delete-branch"
+run_merge_escalation_case "merge_serial_ask_negative_label_ko_consequence_denies" \
+  "yes" "" "momentum-merge-serial-ask-negative-label-ko-consequence.jsonl" "gh pr merge 999 --squash --delete-branch"
+run_merge_escalation_case "merge_serial_ask_negative_label_en_no_merge_denies" \
+  "yes" "" "momentum-merge-serial-ask-negative-label-en-no-merge.jsonl" "gh pr merge 999 --squash --delete-branch"
 # A merge ask is about the PRs its verb takes, not every PR in the sentence…
 run_merge_escalation_case "merge_serial_mixed_pr_ask_denies" \
   "yes" "" "momentum-merge-serial-mixed-pr-ask.jsonl" "gh pr merge 999 --squash --delete-branch"
