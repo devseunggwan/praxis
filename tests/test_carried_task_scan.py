@@ -188,7 +188,17 @@ class TestFailureModes:
 
         locked.chmod(0o000)
         try:
-            if Path(path).exists():  # pragma: no cover - root, or a lenient FS
+            # The probe asks whether the mode actually took, and it must answer
+            # that under every interpreter that runs this suite. `Path.exists()`
+            # cannot: it swallows the PermissionError only from 3.14 on, and
+            # raises it on 3.10–3.13 — where this test would then error out
+            # instead of running or skipping. `stat()` raises everywhere, so the
+            # exception IS the answer and the else branch is the lenient case.
+            try:
+                Path(path).stat()
+            except PermissionError:
+                pass
+            else:  # pragma: no cover - root, or a lenient FS
                 pytest.skip("the directory mode did not make the cursor unstattable")
             result = run(path)
         finally:
