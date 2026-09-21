@@ -306,6 +306,10 @@ build_transcript "$(printf '봇 원문:\n\n%s\n로그 한 줄\n%spython\n%s\n%s'
 run_case silent "fenced-claim-inner-info-is-not-a-closer" '{}'
 build_transcript "$(printf '봇 원문:\n\n%s\n로그 한 줄\n%s\n%s\n%s' "$F3" "$F3" "$CLAIM" "$F3")" none
 run_case block "fenced-claim-bare-closer-does-close" '{}'
+# The opener carries the mirror rule: a backtick fence's info string may hold no
+# backtick, so this line opens nothing and the claim under it is ordinary prose.
+build_transcript "$(printf '%sa\140b\n%s' "$F3" "$CLAIM")" none
+run_case block "backtick-info-with-backtick-opens-nothing" '{}'
 # …while a claim OUTSIDE the fence still blocks — the skip is scoped to the
 # block, not to any message that happens to contain one.
 build_transcript "$(printf '%s\n무관한 로그\n%s\n\n리뷰 코멘트 3건 처리했습니다.' "$F3" "$F3")" none
