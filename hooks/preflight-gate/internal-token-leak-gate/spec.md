@@ -114,14 +114,15 @@ internal tokens in its writes pays nothing.
 
 ### Tests
 
-`tests/hooks/preflight-gate/test_internal_token_leak_gate.py` — 36 cases, each
+`tests/hooks/preflight-gate/test_internal_token_leak_gate.py` — 37 cases, each
 running the real hook against a real git repository with `gh` stubbed on PATH so
 visibility is set per case. Covered: message hit, added-line hit with
 `path:line`, removed line and context line passing, `private`/`internal` silence,
 `UNRESOLVED` advisory, unset env inertness, case-insensitivity, the left
 boundary (`acmectl` hits, `xacme` does not), `cd <literal>`, `git -C`, opaque
 `cd`, `--dry-run`, `-am`, `-F`, `STRICT=0`, the cache (one `gh` call for two
-commits) and its `UNRESOLVED` non-caching, gh title / body / `--body-file` /
+commits) and its `private` and `UNRESOLVED` non-caching, gh title / body /
+`--body-file` /
 `gh api -f body=` / `gh api --input`, the `{owner}/{repo}` placeholder,
 read-only `gh` and plain `echo` / `grep` passing, and the negative control that
 the neutral names this repo keeps (`example-dev-hub`, `orgctl`,
