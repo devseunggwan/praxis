@@ -162,6 +162,13 @@ DISPATCH_WRAPPER_NAME = "_dispatch.sh"
 # (check-plugin-manifests.py Rule 14 pins the pairing).
 DISPATCH_NO_MATCHER_ARG = "-"
 
+# The events on which the host evaluates a hook's `if` (Claude Code hooks
+# reference, issue #1335); on any other event such a hook never runs.
+IF_TOOL_EVENTS = frozenset({
+    "PreToolUse", "PostToolUse", "PostToolUseFailure",
+    "PermissionRequest", "PermissionDenied",
+})
+
 
 # ---------------------------------------------------------------------------
 # Manifest loading
@@ -432,6 +439,28 @@ def manifest_schema_drifts(manifest) -> list[str]:
                         f"{DISPATCH_NO_MATCHER_ARG!r} is reserved as the "
                         "matcher-less argv sentinel and cannot be a matcher"
                     )
+        # `mode.if` (issue #1335): a blank pattern reads as absent in both the
+        # build and the runtime, so it would silently widen the hook to every
+        # call — `minLength` cannot say "not only whitespace" in this subset.
+        for idx, entry in enumerate(hooks_list):
+            mode = entry.get("mode") if isinstance(entry, dict) else None
+            if not isinstance(mode, dict) or "if" not in mode:
+                continue
+            pattern = mode["if"]
+            if isinstance(pattern, str) and not pattern.strip():
+                out.append(
+                    f"SCHEMA hooks/manifest.json $.hooks[{idx}].mode.if: "
+                    f"whitespace-only pattern would drop the filter "
+                    f"(entry {entry.get('name')!r})"
+                )
+            # The host evaluates `if` only on tool events; on any other event
+            # "a hook with `if` set never runs" (Claude Code hooks reference).
+            if entry.get("event") not in IF_TOOL_EVENTS:
+                out.append(
+                    f"SCHEMA hooks/manifest.json $.hooks[{idx}].mode.if: "
+                    f"event {entry.get('event')!r} is not a tool event, so the "
+                    f"host would never run this hook (entry {entry.get('name')!r})"
+                )
     return out
 
 
@@ -590,6 +619,27 @@ def _command_for(entry: dict) -> str:
     return base + " " + " ".join(shlex.quote(a) for a in args)
 
 
+def _member_if_pattern(hook: dict) -> str | None:
+    """The member's `mode.if` permission-rule pattern, or None (issue #1335).
+
+    Reads the transient `if_pattern` marker first (a hook node, post-expansion)
+    and falls back to `mode.if` (a raw manifest entry), so the same function
+    answers on both shapes. Kept semantically identical to
+    `_dispatch.member_if_pattern`, which the runtime uses to resolve the same
+    partition. The two must agree: a member the
+    build puts in the tagged node and the runtime resolves into the untagged one
+    never runs at all. `check-plugin-manifests.py` pins that agreement.
+    """
+    marker = hook.get("if_pattern")
+    if isinstance(marker, str) and marker.strip():
+        return marker
+    mode = hook.get("mode")
+    if not isinstance(mode, dict):
+        return None
+    pattern = mode.get("if")
+    return pattern if isinstance(pattern, str) and pattern.strip() else None
+
+
 def _entry_to_hook_node(entry: dict) -> dict:
     """Render a single manifest entry as a hooks.json `hook` node.
 
@@ -609,6 +659,12 @@ def _entry_to_hook_node(entry: dict) -> dict:
         node["hosts"] = entry["hosts"]
     if entry.get("args"):
         node["args_declared"] = True
+    # `mode` does not survive into a hook node, so the `if` pattern rides along
+    # as a transient marker (like `hosts`) for `filter_hooks_for_host` to
+    # partition on, and is stripped there (issue #1335).
+    if_pattern = _member_if_pattern(entry)
+    if if_pattern is not None:
+        node["if_pattern"] = if_pattern
     return node
 
 
@@ -641,8 +697,25 @@ def expand_to_hooks_json(manifest: dict) -> dict:
     return out
 
 
-def _dispatcher_node(event: str, matcher: str | None, host_id: str, timeout: int) -> dict:
-    """Render the single dispatch-group node (ADR-0002).
+def _dispatcher_node(
+    event: str,
+    matcher: str | None,
+    host_id: str,
+    timeout: int,
+    if_pattern: str | None = None,
+) -> dict:
+    """Render one dispatch-group node (ADR-0002).
+
+    `if_pattern` is the permission-rule filter shared by this node's members
+    (issue #1335). When set it is emitted twice, on purpose: as the node's `if`
+    field, which is what makes the HOST skip the process entirely on a
+    non-matching tool call, and as argv[4], which is how the dispatcher — a
+    fresh process that re-reads the canonical manifest — knows which members are
+    its own. Emitting only the first would start the right process and run the
+    WRONG members: `_iter_group_entries` would resolve the untagged ones.
+
+    A node with no pattern renders exactly the three-arg command every node
+    rendered before this change, so untagged groups stay byte-identical.
 
     The command bakes in the platform `host_id` so the dispatcher applies the
     same host filter at runtime (it re-reads the canonical manifest). `timeout`
@@ -669,7 +742,12 @@ def _dispatcher_node(event: str, matcher: str | None, host_id: str, timeout: int
         f"${{CLAUDE_PLUGIN_ROOT}}/hooks/{DISPATCH_WRAPPER_NAME} "
         f"{shlex.quote(event)} {shlex.quote(matcher_arg)} {shlex.quote(host_id)}"
     )
-    return {"type": "command", "command": cmd, "timeout": timeout}
+    if if_pattern is not None:
+        cmd += f" {shlex.quote(if_pattern)}"
+    node = {"type": "command", "command": cmd, "timeout": timeout}
+    if if_pattern is not None:
+        node["if"] = if_pattern
+    return node
 
 
 def filter_hooks_for_host(
@@ -703,12 +781,16 @@ def filter_hooks_for_host(
     """
     filtered = copy.deepcopy(hooks_data)
     result_hooks: dict = {}
-    _TRANSIENT_KEYS = ("hosts", "args_declared")
+    _TRANSIENT_KEYS = ("hosts", "args_declared", "if_pattern")
     for event_name, event_groups in filtered.get("hooks", {}).items():
         # Pre-pass: max host-kept member timeout per dispatch matcher, across
         # ALL fragments of that matcher in this event. args-declaring members
         # never run under the dispatcher, so they contribute no budget.
-        dispatch_timeout: dict[str | None, int] = {}
+        # Keyed by (matcher, if_pattern) since #1335: a node's budget is the max
+        # over ITS OWN members, not over the whole matcher. Sharing one budget
+        # across partitions would hand a node holding one 2 s member the 15 s
+        # deadline of a sibling node it never runs.
+        dispatch_timeout: dict[tuple[str | None, str | None], int] = {}
         for group in event_groups:
             matcher = group.get("matcher")
             if (event_name, matcher) not in dispatch_groups:
@@ -718,11 +800,12 @@ def filter_hooks_for_host(
                     continue
                 hosts = hook.get("hosts")
                 if hosts is None or host_id in hosts:
-                    dispatch_timeout[matcher] = max(
-                        dispatch_timeout.get(matcher, 0), hook["timeout"]
+                    key = (matcher, _member_if_pattern(hook))
+                    dispatch_timeout[key] = max(
+                        dispatch_timeout.get(key, 0), hook["timeout"]
                     )
 
-        emitted_dispatch: set[str | None] = set()
+        emitted_dispatch: set[tuple[str | None, str | None]] = set()
         kept_groups = []
         for group in event_groups:
             matcher = group.get("matcher")
@@ -740,21 +823,33 @@ def filter_hooks_for_host(
                 # members of every other fragment. The `collapsible` guard keeps
                 # the node in the right slot when an earlier fragment is
                 # entirely host-filtered out (or holds only args members).
-                if (
-                    collapsible
-                    and matcher in dispatch_timeout
-                    and matcher not in emitted_dispatch
+                # One node per distinct `mode.if` inside this matcher (#1335),
+                # in first-appearance order so the untagged node keeps the slot
+                # it has always occupied and the emitted JSON stays stable.
+                for if_pattern in dict.fromkeys(
+                    _member_if_pattern(h) for h in collapsible
                 ):
-                    emitted_dispatch.add(matcher)
-                    new_nodes.append(
-                        _dispatcher_node(
-                            event_name, matcher, host_id, dispatch_timeout[matcher]
+                    key = (matcher, if_pattern)
+                    if key in dispatch_timeout and key not in emitted_dispatch:
+                        emitted_dispatch.add(key)
+                        new_nodes.append(
+                            _dispatcher_node(
+                                event_name,
+                                matcher,
+                                host_id,
+                                dispatch_timeout[key],
+                                if_pattern,
+                            )
                         )
-                    )
-                new_nodes.extend(
-                    {k: v for k, v in h.items() if k not in _TRANSIENT_KEYS}
-                    for h in standalone
-                )
+                # A standalone (args-declaring) member is its own host node, so
+                # its pattern becomes that node's own `if` rather than being
+                # dropped with the other transient keys.
+                for h in standalone:
+                    node = {k: v for k, v in h.items() if k not in _TRANSIENT_KEYS}
+                    pattern = _member_if_pattern(h)
+                    if pattern is not None:
+                        node["if"] = pattern
+                    new_nodes.append(node)
                 if new_nodes:
                     new_group = {k: v for k, v in group.items() if k != "hooks"}
                     new_group["hooks"] = new_nodes
@@ -766,6 +861,11 @@ def filter_hooks_for_host(
                 hosts = hook.get("hosts")
                 if hosts is None or host_id in hosts:
                     entry = {k: v for k, v in hook.items() if k not in _TRANSIENT_KEYS}
+                    # Same promotion as the standalone case: a non-dispatch group
+                    # member is already its own host node.
+                    pattern = _member_if_pattern(hook)
+                    if pattern is not None:
+                        entry["if"] = pattern
                     kept.append(entry)
             if kept:
                 new_group = {k: v for k, v in group.items() if k != "hooks"}

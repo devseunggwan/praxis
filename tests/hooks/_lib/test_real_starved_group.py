@@ -132,7 +132,7 @@ def _patch_group(monkeypatch, members, budget, timeouts=None):
     monkeypatch.setattr(
         _dispatch,
         "load_group",
-        lambda _e, _m, _h=None: (members, budget, dict(timeouts or {})),
+        lambda _e, _m, _h=None, _if=None: (members, budget, dict(timeouts or {})),
     )
 
 

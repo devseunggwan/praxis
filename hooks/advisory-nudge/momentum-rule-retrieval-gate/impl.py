@@ -488,18 +488,52 @@ _ASK_ANSWER_RE = re.compile(r'"((?:[^"\\]|\\.)*)"=\s*"((?:[^"\\]|\\.)*)"')
 # agreeing, as "PR #999 머지 상태만 알려줘" shows.
 _LABEL_LEAD_RE = re.compile(r"\s*[—–:,(-]\s*")
 
+# …except that the qualifier can REVERSE the lead instead of narrowing it
+# ("승인 — 머지하지 않기", "Approve — do not merge"). Reading only the lead turns
+# that label into consent, so a negation anywhere in the label disqualifies the
+# whole thing. The reversal takes several shapes — the negator can precede the
+# verb ("안 머지"), follow it ("머지하지"), sit in a consequence ("머지하면 안
+# 됨"), or be a bare English determiner ("no merge"). A label that declines is
+# not an approval under any reading, so the cost of matching too widely here is
+# one more ask.
+_LABEL_NEGATION_RE = re.compile(
+    r"하지\s*(?:않|말)|취소|보류|중단|나중에|안\s*(?:함|하기|할|돼|되|됨|됩)"
+    r"|(?:안|말)\s*(?:머지|병합)|(?:머지|병합)\s*(?:하지|안\b)"
+    r"|(?<![A-Za-z])(?:not|don't|dont|never|cancel|hold|skip|abort)(?![A-Za-z])"
+    r"|(?<![A-Za-z])no\s+merg(?:e|ing)(?![A-Za-z])",
+    re.IGNORECASE)
+
 # A merge ask is one sentence that both names merging and asks ("Approve
 # merge?", "PR #999를 머지할까요?"). The briefing counter's approve-ask words
 # cannot stand in for it: "approve" also matches "PR #999 was approved", and
 # "승인" matches "테스트 승인할까요?", and neither of those asks to merge.
-# "merge" is a whole word so "emergency" and "merged" stay out, and a question
-# that negates merging or asks whether it happened ("머지하지 말까요?",
-# "머지됐나요?") is not an ask to merge.
-_MERGE_WORD_RE = re.compile(r"(?<![A-Za-z])merge(?![A-Za-z-])|머지|병합", re.IGNORECASE)
+# The merge word is `merge` or `merging` bounded by non-letters, so "emergency"
+# and "merge-base" stay out. `merged` stays out on purpose: it is the past
+# participle, and every question built on it asks whether the merge happened
+# ("Was #999 merged?") rather than asking to do it — which is the same reason a
+# question that negates merging or asks after its state ("머지하지 말까요?",
+# "머지됐나요?", "머지했나요?", "Did we merge #999?") is not an ask to merge.
+# A completion question is the same kind ("Is the merge of #999 done?", "머지
+# 완료됐어?"). The English form stops at a conditional so "Merge #999 once CI is
+# done?" stays an ask; the Korean form needs a state ending, so "머지 완료할까요?"
+# (asking to finish the merge) stays one too. Excluding an ask only denies more.
+_MERGE_WORD_RE = re.compile(r"(?<![A-Za-z])merg(?:e|ing)(?![A-Za-z-])|머지|병합",
+                            re.IGNORECASE)
 _NOT_MERGE_ASK_RE = re.compile(
     r"(?<![A-Za-z])(?:not|don't|dont|never)(?![A-Za-z])"
-    r"|(?:머지|병합)\s*(?:됐|되었|된|되어|되나|하지|안\b|말|상태|충돌|결과)|(?:안|말)\s*(?:머지|병합)|말까요"
-    r"|(?<![A-Za-z])merge\s+(?:status|state|conflicts?|results?)(?![A-Za-z])",
+    r"|(?:머지|병합)\s*(?:됐|되었|된|되어|되나|했|하셨|하였|하지|안\b|말|상태|충돌|결과)"
+    r"|(?:머지|병합)\s*(?:이|가|은|는)?\s*(?:(?:완료|끝|성공)\s*(?:됐|되었|된|되어|되나|되|했|하였|났|나|인|이|여부|\?)|진행\s*중)"
+    r"|(?:안|말)\s*(?:머지|병합)|말까요"
+    r"|(?<![A-Za-z])(?:did|have|has)\s+(?:we|you|i|they|it)\s+(?:already\s+)?merg"
+    r"|(?<![A-Za-z])merg(?:e|ing)\s+(?:status|state|conflicts?|results?)(?![A-Za-z])"
+    # "Is GitHub merging #999?" asks what is happening; "Is merging #999 OK?"
+    # has no subject before `merging` and "Is it fine merging" no bare one.
+    r"|(?<![A-Za-z])(?:is|are|was|were)\s+(?:the\s+)?(?!merging(?![A-Za-z]))[A-Za-z]+"
+    r"(?:\s+(?:still|now|already|currently))?\s+merging(?![A-Za-z])"
+    r"|(?<![A-Za-z])merg(?:e|ing)"
+    r"(?:(?!(?<![A-Za-z])(?:once|when|after|if|until|before)(?![A-Za-z]))[^.?!\n]){0,40}?"
+    r"(?<![A-Za-z])(?:complete[ds]?|done|finish(?:ed|es)?|succeed(?:ed|s)?"
+    r"|go(?:ne)?\s+through|went\s+through|in\s+progress)(?![A-Za-z])",
     re.IGNORECASE)
 _ASK_SENTENCE_RE = re.compile(r"[^.!?。\n]*(?:\?|할까요|될까요|하시겠|해도 되)")
 # An explicit PR reference (`#N`, `PR N`, `…/pull/N`). A bare number is not one:
@@ -512,7 +546,7 @@ _REF_LIST = (r"(?:#|(?<![A-Za-z])pr\s*#?\s*)\d+(?![A-Za-z0-9_])"
              r"(?:\s*(?:,|과|와|및|and|&)\s*(?:#|pr\s*#?\s*)?\d+(?![A-Za-z0-9_]))*")
 _MERGE_OBJECT_RE = re.compile(
     rf"({_REF_LIST})\s*(?:을|를|은|는|도)?\s*(?:머지|병합)"
-    rf"|(?<![A-Za-z])merge\s+(?:pr\s*)?({_REF_LIST})", re.IGNORECASE)
+    rf"|(?<![A-Za-z])merg(?:e|ing)(?:\s*:\s*|\s+)(?:pr\s*)?({_REF_LIST})", re.IGNORECASE)
 
 # A single positional token that is a bare PR number or a …/pull/N URL.
 _PULL_TOKEN_RE = re.compile(r"^(?:\S*/pull/(\d+)|(\d+))$")
@@ -959,7 +993,10 @@ def _strip_pr_ref(text: str, pr: str) -> str:
 def _ask_label_approves(label: str, pr: str) -> bool:
     """True when a picked label is an approval: the whole label passes
     `_is_approval_reply`, or its leading segment is an approval token once a
-    reference to `pr` is removed (`PR #999 머지`, `Merge PR #999`)."""
+    reference to `pr` is removed (`PR #999 머지`, `Merge PR #999`) — and no
+    part of it negates the action (`승인 — 머지하지 않기`)."""
+    if _LABEL_NEGATION_RE.search(label):
+        return False
     if _is_approval_reply(label):
         return True
     lead = _LABEL_LEAD_RE.split(label.strip().lower(), maxsplit=1)[0]
@@ -993,6 +1030,60 @@ def _ask_answer_approves(content: object, pr: str) -> bool:
                for q, a in _ASK_ANSWER_RE.findall(_user_message_text(content)))
 
 
+def _ask_answer_holds(content: object, pr: str) -> bool:
+    """True when an AskUserQuestion result answers a question about `pr` or about
+    merging with something that is not an approval (`보류`)."""
+    return any((_mentions_pr(q, pr) or _MERGE_WORD_RE.search(q))
+               and not _ask_label_approves(a, pr)
+               for q, a in _ASK_ANSWER_RE.findall(_user_message_text(content)))
+
+
+def _ask_question_text(block: dict) -> str:
+    """The question texts of an AskUserQuestion tool_use, joined.
+
+    A declined question comes back `is_error` with no `"q"="a"` pair, so the
+    only place its subject survives is the call that raised it."""
+    inp = block.get("input")
+    questions = inp.get("questions") if isinstance(inp, dict) else None
+    if not isinstance(questions, list):
+        return ""
+    return " ".join(q["question"] for q in questions
+                    if isinstance(q, dict) and isinstance(q.get("question"), str))
+
+
+def _ask_held_after(entries: list[dict], index: int, pr: str) -> bool:
+    """True when an AskUserQuestion answer after `index` holds or declines this
+    merge — a `보류` pick, or a declined question about the PR or about merging.
+
+    The typed-message scan cannot see either: an answer arrives as a tool_result,
+    which `_human_user_indices` skips by design (issue #1418 F2). Without this,
+    a typed `ok` survived the very question that took it back.
+    """
+    asks: dict[str, str] = {}
+    for i, ev in enumerate(entries):
+        msg = ev.get("message")
+        if not isinstance(msg, dict) or ev.get("isSidechain"):
+            continue
+        content = msg.get("content")
+        if not isinstance(content, list):
+            continue
+        for b in content:
+            if not isinstance(b, dict):
+                continue
+            if b.get("type") == "tool_use" and b.get("name") == "AskUserQuestion":
+                if isinstance(b.get("id"), str):
+                    asks[b["id"]] = _ask_question_text(b)
+            elif (i > index and b.get("type") == "tool_result"
+                  and b.get("tool_use_id") in asks):
+                question = asks[b["tool_use_id"]]
+                if b.get("is_error"):
+                    if _mentions_pr(question, pr) or _MERGE_WORD_RE.search(question):
+                        return True
+                elif _ask_answer_holds(b.get("content"), pr):
+                    return True
+    return False
+
+
 def _merge_target_pr(entries: list[dict], command: object, floor: int) -> str | None:
     """PR number a single `gh pr merge` targets, resolved the way
     `_correlated_prior_turn_text` resolves it; None when it cannot be named.
@@ -1017,7 +1108,10 @@ def _is_typed_approval(content: object, pr: str) -> bool:
 
 def _held_after(entries: list[dict], idxs: list[int], index: int, pr: str) -> bool:
     """True when a later user message about this PR or merging is not an approval
-    ("PR #999 머지 보류"): the latest decision replaces an earlier approval."""
+    ("PR #999 머지 보류"): the latest decision replaces an earlier approval. A
+    picked or declined AskUserQuestion answer withdraws it the same way."""
+    if _ask_held_after(entries, index, pr):
+        return True
     for j in idxs:
         if j <= index:
             continue

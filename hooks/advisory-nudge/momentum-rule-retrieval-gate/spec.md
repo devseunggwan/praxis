@@ -347,15 +347,31 @@ approve blindly.
   named it and either asked to merge that PR, or is answered by an approval
   that names merging itself (`머지 진행`), and no later user message about the
   PR or about merging is something other than an approval — the latest decision
-  wins, so `ok` followed by `PR #999 머지 보류` leaves the merge unanswered. A
+  wins, so `ok` followed by `PR #999 머지 보류` leaves the merge unanswered. An
+  `AskUserQuestion` answer withdraws it the same way — a picked label that is
+  not an approval, or a declined (`is_error`) question, about the PR or about
+  merging — which the typed-message scan cannot see, since that answer arrives
+  as a tool_result. A
   merge that repeats or chains merge segments is never answered this way: one
   answer releases one merge.
   Asking to merge is one question sentence (ending in `?`, `할까요`, `될까요`,
-  `하시겠` or `해도 되`) with `merge` as a whole word, `머지` or `병합`, that
+  `하시겠` or `해도 되`) with `merge` or `merging` as a whole word, `머지` or
+  `병합`, that
   neither negates it nor asks whether it happened or how it stands
-  (`머지하지 말까요?`, `머지됐나요?`, `PR #999 merge status?`, `머지 상태`),
-  and that is about the PR. When the merge verb takes PR references as its
-  object — a list right before `머지`/`병합` or right after `merge` — the ask is
+  (`머지하지 말까요?`, `머지됐나요?`, `머지했나요?`, `Did we merge PR #999?`,
+  `PR #999 merge status?`, `머지 상태`) — in either spelling of the verb, so
+  `merging status|state|conflicts|results` is excluded exactly as `merge` is.
+  A completion question is excluded the same way (`Is the merge of PR #999
+  done?`, `Has merging PR #999 completed?`, `머지 완료됐어?`, `머지 끝났나요?`),
+  but only when the completion word is about the merge: a conditional clause
+  keeps the ask (`Merge PR #999 once CI is done?`), and so does a request to
+  finish it (`머지 완료할까요?`). A progressive question is a state question
+  too (`Is GitHub merging PR #999?`, `Are you still merging …?`): a subject
+  before `merging` separates it from the gerund in `Is merging PR #999 OK?`,
+  which still asks. The sentence must also be about the PR. When the merge
+  verb takes PR references as its object — a list right before `머지`/`병합`
+  or right after `merge`, with or without a colon (`Approve merging: PR #833
+  and #999?`) — the ask is
   about exactly those PRs (`#833, #999 를 머지할까요?` asks about both;
   `PR #999 checks are green, #833 머지할까요?` asks about #833 only). Without
   such an object the sentence must name the PR or no PR at all
@@ -366,7 +382,12 @@ approve blindly.
   `is_error`, whose question names the PR, held to the same merge rule
   (`PR #999 어떻게 할까요?` answered `승인 — 그대로 머지` counts), and whose
   picked label leads with an approval token
-  (`승인 — 머지`, `Approve merge`), a reference to the PR itself set aside (`PR #999 머지`). A reply is not an approval: an unrelated message, a status
+  (`승인 — 머지`, `Approve merge`), a reference to the PR itself set aside (`PR #999 머지`),
+  with no negation anywhere in the label — a qualifier can reverse the lead
+  rather than narrow it, whether the negator follows the verb
+  (`승인 — 머지하지 않기`, `Approve — do not merge`), precedes it
+  (`승인 — 안 머지`), sits in a consequence clause (`승인 — 머지하면 안 됨`) or
+  is a bare English determiner (`Approve — no merge`). A reply is not an approval: an unrelated message, a status
   request that names the PR (`PR #999 머지 상태만 알려줘`), a refusal that does
   not end on an approval token, a reply that ends in a question mark
   (`Approve merge?` typed back, `ok?`), a bare `ok` to a turn about something else or
