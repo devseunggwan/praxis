@@ -515,7 +515,7 @@ _NOT_MERGE_ASK_RE = re.compile(
     r"|(?:머지|병합)\s*(?:됐|되었|된|되어|되나|했|하셨|하였|하지|안\b|말|상태|충돌|결과)"
     r"|(?:안|말)\s*(?:머지|병합)|말까요"
     r"|(?<![A-Za-z])(?:did|have|has)\s+(?:we|you|i|they|it)\s+(?:already\s+)?merg"
-    r"|(?<![A-Za-z])merge\s+(?:status|state|conflicts?|results?)(?![A-Za-z])",
+    r"|(?<![A-Za-z])merg(?:e|ing)\s+(?:status|state|conflicts?|results?)(?![A-Za-z])",
     re.IGNORECASE)
 _ASK_SENTENCE_RE = re.compile(r"[^.!?。\n]*(?:\?|할까요|될까요|하시겠|해도 되)")
 # An explicit PR reference (`#N`, `PR N`, `…/pull/N`). A bare number is not one:

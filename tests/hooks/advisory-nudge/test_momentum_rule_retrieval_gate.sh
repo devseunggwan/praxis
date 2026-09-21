@@ -863,6 +863,11 @@ run_merge_escalation_case "merge_serial_ask_label_names_merge_passes" \
 # A question about the merge's state asks nothing ("PR #999 merge status?").
 run_merge_escalation_case "merge_serial_merge_status_ok_denies" \
   "yes" "" "momentum-merge-serial-merge-status-ok.jsonl" "gh pr merge 999 --squash --delete-branch"
+# …in either spelling of the verb: the merge word matches `merging` too, so a
+# state question built on it has to be excluded by the same rule, or the `ok`
+# picked for it reads as consent to merge.
+run_merge_escalation_case "merge_serial_merging_status_ok_denies" \
+  "yes" "" "momentum-merge-serial-merging-status-ok.jsonl" "gh pr merge 999 --squash --delete-branch"
 # Nor does one asking whether it already happened ("PR #999 머지했나요?",
 # "Did we merge PR #999?"): the answer reports history, it does not consent.
 run_merge_escalation_case "merge_serial_past_merge_ask_denies" \
