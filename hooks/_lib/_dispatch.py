@@ -143,10 +143,37 @@ _DEFAULT_GROUP_BUDGET_SEC = 15.0
 # fails if a group member gains a subprocess call without a budget reference.
 
 
+def member_if_pattern(hook: dict) -> Optional[str]:
+    """The member's `mode.if` permission-rule pattern, or None (issue #1335).
+
+    A member declaring one is filtered by the HOST before the dispatcher
+    starts, so it lives in its own dispatcher node and must not be resolved
+    into the unfiltered one. A non-string or blank value reads as absent: the
+    manifest checker rejects it, and the runtime must not widen a group on bad
+    data.
+    """
+    mode = hook.get("mode")
+    if not isinstance(mode, dict):
+        return None
+    pattern = mode.get("if")
+    return pattern if isinstance(pattern, str) and pattern.strip() else None
+
+
 def _iter_group_entries(
-    event: str, matcher: Optional[str], host: Optional[str]
+    event: str,
+    matcher: Optional[str],
+    host: Optional[str],
+    if_pattern: Optional[str] = None,
 ) -> Iterator[tuple[dict, dict]]:
     """Yield `(hook, entry)` manifest pairs matching (event, matcher, host).
+
+    `if_pattern` selects the dispatcher NODE inside the (event, matcher) group:
+    a member is kept iff its own `mode.if` equals it. `None` — the argv default
+    — therefore selects exactly the members declaring no pattern, which is every
+    member until one is tagged. The equality is deliberate rather than a subset
+    test: the host has already decided this node runs, so re-deriving which
+    other patterns would also have matched would make praxis re-implement the
+    permission matcher, and any disagreement there silently drops a gate.
 
     `host` mirrors the per-platform filter `build-plugin-manifests.py` applies: a
     hook is kept iff its `hosts` whitelist is absent OR contains `host`. `host=None`
@@ -182,11 +209,16 @@ def _iter_group_entries(
         # subprocess, stdin-only like every other member — issue #1281.)
         if hook.get("args"):
             continue
+        if member_if_pattern(hook) != if_pattern:
+            continue
         yield hook, hook
 
 
 def load_group(
-    event: str, matcher: Optional[str], host: Optional[str] = None
+    event: str,
+    matcher: Optional[str],
+    host: Optional[str] = None,
+    if_pattern: Optional[str] = None,
 ) -> tuple[list[tuple[str, str, Path]], float, dict[tuple[str, str], float]]:
     """Read the manifest ONCE; return `(members, budget_sec, member_timeouts)`.
 
@@ -207,7 +239,7 @@ def load_group(
     """
     members: list[tuple[str, str, Path]] = []
     timeouts: dict[tuple[str, str], float] = {}
-    for hook, entry in _iter_group_entries(event, matcher, host):
+    for hook, entry in _iter_group_entries(event, matcher, host, if_pattern):
         role = hook.get("role")
         name = hook.get("name")
         # A member's impl path is `<role>/<name>/...`, so both must be strings.
@@ -236,14 +268,17 @@ def load_group(
 
 
 def group_members(
-    event: str, matcher: Optional[str], host: Optional[str] = None
+    event: str,
+    matcher: Optional[str],
+    host: Optional[str] = None,
+    if_pattern: Optional[str] = None,
 ) -> list[tuple[str, str, Path]]:
     """Return `(role, name, impl_path)` for manifest entries matching (event, matcher).
 
     Thin view over `load_group` — see its docstring for ordering and host
     filtering semantics.
     """
-    return load_group(event, matcher, host)[0]
+    return load_group(event, matcher, host, if_pattern)[0]
 
 
 def _load_main(role: str, name: str, impl: Path) -> Optional[Callable[[], int]]:
@@ -440,7 +475,11 @@ def _record_fires(members, results, payload_raw: str, event: str) -> None:
 
 
 def run_group(
-    event: str, matcher: Optional[str], payload_raw: str, host: Optional[str] = None
+    event: str,
+    matcher: Optional[str],
+    payload_raw: str,
+    host: Optional[str] = None,
+    if_pattern: Optional[str] = None,
 ) -> int:
     """Run the whole (event, matcher) group; emit one decision; return its exit code.
 
@@ -460,7 +499,7 @@ def run_group(
         except Exception:
             pass
     try:
-        return _run_group(event, matcher, payload_raw, host)
+        return _run_group(event, matcher, payload_raw, host, if_pattern)
     finally:
         if _transcript is not None:
             try:
@@ -470,7 +509,11 @@ def run_group(
 
 
 def _run_group(
-    event: str, matcher: Optional[str], payload_raw: str, host: Optional[str] = None
+    event: str,
+    matcher: Optional[str],
+    payload_raw: str,
+    host: Optional[str] = None,
+    if_pattern: Optional[str] = None,
 ) -> int:
     # Mark this process as the dispatcher so the fail_open-level coarse recorder
     # (issue #710 coverage expansion) skips the Bash-group members run below —
@@ -504,7 +547,7 @@ def _run_group(
     # member's fire is recorded INCREMENTALLY, right after it resolves —
     # a batch write after the loop would be erased along with the aggregate
     # decision if the host killed the dispatcher mid-group (round-2 review).
-    members, budget, member_timeouts = load_group(event, matcher, host)
+    members, budget, member_timeouts = load_group(event, matcher, host, if_pattern)
     # The SUBSTRING marker probe below (member_rc == 2 or _DENY_MARKER in
     # member_so) is scoped to PreToolUse groups (issue #1199 review): on any
     # other event a member's additionalContext that merely QUOTES a marker
@@ -864,10 +907,14 @@ def _merge_hook_specific_output(
 
 
 def main() -> int:
-    """Entrypoint: stdin = hook payload; argv = [event, matcher, host?].
+    """Entrypoint: stdin = hook payload; argv = [event, matcher, host?, if?].
 
     Defaults to PreToolUse / Bash / no host filter. The build passes the platform
     host as argv[3] so host-restricted hooks are not re-included (see group_members).
+    argv[4] is the node's own `if` pattern (issue #1335): the build emits one
+    dispatcher node per distinct `mode.if` value, and this slot tells the node
+    which members are its own. Absent — the shape of every node the build has
+    ever emitted — it resolves the members that declare no pattern.
     A matcher argv equal to `NO_MATCHER_ARG` maps to None — the group identity of
     matcher-less events (Stop etc.), whose manifest entries carry no matcher key.
     Wrapped in a top-level guard so a dispatcher fault fails open (return 0),
@@ -879,7 +926,8 @@ def main() -> int:
         matcher_arg = sys.argv[2] if len(sys.argv) > 2 else "Bash"
         matcher = None if matcher_arg == NO_MATCHER_ARG else matcher_arg
         host = sys.argv[3] if len(sys.argv) > 3 else None
-        return run_group(event, matcher, payload_raw, host)
+        if_pattern = sys.argv[4] if len(sys.argv) > 4 else None
+        return run_group(event, matcher, payload_raw, host, if_pattern)
     except Exception:
         return 0
 

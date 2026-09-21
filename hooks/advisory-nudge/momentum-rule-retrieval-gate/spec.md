@@ -177,14 +177,38 @@ before approving). Safety gates on the extension:
   > #795 failure), not an adversarial security boundary — `deny` merely adds
   > teeth, and `PRAXIS_MOMENTUM_MERGE_ADVISORY=1` is a standing escape hatch. Two
   > CLI forms that only an adversarial target-swap would use are therefore left
-  > as documented gaps rather than chased across further rounds: (a) an
+  > as documented gaps rather than chased across further rounds: an
   > `xargs`-wrapped merge (`… | xargs -n1 gh pr merge`) is not recognized by the
   > trigger tokenizer (`xargs` is not a peeled prefix), so it bypasses the gate
-  > entirely; (b) a bare-number reference is not repo-scoped, so a cross-repo
-  > `gh -R org/other pr merge 833` after briefing *this* repo's #833 (or a
-  > `Closes #833` line in a different PR's briefing) can false-correlate. Both
-  > require an explicit-signal redesign to close soundly and are out of scope for
-  > the honest-agent nudge.
+  > entirely. Closing it soundly needs an explicit-signal redesign, out of scope
+  > for the honest-agent nudge. (A second gap listed here — an unscoped
+  > cross-repo number — is now handled by **Repo scoping** below, down to the
+  > residual that section names.)
+
+- **Repo scoping (#1419).** Every repo has a `#999`, so a number alone does not
+  identify a PR. When the *merge command* names a repo and the correlated
+  approval window names a **different** one, the approval does not transfer:
+  both `_correlated_prior_turn_text` (prior-turn path) and the `answered`
+  expression in `_merge_escalation_reason` (serial path) bail out via
+  `_repo_conflict`.
+  - The merge's repo is read from the command **only** — `-R`/`--repo` in any
+    spelling (`-R o/r`, `-RO/r`, `--repo=o/r`) or a `…/pull/N` URL argument. A
+    leading host is dropped (`github.com/o/r` == `o/r`) and comparison is
+    case-insensitive. `cd`-based inference is deliberately absent: `cwd` resets
+    between Bash calls, so it would be a guess.
+  - The window's repo comes from the same two sources over the correlated turn
+    range, last-wins — mirroring `_context_pr_from_window`.
+  - **Both sides must resolve, or it is not a conflict.** `None` vs `o/r` is
+    left alone. Measured over the local corpus (851 transcripts, 787 executed
+    `gh pr merge` calls): 393 merges name a repo — 377 agree with their window,
+    **14 differ** — while 123 name none, and **96 of those 123** sit in a window
+    that does name one (the ordinary `gh pr checks 999` → `gh pr merge --repo
+    o/r 999` shape). Treating `None` as a disagreement would therefore deny 96
+    honest merges to reach the same 14.
+  - **Residual:** the issue's literal repro — a briefing/approval window whose
+    prose names no repo at all, followed by `gh -R org/other pr merge 833` — is
+    *not* caught, because the window side is unresolved. What is caught is the
+    common shape where the window did probe a repo.
 - **No multi-target / loop transfer.** A compound `gh pr merge A && gh pr merge
   B` (≥2 merge segments) OR a shell loop / `xargs` repeating one segment
   (`for pr in 833 999; do gh pr merge "$pr"; done`, detected via whole-token
@@ -238,7 +262,7 @@ approve blindly.
   only for a **single** merge segment with no loop (No Approval Transfer). A
   `# briefing-surfaced` inside a heredoc body (`<<EOF … EOF`) is the one residual
   the scanner does not exclude — accepted under the non-adversarial threat model,
-  as with the `xargs`/cross-repo gaps above.
+  as with the `xargs` gap above.
 
   **The marker attests completeness, never existence (issue #940).** It used to
   short-circuit before the transcript was read, so it released the merge no
@@ -323,15 +347,31 @@ approve blindly.
   named it and either asked to merge that PR, or is answered by an approval
   that names merging itself (`머지 진행`), and no later user message about the
   PR or about merging is something other than an approval — the latest decision
-  wins, so `ok` followed by `PR #999 머지 보류` leaves the merge unanswered. A
+  wins, so `ok` followed by `PR #999 머지 보류` leaves the merge unanswered. An
+  `AskUserQuestion` answer withdraws it the same way — a picked label that is
+  not an approval, or a declined (`is_error`) question, about the PR or about
+  merging — which the typed-message scan cannot see, since that answer arrives
+  as a tool_result. A
   merge that repeats or chains merge segments is never answered this way: one
   answer releases one merge.
   Asking to merge is one question sentence (ending in `?`, `할까요`, `될까요`,
-  `하시겠` or `해도 되`) with `merge` as a whole word, `머지` or `병합`, that
+  `하시겠` or `해도 되`) with `merge` or `merging` as a whole word, `머지` or
+  `병합`, that
   neither negates it nor asks whether it happened or how it stands
-  (`머지하지 말까요?`, `머지됐나요?`, `PR #999 merge status?`, `머지 상태`),
-  and that is about the PR. When the merge verb takes PR references as its
-  object — a list right before `머지`/`병합` or right after `merge` — the ask is
+  (`머지하지 말까요?`, `머지됐나요?`, `머지했나요?`, `Did we merge PR #999?`,
+  `PR #999 merge status?`, `머지 상태`) — in either spelling of the verb, so
+  `merging status|state|conflicts|results` is excluded exactly as `merge` is.
+  A completion question is excluded the same way (`Is the merge of PR #999
+  done?`, `Has merging PR #999 completed?`, `머지 완료됐어?`, `머지 끝났나요?`),
+  but only when the completion word is about the merge: a conditional clause
+  keeps the ask (`Merge PR #999 once CI is done?`), and so does a request to
+  finish it (`머지 완료할까요?`). A progressive question is a state question
+  too (`Is GitHub merging PR #999?`, `Are you still merging …?`): a subject
+  before `merging` separates it from the gerund in `Is merging PR #999 OK?`,
+  which still asks. The sentence must also be about the PR. When the merge
+  verb takes PR references as its object — a list right before `머지`/`병합`
+  or right after `merge`, with or without a colon (`Approve merging: PR #833
+  and #999?`) — the ask is
   about exactly those PRs (`#833, #999 를 머지할까요?` asks about both;
   `PR #999 checks are green, #833 머지할까요?` asks about #833 only). Without
   such an object the sentence must name the PR or no PR at all
@@ -342,7 +382,12 @@ approve blindly.
   `is_error`, whose question names the PR, held to the same merge rule
   (`PR #999 어떻게 할까요?` answered `승인 — 그대로 머지` counts), and whose
   picked label leads with an approval token
-  (`승인 — 머지`, `Approve merge`), a reference to the PR itself set aside (`PR #999 머지`). A reply is not an approval: an unrelated message, a status
+  (`승인 — 머지`, `Approve merge`), a reference to the PR itself set aside (`PR #999 머지`),
+  with no negation anywhere in the label — a qualifier can reverse the lead
+  rather than narrow it, whether the negator follows the verb
+  (`승인 — 머지하지 않기`, `Approve — do not merge`), precedes it
+  (`승인 — 안 머지`), sits in a consequence clause (`승인 — 머지하면 안 됨`) or
+  is a bare English determiner (`Approve — no merge`). A reply is not an approval: an unrelated message, a status
   request that names the PR (`PR #999 머지 상태만 알려줘`), a refusal that does
   not end on an approval token, a reply that ends in a question mark
   (`Approve merge?` typed back, `ok?`), a bare `ok` to a turn about something else or
@@ -379,6 +424,43 @@ approve blindly.
   #1214 shipped it — `merge_serial_rebriefed_passes` pins that a briefing item
   written after the first merge re-arms the marker on its own — so a marked
   merge is the one release this check does not reach.
+
+  **A deny says why a briefing the user saw was not scored (issue #1433).**
+  Message-only; no decision moves. When the two deny paths above fire —
+  "fewer than 4 of 6 items" and the marker with no briefing — and the latest
+  turn in which the assistant wrote text before the last human message holds
+  a briefing that would have passed that path's threshold (4 items, or the
+  marker's 1), the `why` gains one clause naming the check that excluded it.
+  `_excluded_briefing_reason` asks the decision's own questions again, in the
+  decision's order, so the named reason is the one that fired:
+
+  | Reason | Check re-asked |
+  | ------ | -------------- |
+  | one approval releases one merge, and this command runs more than one | `_merge_segments` / `_has_repetition` |
+  | the last user message (`…`) is not an approval reply | `_is_approval_reply` |
+  | a user message (`…`) came between the briefing and the approval | briefing turn ends before the approval's own prior turn |
+  | the briefed turn does not name the PR this merge targets | `_correlated_prior_turn_text` |
+  | it precedes a merge that already ran in this session | serial-merge `floor` (marker path only) |
+
+  "The latest turn in which the assistant wrote text" rather than "the turn
+  right before the last user message" is deliberate. An interrupt arrives as a
+  `text` block with no `isMeta` and no `origin` (263 such entries across 868
+  local transcripts), so `_human_user_indices` counts it as a human message:
+  in briefing → interrupt → `continue` the turn before `continue` is empty and
+  the briefing sits one further back. Keyed on the turn right before, the
+  clause would never fire on the very sequence that motivated it. The same
+  split is why briefing → interrupt → `ok` is denied today even though the
+  user approved; the clause names it, and changing that decision is out of
+  this scope.
+
+  Replayed over every recorded `gh pr merge` in local transcripts (791 calls
+  across 867 transcripts, each transcript cut right before the merge and fed
+  to the pre-change and changed builds): 0 decision disagreements, 0
+  tracebacks. Of the 187 denies, 99 gain the clause — 96 not an approval
+  reply, 1 an intervening user message, 1 the briefed turn names a different
+  PR, 1 the serial-merge cut. The replay matters because this code runs inside
+  a `@fail_open` hook: an exception here would not surface as an error, it
+  would release the merge.
 
   **Both directions fail open.** A merge counts as executed only on a clean
   `tool_result`, and only when the shell could not have jumped over it —
