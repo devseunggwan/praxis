@@ -281,8 +281,8 @@ def test_baseline_check_clean():
 def test_member_drop_detected(monkeypatch):
     orig = check._dispatch.group_members
 
-    def fake(event, matcher, host=None):
-        members = orig(event, matcher, host)
+    def fake(event, matcher, host=None, if_pattern=None):
+        members = orig(event, matcher, host, if_pattern)
         return members[:-1] if members else members  # drop one resolved member
 
     monkeypatch.setattr(check._dispatch, "group_members", fake)

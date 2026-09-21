@@ -1959,22 +1959,29 @@ def main() -> int:
             )
 
             # (b) runtime resolution must match the manifest, with no dup, and
-            #     every resolved impl on disk.
-            resolved = _dispatch.group_members(event, matcher, host_id)
+            #     every resolved impl on disk. `group_members` answers one
+            #     `mode.if` partition at a time (issue #1335), so each is
+            #     compared on its own and the roster is their union.
+            resolved = []
+            for pattern in partitions or {None: set()}:
+                part = _dispatch.group_members(event, matcher, host_id, pattern)
+                resolved.extend(part)
+                part_names = {name for _role, name, _impl in part}
+                want_names = partitions.get(pattern, set())
+                if part_names != want_names:
+                    drifts.append(
+                        f"DISPATCH MEMBER DRIFT {event}/{matcher} host={host_id} "
+                        f"if={pattern!r}: group_members={sorted(part_names)} != "
+                        f"manifest={sorted(want_names)} (args-declaring members "
+                        f"are excluded on both sides — excluded here: "
+                        f"{sorted(args_excluded)})"
+                    )
             resolved_names = [name for _role, name, _impl in resolved]
             if len(resolved_names) != len(set(resolved_names)):
                 drifts.append(
                     f"DISPATCH DUP {event}/{matcher} host={host_id}: "
                     f"group_members resolves a hook more than once "
                     f"({sorted(resolved_names)})"
-                )
-            if set(resolved_names) != expected_members:
-                drifts.append(
-                    f"DISPATCH MEMBER DRIFT {event}/{matcher} host={host_id}: "
-                    f"group_members={sorted(set(resolved_names))} != "
-                    f"manifest={sorted(expected_members)} (args-declaring members are "
-                    f"excluded on both sides — excluded here: "
-                    f"{sorted(args_excluded)})"
                 )
             for _role, name, impl in resolved:
                 if not impl.exists():
