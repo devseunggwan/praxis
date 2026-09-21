@@ -28,8 +28,23 @@ _STRICT_ENV = "PRAXIS_DENIED_ACTION_STRICT"
 _BYPASS_ENV = "PRAXIS_DENIED_ACTION_BYPASS"
 
 
-def _rej(tool_use_id="toolu_1", tool_name="Bash", text="git push origin main"):
-    return {"tool_use_id": tool_use_id, "tool_name": tool_name, "text": text}
+def _rej(
+    tool_use_id="toolu_1",
+    tool_name="Bash",
+    text="git push origin main",
+    kind="user-rejected",
+):
+    return {
+        "tool_use_id": tool_use_id,
+        "tool_name": tool_name,
+        "text": text,
+        "kind": kind,
+    }
+
+
+def _blocked(tool_use_id="toolu_1", tool_name="Bash", text="gh pr create --title x"):
+    """A PreToolUse hook block — same hole in the report, different kind (#1422)."""
+    return _rej(tool_use_id, tool_name, text, kind="permission-rule")
 
 
 def _turn(*tool_use_ids, is_error=True):
@@ -176,7 +191,7 @@ def test_indeterminate_message_says_it_is_not_an_absence():
 def test_advisory_names_every_refused_tool():
     text = gate._advisory([_rej(tool_name="Bash"), _rej(tool_name="Write")])
     assert "Bash" in text and "Write" in text
-    assert "2 tool call(s)" in text
+    assert "2 refused by the user" in text
 
 
 def test_advisory_leads_with_english():
@@ -537,3 +552,221 @@ def test_subagent_stop_reaches_the_gate_through_the_dispatcher(tmp_path):
     assert proc.returncode == 0
     assert "denied-action-report-gate" in proc.stdout
     assert "Bash" in proc.stdout
+
+
+# --------------------------------------------------------------------------
+# hook blocks are the second denial kind (issue #1422)
+# --------------------------------------------------------------------------
+
+
+def test_hook_block_from_this_turn_is_reported():
+    """The defect: a blocked call left the same hole and the gate was silent."""
+    b = _blocked(tool_use_id="toolu_now")
+    assert gate.unreported([b], {"toolu_now"}, "PR 을 열었습니다.") == [b]
+
+
+def test_acknowledged_hook_block_is_not_reported():
+    b = _blocked(tool_use_id="toolu_now")
+    assert gate.unreported([b], {"toolu_now"}, "라벨 게이트에 차단되어 다시 실행했습니다.") == []
+
+
+def test_advisory_names_the_two_kinds_separately():
+    """A block says a rule stopped you, a refusal says the user did — a message
+    that merges them names neither."""
+    text = gate._advisory([_blocked(tool_use_id="t1"), _rej(tool_use_id="t2")])
+    assert "1 blocked by a hook or permission rule" in text
+    assert "1 refused by the user" in text
+
+
+def test_advisory_omits_the_kind_that_is_absent():
+    text = gate._advisory([_blocked()])
+    assert "blocked by a hook or permission rule" in text
+    assert "refused by the user" not in text
+
+
+def test_entry_without_a_kind_field_counts_as_a_user_refusal():
+    """Backward compatibility: the scan returned no `kind` before #1422, and the
+    only kind it returned was the user's own refusal."""
+    legacy = {"tool_use_id": "t1", "tool_name": "Bash", "text": ""}
+    assert "refused by the user" in gate._advisory([legacy])
+
+
+def test_a_block_and_a_refusal_together_are_not_sole():
+    """The stated behaviour change: two candidates in a turn, so one bare ack
+    word covers neither — `is_acknowledged`'s own rule, now reachable across
+    the kinds."""
+    b = _blocked(tool_use_id="t1", tool_name="Bash")
+    r = _rej(tool_use_id="t2", tool_name="Write", text="/etc/hosts")
+    out = gate.unreported([b, r], {"t1", "t2"}, "푸시는 거부되었습니다.")
+    assert sorted(x["tool_name"] for x in out) == ["Bash", "Write"]
+
+
+def test_askuserquestion_exclusion_applies_to_the_new_kind_too():
+    b = _blocked(tool_use_id="t1", tool_name="AskUserQuestion", text="어느 쪽?")
+    assert gate.unreported([b], {"t1"}, "그렇게 진행하겠습니다.") == []
+
+
+def _transcript_with_hook_block(tmp_path, tool_use_id="toolu_b"):
+    """A hook block as the runtime records it: `permission-rule`, `is_error`,
+    and the blocking hook's OWN prose — no fixed refusal sentence anywhere."""
+    path = tmp_path / "blocked.jsonl"
+    lines = [
+        {
+            "type": "assistant",
+            "message": {
+                "role": "assistant",
+                "content": [
+                    {
+                        "type": "tool_use",
+                        "id": tool_use_id,
+                        "name": "Bash",
+                        "input": {"command": "gh pr create --title x --body y"},
+                    }
+                ],
+            },
+        },
+        {
+            "type": "user",
+            "toolDenialKind": "permission-rule",
+            "message": {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": tool_use_id,
+                        "is_error": True,
+                        # Transcribed from a live record, not composed: the
+                        # corpus holds exactly two shapes for this kind, and
+                        # this is the hook-block one. The absolute plugin path
+                        # is the only thing replaced.
+                        "content": (
+                            "PreToolUse:Bash hook error: [<plugin>/hooks/"
+                            "_dispatch.sh PreToolUse Bash claude]: "
+                            "[side-effect-scan] [git-commit] local git state "
+                            "mutation — 현재 브랜치/HEAD 확인 필요."
+                        ),
+                    }
+                ],
+            },
+        },
+    ]
+    path.write_text("\n".join(json.dumps(x) for x in lines) + "\n")
+    return path
+
+
+def test_e2e_hook_block_fires_on_a_silent_report(tmp_path):
+    t = _transcript_with_hook_block(tmp_path)
+    proc = _run(
+        {
+            "session_id": "b1",
+            "stop_hook_active": False,
+            "transcript_path": str(t),
+            "last_assistant_message": "PR 을 열고 검증 코멘트를 달았습니다.",
+        },
+        tmp_path=tmp_path,
+    )
+    assert proc.returncode == 0
+    out = json.loads(proc.stdout)
+    assert "blocked by a hook or permission rule" in out["systemMessage"]
+    assert "Bash" in out["systemMessage"]
+
+
+def test_e2e_hook_block_acknowledged_is_silent(tmp_path):
+    """The negative control for the case above: same transcript, a report that
+    owns the block."""
+    t = _transcript_with_hook_block(tmp_path)
+    proc = _run(
+        {
+            "session_id": "b2",
+            "stop_hook_active": False,
+            "transcript_path": str(t),
+            "last_assistant_message": "라벨 게이트에 한 번 차단되어 본문을 고쳐 다시 열었습니다.",
+        },
+        tmp_path=tmp_path,
+    )
+    assert proc.returncode == 0
+    assert proc.stdout.strip() == ""
+
+
+def test_cursor_identity_carries_the_kinds(tmp_path):
+    """A cursor advanced by the narrower default must not make this gate's
+    widened scan resume past an earlier `permission-rule` denial.
+
+    The cursor stores an offset and nothing about which kinds produced it, and
+    `_cursor_matches` checks only inode / size / newline — so before #1422 the
+    part was the shared default and a mid-session upgrade from the narrower
+    build silently dropped every hook block already on disk.
+    """
+    sys.path.insert(0, str(REPO / "hooks" / "_lib"))
+    import _transcript as tr  # noqa: PLC0415
+
+    def assistant(uuid, tuid, name):
+        return {
+            "type": "assistant",
+            "uuid": uuid,
+            "message": {
+                "role": "assistant",
+                "content": [
+                    {"type": "tool_use", "id": tuid, "name": name, "input": {"command": "x"}}
+                ],
+            },
+        }
+
+    def denial(tuid, src, kind):
+        body = (
+            "The user doesn't want to proceed with this tool use."
+            if kind == "user-rejected"
+            else "Blocked by a hook"
+        )
+        return {
+            "type": "user",
+            "toolUseResult": "User rejected tool use",
+            "toolDenialKind": kind,
+            "sourceToolAssistantUUID": src,
+            "message": {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": tuid,
+                        "is_error": True,
+                        "content": body,
+                    }
+                ],
+            },
+        }
+
+    t = tmp_path / "t.jsonl"
+    t.write_text(
+        "\n".join(
+            json.dumps(r)
+            for r in (
+                assistant("u1", "toolu_block", "Bash"),
+                denial("toolu_block", "u1", "permission-rule"),
+                assistant("u2", "toolu_rej", "Write"),
+                denial("toolu_rej", "u2", "user-rejected"),
+            )
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    # The narrower build's cursor, at the part it used: the bare default.
+    narrow = tmp_path / "narrow.json"
+    assert tr.scan_user_rejections(str(t), cursor_path=str(narrow)) is not None
+    assert narrow.exists(), "the narrow scan must have advanced a cursor"
+
+    # This gate's cursor part must not be that one, or the offset above is
+    # inherited and the block below is never read.
+    assert gate._CURSOR_PART != "root"
+    assert "permission-rule" in gate._CURSOR_PART
+
+    wide = tmp_path / "wide.json"
+    got = tr.scan_user_rejections(str(t), cursor_path=str(wide), kinds=tr.DENIAL_KINDS)
+    kinds = sorted(r["kind"] for r in got)
+    assert kinds == ["permission-rule", "user-rejected"], kinds
+
+    # Positive control for the failing direction: reuse the narrow cursor and
+    # the block is provably dropped — this is the defect, pinned.
+    dropped = tr.scan_user_rejections(str(t), cursor_path=str(narrow), kinds=tr.DENIAL_KINDS)
+    assert [r["kind"] for r in dropped] == ["user-rejected"]
