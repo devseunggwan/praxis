@@ -162,6 +162,13 @@ DISPATCH_WRAPPER_NAME = "_dispatch.sh"
 # (check-plugin-manifests.py Rule 14 pins the pairing).
 DISPATCH_NO_MATCHER_ARG = "-"
 
+# The events on which the host evaluates a hook's `if` (Claude Code hooks
+# reference, issue #1335); on any other event such a hook never runs.
+IF_TOOL_EVENTS = frozenset({
+    "PreToolUse", "PostToolUse", "PostToolUseFailure",
+    "PermissionRequest", "PermissionDenied",
+})
+
 
 # ---------------------------------------------------------------------------
 # Manifest loading
@@ -445,6 +452,14 @@ def manifest_schema_drifts(manifest) -> list[str]:
                     f"SCHEMA hooks/manifest.json $.hooks[{idx}].mode.if: "
                     f"whitespace-only pattern would drop the filter "
                     f"(entry {entry.get('name')!r})"
+                )
+            # The host evaluates `if` only on tool events; on any other event
+            # "a hook with `if` set never runs" (Claude Code hooks reference).
+            if entry.get("event") not in IF_TOOL_EVENTS:
+                out.append(
+                    f"SCHEMA hooks/manifest.json $.hooks[{idx}].mode.if: "
+                    f"event {entry.get('event')!r} is not a tool event, so the "
+                    f"host would never run this hook (entry {entry.get('name')!r})"
                 )
     return out
 

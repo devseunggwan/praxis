@@ -114,6 +114,18 @@ def test_whitespace_only_if_pattern_fails(manifest, blank):
     assert f"$.hooks[{idx}].mode.if: whitespace-only" in drifts[0]
 
 
+def test_if_pattern_on_a_non_tool_event_fails(manifest):
+    # The host skips a hook that sets `if` on a non-tool event entirely, so
+    # the build would install a hook that never runs (issue #1335).
+    idx, entry = next(
+        (i, h) for i, h in enumerate(manifest["hooks"]) if h.get("event") == "Stop"
+    )
+    entry.setdefault("mode", {})["if"] = "Bash(git commit *)"
+    drifts = build.manifest_schema_drifts(manifest)
+    assert len(drifts) == 1, drifts
+    assert f"$.hooks[{idx}].mode.if: event 'Stop' is not a tool event" in drifts[0]
+
+
 def test_real_if_pattern_passes(manifest):
     _idx, entry = _tool_entry(manifest)
     entry.setdefault("mode", {})["if"] = "Bash(git commit *)"
