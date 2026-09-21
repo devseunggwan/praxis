@@ -97,6 +97,16 @@ from _payload import read_payload  # type: ignore[import-not-found]  # noqa: E40
 BYPASS_ENV = "PRAXIS_HOOK_BYPASS_POSTCOMPACT_CONTEXT"
 COMPACT_SOURCE = "compact"
 
+# Issue #1476: a compaction summary is English prose, and the user's response-
+# language instruction survives inside it as one buried line at best. This
+# hook is the earliest reachable surface after the boundary, so it carries the
+# instruction back across in its own labeled line rather than leaving it to
+# compete with the summary's own wording. Unset or blank -> no line, and the
+# rest of the block is unchanged (byte-identical to before this env existed).
+# No language is hardcoded: the value is the user's own, verbatim, whatever it
+# is — this is a public plugin and must not assume a language for anyone.
+RESPONSE_LANGUAGE_ENV = "PRAXIS_RESPONSE_LANGUAGE"
+
 
 # ---------------------------------------------------------------------------
 # Payload helpers
@@ -288,6 +298,13 @@ def build_context(session_id: str, cwd: str) -> str:
             lines.append(f"      {idx}. {reason}")
     else:
         lines.append("  • strikes    : 0/3")
+
+    response_language = os.environ.get(RESPONSE_LANGUAGE_ENV, "").strip()
+    if response_language:
+        lines.append(
+            f"  • response language : {response_language} — applies to all "
+            "user-facing prose, including narration between tool calls"
+        )
 
     lines.append("")
     lines.append(

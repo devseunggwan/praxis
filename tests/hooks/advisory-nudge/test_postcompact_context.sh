@@ -425,6 +425,47 @@ assert_body "emit body: PR number rendered" "#999"
 assert_body "emit body: PR URL rendered" "github.com/o/r/pull/999"
 
 # =============================================================================
+# PRAXIS_RESPONSE_LANGUAGE re-injection (issue #1476)
+# =============================================================================
+
+new_case_dir
+make_mock_git_clean "$MOCK_BIN" "main"
+make_mock_gh_no_pr "$MOCK_BIN"
+PAYLOAD=$(payload_for "compact")
+run_hook "unset PRAXIS_RESPONSE_LANGUAGE; export PATH='$MOCK_BIN:'\$PATH" "$PAYLOAD"
+assert_emit "language env unset: hook still emits (rest of block unchanged)"
+if echo "$LAST_OUT" | grep -q "response language"; then
+  echo "FAIL  [language env unset: no response-language line]"
+  echo "        stdout: $LAST_OUT"
+  FAIL=$((FAIL + 1)); FAILED_NAMES+=("language env unset: no response-language line")
+else
+  echo "PASS  [language env unset: no response-language line]"; PASS=$((PASS + 1))
+fi
+
+new_case_dir
+make_mock_git_clean "$MOCK_BIN" "main"
+make_mock_gh_no_pr "$MOCK_BIN"
+PAYLOAD=$(payload_for "compact")
+run_hook "export PRAXIS_RESPONSE_LANGUAGE=ko; export PATH='$MOCK_BIN:'\$PATH" "$PAYLOAD"
+assert_emit "language env set: hook emits with response-language line"
+assert_body "language env set: value echoed verbatim" "response language : ko"
+assert_body "language env set: narration coverage stated" "narration between tool calls"
+
+new_case_dir
+make_mock_git_clean "$MOCK_BIN" "main"
+make_mock_gh_no_pr "$MOCK_BIN"
+PAYLOAD=$(payload_for "compact")
+run_hook "export PRAXIS_RESPONSE_LANGUAGE='  '; export PATH='$MOCK_BIN:'\$PATH" "$PAYLOAD"
+assert_emit "language env blank (whitespace only): treated as unset"
+if echo "$LAST_OUT" | grep -q "response language"; then
+  echo "FAIL  [language env blank: no response-language line]"
+  echo "        stdout: $LAST_OUT"
+  FAIL=$((FAIL + 1)); FAILED_NAMES+=("language env blank: no response-language line")
+else
+  echo "PASS  [language env blank: no response-language line]"; PASS=$((PASS + 1))
+fi
+
+# =============================================================================
 # Summary
 # =============================================================================
 
