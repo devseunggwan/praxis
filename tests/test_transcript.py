@@ -477,6 +477,10 @@ class TestScanUserRejections:
 HOOKS = REPO_ROOT / "hooks"
 
 _CONSUMERS = {
+    # Scans a tail past the turn boundary (min_events=150): the answer, the
+    # re-ask and the write can share one turn, which is the incident shape.
+    HOOKS / "advisory-nudge" / "negation-answer-quote-advisory" / "impl.py":
+        ["load_recent_events"],
     HOOKS / "completion-verify" / "readonly-verify-deferral-gate" / "impl.py":
         ["load_current_turn", "extract_last_assistant_text"],
     # Registered on SubagentStop as well (#1337), so it takes the turn through
