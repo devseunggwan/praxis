@@ -912,6 +912,11 @@ run_merge_escalation_case "merge_same_repo_serial_passes" \
 # as a disagreement would deny all of them to reach the 14 genuine ones.
 run_merge_escalation_case "merge_repo_against_bare_probe_passes" \
   "no" "" "momentum-merge-bare-probe-repo-merge.jsonl" "gh pr merge --repo orgA/repoA 999 --squash"
+# The window's repo and number come from one probe. When the latest probe names
+# no repo, an earlier probe's repo must not stay paired with that number — it
+# would raise a conflict against a merge the latest probe never disagreed with.
+run_merge_escalation_case "merge_repo_after_later_bare_probe_passes" \
+  "no" "" "momentum-merge-repo-then-bare-probe-approved.jsonl" "gh pr merge --repo orgB/repoB 999 --squash"
 # The block names the gap: a reply that approves nothing is not a missing message.
 _reason_out=$(python3 -c 'import json, sys; print(json.dumps({"tool_name": "Bash", "tool_input": {"command": "gh pr merge 999 --squash --delete-branch"}, "transcript_path": sys.argv[1], "session_id": "test-momentum-merge"}))' \
   "$FIXTURES_DIR/momentum-merge-serial-status-request.jsonl" | python3 "$HOOK" 2>/dev/null)

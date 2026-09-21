@@ -772,7 +772,8 @@ def _merge_target_repo(command: object) -> str | None:
 def _context_repo_from_window(entries: list[dict], lo: int, hi: int) -> str | None:
     """Repo named by the most recent read-only `gh pr <verb>` in the window, or
     None. Mirrors `_context_pr_from_window`'s last-wins scan so the repo and the
-    number come from the same notion of "the probe that identified this PR"."""
+    number come from the same probe: a later probe that names no repo resets it
+    to None rather than leaving an earlier probe's repo paired with its number."""
     found: str | None = None
     for ev in entries[lo:hi]:
         msg = ev.get("message")
@@ -791,9 +792,7 @@ def _context_repo_from_window(entries: list[dict], lo: int, hi: int) -> str | No
             for argv in iter_command_starts(safe_tokenize(cmd)):
                 if _gh_pr_target(argv, _CONTEXT_VERBS, _CONTEXT_VALUE_FLAGS) is None:
                     continue
-                repo = _segment_repo(argv)
-                if repo:
-                    found = repo  # last (most recent) resolved repo wins
+                found = _segment_repo(argv)
     return found
 
 
