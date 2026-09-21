@@ -197,9 +197,20 @@ run_case silent "answer shorter than the quote floor" "$SLACK" "$SLACK_INPUT"
 build_transcript "$FREE_PREFIX \"채널은?\"=\"backend\", \"문구는?\"=\"$ANSWER\". Read the answers carefully."
 run_case "ask:$ANSWER" "negation in the second answer of a multi-question result" "$SLACK" "$SLACK_INPUT"
 
-# escaped quotes inside the answer must not end the pair early
-build_transcript "$FREE_PREFIX \"문구는?\"=\"아니지 \\\"bump\\\" 만 언급해요 다른거도\". Read the answers carefully."
-run_case 'ask:bump' "escaped quotes inside the answer" "$SLACK" "$SLACK_INPUT"
+# The runtime embeds answers raw. A literal `\n` stays two characters, so the
+# advisory quotes it back unchanged rather than as a decoded newline.
+build_transcript "$FREE_PREFIX \"경로는?\"=\"아니지 C:\\new\\path 말고 다른 경로로\". Read the answers carefully."
+run_case 'ask:C:\new\path' "raw backslash-n inside the answer" "$SLACK" "$SLACK_INPUT"
+
+# ...and the same answer quoted back verbatim in prose disarms it.
+build_transcript "$FREE_PREFIX \"경로는?\"=\"아니지 C:\\new\\path 말고 다른 경로로\". Read the answers carefully." \
+  "[{\"type\": \"text\", \"text\": \"\\\"아니지 C:\\\\new\\\\path 말고 다른 경로로\\\" 라고 하셔서 경로를 바꿨습니다.\"}]"
+run_case silent "raw backslash-n answer quoted back in prose" "$SLACK" "$SLACK_INPUT"
+
+# A raw `\"` inside the answer ends the pair early; the truncated stub is
+# below the quote floor, so the gate fails open rather than misfiring.
+build_transcript "$FREE_PREFIX \"문구는?\"=\"아니지 \"bump\" 만 언급해요 다른거도\". Read the answers carefully."
+run_case silent "raw quote inside the answer fails open" "$SLACK" "$SLACK_INPUT"
 
 # a rejection carries no pair at all
 build_transcript "The user doesn't want to proceed with this tool use. The tool use was rejected."
@@ -231,8 +242,7 @@ build_scoped_transcript() {
   python3 - "$TRANSCRIPT" "$answer" "$tail_kind" <<'PY'
 import json, sys
 path, answer, tail_kind = sys.argv[1:4]
-escaped = answer.replace("\\", "\\\\").replace('"', '\\"')
-result = f'The user answered: "이 문구로 올릴까요?"="{escaped}". Read the answers carefully.'
+result = f'The user answered: "이 문구로 올릴까요?"="{answer}". Read the answers carefully.'
 side = tail_kind == "sidechain-only"
 
 
@@ -274,10 +284,10 @@ PY
 build_scoped_transcript "$ANSWER" human-turn
 run_case silent "a new user turn ends the correction's life" "$SLACK" "$SLACK_INPUT"
 
-# An answer holding a quote character is still quoted verbatim in the
-# follow-up question. Comparing it against a JSON-serialised input compares it
-# against `\"` instead, and the quotation is never recognised.
-QUOTED_ANSWER='아니지 "bump" 만 언급해요 다른거도 있는데'
+# An answer holding a backslash is still quoted verbatim in the follow-up
+# question. Comparing it against a JSON-serialised input compares it against
+# `\\` instead, and the quotation is never recognised.
+QUOTED_ANSWER='아니지 C:\temp 경로 말고 다른거도 있는데'
 build_scoped_transcript "$QUOTED_ANSWER" quoted-question
 run_case silent "a quoted answer is recognised in the follow-up question" "$SLACK" "$SLACK_INPUT"
 

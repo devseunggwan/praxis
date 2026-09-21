@@ -90,10 +90,11 @@ BYPASS_ENV = "PRAXIS_NEGATION_ANSWER_BYPASS"
 # "Your questions have been answered:" instead, and is not in scope.
 FREE_TEXT_PREFIX = "The user answered:"
 
-# `"<question>"="<answer>"`, repeated per question. Escaped quotes inside
-# either side are consumed by the `\\.` alternative, so an answer containing a
-# quoted string does not end the match early.
-_PAIR_RE = re.compile(r'"((?:[^"\\]|\\.)*)"="((?:[^"\\]|\\.)*)"')
+# `"<question>"="<answer>"`, repeated per question. The runtime embeds both
+# sides raw — no escaping of quotes, backslashes or newlines — so an answer that
+# itself holds a `"` ends its match early and comes back truncated. That fails
+# open: the stub is short or unmarked, so nothing arms.
+_PAIR_RE = re.compile(r'"([^"]*)"="([^"]*)"')
 
 # Opening negation markers. `아니(?!면)` keeps the disjunction `아니면`
 # ("or else") out; `no(?![a-z])` keeps `note` / `nobody` out — a plain `\bno\b`
@@ -119,11 +120,6 @@ MIN_ANSWER_CHARS = 8
 TAIL_MIN_EVENTS = 150
 
 
-def unescape(value: str) -> str:
-    """Undo the backslash escaping the runtime applies inside the pair text."""
-    return value.replace('\\"', '"').replace("\\n", "\n").replace("\\\\", "\\")
-
-
 def free_text_answers(result: str, labels: frozenset[str] = frozenset()) -> list[str]:
     """Typed answers from one AskUserQuestion tool_result, or [] if not free text.
 
@@ -133,8 +129,9 @@ def free_text_answers(result: str, labels: frozenset[str] = frozenset()) -> list
     """
     if not result.startswith(FREE_TEXT_PREFIX):
         return []
-    answers = (unescape(answer) for _question, answer in _PAIR_RE.findall(result))
-    return [answer for answer in answers if answer not in labels]
+    return [
+        answer for _question, answer in _PAIR_RE.findall(result) if answer not in labels
+    ]
 
 
 def option_labels(tool_input: object) -> frozenset[str]:

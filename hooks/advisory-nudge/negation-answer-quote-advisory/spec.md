@@ -63,6 +63,13 @@ result under `The user answered:`, and a sibling question answered by picking
 an option rides along with its label. So within a free-text result, an answer
 equal to one of that call's option labels is dropped as well.
 
+Both sides of a pair are embedded raw: the runtime does not escape quotes,
+backslashes or newlines inside `"<q>"="<text>"` (checked against the source
+`AskUserQuestion` input — every question holding a `\` or a `"` reappears
+verbatim in its result, and the escaped form never does). So the answer is
+compared as written. An answer that itself holds a `"` ends its pair early and
+comes back truncated; that fails open, since the stub arms nothing.
+
 ## Measured corpus
 
 Scope: `~/.claude*/projects/*/*.jsonl`, deduplicated by real path — 851
@@ -100,7 +107,9 @@ Each row is a test case in
 | `note …` / `nobody …` (substring of `no`) | silent |
 | Answer shorter than the 8-character floor | silent |
 | Multi-question result, negation in the second pair | ask |
-| Escaped quotes inside the answer text | ask |
+| Raw `\n` inside the answer, unquoted | ask |
+| Same answer quoted back verbatim in prose | silent |
+| Raw `"` inside the answer (pair truncated) | silent — fails open |
 | Rejection result (no pair at all) | silent |
 | `InputValidationError` result | silent |
 | Question still unanswered | silent |
