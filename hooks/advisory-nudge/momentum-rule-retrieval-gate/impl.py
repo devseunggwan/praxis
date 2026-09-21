@@ -546,7 +546,7 @@ _REF_LIST = (r"(?:#|(?<![A-Za-z])pr\s*#?\s*)\d+(?![A-Za-z0-9_])"
              r"(?:\s*(?:,|과|와|및|and|&)\s*(?:#|pr\s*#?\s*)?\d+(?![A-Za-z0-9_]))*")
 _MERGE_OBJECT_RE = re.compile(
     rf"({_REF_LIST})\s*(?:을|를|은|는|도)?\s*(?:머지|병합)"
-    rf"|(?<![A-Za-z])merg(?:e|ing)\s+(?:pr\s*)?({_REF_LIST})", re.IGNORECASE)
+    rf"|(?<![A-Za-z])merg(?:e|ing)(?:\s*:\s*|\s+)(?:pr\s*)?({_REF_LIST})", re.IGNORECASE)
 
 # A single positional token that is a bare PR number or a …/pull/N URL.
 _PULL_TOKEN_RE = re.compile(r"^(?:\S*/pull/(\d+)|(\d+))$")

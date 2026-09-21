@@ -916,6 +916,10 @@ run_merge_escalation_case "merge_serial_clause_other_pr_denies" \
 # …so "#833, #999 를 머지해 반영할까요?" still asks about both.
 run_merge_escalation_case "merge_serial_two_pr_ask_passes" \
   "no" "" "momentum-merge-serial-two-pr-ask.jsonl" "gh pr merge 999 --squash --delete-branch"
+# …and a colon after the verb still introduces its object ("Approve merging: PR
+# #833 and #999?"), or the ask falls back to every reference and misses #999.
+run_merge_escalation_case "merge_serial_two_pr_ask_colon_passes" \
+  "no" "" "momentum-merge-serial-two-pr-ask-colon.jsonl" "gh pr merge 999 --squash --delete-branch"
 # One answer releases one merge, never a loop that repeats it.
 run_merge_escalation_case "merge_serial_loop_answered_denies" \
   "yes" "" "momentum-merge-serial-answered-current.jsonl" "for i in 1 2; do gh pr merge 999 --squash; done"

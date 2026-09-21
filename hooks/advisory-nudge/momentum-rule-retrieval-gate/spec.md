@@ -368,8 +368,10 @@ approve blindly.
   finish it (`머지 완료할까요?`). A progressive question is a state question
   too (`Is GitHub merging PR #999?`, `Are you still merging …?`): a subject
   before `merging` separates it from the gerund in `Is merging PR #999 OK?`,
-  which still asks. The sentence must also be about the PR. When the merge verb takes PR references as its
-  object — a list right before `머지`/`병합` or right after `merge` — the ask is
+  which still asks. The sentence must also be about the PR. When the merge
+  verb takes PR references as its object — a list right before `머지`/`병합`
+  or right after `merge`, with or without a colon (`Approve merging: PR #833
+  and #999?`) — the ask is
   about exactly those PRs (`#833, #999 를 머지할까요?` asks about both;
   `PR #999 checks are green, #833 머지할까요?` asks about #833 only). Without
   such an object the sentence must name the PR or no PR at all
