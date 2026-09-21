@@ -100,6 +100,34 @@ def test_emit_decision_does_not_exit() -> None:
     assert buf.getvalue()
 
 
+def test_deny_survives_a_reason_the_repeat_counter_cannot_key() -> None:
+    """A counter failure must not swallow the deny it was annotating.
+
+    The counter runs before the write, so an exception there leaves nothing on
+    stdout — and the hook's `@fail_open` then exits 0, letting the call through
+    the gate that meant to stop it. A lone surrogate in a path is one way in:
+    `reason_key` encodes the first line, and utf-8 refuses to encode it.
+    """
+    reason = "deny: cannot edit \ud800 path"
+    buf = io.StringIO()
+    hio.emit_decision("deny", reason, stream=buf)
+    obj = json.loads(buf.getvalue())
+    assert obj["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert obj["hookSpecificOutput"]["permissionDecisionReason"] == reason
+
+
+def test_deny_with_a_keyable_reason_still_writes() -> None:
+    """Positive control for the row above: an ordinary deny reaches stdout.
+
+    Without it, a helper that wrote nothing at all would pass that assertion
+    for the wrong reason.
+    """
+    buf = io.StringIO()
+    hio.emit_decision("deny", "deny: cannot edit /tmp/x", stream=buf)
+    obj = json.loads(buf.getvalue())
+    assert obj["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+
 def test_format_additional_context_key_order_is_fixed() -> None:
     d = hio.format_additional_context("watch out")
     assert list(d.keys()) == ["hookSpecificOutput"]
