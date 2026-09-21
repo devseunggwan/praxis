@@ -90,7 +90,21 @@ command -v praxis_fire_arm >/dev/null 2>&1 && \
 [ "$STOP_HOOK_ACTIVE" = "true" ] && exit 0
 [ ! -f "$TRANSCRIPT_PATH" ] && exit 0
 
-CLAIM_PATTERNS='(모두 완료(했)?|완료했습니다[.!。?…]?\s*$|작업 완료[.!。?…]?\s*$|완료[.!。?…]?\s*$|\bdone\b[.!?]?\s*$|\bfinished\b[.!?]?\s*$|cleanup (is |was )?finished|implementation complete|all done)'
+# A claim word counts at end of line or before a clause break, so
+# "Step 3 of 5 done: schema updated" is a claim too (issue #1416).
+CLAIM_PATTERNS='(모두 완료(했)?|완료했습니다([.!。?…:;,]|\s*$)|작업 완료([.!。?…:;,]|\s*$)|완료([.!。?…:;,]|\s*$)|\bdone\b([.!?:;,]|\s*$)|\bfinished\b([.!?:;,]|\s*$)|cleanup (is |was )?finished|implementation complete|all done)'
+# Negated and forecast forms carry the claim word without claiming anything.
+# Each alternative swallows the claim word itself — deleting only the negator
+# would leave "done" behind and manufacture the claim it was meant to drop.
+# Deliberately narrow: only a negator or modal sitting IMMEDIATELY before the
+# claim word is stripped, because the negation has to govern that word. So
+# "done, but the tests are not finished" stays a claim (the negation trails it),
+# and "not all tests are done" also stays one (a quantifier intervenes) — the
+# gate would rather fire on a non-claim than go silent on a real one.
+# The typographic apostrophe is spelled as an escape: a literal one in source
+# reads as a stray quote to shell linters.
+NON_CLAIM_APOS=$(printf '\342\200\231')
+NON_CLAIM_FORMS="(미|예상 ?)완료|(not|n[${NON_CLAIM_APOS}']t|never)( yet)?( be| been)? (done|finished|complete)|(will|would|should|can|could|may|might|to|going to) (be|get) (done|finished|complete)|expect(ed|s|ing)? to (finish|complete|be done|be finished)"
 EVIDENCE_PATTERNS='(tests? passed|\bPASS\b|exit code 0|\b[1-9][0-9]* tests? (ran|passed)|\b[1-9][0-9]* passed\b|0 errors|build successful|lint clean|성공적으로|테스트.*통과|✅)'
 
 # --- Evidence class by changed surface (issue #943, stage 1: frontend) --------
@@ -260,7 +274,9 @@ GENUINE_CMDS=$(printf '%s' "$TURN_JSON" | jq -r '.genuine_cmds // ""')
 [ -z "$LAST_TEXT" ] && exit 0
 
 # Check last 10 lines only — avoids false positives from mid-message 완료 mentions
-LAST_LINES=$(printf '%s\n' "$LAST_TEXT" | tail -10)
+# `I` keeps the stripping case-insensitive, matching the `grep -iE` below —
+# without it "NOT DONE:" would survive into the claim scan.
+LAST_LINES=$(printf '%s\n' "$LAST_TEXT" | tail -10 | sed -E "s/${NON_CLAIM_FORMS}//gI")
 if ! printf '%s' "$LAST_LINES" | grep -qiE "$CLAIM_PATTERNS"; then
   exit 0
 fi

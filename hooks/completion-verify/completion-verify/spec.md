@@ -21,6 +21,40 @@ When the last 10 lines of the last assistant message match `CLAIM_PATTERNS`
 complete` / etc.), the hook checks the **current turn** — i.e., everything
 since the last real user input — for verification evidence.
 
+A claim word counts at the end of a line **or before a clause break**
+(`.` `!` `?` `:` `;` `,`), so `Step 3 of 5 done: schema updated` and
+`커밋 3개 푸시 완료, CI 대기` are claims (issue #1416). A line with no claim
+word at all (`Login now works`) is outside this pattern by construction.
+
+Before matching, `sed -E "s/${NON_CLAIM_FORMS}//gI"` removes the forms that
+carry a claim word without claiming anything — a negation or a forecast:
+
+| Class | Covered |
+| ----- | ------- |
+| Korean | `미완료`, `예상 완료` |
+| English negation | `not` / `n't` / `n’t` / `never`, optionally `yet` and `be`/`been`, immediately before `done` / `finished` / `complete` — `not done:`, `not yet done,`, `isn't done:`, `is not finished.`, `has not been finished,`, `never finished.`, `implementation not complete.` |
+| English forecast | `will` / `would` / `should` / `can` / `could` / `may` / `might` / `to` / `going to` + `be`/`get` + the claim word, and `expect(ed/s/ing) to (finish\|complete\|be done\|be finished)` — `will be done,`, `should be done,`, `cannot be done,`, `expected to be done,` |
+
+Each alternative swallows the **claim word** as well as the negator; deleting
+only `not ` would leave `done` and manufacture the claim it was meant to drop.
+The `I` flag keeps the stripping case-insensitive, matching the `grep -iE` that
+follows, so `NOT DONE:` is stripped too.
+
+**Boundary — the negator must sit immediately before the claim word.** An
+over-broad exclusion silently disables the gate, so anything else stays a
+claim: a trailing negation (`Step 3 done, but the tests are not finished.`), an
+intervening quantifier (`not all tests are done,`), and a distant negator
+(`I don't think it's done.`). Those still fire the evidence gate — the hook
+would rather fire on a non-claim than go silent on a real one.
+
+Replayed over the local transcript corpus (867 transcripts, 14111 turns,
+deduplicated by real path; each turn cut after its last assistant entry and
+fed to `impl.sh`): the end-of-line pattern fires on 220 turns and blocks 183;
+the clause-break form fires on 335 more and blocks 289 of them — about 2.6×
+the blocks. A 60-line sample of the added fires (drawn before deduplication,
+so two lines appear twice) read as completion claims in 52 lines, 3 were non-claims (a forecast, a negation, a quoted pattern — the
+first two now suppressed), and 5 could not be classified.
+
 The turn passes only if **all** of the following hold:
 
 | Gate | Condition |

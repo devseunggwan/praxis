@@ -85,6 +85,12 @@ from _hosts import (  # type: ignore[import-not-found]  # noqa: E402
     runtime_host,
 )
 from _payload import read_bash_payload  # type: ignore[import-not-found]  # noqa: E402
+from _external_write_body import (  # type: ignore[import-not-found]  # noqa: E402
+    GH_API_WRITE_METHODS,
+    GH_API_WRITE_PATH_RE,
+    is_gh_api_external_write,
+    parse_gh_api,
+)
 from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
     Token,
     TokenRole,
@@ -92,6 +98,7 @@ from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
     _is_gh_binary,
     compound_cascade_hint,
     filter_argv,
+    has_shell_expansion,
     tokenize_with_roles,
 )
 
@@ -143,6 +150,135 @@ GH_WRITE_SUBCOMMANDS = frozenset({
     ("issue", "comment"), ("issue", "edit"),
     ("pr", "comment"), ("pr", "edit"),
 })
+
+# `gh api` carries no (object, verb) pair, so the frozenset above can never
+# reach it — yet the verification-anchor convention *requires* it: a rev >=2
+# anchor is a PATCH against a comment id, which no `gh <noun> <verb>` form can
+# issue. Detection of that shape already exists in `_lib/_external_write_body`
+# (issue #1265); until issue #1435 it fed only advisory hooks, so the one gate
+# that asks for per-action approval could not see the repo's own prescribed
+# write path.
+GH_API_OBJECT = "api"
+
+# `repos/<owner>/<repo>/...` at the head of a `gh api` endpoint. gh also accepts
+# the `{owner}`/`{repo}` placeholders, which it fills from the base repo of the
+# checkout — so a braced segment is NOT a literal target and must fall through
+# to the same resolution the repo-less arm runs.
+_API_REPO_PATH_RE = re.compile(r"(?:^|/)repos/([^/\s]+)/([^/\s]+)(?:/|$)")
+
+
+_API_PLACEHOLDER_SLOT = ("{owner}", "{repo}")
+_API_PARTIAL_REPO = (
+    "UNRESOLVED — the `gh api` endpoint's owner/repo is not fully literal"
+)
+
+
+def _gh_api_repo_slot(path: str | None) -> tuple[bool, str | None]:
+    """(readable, slug) for the `repos/<owner>/<repo>` slot of a `gh api` endpoint.
+
+    Only two forms are readable: both segments literal names (→ that slug), or
+    exactly gh's `{owner}/{repo}` pair (→ None, resolved through the checkout).
+    A half-filled slot — `{owner}/other`, `$OWNER/$REPO` — is neither: gh
+    substitutes only the part it knows, so the checkout's repo is NOT the target
+    and naming it would put a wrong repo in front of the approval.
+    """
+    m = _API_REPO_PATH_RE.search(path or "")
+    if not m:
+        return False, None
+    owner, repo = m.group(1), m.group(2)
+    if _NAME_SEGMENT_RE.match(owner) and _NAME_SEGMENT_RE.match(repo):
+        return True, f"{owner}/{repo}"
+    if (owner, repo) == _API_PLACEHOLDER_SLOT:
+        return True, None
+    return False, None
+
+
+_DEFAULT_GH_HOST = "github.com"
+
+
+def _gh_api_hostname(argv: list[str]) -> str | None:
+    """The `--hostname` value on a `gh api` call, in either spelling."""
+    for i, tok in enumerate(argv):
+        if tok == "--hostname":
+            return argv[i + 1] if i + 1 < len(argv) else None
+        if tok.startswith("--hostname="):
+            return tok.split("=", 1)[1]
+    return None
+
+
+GH_HOST_ENV = "GH_HOST"
+
+
+def _gh_api_effective_host(seg: list[Token], argv: list[str]) -> str | None:
+    """The host a `gh api` call is sent to, in gh's own precedence order.
+
+    `gh api --help`: "GH_HOST: make the request to a GitHub host other than
+    `github.com`", and `--hostname` outranks it. The inline `GH_HOST=` prefix
+    is read before the process environment for the same reason `GH_REPO=` is:
+    it is scoped to this one command, so `os.environ` never sees it.
+    """
+    flag = _gh_api_hostname(argv)
+    if flag is not None:
+        return flag
+    inline = _inline_env_value(seg, GH_HOST_ENV)
+    if inline is not None:
+        return inline
+    return os.environ.get(GH_HOST_ENV)
+
+
+def _qualify_api_target(slug: str | None, host: str | None) -> str | None:
+    """`slug` as the approval should name it once the target host is known.
+
+    The host decides which server the write lands on, so a bare `owner/repo`
+    reads as the github.com repo of that name. A placeholder endpoint would
+    resolve through the checkout's remote, which need not be on that host, so
+    it is UNRESOLVED rather than a guess — as is a host the shell fills in.
+    """
+    if not host or host.lower() == _DEFAULT_GH_HOST:
+        return slug
+    if has_shell_expansion(host):
+        return "UNRESOLVED — the `gh api` host is decided at run time"
+    if slug is None:
+        return f"UNRESOLVED — host `{host}` with an endpoint that names no repo"
+    return f"{host}/{slug}"
+
+
+_API_DYNAMIC_ENDPOINT = "UNRESOLVED — the `gh api` endpoint is built at run time"
+
+
+def _is_dynamic_api_write(call) -> bool:
+    """A write-method `gh api` call whose endpoint the shell fills in.
+
+    `gh api "$ENDPOINT" -f body=hi` names no path this hook can read, so the
+    comment-endpoint test cannot say yes — and treating that as "not a write"
+    let it through unasked. Only the method is still knowable.
+    """
+    return (
+        call.method in GH_API_WRITE_METHODS
+        and bool(call.path)
+        and has_shell_expansion(call.path)
+    )
+
+
+_API_DYNAMIC_METHOD = "UNRESOLVED — the `gh api` method is decided at run time"
+# Header verb for that case. parse_gh_api upper-cases the method, so echoing it
+# would print `$METHOD` for a command that says `$method`.
+_API_RUNTIME_VERB = "<run-time method>"
+
+
+def _is_dynamic_method_api_write(call) -> bool:
+    """A comment/review endpoint whose `--method` value the shell fills in.
+
+    `--method "$METHOD"` is not a literal member of the write set, so the write
+    test said no and the call went through unasked — while the endpoint alone
+    says a PATCH or POST here posts a public body.
+    """
+    return (
+        has_shell_expansion(call.method)
+        and bool(call.path)
+        and bool(GH_API_WRITE_PATH_RE.search(call.path))
+    )
+
 
 OPT_OUT_MARKER = "# cross-boundary:ack"
 
@@ -471,8 +607,13 @@ def _inline_env_repo(seg: list[Token]) -> str | None:
     "" and falls through to the remotes, and so must this. Last assignment
     wins, matching the shell.
     """
+    return _inline_env_value(seg, GH_REPO_ENV)
+
+
+def _inline_env_value(seg: list[Token], name: str) -> str | None:
+    """The `<name>=` value assigned in this segment's command prefix, or None."""
     value: str | None = None
-    prefix = GH_REPO_ENV + "="
+    prefix = name + "="
     for tok in seg:
         if tok.role == TokenRole.COMMAND:
             break
@@ -718,8 +859,13 @@ def _build_checklist(
     from_flag: bool = True,
     selector: str = "",
     host: str | None = None,
+    api_input: bool = False,
 ) -> str:
     """Render the pre-flight ask text for `subcommand` against `repo`.
+
+    `api_input` marks a `gh api --input <file>` call: that flag sends a whole
+    JSON request body, so item ③ keeps it rather than prescribing `-F body=@`,
+    which would send a different request.
 
     `host` is the platform this run is executing on, used only to drop item ②
     where its gate is not installed. None (an unresolvable or unknown host)
@@ -732,7 +878,17 @@ def _build_checklist(
     show_caller_evidence = obj == "pr" and (
         installed is None or _CALLER_EVIDENCE_GATE in installed
     )
-    if from_flag:
+    is_api = obj == GH_API_OBJECT
+    # `gh api` names its target inside the endpoint, never in a `--repo` flag,
+    # so the flag-style header would quote a flag the command does not carry.
+    if is_api:
+        header = [
+            f"⚠️  Cross-boundary pre-flight: `gh api --method {verb} <endpoint>`",
+            f"    Target repository: {repo}",
+        ]
+        if selector:
+            header.append(f"    (resolved from {selector})")
+    elif from_flag:
         header = [f"⚠️  Cross-boundary pre-flight: `gh {obj} {verb} --repo {repo}`"]
     else:
         # The selector is named, not just the repo. "Target: X" alone cannot be
@@ -766,10 +922,25 @@ def _build_checklist(
             "     Without this line the hook hard-blocks the command.",
             "",
         ]
+    if is_api and api_input:
+        body_rule = (
+            "     Keep --input: create the JSON payload file with the Write tool first."
+        )
+    elif is_api:
+        body_rule = "     Use -F body=@/tmp/<slug>.md (write body via Write tool first)."
+    else:
+        body_rule = "     Use --body-file /tmp/<slug>.md (write body via Write tool first)."
     parts += [
         "  ③ Body delivery format",
-        "     Use --body-file /tmp/<slug>.md (write body via Write tool first).",
-        "     Heredoc (`<<EOF`) is blocked by the praxis hook chain.",
+        body_rule,
+        # The hard block at Check 1 exempts `gh api` (`subcommand[0] !=
+        # GH_API_OBJECT`), so telling an API caller their heredoc is blocked
+        # sends them to rewrite a command that would have reached this prompt.
+        (
+            "     Heredoc (`<<EOF`) is not blocked here; it enters this approval path."
+            if is_api
+            else "     Heredoc (`<<EOF`) is blocked by the praxis hook chain."
+        ),
         "",
         "  ④ Language & content rules (CLAUDE.md §External-repo content isolation)",
         "     English only. No internal identifiers (org/team prefixes,",
@@ -868,11 +1039,41 @@ def main() -> int:
             continue
 
         subcommand = _gh_write_subcommand(seg, seg_argv)
+        api_repo: str | None = None
+        api_input = False
         if subcommand is None:
-            continue
+            # `gh api` arm (issue #1435). The shape test is the shared one the
+            # advisory hooks already use, so a write surface is recognized in
+            # exactly one place; what is local here is which repo the endpoint
+            # names and therefore which arm below answers for it.
+            api_argv = [tok.text for tok in seg_argv]
+            api_call = parse_gh_api(api_argv)
+            if api_call is None:
+                continue
+            api_verb = api_call.method
+            if is_gh_api_external_write(api_argv):
+                readable, slug = _gh_api_repo_slot(api_call.path)
+                api_repo = (
+                    _qualify_api_target(slug, _gh_api_effective_host(seg, api_argv))
+                    if readable
+                    else _API_PARTIAL_REPO
+                )
+            elif _is_dynamic_method_api_write(api_call):
+                api_repo = _API_DYNAMIC_METHOD
+                api_verb = _API_RUNTIME_VERB
+            elif _is_dynamic_api_write(api_call):
+                api_repo = _API_DYNAMIC_ENDPOINT
+            else:
+                continue
+            subcommand = (GH_API_OBJECT, api_verb)
+            api_input = api_call.has_input
 
-        # Check 1: heredoc in same segment → hard block (marker-independent)
-        if _has_heredoc(seg):
+        # Check 1: heredoc in same segment → hard block (marker-independent).
+        # Scoped to the noun/verb writes: the block message prescribes
+        # `--body-file`, which `gh api` does not accept, so hard-blocking an
+        # api call here would name a remedy that cannot be followed. The api
+        # arm still reaches the ask below, where item ③ states its own form.
+        if subcommand[0] != GH_API_OBJECT and _has_heredoc(seg):
             sys.stderr.write(HEREDOC_BLOCK_MSG + compound_cascade_hint(command))
             return 2
 
@@ -885,10 +1086,32 @@ def main() -> int:
         # (opt-out marker, if any, skips the checklist here only)
         if opt_out_present:
             return 0
+
+        # `gh api` names its target in the endpoint. A literal `repos/<o>/<r>`
+        # is as explicit as a `--repo` flag, so it takes the same immediate ask
+        # without a git probe. A braced placeholder names nothing on its own —
+        # gh fills it from the checkout — so it falls through to Check 3 and is
+        # resolved exactly like a repo-less write.
+        if api_repo is not None:
+            _emit_ask(
+                _build_checklist(
+                    subcommand,
+                    api_repo,
+                    from_flag=False,
+                    selector="the `gh api` endpoint path",
+                    host=runtime_host(),
+                    api_input=api_input,
+                )
+                + compound_cascade_hint(command)
+            )
+            return 0
+
         has_repo, repo_val = _has_repo_flag(seg)
         if has_repo:
             _emit_ask(
-                _build_checklist(subcommand, repo_val, host=runtime_host())
+                _build_checklist(
+                    subcommand, repo_val, host=runtime_host(), api_input=api_input
+                )
                 + compound_cascade_hint(command)
             )
             return 0
@@ -916,6 +1139,7 @@ def main() -> int:
                     "UNRESOLVED — a `GH_REPO` change in this command could not be evaluated",
                     from_flag=False,
                     host=runtime_host(),
+                    api_input=api_input,
                 )
                 + compound_cascade_hint(command)
             )
@@ -932,6 +1156,7 @@ def main() -> int:
                     "UNRESOLVED — a `cd` in this command could not be modeled",
                     from_flag=False,
                     host=runtime_host(),
+                    api_input=api_input,
                 )
                 + compound_cascade_hint(command)
             )
@@ -958,6 +1183,7 @@ def main() -> int:
                     from_flag=False,
                     selector=selector,
                     host=runtime_host(),
+                    api_input=api_input,
                 )
                 + compound_cascade_hint(command)
             )
