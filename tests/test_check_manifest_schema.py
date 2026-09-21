@@ -96,6 +96,30 @@ def test_wrong_timeout_type_fails(manifest):
     assert "$.hooks[0].timeout: expected integer, got str" in drifts[0]
 
 
+def _tool_entry(manifest) -> tuple[int, dict]:
+    return next(
+        (i, h) for i, h in enumerate(manifest["hooks"])
+        if h.get("event") == "PreToolUse" and h.get("matcher") == "Bash"
+    )
+
+
+@pytest.mark.parametrize("blank", [" ", "   ", "\t\n"])
+def test_whitespace_only_if_pattern_fails(manifest, blank):
+    # A blank `mode.if` reads as absent in build and runtime alike, so the
+    # hook would silently run on every call (issue #1335).
+    idx, entry = _tool_entry(manifest)
+    entry.setdefault("mode", {})["if"] = blank
+    drifts = build.manifest_schema_drifts(manifest)
+    assert len(drifts) == 1, drifts
+    assert f"$.hooks[{idx}].mode.if: whitespace-only" in drifts[0]
+
+
+def test_real_if_pattern_passes(manifest):
+    _idx, entry = _tool_entry(manifest)
+    entry.setdefault("mode", {})["if"] = "Bash(git commit *)"
+    assert build.manifest_schema_drifts(manifest) == []
+
+
 def test_bool_timeout_is_not_an_integer(manifest):
     # bool is a subclass of int in Python; JSON Schema keeps them distinct.
     manifest["hooks"][0]["timeout"] = True

@@ -432,6 +432,20 @@ def manifest_schema_drifts(manifest) -> list[str]:
                         f"{DISPATCH_NO_MATCHER_ARG!r} is reserved as the "
                         "matcher-less argv sentinel and cannot be a matcher"
                     )
+        # `mode.if` (issue #1335): a blank pattern reads as absent in both the
+        # build and the runtime, so it would silently widen the hook to every
+        # call — `minLength` cannot say "not only whitespace" in this subset.
+        for idx, entry in enumerate(hooks_list):
+            mode = entry.get("mode") if isinstance(entry, dict) else None
+            if not isinstance(mode, dict) or "if" not in mode:
+                continue
+            pattern = mode["if"]
+            if isinstance(pattern, str) and not pattern.strip():
+                out.append(
+                    f"SCHEMA hooks/manifest.json $.hooks[{idx}].mode.if: "
+                    f"whitespace-only pattern would drop the filter "
+                    f"(entry {entry.get('name')!r})"
+                )
     return out
 
 
