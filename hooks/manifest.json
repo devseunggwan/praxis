@@ -824,6 +824,27 @@
       }
     },
     {
+      "name": "negation-answer-quote-advisory",
+      "role": "advisory-nudge",
+      "event": "PreToolUse",
+      "matcher": "Bash",
+      "timeout": 5,
+      "review_by": "2026-12-19",
+      "mode": {
+        "bypass_env": ["PRAXIS_NEGATION_ANSWER_BYPASS"]
+      }
+    },
+    {
+      "name": "negation-answer-quote-advisory",
+      "role": "advisory-nudge",
+      "event": "PreToolUse",
+      "matcher": "mcp__.*",
+      "timeout": 5,
+      "mode": {
+        "bypass_env": ["PRAXIS_NEGATION_ANSWER_BYPASS"]
+      }
+    },
+    {
       "name": "block-commit-without-codex-review",
       "role": "preflight-gate",
       "event": "PreToolUse",

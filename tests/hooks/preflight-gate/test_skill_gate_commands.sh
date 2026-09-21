@@ -36,13 +36,13 @@ printf '%s\n' \
 # Transcript WITH a different skill (for "wrong skill" tests)
 TX_WITH_WRONG_SKILL=$(mktemp)
 printf '%s\n' \
-  '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"Skill","input":{"skill":"laplace-dev-hub:code-review"}}]}}' \
+  '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"Skill","input":{"skill":"example-dev-hub:code-review"}}]}}' \
   >"$TX_WITH_WRONG_SKILL"
 
 # Transcript WITH a skill whose name contains a colon (org:skill-name)
 TX_WITH_COLON_SKILL=$(mktemp)
 printf '%s\n' \
-  '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"Skill","input":{"skill":"laplace-dev-hub:create-hub-pr"}}]}}' \
+  '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"Skill","input":{"skill":"example-dev-hub:create-hub-pr"}}]}}' \
   >"$TX_WITH_COLON_SKILL"
 
 # Transcript WITHOUT any matching skill
@@ -255,7 +255,7 @@ run_case "gh --repo owner/my-repo pr create (long global flag, block)" \
 # 9. Required skill name containing a colon → parsed correctly
 # ---------------------------------------------------------------------------
 
-CFG_COLON_SKILL="gh pr create=>laplace-dev-hub:create-hub-pr"
+CFG_COLON_SKILL="gh pr create=>example-dev-hub:create-hub-pr"
 
 run_case "skill with colon in name, not invoked (block)" \
   "block" \

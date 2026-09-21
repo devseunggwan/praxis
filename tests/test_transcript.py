@@ -477,6 +477,10 @@ class TestScanUserRejections:
 HOOKS = REPO_ROOT / "hooks"
 
 _CONSUMERS = {
+    # Scans a tail past the turn boundary (min_events=150): the answer, the
+    # re-ask and the write can share one turn, which is the incident shape.
+    HOOKS / "advisory-nudge" / "negation-answer-quote-advisory" / "impl.py":
+        ["load_recent_events"],
     HOOKS / "completion-verify" / "readonly-verify-deferral-gate" / "impl.py":
         ["load_current_turn", "extract_last_assistant_text"],
     # Registered on SubagentStop as well (#1337), so it takes the turn through
@@ -590,6 +594,8 @@ _CONSTANT_CONSUMERS = {
         ["TRANSCRIPT_SCAN_LINES", "REJECTION_PHRASE"],
     HOOKS / "preflight-gate" / "block-gh-issue-create-without-dup-search" / "impl.py":
         ["TRANSCRIPT_SCAN_LINES"],
+    HOOKS / "completion-verify" / "denied-action-report-gate" / "impl.py":
+        ["DENIAL_KINDS", "HOOK_BLOCK_DENIAL_KIND", "REJECTION_DENIAL_KIND"],
 }
 
 
@@ -1753,3 +1759,89 @@ class TestDropSidechain:
                             [_user(text="task"), _assistant(text="done")])
         assert T.load_recent_events(path, drop_sidechain=True) == \
             T.load_recent_events(path)
+
+
+class TestDenialKinds:
+    """The `kinds` parameter (#1422).
+
+    A hook block is recorded as `permission-rule` and carries the blocking
+    hook's own prose, so the fixed refusal sentence is required only for
+    `user-rejected`. Both directions are pinned: widening must not leak into
+    the default, and the default's third marker must still be enforced.
+    """
+
+    # Transcribed from a live record. The corpus holds two shapes for this
+    # kind and no third: this one, and "Permission to use Bash with command
+    # <cmd> has been denied." Neither carries the user-refusal sentence.
+    HOOK_PROSE = (
+        "PreToolUse:Bash hook error: [<plugin>/hooks/_dispatch.sh PreToolUse "
+        "Bash claude]: [side-effect-scan] [git-commit] local git state mutation"
+    )
+
+    def _both(self, tmp_path):
+        return _write_jsonl(tmp_path, [
+            _asst_tool_use("A1", "toolu_1", "Bash", {"command": "git push"}),
+            _rejection("toolu_1", "A1"),
+            _asst_tool_use("A2", "toolu_2", "Bash", {"command": "gh pr create"}),
+            _rejection("toolu_2", "A2", denial_kind="permission-rule",
+                       sentence=self.HOOK_PROSE),
+        ])
+
+    def test_default_returns_only_the_user_refusal(self, tmp_path):
+        recs = T.scan_user_rejections(self._both(tmp_path))
+        assert [r["tool_use_id"] for r in recs] == ["toolu_1"]
+        assert [r["kind"] for r in recs] == ["user-rejected"]
+
+    def test_explicit_kinds_returns_both(self, tmp_path):
+        recs = T.scan_user_rejections(self._both(tmp_path), kinds=T.DENIAL_KINDS)
+        assert [r["tool_use_id"] for r in recs] == ["toolu_1", "toolu_2"]
+        assert [r["kind"] for r in recs] == ["user-rejected", "permission-rule"]
+
+    def test_hook_block_needs_no_fixed_sentence(self, tmp_path):
+        """The prose is per-hook, so requiring a sentence here would be a
+        natural-language judgement — the one thing this scan makes nowhere."""
+        path = _write_jsonl(tmp_path, [
+            _asst_tool_use("A1", "toolu_1", "Bash", {"command": "gh pr create"}),
+            _rejection("toolu_1", "A1", denial_kind="permission-rule",
+                       sentence=self.HOOK_PROSE),
+        ])
+        recs = T.scan_user_rejections(path, kinds=T.DENIAL_KINDS)
+        assert [r["kind"] for r in recs] == ["permission-rule"]
+
+    def test_user_rejection_without_the_sentence_is_still_dropped(self, tmp_path):
+        """The relaxation is scoped to the kind that has no sentence. Widening
+        `kinds` must not retire the third marker for `user-rejected`."""
+        path = _write_jsonl(tmp_path, [
+            _asst_tool_use("A1", "toolu_1", "Bash", {"command": "git push"}),
+            _rejection("toolu_1", "A1", sentence="Tool call failed."),
+        ])
+        assert T.scan_user_rejections(path, kinds=T.DENIAL_KINDS) == []
+
+    def test_hook_block_still_needs_is_error(self, tmp_path):
+        """Two markers, not one: `permission-rule` alone is not enough."""
+        path = _write_jsonl(tmp_path, [
+            _asst_tool_use("A1", "toolu_1", "Bash", {"command": "gh pr create"}),
+            _rejection("toolu_1", "A1", is_error=None, denial_kind="permission-rule",
+                       sentence=self.HOOK_PROSE),
+        ])
+        assert T.scan_user_rejections(path, kinds=T.DENIAL_KINDS) == []
+
+    def test_the_permission_rule_shape_without_a_hook_prefix(self, tmp_path):
+        """The corpus's second shape: a permission rule, not a hook. Same kind,
+        same absent sentence — so the scan must not key on the hook prefix."""
+        path = _write_jsonl(tmp_path, [
+            _asst_tool_use("A1", "toolu_1", "Bash", {"command": "git reset --hard"}),
+            _rejection("toolu_1", "A1", denial_kind="permission-rule",
+                       sentence="Permission to use Bash with command git reset "
+                                "--hard has been denied."),
+        ])
+        recs = T.scan_user_rejections(path, kinds=T.DENIAL_KINDS)
+        assert [r["kind"] for r in recs] == ["permission-rule"]
+
+    def test_an_unknown_denial_kind_is_returned_by_neither(self, tmp_path):
+        path = _write_jsonl(tmp_path, [
+            _asst_tool_use("A1", "toolu_1", "Bash", {"command": "git push"}),
+            _rejection("toolu_1", "A1", denial_kind="something-else"),
+        ])
+        assert T.scan_user_rejections(path) == []
+        assert T.scan_user_rejections(path, kinds=T.DENIAL_KINDS) == []

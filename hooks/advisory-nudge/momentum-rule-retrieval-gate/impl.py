@@ -488,18 +488,52 @@ _ASK_ANSWER_RE = re.compile(r'"((?:[^"\\]|\\.)*)"=\s*"((?:[^"\\]|\\.)*)"')
 # agreeing, as "PR #999 머지 상태만 알려줘" shows.
 _LABEL_LEAD_RE = re.compile(r"\s*[—–:,(-]\s*")
 
+# …except that the qualifier can REVERSE the lead instead of narrowing it
+# ("승인 — 머지하지 않기", "Approve — do not merge"). Reading only the lead turns
+# that label into consent, so a negation anywhere in the label disqualifies the
+# whole thing. The reversal takes several shapes — the negator can precede the
+# verb ("안 머지"), follow it ("머지하지"), sit in a consequence ("머지하면 안
+# 됨"), or be a bare English determiner ("no merge"). A label that declines is
+# not an approval under any reading, so the cost of matching too widely here is
+# one more ask.
+_LABEL_NEGATION_RE = re.compile(
+    r"하지\s*(?:않|말)|취소|보류|중단|나중에|안\s*(?:함|하기|할|돼|되|됨|됩)"
+    r"|(?:안|말)\s*(?:머지|병합)|(?:머지|병합)\s*(?:하지|안\b)"
+    r"|(?<![A-Za-z])(?:not|don't|dont|never|cancel|hold|skip|abort)(?![A-Za-z])"
+    r"|(?<![A-Za-z])no\s+merg(?:e|ing)(?![A-Za-z])",
+    re.IGNORECASE)
+
 # A merge ask is one sentence that both names merging and asks ("Approve
 # merge?", "PR #999를 머지할까요?"). The briefing counter's approve-ask words
 # cannot stand in for it: "approve" also matches "PR #999 was approved", and
 # "승인" matches "테스트 승인할까요?", and neither of those asks to merge.
-# "merge" is a whole word so "emergency" and "merged" stay out, and a question
-# that negates merging or asks whether it happened ("머지하지 말까요?",
-# "머지됐나요?") is not an ask to merge.
-_MERGE_WORD_RE = re.compile(r"(?<![A-Za-z])merge(?![A-Za-z-])|머지|병합", re.IGNORECASE)
+# The merge word is `merge` or `merging` bounded by non-letters, so "emergency"
+# and "merge-base" stay out. `merged` stays out on purpose: it is the past
+# participle, and every question built on it asks whether the merge happened
+# ("Was #999 merged?") rather than asking to do it — which is the same reason a
+# question that negates merging or asks after its state ("머지하지 말까요?",
+# "머지됐나요?", "머지했나요?", "Did we merge #999?") is not an ask to merge.
+# A completion question is the same kind ("Is the merge of #999 done?", "머지
+# 완료됐어?"). The English form stops at a conditional so "Merge #999 once CI is
+# done?" stays an ask; the Korean form needs a state ending, so "머지 완료할까요?"
+# (asking to finish the merge) stays one too. Excluding an ask only denies more.
+_MERGE_WORD_RE = re.compile(r"(?<![A-Za-z])merg(?:e|ing)(?![A-Za-z-])|머지|병합",
+                            re.IGNORECASE)
 _NOT_MERGE_ASK_RE = re.compile(
     r"(?<![A-Za-z])(?:not|don't|dont|never)(?![A-Za-z])"
-    r"|(?:머지|병합)\s*(?:됐|되었|된|되어|되나|하지|안\b|말|상태|충돌|결과)|(?:안|말)\s*(?:머지|병합)|말까요"
-    r"|(?<![A-Za-z])merge\s+(?:status|state|conflicts?|results?)(?![A-Za-z])",
+    r"|(?:머지|병합)\s*(?:됐|되었|된|되어|되나|했|하셨|하였|하지|안\b|말|상태|충돌|결과)"
+    r"|(?:머지|병합)\s*(?:이|가|은|는)?\s*(?:(?:완료|끝|성공)\s*(?:됐|되었|된|되어|되나|되|했|하였|났|나|인|이|여부|\?)|진행\s*중)"
+    r"|(?:안|말)\s*(?:머지|병합)|말까요"
+    r"|(?<![A-Za-z])(?:did|have|has)\s+(?:we|you|i|they|it)\s+(?:already\s+)?merg"
+    r"|(?<![A-Za-z])merg(?:e|ing)\s+(?:status|state|conflicts?|results?)(?![A-Za-z])"
+    # "Is GitHub merging #999?" asks what is happening; "Is merging #999 OK?"
+    # has no subject before `merging` and "Is it fine merging" no bare one.
+    r"|(?<![A-Za-z])(?:is|are|was|were)\s+(?:the\s+)?(?!merging(?![A-Za-z]))[A-Za-z]+"
+    r"(?:\s+(?:still|now|already|currently))?\s+merging(?![A-Za-z])"
+    r"|(?<![A-Za-z])merg(?:e|ing)"
+    r"(?:(?!(?<![A-Za-z])(?:once|when|after|if|until|before)(?![A-Za-z]))[^.?!\n]){0,40}?"
+    r"(?<![A-Za-z])(?:complete[ds]?|done|finish(?:ed|es)?|succeed(?:ed|s)?"
+    r"|go(?:ne)?\s+through|went\s+through|in\s+progress)(?![A-Za-z])",
     re.IGNORECASE)
 _ASK_SENTENCE_RE = re.compile(r"[^.!?。\n]*(?:\?|할까요|될까요|하시겠|해도 되)")
 # An explicit PR reference (`#N`, `PR N`, `…/pull/N`). A bare number is not one:
@@ -512,10 +546,23 @@ _REF_LIST = (r"(?:#|(?<![A-Za-z])pr\s*#?\s*)\d+(?![A-Za-z0-9_])"
              r"(?:\s*(?:,|과|와|및|and|&)\s*(?:#|pr\s*#?\s*)?\d+(?![A-Za-z0-9_]))*")
 _MERGE_OBJECT_RE = re.compile(
     rf"({_REF_LIST})\s*(?:을|를|은|는|도)?\s*(?:머지|병합)"
-    rf"|(?<![A-Za-z])merge\s+(?:pr\s*)?({_REF_LIST})", re.IGNORECASE)
+    rf"|(?<![A-Za-z])merg(?:e|ing)(?:\s*:\s*|\s+)(?:pr\s*)?({_REF_LIST})", re.IGNORECASE)
 
 # A single positional token that is a bare PR number or a …/pull/N URL.
 _PULL_TOKEN_RE = re.compile(r"^(?:\S*/pull/(\d+)|(\d+))$")
+
+# A PR number alone does not identify a PR: every repo has a #999 (issue #1419).
+# The repo a `gh pr` segment names comes from `-R`/`--repo` or from a …/pull/N
+# URL positional; nothing else in a transcript resolves one, since an approval
+# is prose and names no repo. `gh -R` accepts `[HOST/]OWNER/REPO`, so two and
+# three segments both parse and the host is dropped — the same repo reached
+# with and without an explicit host is one target. The cost is that one
+# OWNER/REPO on two hosts (github.com and an enterprise server) also reads as
+# one target; keeping the host would instead split the far commoner
+# with-and-without-host pair into a false conflict.
+_REPO_FLAGS = frozenset({"-R", "--repo"})
+_REPO_SLUG_RE = re.compile(r"^(?:[A-Za-z0-9._-]+/)?([A-Za-z0-9._-]+/[A-Za-z0-9._-]+?)(?:\.git)?$")
+_PULL_URL_REPO_RE = re.compile(r"([A-Za-z0-9._-]+/[A-Za-z0-9._-]+)/pull/\d+$")
 
 # `gh pr merge` flags that consume a following value token — skipped when
 # scanning for the first positional (the merge target) so a flag value like
@@ -536,6 +583,9 @@ _CONTEXT_VALUE_FLAGS = frozenset({
     "-b", "--body", "-F", "--body-file", "-t", "--title", "--subject",
     "--json", "--jq", "--template", "--repo", "-R",
 })
+# `_segment_repo` reads both merge and context segments, so it skips the values
+# of either verb family's flags.
+_SEGMENT_VALUE_FLAGS = _MERGE_VALUE_FLAGS | _CONTEXT_VALUE_FLAGS
 
 # Shell constructs that repeat a single textual merge segment at runtime
 # (`for pr in 833 999; do gh pr merge "$pr"; done`, `xargs gh pr merge`). One
@@ -702,6 +752,101 @@ def _gh_pr_positional(argv: list[str], verbs: frozenset[str],
     return _first_positional(argv[i + 2:], value_flags)
 
 
+def _segment_repo(argv: list[str]) -> str | None:
+    """`owner/repo` a `gh pr` segment names, or None when it names none.
+
+    Reads `-R`/`--repo` in all three forms the sibling gates accept (separate
+    token, `--repo=X`, concatenated `-RX`) and a `…/pull/N` URL positional. The
+    host is dropped, so `gh -R github.com/o/r` and `gh -R o/r` are one repo.
+
+    Only a real positional is read as a URL: a flag's value can hold any text,
+    and a `--subject` quoting another repo's PR link does not retarget the merge.
+    """
+    argv = strip_prefix(argv)
+    skip_next = False
+    for i, tok in enumerate(argv):
+        if skip_next:
+            skip_next = False
+            continue
+        cand = ""
+        if "=" in tok:
+            name, _, val = tok.partition("=")
+            if name in _REPO_FLAGS:
+                cand = val
+            elif name.startswith("-"):
+                continue
+        elif tok in _REPO_FLAGS and i + 1 < len(argv):
+            cand = argv[i + 1]
+        elif tok.startswith("-R") and len(tok) > 2 and not tok.startswith("--"):
+            cand = tok[2:]
+        elif tok in _SEGMENT_VALUE_FLAGS:
+            skip_next = True
+            continue
+        elif tok.startswith("-"):
+            continue
+        if cand:
+            m = _REPO_SLUG_RE.match(cand.strip("'\""))
+            if m:
+                return m.group(1).lower()
+            continue
+        m = _PULL_URL_REPO_RE.search(tok)
+        if m:
+            return m.group(1).lower()
+    return None
+
+
+def _merge_target_repo(command: object) -> str | None:
+    """Repo the single `gh pr merge` segment names, or None (no repo, or not a
+    single segment — a compound command is already refused upstream)."""
+    if not isinstance(command, str):
+        return None
+    repos = [_segment_repo(argv)
+             for argv in iter_command_starts(safe_tokenize(command))
+             if _is_gh_pr_merge(strip_prefix(argv))]
+    return repos[0] if len(repos) == 1 else None
+
+
+def _context_repo_from_window(entries: list[dict], lo: int, hi: int) -> str | None:
+    """Repo named by the most recent read-only `gh pr <verb>` in the window, or
+    None. Mirrors `_context_pr_from_window`'s last-wins scan so the repo and the
+    number come from the same probe: a later probe that names no repo resets it
+    to None rather than leaving an earlier probe's repo paired with its number."""
+    found: str | None = None
+    for ev in entries[lo:hi]:
+        msg = ev.get("message")
+        if not isinstance(msg, dict) or msg.get("role") != "assistant" or ev.get("isSidechain"):
+            continue
+        content = msg.get("content", [])
+        if not isinstance(content, list):
+            continue
+        for b in content:
+            if not (isinstance(b, dict) and b.get("type") == "tool_use"
+                    and b.get("name") == "Bash"):
+                continue
+            cmd = (b.get("input") or {}).get("command")
+            if not isinstance(cmd, str):
+                continue
+            for argv in iter_command_starts(safe_tokenize(cmd)):
+                if _gh_pr_target(argv, _CONTEXT_VERBS, _CONTEXT_VALUE_FLAGS) is None:
+                    continue
+                found = _segment_repo(argv)
+    return found
+
+
+def _repo_conflict(merge_repo: str | None, window_repo: str | None) -> bool:
+    """True when both sides resolve a repo and they differ — the one case where a
+    PR number is provably not this session's PR (issue #1419).
+
+    Deliberately NOT a mismatch test against `None`. Measured over the local
+    corpus: of 393 `gh pr merge` calls naming a repo, 377 agree with the window's
+    probe and 14 differ; a further 123 name no repo, and 96 of those sit in a
+    window that does name one. Treating `None` as a mismatch would break
+    correlation for those 96 — the ordinary `gh pr checks 1234` →
+    `gh pr merge --repo o/r 1234` shape — to reach the same 14.
+    """
+    return bool(merge_repo) and bool(window_repo) and merge_repo != window_repo
+
+
 def _gh_pr_target(argv: list[str], verbs: frozenset[str],
                   value_flags: frozenset[str]) -> str | None:
     """PR *number* the first positional resolves to (bare number or …/pull/N),
@@ -848,7 +993,10 @@ def _strip_pr_ref(text: str, pr: str) -> str:
 def _ask_label_approves(label: str, pr: str) -> bool:
     """True when a picked label is an approval: the whole label passes
     `_is_approval_reply`, or its leading segment is an approval token once a
-    reference to `pr` is removed (`PR #999 머지`, `Merge PR #999`)."""
+    reference to `pr` is removed (`PR #999 머지`, `Merge PR #999`) — and no
+    part of it negates the action (`승인 — 머지하지 않기`)."""
+    if _LABEL_NEGATION_RE.search(label):
+        return False
     if _is_approval_reply(label):
         return True
     lead = _LABEL_LEAD_RE.split(label.strip().lower(), maxsplit=1)[0]
@@ -882,6 +1030,60 @@ def _ask_answer_approves(content: object, pr: str) -> bool:
                for q, a in _ASK_ANSWER_RE.findall(_user_message_text(content)))
 
 
+def _ask_answer_holds(content: object, pr: str) -> bool:
+    """True when an AskUserQuestion result answers a question about `pr` or about
+    merging with something that is not an approval (`보류`)."""
+    return any((_mentions_pr(q, pr) or _MERGE_WORD_RE.search(q))
+               and not _ask_label_approves(a, pr)
+               for q, a in _ASK_ANSWER_RE.findall(_user_message_text(content)))
+
+
+def _ask_question_text(block: dict) -> str:
+    """The question texts of an AskUserQuestion tool_use, joined.
+
+    A declined question comes back `is_error` with no `"q"="a"` pair, so the
+    only place its subject survives is the call that raised it."""
+    inp = block.get("input")
+    questions = inp.get("questions") if isinstance(inp, dict) else None
+    if not isinstance(questions, list):
+        return ""
+    return " ".join(q["question"] for q in questions
+                    if isinstance(q, dict) and isinstance(q.get("question"), str))
+
+
+def _ask_held_after(entries: list[dict], index: int, pr: str) -> bool:
+    """True when an AskUserQuestion answer after `index` holds or declines this
+    merge — a `보류` pick, or a declined question about the PR or about merging.
+
+    The typed-message scan cannot see either: an answer arrives as a tool_result,
+    which `_human_user_indices` skips by design (issue #1418 F2). Without this,
+    a typed `ok` survived the very question that took it back.
+    """
+    asks: dict[str, str] = {}
+    for i, ev in enumerate(entries):
+        msg = ev.get("message")
+        if not isinstance(msg, dict) or ev.get("isSidechain"):
+            continue
+        content = msg.get("content")
+        if not isinstance(content, list):
+            continue
+        for b in content:
+            if not isinstance(b, dict):
+                continue
+            if b.get("type") == "tool_use" and b.get("name") == "AskUserQuestion":
+                if isinstance(b.get("id"), str):
+                    asks[b["id"]] = _ask_question_text(b)
+            elif (i > index and b.get("type") == "tool_result"
+                  and b.get("tool_use_id") in asks):
+                question = asks[b["tool_use_id"]]
+                if b.get("is_error"):
+                    if _mentions_pr(question, pr) or _MERGE_WORD_RE.search(question):
+                        return True
+                elif _ask_answer_holds(b.get("content"), pr):
+                    return True
+    return False
+
+
 def _merge_target_pr(entries: list[dict], command: object, floor: int) -> str | None:
     """PR number a single `gh pr merge` targets, resolved the way
     `_correlated_prior_turn_text` resolves it; None when it cannot be named.
@@ -906,7 +1108,10 @@ def _is_typed_approval(content: object, pr: str) -> bool:
 
 def _held_after(entries: list[dict], idxs: list[int], index: int, pr: str) -> bool:
     """True when a later user message about this PR or merging is not an approval
-    ("PR #999 머지 보류"): the latest decision replaces an earlier approval."""
+    ("PR #999 머지 보류"): the latest decision replaces an earlier approval. A
+    picked or declined AskUserQuestion answer withdraws it the same way."""
+    if _ask_held_after(entries, index, pr):
+        return True
     for j in idxs:
         if j <= index:
             continue
@@ -1011,6 +1216,12 @@ def _correlated_prior_turn_text(entries: list[dict], idxs: list[int],
     prev_lo = max(prev_start, floor)
     if prev_lo >= idxs[-1]:
         return None
+    # A briefing about another repo's #999 is not this merge's briefing, however
+    # well the number matches (issue #1419). Only a resolvable disagreement
+    # counts — see `_repo_conflict` for why `None` is not a mismatch.
+    if _repo_conflict(_merge_target_repo(command),
+                      _context_repo_from_window(entries, prev_lo, len(entries))):
+        return None
     prev_text = _assistant_text(entries, prev_lo, idxs[-1])
     pos = segments[0]
     if pos is None:
@@ -1038,6 +1249,65 @@ def _correlated_prior_turn_text(entries: list[dict], idxs: list[int],
     if not correlated:
         return None
     return prev_text
+
+
+def _last_spoken_turn(entries: list[dict], idxs: list[int]) -> tuple[int, int] | None:
+    """Bounds of the latest turn before the last human message with assistant text.
+
+    Turns with no assistant text are skipped: an interrupt marker arrives as a
+    human message, so the turn between it and the next reply is empty and the
+    briefing the user actually read sits one turn further back.
+    """
+    for k in range(len(idxs) - 1, -1, -1):
+        lo = idxs[k - 1] + 1 if k >= 1 else 0
+        if _assistant_text(entries, lo, idxs[k]).strip():
+            return lo, idxs[k]
+    return None
+
+
+def _excerpt(entries: list[dict], index: int) -> str:
+    text = _sanitize(_user_message_text(entries[index].get("message", {}).get("content")))
+    text = re.sub(r"\s+", " ", text).strip().replace("`", "'")
+    return text if len(text) <= 30 else text[:30] + "…"
+
+
+def _excluded_briefing_reason(entries: list[dict], idxs: list[int], command: object,
+                              threshold: int, floor: int = 0) -> str | None:
+    """Why a briefing the user was shown fell outside the scored window, else None.
+
+    Message-only (issue #1433): every check below is one the decision already
+    made, asked again in the same order so the named reason is the one that
+    actually excluded the briefing. None when no such briefing exists, so a merge
+    that was never briefed keeps its message unchanged.
+    """
+    if not idxs:
+        return None
+    spoken = _last_spoken_turn(entries, idxs)
+    if spoken is None:
+        return None
+    lo, hi = spoken
+    if _briefing_item_count(_assistant_text(entries, lo, hi)) < threshold:
+        return None
+    if len(_merge_segments(command)) != 1 or _has_repetition(command):
+        return "one approval releases one merge, and this command runs more than one"
+    if not _is_approval_reply(entries[idxs[-1]].get("message", {}).get("content")):
+        return (f"the last user message (`{_excerpt(entries, idxs[-1])}`) is not an "
+                "approval reply, so no earlier turn was scored")
+    if len(idxs) >= 2 and lo < idxs[-2] + 1:
+        return (f"a user message (`{_excerpt(entries, hi)}`) came between the briefing "
+                "and the approval, and only the turn right before the approval is scored")
+    if _correlated_prior_turn_text(entries, idxs, command) is None:
+        return "the briefed turn does not name the PR this merge targets"
+    if floor > lo:
+        return ("it precedes a merge that already ran in this session, and one "
+                "briefing releases one merge")
+    return None
+
+
+def _with_exclusion(why: str, reason: str | None) -> str:
+    if reason is None:
+        return why
+    return f"{why}. A briefing was shown earlier but not scored: {reason}"
 
 
 def _merge_escalation_reason(payload: dict) -> str | None:
@@ -1083,8 +1353,14 @@ def _merge_escalation_reason(payload: dict) -> str | None:
     # already consumed, so it no longer releases the next merge on text alone.
     last_merge = _last_executed_merge(entries)
     # One answer releases one merge: a loop or chained merge is never answered.
+    # An answer also does not cross repos — the prose names a number, never a
+    # repo, so a `--repo`-bearing merge whose window probed a DIFFERENT repo is
+    # reusing the earlier PR's approval (issue #1419).
     answered = last_merge is None or (
         len(_merge_segments(code)) == 1 and not _has_repetition(code)
+        and not _repo_conflict(
+            _merge_target_repo(code),
+            _context_repo_from_window(entries, last_merge + 1, len(entries)))
         and _answered_after(entries, idxs, last_merge,
                             _merge_target_pr(entries, code, last_merge + 1)))
     items = _briefing_item_count(current_text)
@@ -1138,9 +1414,12 @@ def _merge_escalation_reason(payload: dict) -> str | None:
     if marker_ok:
         return format_block(
             rule_name="Pre-Merge Reporting briefing",
-            why="this gh pr merge carries `# briefing-surfaced` but no briefing "
+            why=_with_exclusion(
+                "this gh pr merge carries `# briefing-surfaced` but no briefing "
                 "is present in the window — the marker attests that a briefing "
                 "was complete, not that one exists, and none was found",
+                _excluded_briefing_reason(entries, idxs, code,
+                                          MERGE_BRIEFING_MARKER_MIN_ITEMS, floor)),
             correct_path="surface the 6-item briefing and an explicit 'Approve "
                 "merge?' question in this turn, then re-run the merge",
             bypass_env=MERGE_ADVISORY_ENV,
@@ -1172,10 +1451,12 @@ def _merge_escalation_reason(payload: dict) -> str | None:
 
     return format_block(
         rule_name="Pre-Merge Reporting briefing",
-        why="this gh pr merge is not preceded by the Pre-Merge Reporting "
+        why=_with_exclusion(
+            "this gh pr merge is not preceded by the Pre-Merge Reporting "
             "briefing — fewer than "
             f"{MERGE_BRIEFING_MIN_ITEMS} of 6 items present (What changed / "
             "verified / NOT verified / Risk / Open items / explicit approve-ask)",
+            _excluded_briefing_reason(entries, idxs, code, MERGE_BRIEFING_MIN_ITEMS)),
         correct_path="surface the 6-item briefing and an explicit 'Approve "
             "merge?' question, then re-run the merge",
         bypass_env=MERGE_ADVISORY_ENV,

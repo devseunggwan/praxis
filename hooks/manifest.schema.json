@@ -157,6 +157,11 @@
                 "type": "string",
                 "minLength": 1
               },
+              "if": {
+                "description": "Permission-rule pattern (\"Bash(git commit *)\", \"Edit(*.ts)\") the HOST evaluates before starting the hook process (#1335). Members sharing a value share one dispatcher node; untagged members keep the unfiltered node. Only meaningful on tool events (PreToolUse, PostToolUse, PostToolUseFailure, PermissionRequest, PermissionDenied) — on any other event the host never runs a hook that declares it.",
+                "type": "string",
+                "minLength": 1
+              },
               "bypass_env": {
                 "type": "array",
                 "minItems": 1,

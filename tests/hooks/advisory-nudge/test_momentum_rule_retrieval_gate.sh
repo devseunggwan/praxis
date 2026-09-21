@@ -863,6 +863,51 @@ run_merge_escalation_case "merge_serial_ask_label_names_merge_passes" \
 # A question about the merge's state asks nothing ("PR #999 merge status?").
 run_merge_escalation_case "merge_serial_merge_status_ok_denies" \
   "yes" "" "momentum-merge-serial-merge-status-ok.jsonl" "gh pr merge 999 --squash --delete-branch"
+# …in either spelling of the verb: the merge word matches `merging` too, so a
+# state question built on it has to be excluded by the same rule, or the `ok`
+# picked for it reads as consent to merge.
+run_merge_escalation_case "merge_serial_merging_status_ok_denies" \
+  "yes" "" "momentum-merge-serial-merging-status-ok.jsonl" "gh pr merge 999 --squash --delete-branch"
+# "Is GitHub merging PR #999?" asks what is happening, not to do it — a subject
+# before `merging` makes it progressive rather than a gerund ("Is merging … OK?").
+run_merge_escalation_case "merge_serial_progressive_merging_ok_denies" \
+  "yes" "" "momentum-merge-serial-progressive-merging-ok.jsonl" "gh pr merge 999 --squash --delete-branch"
+# A completion question is a state question too, in both verb spellings and in
+# Korean — the `ok` after "Is the merge of PR #999 done?" is not consent.
+run_merge_escalation_case "merge_serial_completion_merging_ok_denies" \
+  "yes" "" "momentum-merge-serial-completion-merging-ok.jsonl" "gh pr merge 999 --squash --delete-branch"
+run_merge_escalation_case "merge_serial_completion_merge_ok_denies" \
+  "yes" "" "momentum-merge-serial-completion-merge-ok.jsonl" "gh pr merge 999 --squash --delete-branch"
+run_merge_escalation_case "merge_serial_completion_ko_ok_denies" \
+  "yes" "" "momentum-merge-serial-completion-ko-ok.jsonl" "gh pr merge 999 --squash --delete-branch"
+# …but "done" inside a condition is not about the merge: "Merge PR #999 once CI
+# is done?" still asks to merge, so its `ok` still releases #999.
+run_merge_escalation_case "merge_serial_conditional_done_ask_passes" \
+  "no" "" "momentum-merge-serial-conditional-done-ask.jsonl" "gh pr merge 999 --squash --delete-branch"
+# Nor does one asking whether it already happened ("PR #999 머지했나요?",
+# "Did we merge PR #999?"): the answer reports history, it does not consent.
+run_merge_escalation_case "merge_serial_past_merge_ask_denies" \
+  "yes" "" "momentum-merge-serial-past-merge-ask.jsonl" "gh pr merge 999 --squash --delete-branch"
+run_merge_escalation_case "merge_serial_past_merge_ask_en_denies" \
+  "yes" "" "momentum-merge-serial-past-merge-ask-en.jsonl" "gh pr merge 999 --squash --delete-branch"
+# `merging` is the same verb, so "Proceed with merging PR #999?" is an ask —
+# only the past participle `merged` stays out.
+run_merge_escalation_case "merge_serial_merging_ask_passes" \
+  "no" "" "momentum-merge-serial-merging-ask.jsonl" "gh pr merge 999 --squash --delete-branch"
+# A qualifier can reverse the label's lead instead of narrowing it, so
+# `승인 — 머지하지 않기` picked for a merge ask is a refusal, not consent.
+run_merge_escalation_case "merge_serial_ask_negative_label_denies" \
+  "yes" "" "momentum-merge-serial-ask-negative-label.jsonl" "gh pr merge 999 --squash --delete-branch"
+# The negator does not always follow the verb: it can precede it, sit in a
+# consequence clause, or be a bare English determiner. Each still declines, so
+# each is pinned separately — reading only the lead token turns all three into
+# consent.
+run_merge_escalation_case "merge_serial_ask_negative_label_ko_prefix_denies" \
+  "yes" "" "momentum-merge-serial-ask-negative-label-ko-prefix.jsonl" "gh pr merge 999 --squash --delete-branch"
+run_merge_escalation_case "merge_serial_ask_negative_label_ko_consequence_denies" \
+  "yes" "" "momentum-merge-serial-ask-negative-label-ko-consequence.jsonl" "gh pr merge 999 --squash --delete-branch"
+run_merge_escalation_case "merge_serial_ask_negative_label_en_no_merge_denies" \
+  "yes" "" "momentum-merge-serial-ask-negative-label-en-no-merge.jsonl" "gh pr merge 999 --squash --delete-branch"
 # A merge ask is about the PRs its verb takes, not every PR in the sentence…
 run_merge_escalation_case "merge_serial_mixed_pr_ask_denies" \
   "yes" "" "momentum-merge-serial-mixed-pr-ask.jsonl" "gh pr merge 999 --squash --delete-branch"
@@ -871,12 +916,62 @@ run_merge_escalation_case "merge_serial_clause_other_pr_denies" \
 # …so "#833, #999 를 머지해 반영할까요?" still asks about both.
 run_merge_escalation_case "merge_serial_two_pr_ask_passes" \
   "no" "" "momentum-merge-serial-two-pr-ask.jsonl" "gh pr merge 999 --squash --delete-branch"
+# …and a colon after the verb still introduces its object ("Approve merging: PR
+# #833 and #999?"), or the ask falls back to every reference and misses #999.
+run_merge_escalation_case "merge_serial_two_pr_ask_colon_passes" \
+  "no" "" "momentum-merge-serial-two-pr-ask-colon.jsonl" "gh pr merge 999 --squash --delete-branch"
 # One answer releases one merge, never a loop that repeats it.
 run_merge_escalation_case "merge_serial_loop_answered_denies" \
   "yes" "" "momentum-merge-serial-answered-current.jsonl" "for i in 1 2; do gh pr merge 999 --squash; done"
 # A later hold replaces an earlier approval ("ok" then "PR #999 머지 보류").
 run_merge_escalation_case "merge_serial_hold_after_ok_denies" \
   "yes" "" "momentum-merge-serial-hold-after-ok.jsonl" "gh pr merge 999 --squash --delete-branch"
+# …and it replaces it through AskUserQuestion too, which the typed-message scan
+# never sees: a `보류` pick and a declined question each take the "ok" back.
+run_merge_escalation_case "merge_serial_ask_hold_after_ok_denies" \
+  "yes" "" "momentum-merge-serial-ask-hold-after-ok.jsonl" "gh pr merge 999 --squash --delete-branch"
+run_merge_escalation_case "merge_serial_ask_decline_after_ok_denies" \
+  "yes" "" "momentum-merge-serial-ask-decline-after-ok.jsonl" "gh pr merge 999 --squash --delete-branch"
+
+# --- a PR number is not a PR: every repo has a #999 (issue #1419) ------------
+# The window probed orgA/repoA's #999 and the approval is prose, which names no
+# repo. A merge naming orgB/repoB is therefore a different PR reusing that
+# approval — in all three forms the repo can arrive in.
+run_merge_escalation_case "merge_cross_repo_flag_denies" \
+  "yes" "" "momentum-merge-repo-probed-approved.jsonl" "gh pr merge --repo orgB/repoB 999 --squash"
+run_merge_escalation_case "merge_cross_repo_short_flag_denies" \
+  "yes" "" "momentum-merge-repo-probed-approved.jsonl" "gh pr merge -R orgB/repoB 999 --squash"
+run_merge_escalation_case "merge_cross_repo_pull_url_denies" \
+  "yes" "" "momentum-merge-repo-probed-approved.jsonl" "gh pr merge https://github.com/orgB/repoB/pull/999 --squash"
+# …the same repo still merges, and `[HOST/]OWNER/REPO` is the same repo.
+run_merge_escalation_case "merge_same_repo_passes" \
+  "no" "" "momentum-merge-repo-probed-approved.jsonl" "gh pr merge --repo orgA/repoA 999 --squash"
+run_merge_escalation_case "merge_same_repo_with_host_passes" \
+  "no" "" "momentum-merge-repo-probed-approved.jsonl" "gh pr merge --repo github.com/orgA/repoA 999 --squash"
+# …and a merge that names no repo has nothing to disagree with.
+run_merge_escalation_case "merge_no_repo_after_repo_probe_passes" \
+  "no" "" "momentum-merge-repo-probed-approved.jsonl" "gh pr merge 999 --squash"
+# A flag's value is text, not a target: a `--subject` quoting another repo's PR
+# link names no repo, so it must not raise a conflict against the probed one.
+run_merge_escalation_case "merge_subject_url_is_not_target_passes" \
+  "no" "" "momentum-merge-repo-probed-approved.jsonl" "gh pr merge 999 --subject https://github.com/orgB/repoB/pull/5 --squash"
+# The serial path carries the same rule: the approval that released #833 in
+# orgA/repoA does not release orgB/repoB's #999.
+run_merge_escalation_case "merge_cross_repo_serial_denies" \
+  "yes" "" "momentum-merge-repo-serial-approved.jsonl" "gh pr merge --repo orgB/repoB 999 --squash"
+run_merge_escalation_case "merge_same_repo_serial_passes" \
+  "no" "" "momentum-merge-repo-serial-approved.jsonl" "gh pr merge --repo orgA/repoA 999 --squash"
+# An unresolvable side is NOT a mismatch. Measured over the local corpus, 96 of
+# the 123 repo-less merges sit in a window that names a repo — the ordinary
+# `gh pr checks 999` → `gh pr merge --repo o/r 999` shape — so treating `None`
+# as a disagreement would deny all of them to reach the 14 genuine ones.
+run_merge_escalation_case "merge_repo_against_bare_probe_passes" \
+  "no" "" "momentum-merge-bare-probe-repo-merge.jsonl" "gh pr merge --repo orgA/repoA 999 --squash"
+# The window's repo and number come from one probe. When the latest probe names
+# no repo, an earlier probe's repo must not stay paired with that number — it
+# would raise a conflict against a merge the latest probe never disagreed with.
+run_merge_escalation_case "merge_repo_after_later_bare_probe_passes" \
+  "no" "" "momentum-merge-repo-then-bare-probe-approved.jsonl" "gh pr merge --repo orgB/repoB 999 --squash"
 # The block names the gap: a reply that approves nothing is not a missing message.
 _reason_out=$(python3 -c 'import json, sys; print(json.dumps({"tool_name": "Bash", "tool_input": {"command": "gh pr merge 999 --squash --delete-branch"}, "transcript_path": sys.argv[1], "session_id": "test-momentum-merge"}))' \
   "$FIXTURES_DIR/momentum-merge-serial-status-request.jsonl" | python3 "$HOOK" 2>/dev/null)
@@ -1430,6 +1525,79 @@ else
   echo "  FAIL  main() not wrapped by @fail_open (rc=$_uncaught_rc, out=$(echo "$_uncaught_out" | head -c 200))"
   FAIL=$((FAIL + 1)); FAILED_NAMES+=("main() is wrapped by the shared @fail_open guard")
 fi
+
+# --- why a briefing the user saw was not scored (issue #1433) ----------------
+#
+# Message-only: each case asserts the decision is still deny AND the reason
+# names the check that excluded the briefing. `-` asserts the clause is ABSENT,
+# which is what keeps a never-briefed merge's message unchanged.
+#
+# The interrupt fixtures carry the marker in the shape measured in local
+# transcripts (a `text` block, no isMeta, no origin), which the gate counts as a
+# human message — so the turn right before the reply is empty and the briefing
+# sits one turn further back.
+run_exclusion_case() {
+  local name="$1" fixture="$2" command="$3" expected="$4"
+  local reason
+  reason=$(python3 -c '
+import json, sys
+print(json.dumps({"tool_name": "Bash", "tool_input": {"command": sys.argv[2]},
+                  "transcript_path": sys.argv[1], "session_id": "test-momentum-1433"}))' \
+    "$FIXTURES_DIR/$fixture" "$command" \
+    | python3 "$HOOK" 2>/dev/null \
+    | python3 -c '
+import json, sys
+out = json.load(sys.stdin)["hookSpecificOutput"]
+# A non-deny decision prints nothing, so the empty-reason check below fails it.
+print(out["permissionDecisionReason"] if out.get("permissionDecision") == "deny" else "")')
+  local ok=1
+  [ -n "$reason" ] || ok=0
+  if [ "$expected" = "-" ]; then
+    printf '%s' "$reason" | grep -qF "but not scored" && ok=0
+  else
+    printf '%s' "$reason" | grep -qF "$expected" || ok=0
+  fi
+  if [ "$ok" -eq 1 ]; then
+    echo "PASS  [$name]"; PASS=$((PASS + 1))
+  else
+    echo "FAIL  [$name] reason: $(printf '%s' "$reason" | head -c 300)"
+    FAIL=$((FAIL + 1)); FAILED_NAMES+=("$name")
+  fi
+}
+
+# The reproduction in the issue: briefing → interrupt → `continue` → merge.
+run_exclusion_case "exclusion_interrupt_then_continue" \
+  "momentum-merge-interrupt-continue.jsonl" "gh pr merge 833 --squash --delete-branch" \
+  'the last user message (`continue`) is not an approval reply'
+# Same, answered `ok`: the gate still denies, and the reason must name the
+# interrupt — "not an approval reply" would be false here.
+run_exclusion_case "exclusion_interrupt_then_ok" \
+  "momentum-merge-interrupt-ok.jsonl" "gh pr merge 833 --squash --delete-branch" \
+  'a user message (`[Request interrupted by user]`) came between the briefing and the approval'
+run_exclusion_case "exclusion_continue_without_interrupt" \
+  "momentum-merge-prior-turn-continue.jsonl" "gh pr merge 833 --squash --delete-branch" \
+  'the last user message (`continue`) is not an approval reply'
+run_exclusion_case "exclusion_substantive_reply" \
+  "momentum-merge-substantive-reply.jsonl" "gh pr merge 833 --squash" \
+  'is not an approval reply'
+run_exclusion_case "exclusion_briefing_names_other_pr" \
+  "momentum-merge-prior-turn-wrong-pr.jsonl" "gh pr merge 833 --squash" \
+  'the briefed turn does not name the PR this merge targets'
+run_exclusion_case "exclusion_compound_merge" \
+  "momentum-merge-prior-turn-briefing.jsonl" "gh pr merge 833 --squash && gh pr merge 834 --squash" \
+  'one approval releases one merge'
+run_exclusion_case "exclusion_serial_cut_on_marker" \
+  "momentum-merge-serial-second.jsonl" \
+  "gh pr merge 999 --squash --delete-branch # briefing-surfaced: prior turn" \
+  'it precedes a merge that already ran in this session'
+# Guards: nothing was briefed, so there is nothing to explain.
+run_exclusion_case "exclusion_absent_without_briefing" \
+  "momentum-merge-fidelity-unreliable.jsonl" "gh pr merge --squash --delete-branch" "-"
+run_exclusion_case "exclusion_absent_below_threshold" \
+  "momentum-merge-serial-second.jsonl" "gh pr merge 999 --squash --delete-branch" "-"
+
+# The decision is unchanged for the approved flow: `ok` right after the briefing
+# still releases the merge (merge_escalation_prior_turn_briefing_passes above).
 
 # ===========================================================================
 # Summary
