@@ -404,6 +404,43 @@ approve blindly.
   written after the first merge re-arms the marker on its own — so a marked
   merge is the one release this check does not reach.
 
+  **A deny says why a briefing the user saw was not scored (issue #1433).**
+  Message-only; no decision moves. When the two deny paths above fire —
+  "fewer than 4 of 6 items" and the marker with no briefing — and the latest
+  turn in which the assistant wrote text before the last human message holds
+  a briefing that would have passed that path's threshold (4 items, or the
+  marker's 1), the `why` gains one clause naming the check that excluded it.
+  `_excluded_briefing_reason` asks the decision's own questions again, in the
+  decision's order, so the named reason is the one that fired:
+
+  | Reason | Check re-asked |
+  | ------ | -------------- |
+  | one approval releases one merge, and this command runs more than one | `_merge_segments` / `_has_repetition` |
+  | the last user message (`…`) is not an approval reply | `_is_approval_reply` |
+  | a user message (`…`) came between the briefing and the approval | briefing turn ends before the approval's own prior turn |
+  | the briefed turn does not name the PR this merge targets | `_correlated_prior_turn_text` |
+  | it precedes a merge that already ran in this session | serial-merge `floor` (marker path only) |
+
+  "The latest turn in which the assistant wrote text" rather than "the turn
+  right before the last user message" is deliberate. An interrupt arrives as a
+  `text` block with no `isMeta` and no `origin` (263 such entries across 868
+  local transcripts), so `_human_user_indices` counts it as a human message:
+  in briefing → interrupt → `continue` the turn before `continue` is empty and
+  the briefing sits one further back. Keyed on the turn right before, the
+  clause would never fire on the very sequence that motivated it. The same
+  split is why briefing → interrupt → `ok` is denied today even though the
+  user approved; the clause names it, and changing that decision is out of
+  this scope.
+
+  Replayed over every recorded `gh pr merge` in local transcripts (791 calls
+  across 867 transcripts, each transcript cut right before the merge and fed
+  to the pre-change and changed builds): 0 decision disagreements, 0
+  tracebacks. Of the 187 denies, 99 gain the clause — 96 not an approval
+  reply, 1 an intervening user message, 1 the briefed turn names a different
+  PR, 1 the serial-merge cut. The replay matters because this code runs inside
+  a `@fail_open` hook: an exception here would not surface as an error, it
+  would release the merge.
+
   **Both directions fail open.** A merge counts as executed only on a clean
   `tool_result`, and only when the shell could not have jumped over it —
   `_SKIPPABLE_KEYWORDS` (`||`, `if`, `elif`, `case`) plus a non-terminal `&&`.
