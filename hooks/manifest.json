@@ -63,6 +63,19 @@
       }
     },
     {
+      "name": "response-language-nudge",
+      "role": "advisory-nudge",
+      "event": "PostToolUse",
+      "matcher": ".*",
+      "timeout": 5,
+      "review_by": "2026-12-04",
+      "mode": {
+        "state_paths": [
+          "PRAXIS_RESPONSE_LANGUAGE_NUDGE_FILE"
+        ]
+      }
+    },
+    {
       "name": "strike-counter",
       "role": "completion-verify",
       "body": "impl.sh",

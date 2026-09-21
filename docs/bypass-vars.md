@@ -160,6 +160,7 @@ per-hook `spec.md` before promoting any of them.
 | `PRAXIS_WORKTREE_SOURCE_EXTENSIONS` | `worktree-edit-gate` | File extensions the gate applies to |
 | `PRAXIS_MD_ESCAPE_MODE` | `pre-edit-md-escape-advisory` | Select advisory vs block mode |
 | `PRAXIS_INTENT_PIVOT_MODE` | `session-intent` | Pivot-detection mode |
+| `PRAXIS_RESPONSE_LANGUAGE` | `postcompact-context`, `response-language-nudge` | User's response-language instruction. `postcompact-context` echoes it verbatim as one context line; `response-language-nudge` additionally requires it to normalize to Korean before it runs its drift check. No default, no hardcoded language — unset or blank leaves both hooks' output unchanged (issue #1476) |
 
 ## Path / test (relocate state, caches, logs)
 
@@ -180,6 +181,7 @@ per-hook `spec.md` before promoting any of them.
 | `PRAXIS_WORKTREE_PRUNE_SNAPSHOT_FILE` | `${TMPDIR}/praxis-worktree-prune-snapshot-<sid>.json` | `worktree-prune-snapshot-gate` |
 | `PRAXIS_MD_READ_HISTORY_FILE` | `${TMPDIR}/praxis-md-read-history-<sid>.json` | `pre-edit-md-escape-advisory` |
 | `PRAXIS_PBGUARD_TEST_*` | unset | `pre-edit-protected-branch-guard` — test-only injection (branch/status/repo-root/ignored/log) |
+| `PRAXIS_RESPONSE_LANGUAGE_NUDGE_FILE` | `~/.praxis/cache/response-language-nudge-<sid>.json` | `response-language-nudge` — dedup-state file, test override |
 
 The volatile `${TMPDIR}/praxis-*` cache paths above are slated to move under
 `~/.praxis/cache` in the #527 follow-up; their per-file override vars will

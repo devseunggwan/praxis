@@ -74,6 +74,8 @@ Session state carried across the compaction boundary:
   • strikes    : K/3
       1. <reason 1>
       2. <reason 2>
+  • response language : <value from PRAXIS_RESPONSE_LANGUAGE> — applies to all
+                 user-facing prose, including narration between tool calls
 
 Injected by the SessionStart(compact) hook once per compaction; later prompts
 will not repeat it.
@@ -83,6 +85,25 @@ When a source is unavailable (no PR, no strikes, detached HEAD) the field
 degrades gracefully — `(none for current branch)` / `0/3` /
 `(detached/unknown)` — instead of being dropped.
 
+The `response language` line does not degrade — it does not have a fallback
+placeholder, it is **absent** — and is appended only when
+`PRAXIS_RESPONSE_LANGUAGE` is set to a non-blank value (issue #1476). Unset or
+blank leaves the rest of the block byte-identical to the pre-#1476 output. The
+value is echoed verbatim, whatever it is: this is a public plugin, so the hook
+never hardcodes or assumes a language (see *Configuration*).
+
+### Why this line exists (issue #1476)
+
+A user-specified response language does not survive a compaction: the summary
+is English prose, and the instruction, if it appears at all, is one line
+buried inside it. `postcompact-context` is the earliest reachable surface
+after the boundary — the model's very next turn reads whatever this hook
+injects — so re-stating the language rule here, labeled on its own line,
+gives the post-compaction turn a rule to retrieve instead of a paragraph to
+infer it from. `response-language-nudge` (a sibling `PostToolUse` hook, same
+env var) is the second reachable surface, for the drift this one cannot
+catch mid-turn — see its own spec for that half.
+
 ## Configuration
 
 | Env var | Default | Scope | Effect |
@@ -90,6 +111,7 @@ degrades gracefully — `(none for current branch)` / `0/3` /
 | `PRAXIS_HOOK_BYPASS_POSTCOMPACT_CONTEXT` | unset | hook | When `1`, exits silently before reading stdin |
 | `PRAXIS_POSTCOMPACT_GIT_TIMEOUT` / `PRAXIS_POSTCOMPACT_GH_TIMEOUT` | `1.5` / `3.0` | test override | Subprocess timeouts in seconds; the suite raises them so CPU contention cannot fake an empty PR field |
 | `PRAXIS_STATE_DIR` | `~/.praxis/state` | external lookup only | Strike-counter state directory the hook *reads* (host-neutral default, #527; falls back to the legacy `~/.claude/state/praxis` when unset and the new location is absent) |
+| `PRAXIS_RESPONSE_LANGUAGE` | unset | config | The user's response-language instruction, echoed verbatim as its own `response language` line when non-blank (issue #1476). No default and no hardcoded language — a public plugin cannot assume one — so unset or blank omits the line entirely and leaves the rest byte-identical |
 
 The hook keeps no state file of its own. `PRAXIS_POSTCOMPACT_CONTEXT_FILE`
 and `PRAXIS_POSTCOMPACT_TAIL_LINES` were removed in #1339 together with the
@@ -131,6 +153,8 @@ The hook never blocks the session.
 - missing `session_id` / `cwd` → silent
 - `git` / `gh` absent or non-zero → field degrades, hook continues
 - uncaught exception in inner logic → swallowed, exit 0
+- `PRAXIS_RESPONSE_LANGUAGE` unset or blank → the `response language` line is
+  omitted, not degraded; the rest of the block is byte-identical to before
 
 ## Host filtering
 
@@ -167,4 +191,5 @@ Cases cover: emit on `source: "compact"` with `hookEventName: "SessionStart"`,
 emit when `source` is absent, silent on every other `source`, bypass env,
 fail-open on malformed / field-missing payloads, missing `git` / `gh` still
 exits 0 inside the budget, strike state integration, branch / PR field
-degradation.
+degradation, `PRAXIS_RESPONSE_LANGUAGE` unset (line absent, output otherwise
+unchanged) vs set (line present, value echoed verbatim) — issue #1476.
