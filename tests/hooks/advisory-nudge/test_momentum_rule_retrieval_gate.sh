@@ -896,6 +896,10 @@ run_merge_escalation_case "merge_same_repo_with_host_passes" \
 # …and a merge that names no repo has nothing to disagree with.
 run_merge_escalation_case "merge_no_repo_after_repo_probe_passes" \
   "no" "" "momentum-merge-repo-probed-approved.jsonl" "gh pr merge 999 --squash"
+# A flag's value is text, not a target: a `--subject` quoting another repo's PR
+# link names no repo, so it must not raise a conflict against the probed one.
+run_merge_escalation_case "merge_subject_url_is_not_target_passes" \
+  "no" "" "momentum-merge-repo-probed-approved.jsonl" "gh pr merge 999 --subject https://github.com/orgB/repoB/pull/5 --squash"
 # The serial path carries the same rule: the approval that released #833 in
 # orgA/repoA does not release orgB/repoB's #999.
 run_merge_escalation_case "merge_cross_repo_serial_denies" \

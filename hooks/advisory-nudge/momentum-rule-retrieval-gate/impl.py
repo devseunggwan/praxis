@@ -546,6 +546,9 @@ _CONTEXT_VALUE_FLAGS = frozenset({
     "-b", "--body", "-F", "--body-file", "-t", "--title", "--subject",
     "--json", "--jq", "--template", "--repo", "-R",
 })
+# `_segment_repo` reads both merge and context segments, so it skips the values
+# of either verb family's flags.
+_SEGMENT_VALUE_FLAGS = _MERGE_VALUE_FLAGS | _CONTEXT_VALUE_FLAGS
 
 # Shell constructs that repeat a single textual merge segment at runtime
 # (`for pr in 833 999; do gh pr merge "$pr"; done`, `xargs gh pr merge`). One
@@ -718,18 +721,32 @@ def _segment_repo(argv: list[str]) -> str | None:
     Reads `-R`/`--repo` in all three forms the sibling gates accept (separate
     token, `--repo=X`, concatenated `-RX`) and a `…/pull/N` URL positional. The
     host is dropped, so `gh -R github.com/o/r` and `gh -R o/r` are one repo.
+
+    Only a real positional is read as a URL: a flag's value can hold any text,
+    and a `--subject` quoting another repo's PR link does not retarget the merge.
     """
     argv = strip_prefix(argv)
+    skip_next = False
     for i, tok in enumerate(argv):
+        if skip_next:
+            skip_next = False
+            continue
         cand = ""
         if "=" in tok:
             name, _, val = tok.partition("=")
             if name in _REPO_FLAGS:
                 cand = val
+            elif name.startswith("-"):
+                continue
         elif tok in _REPO_FLAGS and i + 1 < len(argv):
             cand = argv[i + 1]
         elif tok.startswith("-R") and len(tok) > 2 and not tok.startswith("--"):
             cand = tok[2:]
+        elif tok in _SEGMENT_VALUE_FLAGS:
+            skip_next = True
+            continue
+        elif tok.startswith("-"):
+            continue
         if cand:
             m = _REPO_SLUG_RE.match(cand.strip("'\""))
             if m:
