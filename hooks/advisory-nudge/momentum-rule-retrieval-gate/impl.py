@@ -526,6 +526,10 @@ _NOT_MERGE_ASK_RE = re.compile(
     r"|(?:안|말)\s*(?:머지|병합)|말까요"
     r"|(?<![A-Za-z])(?:did|have|has)\s+(?:we|you|i|they|it)\s+(?:already\s+)?merg"
     r"|(?<![A-Za-z])merg(?:e|ing)\s+(?:status|state|conflicts?|results?)(?![A-Za-z])"
+    # "Is GitHub merging #999?" asks what is happening; "Is merging #999 OK?"
+    # has no subject before `merging` and "Is it fine merging" no bare one.
+    r"|(?<![A-Za-z])(?:is|are|was|were)\s+(?:the\s+)?(?!merging(?![A-Za-z]))[A-Za-z]+"
+    r"(?:\s+(?:still|now|already|currently))?\s+merging(?![A-Za-z])"
     r"|(?<![A-Za-z])merg(?:e|ing)"
     r"(?:(?!(?<![A-Za-z])(?:once|when|after|if|until|before)(?![A-Za-z]))[^.?!\n]){0,40}?"
     r"(?<![A-Za-z])(?:complete[ds]?|done|finish(?:ed|es)?|succeed(?:ed|s)?"

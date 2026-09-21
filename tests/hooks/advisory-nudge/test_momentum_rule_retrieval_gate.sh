@@ -868,6 +868,10 @@ run_merge_escalation_case "merge_serial_merge_status_ok_denies" \
 # picked for it reads as consent to merge.
 run_merge_escalation_case "merge_serial_merging_status_ok_denies" \
   "yes" "" "momentum-merge-serial-merging-status-ok.jsonl" "gh pr merge 999 --squash --delete-branch"
+# "Is GitHub merging PR #999?" asks what is happening, not to do it — a subject
+# before `merging` makes it progressive rather than a gerund ("Is merging … OK?").
+run_merge_escalation_case "merge_serial_progressive_merging_ok_denies" \
+  "yes" "" "momentum-merge-serial-progressive-merging-ok.jsonl" "gh pr merge 999 --squash --delete-branch"
 # A completion question is a state question too, in both verb spellings and in
 # Korean — the `ok` after "Is the merge of PR #999 done?" is not consent.
 run_merge_escalation_case "merge_serial_completion_merging_ok_denies" \
