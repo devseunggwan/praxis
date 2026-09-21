@@ -5,6 +5,51 @@ All notable changes to praxis are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.18.0](https://github.com/devseunggwan/praxis/compare/v7.17.0...v7.18.0) (2026-09-21)
+
+
+### Added
+
+* **hook:** end PR thread advisory on disposition ([#1450](https://github.com/devseunggwan/praxis/issues/1450)) ([c5c8aab](https://github.com/devseunggwan/praxis/commit/c5c8aabcb28f9328cf8d5d41e875e94afd19ca0a))
+* **hook:** gate gh api comment writes on approval ([#1437](https://github.com/devseunggwan/praxis/issues/1437)) ([ed7c7c5](https://github.com/devseunggwan/praxis/commit/ed7c7c591fc3332177bb224df15a94ce02d0471e))
+* **hooks:** ask when a correction goes unquoted ([#1460](https://github.com/devseunggwan/praxis/issues/1460)) ([1232f0e](https://github.com/devseunggwan/praxis/commit/1232f0eecaf0d54938f577aa70feafdeb28bab07)), closes [#1441](https://github.com/devseunggwan/praxis/issues/1441)
+* **hooks:** escalate a repeated deny on the decision channel ([#1465](https://github.com/devseunggwan/praxis/issues/1465)) ([b6af6b4](https://github.com/devseunggwan/praxis/commit/b6af6b4c24c4b8e7047f574d8e1ecad03341de38))
+* **hooks:** flag retractions that quote no probe ([#1458](https://github.com/devseunggwan/praxis/issues/1458)) ([290fab0](https://github.com/devseunggwan/praxis/commit/290fab0b67a09adc6b94e0ac7935ce9c3fe03624))
+* **hooks:** gate internal tokens to public repos ([#1473](https://github.com/devseunggwan/praxis/issues/1473)) ([47c0cbe](https://github.com/devseunggwan/praxis/commit/47c0cbed9c55f177e9c3b9eec8405390d9ea65ae))
+* **hooks:** reject a future-tense Falsification line ([#1463](https://github.com/devseunggwan/praxis/issues/1463)) ([36bbf88](https://github.com/devseunggwan/praxis/commit/36bbf882668bd7199a7b6e089fd6e4b1127f5464))
+* **hooks:** report hook blocks as denied actions ([#1453](https://github.com/devseunggwan/praxis/issues/1453)) ([835bf28](https://github.com/devseunggwan/praxis/commit/835bf285b7dae55957b08ee933bdffeff1620d1c)), closes [#1422](https://github.com/devseunggwan/praxis/issues/1422)
+* **hooks:** scope skill-gate mappings by repository ([#1464](https://github.com/devseunggwan/praxis/issues/1464)) ([1502a31](https://github.com/devseunggwan/praxis/commit/1502a310e977829286e7945058cc7bda9a15a756))
+* **hooks:** widen zsh advisory to four dialect shapes ([#1462](https://github.com/devseunggwan/praxis/issues/1462)) ([44222b9](https://github.com/devseunggwan/praxis/commit/44222b9feb06526a6a523a83a5c971b7f3a7812e))
+* **retrospect:** promote carried cursor tasks to findings ([#1461](https://github.com/devseunggwan/praxis/issues/1461)) ([a39e227](https://github.com/devseunggwan/praxis/commit/a39e2277e3152ba23d740a6001ae186655d11693))
+* **skill:** add perf-leak-review reviewer ([#1431](https://github.com/devseunggwan/praxis/issues/1431)) ([8aa72e5](https://github.com/devseunggwan/praxis/commit/8aa72e5812abaa3f9419d6820240c67eca50ae42))
+
+
+### Fixed
+
+* **hooks:** block a memory the index cannot read ([518c070](https://github.com/devseunggwan/praxis/commit/518c070dfe5e98948bfa1bb87f2490c301779245)), closes [#1426](https://github.com/devseunggwan/praxis/issues/1426)
+* **hooks:** cap the anchor advisory instead of pinning it ([#1452](https://github.com/devseunggwan/praxis/issues/1452)) ([17944e0](https://github.com/devseunggwan/praxis/commit/17944e0f951bca305ea2c9e9ad392ebfc7442651))
+* **hooks:** catch mid-line completion claims ([#1457](https://github.com/devseunggwan/praxis/issues/1457)) ([fa698a6](https://github.com/devseunggwan/praxis/commit/fa698a695226b0ce4e866d84d5ef7960ef43a097))
+* **hooks:** check only a command that published ([#1451](https://github.com/devseunggwan/praxis/issues/1451)) ([93bb54c](https://github.com/devseunggwan/praxis/commit/93bb54cf2a91a8592e9646023f745ed74c7158b2))
+* **hooks:** close four merge-approval read gaps ([#1467](https://github.com/devseunggwan/praxis/issues/1467)) ([6e3e436](https://github.com/devseunggwan/praxis/commit/6e3e436c3d0638835f3a38f21c093b4174f5e8d5))
+* **hooks:** move org literals out of trigger tables ([#1472](https://github.com/devseunggwan/praxis/issues/1472)) ([3fa5271](https://github.com/devseunggwan/praxis/commit/3fa52710ee5367aa6305c8c703c720e65784a1ac))
+* **hooks:** read a fenced block as quoted, not a claim ([#1468](https://github.com/devseunggwan/praxis/issues/1468)) ([ea94670](https://github.com/devseunggwan/praxis/commit/ea9467004c98e34e630d53ec9ce220a0ba3d3121))
+* **hooks:** remove block-rename-sweep-survivors ([#1440](https://github.com/devseunggwan/praxis/issues/1440)) ([92bda2c](https://github.com/devseunggwan/praxis/commit/92bda2c4523ff44629ed43fad5b0c9827e5bd91a))
+* **hooks:** say why a shown briefing was not scored ([38c71dd](https://github.com/devseunggwan/praxis/commit/38c71dd4d3a71510b58c37b60677c0af88a0f6fa))
+* **hooks:** say why a shown briefing was not scored ([#1456](https://github.com/devseunggwan/praxis/issues/1456)) ([38c71dd](https://github.com/devseunggwan/praxis/commit/38c71dd4d3a71510b58c37b60677c0af88a0f6fa))
+* **hooks:** scope rehearsal scan to one segment ([#1447](https://github.com/devseunggwan/praxis/issues/1447)) ([f2f8e94](https://github.com/devseunggwan/praxis/commit/f2f8e94844dc07bbfff62e25a3695b8580cb1f80))
+* **hooks:** scope the merge target to its repo ([#1469](https://github.com/devseunggwan/praxis/issues/1469)) ([f4774a5](https://github.com/devseunggwan/praxis/commit/f4774a51b0b2d27e931140f983a285130ab654e5))
+* **hooks:** skip interpreter programs in prod scan ([#1449](https://github.com/devseunggwan/praxis/issues/1449)) ([a7434e1](https://github.com/devseunggwan/praxis/commit/a7434e17ea0c897f108c370c7665fba066a9e222))
+* **hook:** widen pr-state refetch verdict ([#1438](https://github.com/devseunggwan/praxis/issues/1438)) ([47956ab](https://github.com/devseunggwan/praxis/commit/47956ab6a2245a83b5d804dce7bfd818377d6f99))
+
+
+### Changed
+
+* **agents:** trim skill rows for word budget ([#1430](https://github.com/devseunggwan/praxis/issues/1430)) ([b20a723](https://github.com/devseunggwan/praxis/commit/b20a7238fde2217758546800c3911e37a0438d8a))
+* bump reviewdog/action-actionlint from 1.73.4 to 1.75.0 ([#1455](https://github.com/devseunggwan/praxis/issues/1455)) ([4b5d482](https://github.com/devseunggwan/praxis/commit/4b5d4829b25ad3cc5283e34eb16cec9984eef66d))
+* **hooks:** count each transcript once in the replay ([38c71dd](https://github.com/devseunggwan/praxis/commit/38c71dd4d3a71510b58c37b60677c0af88a0f6fa))
+* **hooks:** split a dispatch group by host-side if filter ([#1466](https://github.com/devseunggwan/praxis/issues/1466)) ([3800937](https://github.com/devseunggwan/praxis/commit/3800937e87e2c8d150f1e704ad9653264ea83338)), closes [#1335](https://github.com/devseunggwan/praxis/issues/1335)
+* **skill:** ask merge approval via AskUserQuestion ([#1446](https://github.com/devseunggwan/praxis/issues/1446)) ([fdc1871](https://github.com/devseunggwan/praxis/commit/fdc1871a69ec7f69b1f8d719460b0d7be18e5af2))
+
 ## [7.17.0](https://github.com/devseunggwan/praxis/compare/v7.16.0...v7.17.0) (2026-09-14)
 
 
