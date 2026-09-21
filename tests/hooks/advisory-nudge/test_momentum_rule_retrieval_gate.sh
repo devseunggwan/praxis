@@ -1490,7 +1490,11 @@ print(json.dumps({"tool_name": "Bash", "tool_input": {"command": sys.argv[2]},
                   "transcript_path": sys.argv[1], "session_id": "test-momentum-1433"}))' \
     "$FIXTURES_DIR/$fixture" "$command" \
     | python3 "$HOOK" 2>/dev/null \
-    | python3 -c 'import json, sys; print(json.load(sys.stdin)["hookSpecificOutput"]["permissionDecisionReason"])')
+    | python3 -c '
+import json, sys
+out = json.load(sys.stdin)["hookSpecificOutput"]
+# A non-deny decision prints nothing, so the empty-reason check below fails it.
+print(out["permissionDecisionReason"] if out.get("permissionDecision") == "deny" else "")')
   local ok=1
   [ -n "$reason" ] || ok=0
   if [ "$expected" = "-" ]; then
