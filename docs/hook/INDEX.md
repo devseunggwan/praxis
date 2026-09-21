@@ -84,6 +84,7 @@ confirmation-prompt layer.
 | [side-effect-scan](../../hooks/preflight-gate/side-effect-scan/spec.md) | PreToolUse | Ask before commands with collateral side effects (`git commit/push`, `gh pr merge/create`, `kubectl apply`) |
 | [commit-title-length-check](../../hooks/preflight-gate/commit-title-length-check/spec.md) | PreToolUse | Ask when `git commit` title exceeds 50 chars |
 | [commit-title-format-check](../../hooks/preflight-gate/commit-title-format-check/spec.md) | PreToolUse | Block `git commit`, `gh pr create`, `gh issue create` when title does not match Conventional Commits format |
+| [internal-token-leak-gate](../../hooks/preflight-gate/internal-token-leak-gate/spec.md) | PreToolUse | Block a `git commit` or `gh` write carrying a `PRAXIS_INTERNAL_TOKENS` name toward a repo GitHub reports as public |
 | [commit-message-paren-check](../../hooks/preflight-gate/commit-message-paren-check/spec.md) | PreToolUse | Block `git commit` when a message line opens a pseudo-scope release-please's parser cannot close, which silently drops the commit from the CHANGELOG |
 | [branch-name-check](../../hooks/preflight-gate/branch-name-check/spec.md) | PreToolUse | Block branch creation (`checkout -b`, `switch -c`, `worktree add -b`) when the new branch name does not match the configured regex |
 | [pre-merge-approval-gate](../../hooks/preflight-gate/pre-merge-approval-gate/spec.md) | PreToolUse | Surface per-PR approval prompt for `gh pr merge` in direct sessions |

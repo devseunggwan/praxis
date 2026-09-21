@@ -163,7 +163,7 @@ print(json.dumps({
 # issue #1153: no remote ref moves and the pre-command HEAD is recoverable from
 # the same shell. A repository's own git hooks can still reach the network, so
 # that is a property of plain git, not of every checkout. The
-# seven sibling commit hooks that gate this argv are context, not ground.
+# eight sibling commit hooks that gate this argv are context, not ground.
 # git-push stays ASK (publishes shared state).
 run_case "git-commit bare"          advise "git commit -m 'wip'"
 run_case "git-merge"                advise "git merge feature-x"
@@ -195,7 +195,7 @@ run_case "kubectl apply"            ask  "kubectl apply -f pod.yaml"
 run_case "kubectl delete"           ask  "kubectl delete ns my-ns"
 
 # --- detection: configured wrapper CLIs that commit internally -------------
-# Issue #874 split these out of git-commit and left them at ASK: the seven
+# Issue #874 split these out of git-commit and left them at ASK: the eight
 # sibling gates match a literal `git commit` argv, so a commit made inside a
 # wrapper process is invisible to all of them. Since #1157 the pattern list
 # comes from PRAXIS_WRAPPER_COMMIT_CMDS (shipped default empty).

@@ -298,6 +298,23 @@
       }
     },
     {
+      "name": "internal-token-leak-gate",
+      "role": "preflight-gate",
+      "event": "PreToolUse",
+      "matcher": "Bash",
+      "gates": ["git-commit"],
+      "timeout": 10,
+      "review_by": "2026-12-20",
+      "mode": {
+        "strict_env": "PRAXIS_INTERNAL_TOKEN_STRICT",
+        "state_paths": ["PRAXIS_INTERNAL_TOKEN_CACHE_PATH"],
+        "external_commands": [
+          "git -C <cwd> diff --no-color --no-ext-diff -U0 (--cached or HEAD)",
+          "gh api repos/<owner>/<repo> --jq .visibility"
+        ]
+      }
+    },
+    {
       "name": "branch-name-check",
       "role": "preflight-gate",
       "event": "PreToolUse",
