@@ -606,6 +606,23 @@ def test_run_group_aggregates_real_firing(command, expected_rc, ask_on_stdout, c
         assert _ASK not in out
 
 
+# Reproduces the exact issue #1477 scenario: a masked-exit pipe on an
+# irreversible push fires BOTH `side-effect-scan` (ask) and `pipefail-advisory`
+# (additionalContext-only) on the SAME command. Before the fix, only the ask
+# JSON left the dispatcher and pipefail-advisory's warning never reached the
+# model on the one call it was warning about.
+_FIRING_ASK_WITH_PIPEFAIL_SIBLING = "git push --force origin main | tail -3"
+
+
+def test_ask_carries_sibling_pipefail_advisory_on_real_impls(capsys):
+    rc = _dispatch.run_group("PreToolUse", "Bash", _payload(_FIRING_ASK_WITH_PIPEFAIL_SIBLING))
+    hso = _sole_hso(capsys.readouterr().out)
+    assert rc == 0
+    assert hso["permissionDecision"] == "ask"
+    assert "pipefail-advisory" in hso["additionalContext"]
+    assert "set -o pipefail" in hso["additionalContext"]
+
+
 def test_run_group_deny_beats_ask_on_real_impls(monkeypatch, capsys):
     # Pin strict so commit-title-format-check denies deterministically regardless
     # of ambient env; subprocess and in-process both inherit the same value.
@@ -749,6 +766,108 @@ def test_ask_when_no_deny(tmp_path, monkeypatch, capsys):
     assert rc == 0
     assert '"permissionDecision": "ask"' in captured.out
     assert "nudge" in captured.err
+
+
+# --------------------------------------------------------------------------- #
+# ask + sibling additionalContext merge (issue #1477)
+# --------------------------------------------------------------------------- #
+
+def test_ask_merges_sibling_additional_context(tmp_path, monkeypatch, capsys):
+    """Member A asks, member B carries a non-decision additionalContext — the
+    group output must be ONE object holding both the ask decision and B's text."""
+    members = [
+        ("preflight-gate", "ask", _write_fake(tmp_path, "ask", _FAKE_ASK)),
+        (
+            "advisory-nudge",
+            "ctx",
+            _write_fake(tmp_path, "ctx", _fake_context("PreToolUse", "sibling-warning")),
+        ),
+    ]
+    _patch_members(monkeypatch, members)
+    rc = _dispatch.run_group("PreToolUse", "Bash", NOOP_PAYLOAD)
+    hso = _sole_hso(capsys.readouterr().out)
+    assert rc == 0
+    assert hso["permissionDecision"] == "ask"
+    assert hso["permissionDecisionReason"] == "r"
+    assert hso["additionalContext"] == "sibling-warning"
+
+
+def test_ask_path_unchanged_with_no_context_siblings(tmp_path, monkeypatch, capsys):
+    """Pre-#1477 path is unchanged: an ask with no non-decision sibling output
+    (only a plain-pass member and a stderr-only advisory) carries no
+    `additionalContext` key at all — the merge must not fabricate one."""
+    members = [
+        ("advisory-nudge", "adv", _write_fake(tmp_path, "adv", _FAKE_ADVISORY)),  # stderr only
+        ("preflight-gate", "ask", _write_fake(tmp_path, "ask", _FAKE_ASK)),
+        ("preflight-gate", "pass", _write_fake(tmp_path, "pass", _FAKE_PASS)),
+    ]
+    _patch_members(monkeypatch, members)
+    rc = _dispatch.run_group("PreToolUse", "Bash", NOOP_PAYLOAD)
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert json.loads(out) == {
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "ask",
+            "permissionDecisionReason": "r",
+        }
+    }
+
+
+def test_ask_merge_ignores_mismatched_event_sibling(tmp_path, monkeypatch, capsys):
+    # Same guard as the plain additionalContext lane (issue #1199 review): a
+    # sibling naming the wrong event must not be adopted into the ask's object.
+    members = [
+        ("preflight-gate", "ask", _write_fake(tmp_path, "ask", _FAKE_ASK)),
+        (
+            "advisory-nudge",
+            "bad",
+            _write_fake(tmp_path, "bad", _fake_context("PostToolUse", "wrong-event")),
+        ),
+    ]
+    _patch_members(monkeypatch, members)
+    rc = _dispatch.run_group("PreToolUse", "Bash", NOOP_PAYLOAD)
+    hso = _sole_hso(capsys.readouterr().out)
+    assert rc == 0
+    assert hso["permissionDecision"] == "ask"
+    assert "additionalContext" not in hso
+
+
+def _fake_compact_decision(decision: str, text: str) -> str:
+    # Compact separators leave no space after the colon, so the spacing-sensitive
+    # marker substrings never match — only the parsed field can exclude it.
+    return (
+        "import json, sys\n"
+        "def main():\n"
+        "    json.dump({'hookSpecificOutput': {'hookEventName': 'PreToolUse',"
+        " 'permissionDecision': %r, 'additionalContext': %r}}, sys.stdout,"
+        " separators=(',', ':'))\n"
+        "    sys.stdout.write('\\n')\n"
+        "    return 0\n" % (decision, text)
+    )
+
+
+@pytest.mark.parametrize("decision", ["ask", "deny"])
+def test_ask_merge_skips_compact_decision_sibling(decision, tmp_path, monkeypatch, capsys):
+    members = [
+        ("preflight-gate", "ask", _write_fake(tmp_path, "ask", _FAKE_ASK)),
+        (
+            "advisory-nudge",
+            "compact",
+            _write_fake(tmp_path, "compact", _fake_compact_decision(decision, "decision-text")),
+        ),
+        (
+            "advisory-nudge",
+            "ctx",
+            _write_fake(tmp_path, "ctx", _fake_context("PreToolUse", "sibling-warning")),
+        ),
+    ]
+    _patch_members(monkeypatch, members)
+    rc = _dispatch.run_group("PreToolUse", "Bash", NOOP_PAYLOAD)
+    hso = _sole_hso(capsys.readouterr().out)
+    assert rc == 0
+    assert hso["permissionDecision"] == "ask"
+    assert hso["additionalContext"] == "sibling-warning"
 
 
 def test_all_pass_allows(tmp_path, monkeypatch, capsys):
