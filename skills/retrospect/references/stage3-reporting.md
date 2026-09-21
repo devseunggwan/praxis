@@ -308,8 +308,32 @@ For every non-note-only finding, Stage 3 must explain:
 2. why this action type was chosen
 3. how it will be verified
 4. `Stage 2 caveats: ...` when caveats apply
-5. `Falsification: ...`
-6. `remedy_reach: ...` — see [Remedy-reach receipt](#remedy-reach-receipt)
+5. `Falsification: ...` — an observation **already made**, never a promise
+6. `Probe: ...` — see [Probe receipt](#probe-receipt)
+7. `remedy_reach: ...` — see [Remedy-reach receipt](#remedy-reach-receipt)
+
+### Probe receipt
+
+`Probe: <command> → <what it returned>`, on the finding's plan.
+
+A finding whose Pattern or Root Cause asserts how a hook or tool **behaves**
+(`advisory, exit 0, leaves no friction signal`) or claims **novelty** (`no
+existing gate covers this`) may not offer `✅ Execute now` without one. Both
+claims are refutable by a single cheap command, and both were refuted at Stage 4
+in the motivating cycle (#1424) — after the user had already spent an approval
+on them. One was settled by replaying the hook's own transcript output
+(`permissionDecision: ask`, not the asserted exit 0), the other by
+`ls hooks/completion-verify`, which showed an existing gate covering half the
+proposal.
+
+`Falsification:` carries the same rule and it is structurally enforced:
+`retrospect-mix-check` Gate-13 blocks Stage 3 when the line promises the check
+(`will verify …`, `Stage 4에서 확인`, `확인 예정`) instead of reporting one. The
+rule the skill already records for `(Recommended)` — a disconfirming test runs
+before the label, not after — is the same rule.
+
+Findings that assert neither mechanism nor novelty (a behavioural pattern read
+off the session itself) owe no `Probe:` line.
 
 ### Remedy-reach receipt
 
@@ -474,6 +498,9 @@ Stop and return to Stage 2 / Stage 2.5 when any of these are true:
 - Omitting the `retrospect:denied_actions` fence, or emitting it with no
   `disposition:` on any row, when the transcript carries a user rejection
   (Gate-12).
+- A `Falsification:` line that promises the check rather than reporting one
+  (Gate-13), or an `Execute now` offered on an unprobed mechanism or novelty
+  claim.
 
 ## Quick Reference
 
@@ -496,6 +523,20 @@ After the report, ask per finding:
 - `🕐 Defer (create note only)`
 
 Do not run Stage 4 until the user explicitly approves the finding.
+
+### When every option mutates
+
+A finding whose only actions are mutating (`hook_code`, `issue`) has no
+low-blast option in that menu, and `menu-mutation-tier-advisory` asks for one.
+Its documented satisfying path is a reason line, so write it into the question
+body rather than paying one extra prompt per such finding, every cycle:
+
+```text
+Safe-tier-unavailable: 이 finding 의 행동은 훅 파일 작성뿐이라 읽기 전용 단계가 없습니다
+```
+
+A finding that already offers something read-only (`Memory only`, a note) has a
+safe tier and needs no such line — the advisory stays silent there by itself.
 
 ## Co-update note
 

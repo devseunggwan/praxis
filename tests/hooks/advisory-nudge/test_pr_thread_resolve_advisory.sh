@@ -67,12 +67,28 @@ threads_json() {
     "${HAS_NEXT:-false}" "${nodes%,}"
 }
 
-# thread <isResolved> <path> <line> <body>
+# thread <isResolved> <path> <line> <body> [last_author] [last_body]
+# The last comment defaults to the head comment — same author, same body — which
+# is what an untouched thread looks like and must not read as dispositioned.
 thread() {
   python3 -c 'import json,sys
+last_author = sys.argv[5] if len(sys.argv) > 5 else "rev"
+last_body = sys.argv[6] if len(sys.argv) > 6 else sys.argv[4]
 print(json.dumps({"isResolved": sys.argv[1]=="true","path":sys.argv[2],
  "line": None if sys.argv[3]=="null" else int(sys.argv[3]),
- "comments":{"nodes":[{"author":{"login":"rev"},"body":sys.argv[4]}]}}))' "$@"
+ "head":{"nodes":[{"author":{"login":"rev"},"body":sys.argv[4]}]},
+ "tail":{"nodes":[{"author":{"login":last_author},"body":last_body}]}}))' "$@"
+}
+
+# stdout_of <cmd> <tool_response> -> the hook's stdout alone (stub_gh first).
+# run_case discards stdout (`1>/dev/null`), so the additionalContext document is
+# unmeasurable through it.
+stdout_of() {
+  local payload
+  payload=$(python3 -c 'import json,sys
+print(json.dumps({"tool_name":"Bash","tool_input":{"command":sys.argv[1]},"cwd":sys.argv[2],"tool_response":json.loads(sys.argv[3])}))' \
+    "$1" "$WORK" "$2")
+  printf '%s' "$payload" | PATH="$BIN:$PATH" python3 "$HOOK" 2>/dev/null
 }
 
 # run_case <advisory|advisory-strict|silent> <name> <cmd> <tool_response> [ENV=val ...]
@@ -292,6 +308,125 @@ if [ "$rc" -eq 0 ] && [ -z "$out" ]; then
 else
   echo "FAIL  [non-bash-tool] rc=$rc out=<$out>"; FAIL=$((FAIL + 1))
 fi
+
+# --- disposition recorded in the thread ends the advisory -----------------
+# check_json <name> <expect-empty|expect-context> <stdout>
+check_json() {
+  local name="$1" mode="$2" out="$3" ok=1
+  case "$mode" in
+    expect-empty) [ -z "$out" ] || ok=0 ;;
+    expect-context)
+      printf '%s' "$out" | python3 -c 'import json,sys
+d = json.load(sys.stdin)
+inner = d["hookSpecificOutput"]
+assert inner["hookEventName"] == "PostToolUse", inner
+assert "additionalContext" in inner, inner
+assert "Not fixed" in inner["additionalContext"]' 2>/dev/null || ok=0
+      ;;
+  esac
+  if [ "$ok" -eq 1 ]; then
+    echo "PASS  [$name]"; PASS=$((PASS + 1))
+  else
+    echo "FAIL  [$name] mode=$mode out=<$out>"; FAIL=$((FAIL + 1))
+  fi
+}
+
+# an undispositioned thread reaches the model channel
+setup_repo
+stub_gh "$PR_LIST" "$(threads_json "$(thread false a.py 1 'issue (blocking): x')")"
+check_json "context-emitted" expect-context "$(stdout_of "git push origin main" "$OK")"
+
+# the same thread, once answered by someone else, stops being listed
+setup_repo
+stub_gh "$PR_LIST" "$(threads_json \
+  "$(thread false a.py 1 'issue (blocking): x' me 'Not fixed — 후속 이슈 #7')")"
+run_case advisory "dispositioned-demoted-to-fyi" "git push origin main" "$OK"
+check_json "dispositioned-no-context" expect-empty "$(stdout_of "git push origin main" "$OK")"
+
+# every disposition verb closes the model channel, and only at the head of
+# the newest comment
+setup_repo
+stub_gh "$PR_LIST" "$(threads_json \
+  "$(thread false a.py 1 'issue (blocking): x' me 'Fixed — abc1234 guard added')")"
+check_json "disposition-fixed-no-context" expect-empty "$(stdout_of "git push origin main" "$OK")"
+setup_repo
+stub_gh "$PR_LIST" "$(threads_json \
+  "$(thread false a.py 1 'issue (blocking): x' me 'False positive — probe output')")"
+check_json "disposition-false-positive-no-context" expect-empty "$(stdout_of "git push origin main" "$OK")"
+setup_repo
+stub_gh "$PR_LIST" "$(threads_json \
+  "$(thread false a.py 1 'issue (blocking): x' me 'I think this is Fixed — later')")"
+run_case advisory "disposition-not-at-head-still-needs" "git push origin main" "$OK"
+
+# a reply from the thread's own author is not a disposition
+setup_repo
+stub_gh "$PR_LIST" "$(threads_json \
+  "$(thread false a.py 1 'issue (blocking): x' rev 'Fixed — bot quoting itself')")"
+run_case advisory "self-authored-not-disposition" "git push origin main" "$OK"
+
+# a later objection re-arms the advisory
+setup_repo
+stub_gh "$PR_LIST" "$(threads_json \
+  "$(thread false a.py 1 'issue (blocking): x' rev 'still broken after that change')")"
+run_case advisory "new-comment-rearms" "git push origin main" "$OK"
+
+# --- a quoted disposition is an objection, not a verdict ------------------
+setup_repo
+stub_gh "$PR_LIST" "$(threads_json "$(thread false a.py 1 'issue (blocking): x' me \
+  '> Fixed — abc1234 guard added
+
+Actually still broken')")"
+run_case advisory "quoted-disposition-still-needs" "git push origin main" "$OK"
+check_json "quoted-disposition-emits-context" expect-context \
+  "$(stdout_of "git push origin main" "$OK")"
+
+# quoting the finding before answering it is the ordinary reply shape
+setup_repo
+stub_gh "$PR_LIST" "$(threads_json "$(thread false a.py 1 'issue (blocking): x' me \
+  '> issue (blocking): x
+
+Not fixed — 후속 이슈 #7')")"
+check_json "quote-then-disposition-no-context" expect-empty \
+  "$(stdout_of "git push origin main" "$OK")"
+
+# --- a truncated first page says so on the model channel too --------------
+# context_has <name> <present|absent> <needle> <stdout>
+context_has() {
+  local name="$1" mode="$2" needle="$3" out="$4" ok=1 body
+  body=$(printf '%s' "$out" | python3 -c 'import json,sys
+try:
+    print(json.load(sys.stdin)["hookSpecificOutput"]["additionalContext"])
+except Exception:
+    pass' 2>/dev/null)
+  case "$mode" in
+    present) printf '%s' "$body" | grep -qF -- "$needle" || ok=0 ;;
+    absent)  printf '%s' "$body" | grep -qF -- "$needle" && ok=0 ;;
+  esac
+  if [ "$ok" -eq 1 ]; then
+    echo "PASS  [$name]"; PASS=$((PASS + 1))
+  else
+    echo "FAIL  [$name] mode=$mode needle=<$needle> body=<$body>"; FAIL=$((FAIL + 1))
+  fi
+}
+
+setup_repo
+HAS_NEXT=true stub_gh "$PR_LIST" "$(HAS_NEXT=true threads_json \
+  "$(thread false a.py 1 'issue (blocking): x')")"
+context_has "context-carries-truncation" present "not complete" \
+  "$(stdout_of "git push origin main" "$OK")"
+
+# --- the model channel carries the objection that reopened the thread -----
+setup_repo
+stub_gh "$PR_LIST" "$(threads_json "$(thread false a.py 1 'issue (blocking): original finding' \
+  rev2 'still broken after that change')")"
+context_has "context-carries-latest-objection" present "still broken after that change" \
+  "$(stdout_of "git push origin main" "$OK")"
+
+# an untouched thread does not get a redundant "latest" line
+setup_repo
+stub_gh "$PR_LIST" "$(threads_json "$(thread false a.py 1 'issue (blocking): x')")"
+context_has "context-omits-redundant-latest" absent "latest (@" \
+  "$(stdout_of "git push origin main" "$OK")"
 
 echo "----"
 echo "PASS: $PASS / FAIL: $FAIL"

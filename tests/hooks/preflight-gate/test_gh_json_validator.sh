@@ -286,6 +286,42 @@ run_case "514: --json help,merged still blocks" \
   "gh pr view 1 --json help,merged"
 
 # ---------------------------------------------------------------------------
+# issue #1420: the repeat counter keys a deny by its leading `[marker]`, and
+# without one it keys the WHOLE first line instead. This reason names the
+# subcommand and the offending field, so an unmarked version gives every deny
+# its own key and the repeat notice can never fire. Asserting the marker string
+# alone would pass on a marker the counter does not accept, so the two denies'
+# actual keys are compared — that is the property the notice depends on.
+# ---------------------------------------------------------------------------
+_key_of() {
+  local sid payload out
+  sid="key-$(date +%s)-$$-$RANDOM"
+  payload=$(python3 -c '
+import json, sys
+print(json.dumps({"tool_name": "Bash",
+                  "tool_input": {"command": sys.argv[1]},
+                  "session_id": sys.argv[2]}))
+' "$1" "$sid")
+  out=$(printf '%s' "$payload" | env "PATH=$GH_STUB_DIR:$PATH" python3 "$HOOK_PY" 2>/dev/null)
+  printf '%s' "$out" | python3 -c '
+import importlib.util, json, sys
+spec = importlib.util.spec_from_file_location("br", sys.argv[1])
+br = importlib.util.module_from_spec(spec); spec.loader.exec_module(br)
+d = json.load(sys.stdin)["hookSpecificOutput"]
+print(br.reason_key(d["permissionDecisionReason"])[0])
+' "$ROOT_DIR/hooks/_lib/_block_repeat.py"
+}
+_k1=$(_key_of "gh pr view 1 --json merged")
+_k2=$(_key_of "gh issue view 1 --json merged")
+if [ -n "$_k1" ] && [ "$_k1" = "$_k2" ] && [ "$_k1" = "reason:praxis:gh-json-validator" ]; then
+  echo "PASS  [1420] two invalid-field denies share one repeat key ($_k1)"
+  PASS=$((PASS+1))
+else
+  echo "FAIL  [1420] repeat keys differ: pr=${_k1:-<empty>} issue=${_k2:-<empty>}"
+  FAIL=$((FAIL+1)); FAILED_NAMES+=("1420 repeat key")
+fi
+
+# ---------------------------------------------------------------------------
 # Summary
 # Fail-open guard opt-in (issue #498): main() must be @fail_open-wrapped;
 # guard behavior is tested centrally in tests/test_hook_runtime.sh.
