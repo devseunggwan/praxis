@@ -143,9 +143,11 @@ installs no hooks is itself drift.
 
 Outside `claude` the survivors are `commit-title-format-check`,
 `commit-title-length-check`, `internal-token-leak-gate` and
-`verify-commit-flag-override`. Two of those gate
-only the *shape* of the commit title; the third fires only when a `-n` /
-`--no-verify`-class override is present. None of them asks whether the commit
+`verify-commit-flag-override`. The two `commit-title-*` checks gate only the
+*shape* of the commit title; `internal-token-leak-gate` fires only when an
+internal identifier heads for a public repo; `verify-commit-flag-override`
+fires only when a `-n` / `--no-verify`-class override is present. None of them
+asks whether the commit
 was intended at all. The siblings that carry that weight — the codex-review
 gate, the staged-file enumeration and the decomposition advisory — are
 `claude`-only, as the `Hosts` column records. The
