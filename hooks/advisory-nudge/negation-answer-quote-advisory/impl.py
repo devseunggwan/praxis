@@ -124,11 +124,33 @@ def unescape(value: str) -> str:
     return value.replace('\\"', '"').replace("\\n", "\n").replace("\\\\", "\\")
 
 
-def free_text_answers(result: str) -> list[str]:
-    """Answers from one AskUserQuestion tool_result, or [] if not free text."""
+def free_text_answers(result: str, labels: frozenset[str] = frozenset()) -> list[str]:
+    """Typed answers from one AskUserQuestion tool_result, or [] if not free text.
+
+    One free-text answer puts the whole result under the free-text prefix, so a
+    sibling question answered by picking an option rides along; its label is
+    still the agent's own words and is dropped here.
+    """
     if not result.startswith(FREE_TEXT_PREFIX):
         return []
-    return [unescape(answer) for _question, answer in _PAIR_RE.findall(result)]
+    answers = (unescape(answer) for _question, answer in _PAIR_RE.findall(result))
+    return [answer for answer in answers if answer not in labels]
+
+
+def option_labels(tool_input: object) -> frozenset[str]:
+    """Every option label the agent offered in one AskUserQuestion call."""
+    if not isinstance(tool_input, dict):
+        return frozenset()
+    questions = tool_input.get("questions")
+    if not isinstance(questions, list):
+        return frozenset()
+    return frozenset(
+        option["label"]
+        for question in questions
+        if isinstance(question, dict) and isinstance(question.get("options"), list)
+        for option in question["options"]
+        if isinstance(option, dict) and isinstance(option.get("label"), str)
+    )
 
 
 def is_negation_answer(answer: str) -> bool:
@@ -211,14 +233,14 @@ def pending_negation_answer(events: list[dict]) -> str | None:
     agent received, and its prose is not the main agent showing a reading.
     Counting them arms a write nobody corrected and disarms one nobody quoted.
     """
-    ask_ids: set[str] = set()
+    ask_labels: dict[str, frozenset[str]] = {}
     armed: str | None = None
     for event in events:
         if event.get("isSidechain"):
             continue
         if is_human_turn_start(event):
             armed = None
-            ask_ids.clear()
+            ask_labels.clear()
             continue
         message = event.get("message")
         if not isinstance(message, dict):
@@ -232,7 +254,7 @@ def pending_negation_answer(events: list[dict]) -> str | None:
             kind = block.get("type")
             if kind == "tool_use":
                 if block.get("name") == "AskUserQuestion":
-                    ask_ids.add(str(block.get("id")))
+                    ask_labels[str(block.get("id"))] = option_labels(block.get("input"))
                     if armed and any(
                         quotes(text, armed) for text in _strings(block.get("input"))
                     ):
@@ -241,9 +263,9 @@ def pending_negation_answer(events: list[dict]) -> str | None:
                 body = block.get("text")
                 if armed and isinstance(body, str) and quotes(body, armed):
                     armed = None
-            elif kind == "tool_result" and str(block.get("tool_use_id")) in ask_ids:
-                ask_ids.discard(str(block.get("tool_use_id")))
-                for answer in free_text_answers(result_text(block)):
+            elif kind == "tool_result" and str(block.get("tool_use_id")) in ask_labels:
+                labels = ask_labels.pop(str(block.get("tool_use_id")))
+                for answer in free_text_answers(result_text(block), labels):
                     if is_negation_answer(answer):
                         armed = answer
     return armed

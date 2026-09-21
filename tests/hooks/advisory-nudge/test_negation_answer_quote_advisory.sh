@@ -43,7 +43,8 @@ import json, sys
 path, result, follow = sys.argv[1:4]
 question = {
     "question": "이 문구로 올릴까요?",
-    "options": [{"label": "올린다"}, {"label": "고친다"}],
+    "options": [{"label": "올린다"}, {"label": "고친다"},
+                {"label": "아니오, 독립적인 버그픽스 (권장)"}],
 }
 ask_block = {
     "type": "tool_use",
@@ -166,6 +167,11 @@ run_case silent "answer quoted in assistant prose" "$SLACK" "$SLACK_INPUT"
 # an option pick carries the other prefix — the label is the agent's own text
 build_transcript "$OPTION_PREFIX \"이 문구로 올릴까요?\"=\"아니오, 독립적인 버그픽스 (권장)\". You can now continue with these answers in mind."
 run_case silent "option-label answer is not free text" "$SLACK" "$SLACK_INPUT"
+
+# one typed answer moves the whole result under the free-text prefix; the
+# sibling's picked label is still the agent's own text
+build_transcript "$FREE_PREFIX \"채널은?\"=\"backend\", \"이 문구로 올릴까요?\"=\"아니오, 독립적인 버그픽스 (권장)\". Read the answers carefully."
+run_case silent "option label beside a typed answer" "$SLACK" "$SLACK_INPUT"
 
 # `아니면` is a disjunction, not a refusal
 build_transcript "$FREE_PREFIX \"어느 채널에 올릴까요?\"=\"아니면 다른 채널로 정해줘\". Read the answers carefully."

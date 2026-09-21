@@ -58,6 +58,11 @@ would fire on the agent's own words. Measured over 851 local transcripts: 2236
 option answers, of which 6 open with a negation marker and all 6 are labels the
 agent wrote (`아니오, 독립적인 버그픽스 (권장)`).
 
+The prefix is per result, not per answer: one typed answer puts the whole
+result under `The user answered:`, and a sibling question answered by picking
+an option rides along with its label. So within a free-text result, an answer
+equal to one of that call's option labels is dropped as well.
+
 ## Measured corpus
 
 Scope: `~/.claude*/projects/*/*.jsonl`, deduplicated by real path — 851
@@ -88,6 +93,7 @@ Each row is a test case in
 | Same answer quoted in assistant prose | silent |
 | Free-text answer with no negation marker | silent |
 | Option-label answer opening with `아니오` | silent |
+| Same label beside a typed answer, under the free-text prefix | silent |
 | `아니면` (disjunction, not refusal) | silent |
 | Negation marker but phrased as a question | silent |
 | English `no, …` | ask |
