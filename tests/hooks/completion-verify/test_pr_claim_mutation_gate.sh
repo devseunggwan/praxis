@@ -298,6 +298,14 @@ build_transcript "$(printf '%s\n%s\n%s\n%s\n%s' "$F4" "$F3" "$CLAIM" "$F3" "$F4"
 run_case silent "fenced-claim-nested-run" '{}'
 build_transcript "$(printf '봇 원문:\n\n%s\n%s' "$F3" "$CLAIM")" none
 run_case silent "fenced-claim-unclosed" '{}'
+# A closing fence carries nothing after its run (CommonMark), so a line like
+# ```python INSIDE a block is content, not a closer. Read as one it ends the
+# block early and hands the quoted claim back to the scan — the exact block this
+# gate exists to prevent. The two cases below differ only in that suffix.
+build_transcript "$(printf '봇 원문:\n\n%s\n로그 한 줄\n%spython\n%s\n%s' "$F3" "$F3" "$CLAIM" "$F3")" none
+run_case silent "fenced-claim-inner-info-is-not-a-closer" '{}'
+build_transcript "$(printf '봇 원문:\n\n%s\n로그 한 줄\n%s\n%s\n%s' "$F3" "$F3" "$CLAIM" "$F3")" none
+run_case block "fenced-claim-bare-closer-does-close" '{}'
 # …while a claim OUTSIDE the fence still blocks — the skip is scoped to the
 # block, not to any message that happens to contain one.
 build_transcript "$(printf '%s\n무관한 로그\n%s\n\n리뷰 코멘트 3건 처리했습니다.' "$F3" "$F3")" none
