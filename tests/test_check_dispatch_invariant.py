@@ -227,6 +227,41 @@ def test_no_matcher_sentinel_pinned_across_build_and_runtime():
     assert check._build.DISPATCH_NO_MATCHER_ARG == check._dispatch.NO_MATCHER_ARG
 
 
+# `mode.if` partitions (issue #1335): one dispatcher node per partition.
+def _tagged_node(host: str, pattern: str) -> dict:
+    node = _disp_node(host)
+    node["command"] += f" '{pattern}'"
+    node["if"] = pattern
+    return node
+
+
+def test_one_node_per_if_partition_is_clean():
+    hj = _hooks_json([_disp_node("claude"), _tagged_node("claude", "Bash(git commit *)")])
+    out = check.dispatch_node_drifts(
+        hj, "PreToolUse", "Bash", "claude", {"a", "b"}, WRAP,
+        if_patterns={None, "Bash(git commit *)"},
+    )
+    assert out == [], out
+
+
+def test_missing_partition_node_flagged():
+    hj = _hooks_json([_disp_node("claude")])
+    out = check.dispatch_node_drifts(
+        hj, "PreToolUse", "Bash", "claude", {"a", "b"}, WRAP,
+        if_patterns={None, "Bash(git commit *)"},
+    )
+    assert any("DISPATCH NODE COUNT" in d for d in out), out
+
+
+def test_wrong_partition_if_flagged():
+    hj = _hooks_json([_disp_node("claude"), _tagged_node("claude", "Bash(git push *)")])
+    out = check.dispatch_node_drifts(
+        hj, "PreToolUse", "Bash", "claude", {"a", "b"}, WRAP,
+        if_patterns={None, "Bash(git commit *)"},
+    )
+    assert any("DISPATCH IF PARTITION" in d for d in out), out
+
+
 # ---------------------------------------------------------------------------
 # Runtime cross-check — full main() with a monkeypatched resolver
 # ---------------------------------------------------------------------------
@@ -246,8 +281,8 @@ def test_baseline_check_clean():
 def test_member_drop_detected(monkeypatch):
     orig = check._dispatch.group_members
 
-    def fake(event, matcher, host=None):
-        members = orig(event, matcher, host)
+    def fake(event, matcher, host=None, if_pattern=None):
+        members = orig(event, matcher, host, if_pattern)
         return members[:-1] if members else members  # drop one resolved member
 
     monkeypatch.setattr(check._dispatch, "group_members", fake)

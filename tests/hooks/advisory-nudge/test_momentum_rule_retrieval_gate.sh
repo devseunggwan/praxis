@@ -863,6 +863,51 @@ run_merge_escalation_case "merge_serial_ask_label_names_merge_passes" \
 # A question about the merge's state asks nothing ("PR #999 merge status?").
 run_merge_escalation_case "merge_serial_merge_status_ok_denies" \
   "yes" "" "momentum-merge-serial-merge-status-ok.jsonl" "gh pr merge 999 --squash --delete-branch"
+# …in either spelling of the verb: the merge word matches `merging` too, so a
+# state question built on it has to be excluded by the same rule, or the `ok`
+# picked for it reads as consent to merge.
+run_merge_escalation_case "merge_serial_merging_status_ok_denies" \
+  "yes" "" "momentum-merge-serial-merging-status-ok.jsonl" "gh pr merge 999 --squash --delete-branch"
+# "Is GitHub merging PR #999?" asks what is happening, not to do it — a subject
+# before `merging` makes it progressive rather than a gerund ("Is merging … OK?").
+run_merge_escalation_case "merge_serial_progressive_merging_ok_denies" \
+  "yes" "" "momentum-merge-serial-progressive-merging-ok.jsonl" "gh pr merge 999 --squash --delete-branch"
+# A completion question is a state question too, in both verb spellings and in
+# Korean — the `ok` after "Is the merge of PR #999 done?" is not consent.
+run_merge_escalation_case "merge_serial_completion_merging_ok_denies" \
+  "yes" "" "momentum-merge-serial-completion-merging-ok.jsonl" "gh pr merge 999 --squash --delete-branch"
+run_merge_escalation_case "merge_serial_completion_merge_ok_denies" \
+  "yes" "" "momentum-merge-serial-completion-merge-ok.jsonl" "gh pr merge 999 --squash --delete-branch"
+run_merge_escalation_case "merge_serial_completion_ko_ok_denies" \
+  "yes" "" "momentum-merge-serial-completion-ko-ok.jsonl" "gh pr merge 999 --squash --delete-branch"
+# …but "done" inside a condition is not about the merge: "Merge PR #999 once CI
+# is done?" still asks to merge, so its `ok` still releases #999.
+run_merge_escalation_case "merge_serial_conditional_done_ask_passes" \
+  "no" "" "momentum-merge-serial-conditional-done-ask.jsonl" "gh pr merge 999 --squash --delete-branch"
+# Nor does one asking whether it already happened ("PR #999 머지했나요?",
+# "Did we merge PR #999?"): the answer reports history, it does not consent.
+run_merge_escalation_case "merge_serial_past_merge_ask_denies" \
+  "yes" "" "momentum-merge-serial-past-merge-ask.jsonl" "gh pr merge 999 --squash --delete-branch"
+run_merge_escalation_case "merge_serial_past_merge_ask_en_denies" \
+  "yes" "" "momentum-merge-serial-past-merge-ask-en.jsonl" "gh pr merge 999 --squash --delete-branch"
+# `merging` is the same verb, so "Proceed with merging PR #999?" is an ask —
+# only the past participle `merged` stays out.
+run_merge_escalation_case "merge_serial_merging_ask_passes" \
+  "no" "" "momentum-merge-serial-merging-ask.jsonl" "gh pr merge 999 --squash --delete-branch"
+# A qualifier can reverse the label's lead instead of narrowing it, so
+# `승인 — 머지하지 않기` picked for a merge ask is a refusal, not consent.
+run_merge_escalation_case "merge_serial_ask_negative_label_denies" \
+  "yes" "" "momentum-merge-serial-ask-negative-label.jsonl" "gh pr merge 999 --squash --delete-branch"
+# The negator does not always follow the verb: it can precede it, sit in a
+# consequence clause, or be a bare English determiner. Each still declines, so
+# each is pinned separately — reading only the lead token turns all three into
+# consent.
+run_merge_escalation_case "merge_serial_ask_negative_label_ko_prefix_denies" \
+  "yes" "" "momentum-merge-serial-ask-negative-label-ko-prefix.jsonl" "gh pr merge 999 --squash --delete-branch"
+run_merge_escalation_case "merge_serial_ask_negative_label_ko_consequence_denies" \
+  "yes" "" "momentum-merge-serial-ask-negative-label-ko-consequence.jsonl" "gh pr merge 999 --squash --delete-branch"
+run_merge_escalation_case "merge_serial_ask_negative_label_en_no_merge_denies" \
+  "yes" "" "momentum-merge-serial-ask-negative-label-en-no-merge.jsonl" "gh pr merge 999 --squash --delete-branch"
 # A merge ask is about the PRs its verb takes, not every PR in the sentence…
 run_merge_escalation_case "merge_serial_mixed_pr_ask_denies" \
   "yes" "" "momentum-merge-serial-mixed-pr-ask.jsonl" "gh pr merge 999 --squash --delete-branch"
@@ -871,12 +916,22 @@ run_merge_escalation_case "merge_serial_clause_other_pr_denies" \
 # …so "#833, #999 를 머지해 반영할까요?" still asks about both.
 run_merge_escalation_case "merge_serial_two_pr_ask_passes" \
   "no" "" "momentum-merge-serial-two-pr-ask.jsonl" "gh pr merge 999 --squash --delete-branch"
+# …and a colon after the verb still introduces its object ("Approve merging: PR
+# #833 and #999?"), or the ask falls back to every reference and misses #999.
+run_merge_escalation_case "merge_serial_two_pr_ask_colon_passes" \
+  "no" "" "momentum-merge-serial-two-pr-ask-colon.jsonl" "gh pr merge 999 --squash --delete-branch"
 # One answer releases one merge, never a loop that repeats it.
 run_merge_escalation_case "merge_serial_loop_answered_denies" \
   "yes" "" "momentum-merge-serial-answered-current.jsonl" "for i in 1 2; do gh pr merge 999 --squash; done"
 # A later hold replaces an earlier approval ("ok" then "PR #999 머지 보류").
 run_merge_escalation_case "merge_serial_hold_after_ok_denies" \
   "yes" "" "momentum-merge-serial-hold-after-ok.jsonl" "gh pr merge 999 --squash --delete-branch"
+# …and it replaces it through AskUserQuestion too, which the typed-message scan
+# never sees: a `보류` pick and a declined question each take the "ok" back.
+run_merge_escalation_case "merge_serial_ask_hold_after_ok_denies" \
+  "yes" "" "momentum-merge-serial-ask-hold-after-ok.jsonl" "gh pr merge 999 --squash --delete-branch"
+run_merge_escalation_case "merge_serial_ask_decline_after_ok_denies" \
+  "yes" "" "momentum-merge-serial-ask-decline-after-ok.jsonl" "gh pr merge 999 --squash --delete-branch"
 
 # --- a PR number is not a PR: every repo has a #999 (issue #1419) ------------
 # The window probed orgA/repoA's #999 and the approval is prose, which names no
