@@ -4,7 +4,9 @@ Supported hosts: all
 
 `hooks/preflight-gate/skill-gate-commands/impl.py` intercepts every Bash tool
 call and hard-blocks configured external-mutation commands when the required
-skill has not been invoked anywhere in the current session.
+skill has not been invoked anywhere in the current session. A mapping applies
+in every repository unless it carries a `repo=<owner>/<repo>:` qualifier,
+which scopes it to the repository the cwd's GitHub origin names.
 
 ## Why this exists
 
@@ -42,14 +44,17 @@ A command is blocked (exit 2) when ALL hold:
 | non-Bash tool call | **PASS** |
 | Global flags before subcommand (`gh -R X pr create`) | matched correctly |
 | Custom (non-built-in) pattern with leading global flag (`gh -R X issue create`, `git -C dir tag`) | matched correctly — the fallback matcher skips known-binary global flags so the flag value no longer breaks token contiguity (issue #514) |
+| Scoped entry (`repo=owner/repo:`), cwd's origin matches | checked as usual — **BLOCKED** or **PASS** by the rule above |
+| Scoped entry, cwd's origin differs, is absent, is not GitHub, or the cwd is not a repo | **PASS**, silently — a mapping for another repository has nothing to say here (issue #1423) |
+| `repo=` head whose value is not an `owner/repo` slug | entry skipped — it does **not** fall through to the global scope; a typo must not widen a gate |
 | Whitespace-free shell operator (`gh pr create&&echo`, `gh pr create;echo`) | matched correctly — tokenisation uses the shared `safe_tokenize` (`shlex.shlex` with `punctuation_chars=';\|&'`), which splits the operator into its own token instead of gluing `create&&echo` into one. Plain `shlex.split` glued it and let the form bypass the gate (issue #514) |
 
 ## Config env var
 
 `PRAXIS_SKILL_GATED_COMMANDS` — comma-separated entries, each:
 
-```
-<command-pattern>=><required-skill>
+```text
+[repo=<owner>/<repo>:]<command-pattern>=><required-skill>
 ```
 
 The `=>` separator is used because skill names routinely contain colons
@@ -58,6 +63,34 @@ pattern is matched against the normalised token sequence (global flags
 before the subcommand group are skipped). See
 [docs/skill-gated-commands.md](../../../docs/skill-gated-commands.md)
 for the full schema, supported patterns, and examples.
+
+### Repository scope (issue #1423)
+
+The optional `repo=<owner>/<repo>:` head scopes one entry:
+
+```text
+repo=acme/web:gh pr create=>acme:code-review,gh pr merge=>praxis:merge-briefing
+```
+
+Here the first entry fires only inside `acme/web` and the second everywhere.
+The current repository is resolved once per call from the payload's `cwd`
+(falling back to the process cwd) via `_git.origin_slug` — `git remote get-url
+origin`, parsed by the shared host-anchored regex — and compared
+case-insensitively, because GitHub treats owner and repo names that way and the
+HTTPS and SSH origin forms must resolve alike.
+
+**This exists because the env var is usually set at user level**, where it
+reaches every session in every repository, while the skill it names often
+exists in one project only. Without a scope, adding a project's review skill to
+the gate turns `gh pr create` into a block in unrelated repos — personal
+plugins, dotfiles, scratch repos — whose only exits are a ritual invocation of
+a skill that does not belong there, or `PRAXIS_HOOK_BYPASS_SKILL_GATE`, the
+bypass-token habit this hook family exists to discourage.
+
+A project-only skill can also be configured in that project's
+`.claude/settings.local.json` instead, which scopes it by where the setting
+lives rather than by what it says. The qualifier is for the case where the
+mapping has to sit in the user-level file anyway.
 
 ## Transcript scanning
 
@@ -88,4 +121,8 @@ bash tests/hooks/preflight-gate/test_skill_gate_commands.sh
 Covers: no-config NO-OP, gh-pr-create block/pass, gh-pr-merge block/pass,
 git-push-origin block/pass, non-configured command pass, bypass env pass,
 global-flag ordering, skill name with colon, missing transcript fail-open,
-unreadable transcript fail-open, malformed JSON fail-open, non-Bash tool pass.
+unreadable transcript fail-open, malformed JSON fail-open, non-Bash tool pass,
+and the repository scope: a scoped entry blocking in its own repo, inert in
+another and outside a git repo, matching case-insensitively, passing when the
+skill ran, a malformed qualifier skipping its entry, and an unscoped entry
+still blocking everywhere beside a scoped sibling.
