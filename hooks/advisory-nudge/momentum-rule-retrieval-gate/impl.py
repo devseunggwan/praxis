@@ -513,14 +513,23 @@ _LABEL_NEGATION_RE = re.compile(
 # ("Was #999 merged?") rather than asking to do it — which is the same reason a
 # question that negates merging or asks after its state ("머지하지 말까요?",
 # "머지됐나요?", "머지했나요?", "Did we merge #999?") is not an ask to merge.
+# A completion question is the same kind ("Is the merge of #999 done?", "머지
+# 완료됐어?"). The English form stops at a conditional so "Merge #999 once CI is
+# done?" stays an ask; the Korean form needs a state ending, so "머지 완료할까요?"
+# (asking to finish the merge) stays one too. Excluding an ask only denies more.
 _MERGE_WORD_RE = re.compile(r"(?<![A-Za-z])merg(?:e|ing)(?![A-Za-z-])|머지|병합",
                             re.IGNORECASE)
 _NOT_MERGE_ASK_RE = re.compile(
     r"(?<![A-Za-z])(?:not|don't|dont|never)(?![A-Za-z])"
     r"|(?:머지|병합)\s*(?:됐|되었|된|되어|되나|했|하셨|하였|하지|안\b|말|상태|충돌|결과)"
+    r"|(?:머지|병합)\s*(?:이|가|은|는)?\s*(?:(?:완료|끝|성공)\s*(?:됐|되었|된|되어|되나|되|했|하였|났|나|인|이|여부|\?)|진행\s*중)"
     r"|(?:안|말)\s*(?:머지|병합)|말까요"
     r"|(?<![A-Za-z])(?:did|have|has)\s+(?:we|you|i|they|it)\s+(?:already\s+)?merg"
-    r"|(?<![A-Za-z])merg(?:e|ing)\s+(?:status|state|conflicts?|results?)(?![A-Za-z])",
+    r"|(?<![A-Za-z])merg(?:e|ing)\s+(?:status|state|conflicts?|results?)(?![A-Za-z])"
+    r"|(?<![A-Za-z])merg(?:e|ing)"
+    r"(?:(?!(?<![A-Za-z])(?:once|when|after|if|until|before)(?![A-Za-z]))[^.?!\n]){0,40}?"
+    r"(?<![A-Za-z])(?:complete[ds]?|done|finish(?:ed|es)?|succeed(?:ed|s)?"
+    r"|go(?:ne)?\s+through|went\s+through|in\s+progress)(?![A-Za-z])",
     re.IGNORECASE)
 _ASK_SENTENCE_RE = re.compile(r"[^.!?。\n]*(?:\?|할까요|될까요|하시겠|해도 되)")
 # An explicit PR reference (`#N`, `PR N`, `…/pull/N`). A bare number is not one:

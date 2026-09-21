@@ -868,6 +868,18 @@ run_merge_escalation_case "merge_serial_merge_status_ok_denies" \
 # picked for it reads as consent to merge.
 run_merge_escalation_case "merge_serial_merging_status_ok_denies" \
   "yes" "" "momentum-merge-serial-merging-status-ok.jsonl" "gh pr merge 999 --squash --delete-branch"
+# A completion question is a state question too, in both verb spellings and in
+# Korean — the `ok` after "Is the merge of PR #999 done?" is not consent.
+run_merge_escalation_case "merge_serial_completion_merging_ok_denies" \
+  "yes" "" "momentum-merge-serial-completion-merging-ok.jsonl" "gh pr merge 999 --squash --delete-branch"
+run_merge_escalation_case "merge_serial_completion_merge_ok_denies" \
+  "yes" "" "momentum-merge-serial-completion-merge-ok.jsonl" "gh pr merge 999 --squash --delete-branch"
+run_merge_escalation_case "merge_serial_completion_ko_ok_denies" \
+  "yes" "" "momentum-merge-serial-completion-ko-ok.jsonl" "gh pr merge 999 --squash --delete-branch"
+# …but "done" inside a condition is not about the merge: "Merge PR #999 once CI
+# is done?" still asks to merge, so its `ok` still releases #999.
+run_merge_escalation_case "merge_serial_conditional_done_ask_passes" \
+  "no" "" "momentum-merge-serial-conditional-done-ask.jsonl" "gh pr merge 999 --squash --delete-branch"
 # Nor does one asking whether it already happened ("PR #999 머지했나요?",
 # "Did we merge PR #999?"): the answer reports history, it does not consent.
 run_merge_escalation_case "merge_serial_past_merge_ask_denies" \

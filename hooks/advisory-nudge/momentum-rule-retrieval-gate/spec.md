@@ -360,8 +360,12 @@ approve blindly.
   neither negates it nor asks whether it happened or how it stands
   (`머지하지 말까요?`, `머지됐나요?`, `머지했나요?`, `Did we merge PR #999?`,
   `PR #999 merge status?`, `머지 상태`) — in either spelling of the verb, so
-  `merging status|state|conflicts|results` is excluded exactly as `merge` is,
-  and that is about the PR. When the merge verb takes PR references as its
+  `merging status|state|conflicts|results` is excluded exactly as `merge` is.
+  A completion question is excluded the same way (`Is the merge of PR #999
+  done?`, `Has merging PR #999 completed?`, `머지 완료됐어?`, `머지 끝났나요?`),
+  but only when the completion word is about the merge: a conditional clause
+  keeps the ask (`Merge PR #999 once CI is done?`), and so does a request to
+  finish it (`머지 완료할까요?`). The sentence must also be about the PR. When the merge verb takes PR references as its
   object — a list right before `머지`/`병합` or right after `merge` — the ask is
   about exactly those PRs (`#833, #999 를 머지할까요?` asks about both;
   `PR #999 checks are green, #833 머지할까요?` asks about #833 only). Without
