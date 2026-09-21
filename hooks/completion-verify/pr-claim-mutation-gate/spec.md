@@ -59,6 +59,34 @@ comments") does not match either verb set.
 | Hedge | `처리한 것 같습니다`, `I might have addressed ...` | disclosed uncertainty, not a completion claim |
 | Question | `처리했나요?`, `Did I fix the comments?` | the user's/assistant's own question, not an assertion |
 | Quoted line (`>` prefix) | `> 처리했다고 보고했다` | reporting that a claim was made, not making one |
+| Fenced block (` ``` ` / `~~~`) | a bot comment pasted verbatim, ending in `리뷰 코멘트 처리 완료` | the other standard way of reproducing someone else's text (#1444) |
+
+**Known gap — inline code and indented blocks.** The fence skip covers
+` ``` `/`~~~` blocks only. A claim inside an inline-code span
+(`` `리뷰 코멘트 처리 완료` ``) and inside a four-space-indented code block still
+fires. Both are ways of reproducing text, but inline code is far more often an
+identifier than a whole sentence, and a four-space indent is ambiguous inside
+list items — neither was the reported case (#1444).
+
+**Known gap — fence handling is the seventh local copy.** Six other hooks
+compile their own fence-opener regex, with subtly different rules — the leading
+bound is `^ {0,3}`, `^(\s*)`, `^[ \t]*` or nothing, and only some check that
+the closing run matches the opening character and length:
+`composed-command-gate`, `exclusion-probe-gate`,
+`menu-mutation-tier-advisory`, `artifact-verdict-evidence-gate`,
+`block-pr-without-caller-evidence`, `block-pr-without-precommit-evidence`.
+That list is what this scan returns:
+
+```sh
+grep -rn 'r"[^"]*`{3,}' hooks --include='*.py'
+```
+
+`anchor-comment-gate` handles fences too, with a fixed three-backtick pattern
+the scan above does not reach. This hook mirrors the most complete of the six
+(`exclusion-probe-gate`) with CommonMark's three-space bound.
+Consolidating them into `hooks/_lib/` is a separate change: it touches six
+hooks, each with its own fixtures, so folding it into #1444 would bundle a
+cross-hook refactor into a one-narrowing fix.
 
 **Known accepted gap — double negation.** `처리하지 않은 게 아닙니다`
 ("it is not the case that it was not processed" — i.e. affirmative) still
@@ -246,6 +274,11 @@ evidence), no PR subject (silent — out of this hook's scope), subject present
 but no claim verb (silent), negated claim EN/KR (silent), the documented
 double-negation gap (silent, accepted trade-off), hedged EN/KR forms
 (silent), question-form EN/KR (silent), a quoted line reporting a claim
-rather than making one (silent), `PRAXIS_PR_CLAIM_ADVISORY` demote
+rather than making one (silent), a claim inside a fenced block in five
+variants — plain, info string, tilde, a longer fence whose inner short run does
+not close it, and an unclosed fence (all silent) — against a claim in prose
+beside a fence and a four-space-indented block, which both still block;
+a processed verb with no PR noun on the line (silent, a property
+`_SUBJECT_RE` already had), `PRAXIS_PR_CLAIM_ADVISORY` demote
 (`systemMessage`, no `decision`), bypass env (silent), `stop_hook_active`
 loop guard (silent), missing transcript (fail-open).
