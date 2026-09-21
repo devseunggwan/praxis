@@ -599,14 +599,16 @@ def dispatch_node_drifts(
     expected_members: set[str],
     dispatch_wrapper_name: str,
     args_wrappers: AbstractSet[str] = frozenset(),
+    if_patterns: AbstractSet[str | None] = frozenset({None}),
 ) -> list[str]:
     """Drift strings for one (event, matcher) group's node shape in a hooks.json.
 
     Pure function (no I/O) so the node-shape half of Rule 14 is unit-testable in
     isolation from the runtime resolver. `expected_members` is the host-kept
-    COLLAPSIBLE member set: non-empty → the group must hold exactly ONE
-    dispatcher node carrying `event matcher host_id` args; empty (the host
-    filtered every member) → no dispatcher node. `args_members` are the group's
+    COLLAPSIBLE member set: non-empty → the group must hold ONE dispatcher node
+    per `if_patterns` partition (`None` = the untagged node, issue #1335), each
+    carrying `event matcher host_id` args and that partition's `if`; empty (the
+    host filtered every member) → no dispatcher node. `args_members` are the group's
     args-declaring members: the build keeps them as STANDALONE nodes (the
     dispatcher cannot forward argv; the runtime resolver excludes them the same
     way — issue #1199 review), so their per-member nodes are expected, not a
@@ -639,12 +641,21 @@ def dispatch_node_drifts(
     present = {_basename(n) for n in member_nodes}
     missing = sorted(args_wrappers - present)
     out: list[str] = []
-    want = 1 if expected_members else 0
+    want = len(if_patterns) if expected_members else 0
     if len(dispatch_nodes) != want:
         out.append(
             f"DISPATCH NODE COUNT {event}/{matcher} host={host_id}: expected "
             f"{want} dispatcher node(s), found {len(dispatch_nodes)}"
         )
+    elif want:
+        found = sorted((str(n.get("if")) for n in dispatch_nodes))
+        expected = sorted(str(p) for p in if_patterns)
+        if found != expected:
+            out.append(
+                f"DISPATCH IF PARTITION {event}/{matcher} host={host_id}: "
+                f"dispatcher node `if` values {found} != manifest partitions "
+                f"{expected}"
+            )
     if missing:
         out.append(
             f"DISPATCH ARGS NODE MISSING {event}/{matcher} host={host_id}: "
@@ -1885,8 +1896,11 @@ def main() -> int:
     # ------------------------------------------------------------------
     def _manifest_members_for(
         event: str, matcher: str | None, host: str
-    ) -> tuple[set[str], set[str], set[str]]:
-        """Return `(collapsible_names, args_names, args_wrappers)` for a group.
+    ) -> tuple[set[str], set[str], set[str], dict[str | None, set[str]]]:
+        """Return `(collapsible_names, args_names, args_wrappers, partitions)`.
+
+        `partitions` splits the collapsible names by `mode.if` (None = the
+        untagged node, issue #1335) — one dispatcher node per key.
 
         args-declaring entries are excluded from the dispatch member set on
         BOTH sides (the build keeps them standalone in `filter_hooks_for_host`;
@@ -1898,6 +1912,7 @@ def main() -> int:
         names: set[str] = set()
         args_names: set[str] = set()
         args_wrappers: set[str] = set()
+        partitions: dict[str | None, set[str]] = {}
         for hook in manifest["hooks"]:
             hosts = hook.get("hosts")
             if hosts is not None and host not in hosts:
@@ -1911,7 +1926,10 @@ def main() -> int:
                     args_wrappers.add(_build._wrapper_filename(hook))
                 else:
                     names.add(hook["name"])
-        return names, args_names, args_wrappers
+                    partitions.setdefault(
+                        _dispatch.member_if_pattern(hook), set()
+                    ).add(hook["name"])
+        return names, args_names, args_wrappers, partitions
 
     # Sentinel canary: the build renders DISPATCH_NO_MATCHER_ARG into a
     # matcher-less dispatcher node's command; the runtime maps NO_MATCHER_ARG
@@ -1936,8 +1954,8 @@ def main() -> int:
 
     for event, matcher in sorted(dispatch_groups, key=lambda em: (em[0], em[1] or "")):
         for host_id, hooks_path in hooks_outputs:
-            expected_members, args_excluded, args_wrappers = _manifest_members_for(
-                event, matcher, host_id
+            expected_members, args_excluded, args_wrappers, partitions = (
+                _manifest_members_for(event, matcher, host_id)
             )
 
             # (b) runtime resolution must match the manifest, with no dup, and
@@ -1983,6 +2001,7 @@ def main() -> int:
                     expected_members,
                     _build.DISPATCH_WRAPPER_NAME,
                     args_wrappers=args_wrappers,
+                    if_patterns=set(partitions),
                 )
             )
 
