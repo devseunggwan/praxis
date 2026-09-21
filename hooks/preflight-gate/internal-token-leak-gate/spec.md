@@ -61,9 +61,12 @@ hook therefore asks GitHub â€” `gh api repos/<owner>/<repo> --jq .visibility` â€
 and blocks only on `public`. `private` and `internal` are silent, because an
 org's own names belong in its own closed repos.
 
-Answers are cached at `~/.praxis/cache/internal-token-visibility.json` for 24h,
-keyed by lowercased slug, so a session's repeated commits cost one round trip.
-`UNRESOLVED` is never cached: the next call gets a fresh try.
+A `public` answer is cached at `~/.praxis/cache/internal-token-visibility.json`
+for 24h, keyed by lowercased slug, so a session's repeated commits to a public
+repo cost one round trip. `private` and `internal` are never cached: a repo made
+public inside the window would otherwise take the very write this gate exists
+to stop, while a stale `public` only over-blocks. The lookup runs only after a
+token hit, so re-asking costs little. `UNRESOLVED` is never cached either.
 
 ### Outcomes
 

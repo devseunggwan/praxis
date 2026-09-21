@@ -216,6 +216,15 @@ def test_visibility_is_cached_per_repo(repo: Path, env: dict[str, str]) -> None:
     assert gh_calls(env) == 1
 
 
+def test_private_is_not_cached(repo: Path, env: dict[str, str]) -> None:
+    """A repo made public after a private answer must block on the next write."""
+    env["FAKE_GH_VIS"] = "private"
+    assert run('git commit -m "feat: acme"', repo, env).returncode == 0
+    env["FAKE_GH_VIS"] = "public"
+    assert run('git commit -m "feat: acme"', repo, env).returncode == 2
+    assert gh_calls(env) == 2
+
+
 def test_unresolved_is_not_cached(repo: Path, env: dict[str, str]) -> None:
     env["FAKE_GH_VIS"] = "fail"
     run('git commit -m "feat: acme"', repo, env)

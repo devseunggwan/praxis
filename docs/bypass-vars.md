@@ -174,7 +174,7 @@ per-hook `spec.md` before promoting any of them.
 | `PRAXIS_MEMORY_DIR` | memory store dir | `memory-hint`, `momentum-rule-retrieval-gate`, `memory-distillation-fields-gate` |
 | `PRAXIS_GH_LABEL_CACHE_PATH` | `~/.praxis/cache/gh-label-cache.json` | `gh-label-verify` |
 | `PRAXIS_GH_LABEL_CACHE_TTL_SEC` | `300` | `gh-label-verify` |
-| `PRAXIS_INTERNAL_TOKEN_CACHE_PATH` | `~/.praxis/cache/internal-token-visibility.json` | `internal-token-leak-gate` — repo-visibility answers, 24h TTL |
+| `PRAXIS_INTERNAL_TOKEN_CACHE_PATH` | `~/.praxis/cache/internal-token-visibility.json` | `internal-token-leak-gate` — `public` repo-visibility answers only, 24h TTL |
 | `PRAXIS_SESSION_INTENT_FILE` | `${TMPDIR}/praxis-session-intent-<sid>.json` | `session-intent` |
 | `PRAXIS_WORKTREE_PRUNE_SNAPSHOT_FILE` | `${TMPDIR}/praxis-worktree-prune-snapshot-<sid>.json` | `worktree-prune-snapshot-gate` |
 | `PRAXIS_MD_READ_HISTORY_FILE` | `${TMPDIR}/praxis-md-read-history-<sid>.json` | `pre-edit-md-escape-advisory` |

@@ -20,9 +20,10 @@ Surfaces scanned (one live command start at a time):
 
 Only a hit whose target repo GitHub reports as `public` blocks. The target is
 `--repo` / the `repos/<owner>/<repo>` endpoint for gh, and the `origin` remote
-of the directory the command runs in otherwise. The visibility answer is
-cached per repo (24h). Private and internal repos are silent — an org's own
-name belongs there.
+of the directory the command runs in otherwise. A `public` answer is cached
+per repo (24h); a private or internal one is re-asked on every hit, so a repo
+made public mid-window is caught. Private and internal repos are silent — an
+org's own name belongs there.
 
 Fail-open (ETHOS: infrastructure failure degrades to "no hook"):
   - visibility cannot be resolved (gh missing, offline, 404, no budget) —
@@ -340,7 +341,12 @@ def _gh_visibility(repo: str) -> str | None:
 
 
 def repo_visibility(repo: str, session_id: str | None) -> str:
-    """`public` / `private` / `internal`, or UNRESOLVED. Cached per repo."""
+    """`public` / `private` / `internal`, or UNRESOLVED. Only `public` is cached.
+
+    A cached non-public answer would let a repo made public inside the TTL take
+    the write the gate exists to stop. A stale `public` only over-blocks, and the
+    lookup runs only when a token already hit, so re-asking costs little.
+    """
     key = repo.lower()
     path = os.environ.get(CACHE_PATH_ENV) or resolve_cache_file(
         CACHE_FILE, session_id=session_id
@@ -350,16 +356,17 @@ def repo_visibility(repo: str, session_id: str | None) -> str:
     now = time.time()
     if (
         isinstance(entry, dict)
-        and entry.get("vis") in _KNOWN_VISIBILITY
+        and entry.get("vis") == PUBLIC
         and isinstance(entry.get("ts"), (int, float))
         and now - entry["ts"] < CACHE_TTL_SEC
     ):
-        return entry["vis"]
+        return PUBLIC
     vis = _gh_visibility(repo)
     if vis is None:
         return UNRESOLVED  # never cached: the next call gets a fresh try
-    cache[key] = {"vis": vis, "ts": now}
-    _write_cache(path, cache)
+    if vis == PUBLIC:
+        cache[key] = {"vis": vis, "ts": now}
+        _write_cache(path, cache)
     return vis
 
 
