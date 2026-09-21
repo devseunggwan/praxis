@@ -522,7 +522,10 @@ _PULL_TOKEN_RE = re.compile(r"^(?:\S*/pull/(\d+)|(\d+))$")
 # URL positional; nothing else in a transcript resolves one, since an approval
 # is prose and names no repo. `gh -R` accepts `[HOST/]OWNER/REPO`, so two and
 # three segments both parse and the host is dropped — the same repo reached
-# with and without an explicit host is one target.
+# with and without an explicit host is one target. The cost is that one
+# OWNER/REPO on two hosts (github.com and an enterprise server) also reads as
+# one target; keeping the host would instead split the far commoner
+# with-and-without-host pair into a false conflict.
 _REPO_FLAGS = frozenset({"-R", "--repo"})
 _REPO_SLUG_RE = re.compile(r"^(?:[A-Za-z0-9._-]+/)?([A-Za-z0-9._-]+/[A-Za-z0-9._-]+?)(?:\.git)?$")
 _PULL_URL_REPO_RE = re.compile(r"([A-Za-z0-9._-]+/[A-Za-z0-9._-]+)/pull/\d+$")
