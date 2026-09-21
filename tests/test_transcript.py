@@ -503,6 +503,10 @@ _CONSUMERS = {
     HOOKS / "completion-verify" / "denied-action-report-gate" / "impl.py":
         ["load_stop_turn", "resolve_stop_transcript", "scan_cursor_path",
          "scan_user_rejections", "stop_last_assistant_text"],
+    # Reads the Stop turn only: the retraction sentence and the probe that
+    # should accompany it both live in the message being emitted (#1442).
+    HOOKS / "completion-verify" / "retraction-probe-advisory" / "impl.py":
+        ["load_stop_turn", "stop_last_assistant_text"],
     HOOKS / "completion-verify" / "negative-existence-verdict-gate" / "impl.py":
         ["load_current_turn", "extract_last_assistant_text"],
     HOOKS / "completion-verify" / "bypass-route-signal" / "impl.py":

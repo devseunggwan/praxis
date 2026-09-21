@@ -601,6 +601,23 @@ run_case "38 pass: 코멘트 URL 이 없는 출력은 무시" \
   pass PostToolUse "$BROKEN_GH" "git push origin HEAD" \
   "$FIX" Bash "To github.com:owner/repo.git"
 
+# A gh write that publishes no comment must not be audited: its output can
+# carry an anchor URL it merely printed, and a blocking finding about someone
+# else's anchor would deny that mutation. 38b is the positive control — the
+# same fake and the same output DO produce a finding once a comment is posted.
+run_case "38a pass: 코멘트를 게시하지 않는 gh 쓰기는 감사 대상 아님" \
+  pass PostToolUse "$BROKEN_GH" "gh pr edit 42 --body-file anchor.md" \
+  "$FIX" Bash "$COMMENT_URL"
+
+run_case "38b report: 같은 출력이라도 코멘트 게시면 검사한다" \
+  "report:blocking" PostToolUse "$BROKEN_GH" "gh pr comment 42 --body-file anchor.md" \
+  "$FIX" Bash "$COMMENT_URL"
+
+run_case "38c pass: 코멘트 엔드포인트가 아닌 gh api 쓰기도 제외" \
+  pass PostToolUse "$BROKEN_GH" \
+  "gh api --method PATCH repos/owner/repo/pulls/42 -f body=x" \
+  "$FIX" Bash "$COMMENT_URL"
+
 run_case "39 pass: PostToolUse 에서도 바이패스 토큰 유효" \
   pass PostToolUse "$BROKEN_GH" \
   "gh pr comment 42 --body-file anchor.md # anchor-gate: 오프라인, 사유 기록" \
@@ -657,6 +674,123 @@ run_case "41b context(unknown): URL 이 사라진 게시는 검사 미실행으�
   "context:아예 실행하지 못했습니다" PostToolUse "$OK_GH" \
   "gh pr comment 42 --body-file $FIX/ok.md > /dev/null" \
   "$FIX" Bash ""
+
+# ---------------------------------------------------------------------------
+# The command must plausibly have published something (#1421)
+# ---------------------------------------------------------------------------
+# Both ref sources read text a command can carry without having written: the
+# output scan finds an anchor URL a `grep` or a heredoc merely printed, and the
+# endpoint literal is spelled the same by a read-only `gh api` as by a PATCH.
+# Each of the four below reached the network and reported findings against work
+# it never touched. All four run against the STALE fake, so before the fix each
+# one produced a blocking stale-SHA report — `silent` here is the whole delta.
+
+run_case "50 silent: 저장된 앵커 URL 을 출력한 grep 은 검사 대상 아님" \
+  silent PostToolUse "$STALE_GH" "grep -rn issuecomment notes.md" \
+  "$FIX" Bash "notes.md:3:$COMMENT_URL"
+
+run_case "51 silent: URL 을 출력한 python3 heredoc 은 검사 대상 아님" \
+  silent PostToolUse "$STALE_GH" \
+  "$(printf 'python3 - <<%s\nprint("%s")\nEOF' "'EOF'" "$COMMENT_URL")" \
+  "$FIX" Bash "$COMMENT_URL"
+
+# gh sends GET without --method, so this spells the endpoint exactly like the
+# PATCH in case 41 while writing nothing.
+run_case "52 silent: 읽기 전용 gh api 는 엔드포인트가 같아도 게시가 아님" \
+  silent PostToolUse "$STALE_GH" \
+  "gh api /repos/owner/repo/issues/comments/999 --jq .body" \
+  "$FIX" Bash ""
+
+run_case "53 silent: 코멘트를 조회한 gh pr view 는 검사 대상 아님" \
+  silent PostToolUse "$STALE_GH" "gh pr view 42 --json comments" \
+  "$FIX" Bash "$COMMENT_URL"
+
+# The other half of the pair: the precondition must not swallow a real post.
+# Cases 30-41b already cover `gh pr comment`; this pins the `gh api` write,
+# whose method is what `is_gh_external_write` reads.
+run_case "54 report: 쓰기 메서드 gh api 는 그대로 검사된다" \
+  "report:와 다름" PostToolUse "$STALE_GH" \
+  "gh api --method PATCH /repos/owner/repo/issues/comments/999 -F body=@anchor.md" \
+  "$FIX" Bash "$COMMENT_URL"
+
+# ---------------------------------------------------------------------------
+# A closed PR has nothing left to fix (#1421)
+# ---------------------------------------------------------------------------
+# Same stale anchor as case 31, same command, same fake — only the PR's state
+# differs. There it exits 2 with "fix the comment now"; a merged PR cannot be
+# edited into a mergeable one, so the finding stays but stops asking for a write.
+CLOSED_GH=$(mktemp -d) || { echo "FATAL: mktemp -d failed" >&2; exit 1; }
+echo "$CLOSED_GH" >>"$GH_DIRS_FILE"
+cat >"$CLOSED_GH/gh" <<EOF
+#!/usr/bin/env bash
+if [ "\$1" = "api" ]; then cat "$FIX/stale.md"; exit 0; fi
+echo "$SHA main MERGED"
+exit 0
+EOF
+chmod +x "$CLOSED_GH/gh"
+
+run_case "55 context(advisory): 머지된 PR 의 stale 앵커는 블로킹하지 않음" \
+  "context:와 다름" PostToolUse "$CLOSED_GH" "gh pr comment 42 --body-file anchor.md" \
+  "$FIX" Bash "$COMMENT_URL"
+
+run_case "56 context: 데모트된 메시지가 PR state 를 밝힌다" \
+  "context:PR state MERGED" PostToolUse "$CLOSED_GH" \
+  "gh pr comment 42 --body-file anchor.md" "$FIX" Bash "$COMMENT_URL"
+
+# Positive control for 47: the identical fake differing only in the state field
+# still blocks, so `silent`/`context` above measures the state and not the fake.
+OPEN_GH=$(mktemp -d) || { echo "FATAL: mktemp -d failed" >&2; exit 1; }
+echo "$OPEN_GH" >>"$GH_DIRS_FILE"
+cat >"$OPEN_GH/gh" <<EOF
+#!/usr/bin/env bash
+if [ "\$1" = "api" ]; then cat "$FIX/stale.md"; exit 0; fi
+echo "$SHA main OPEN"
+exit 0
+EOF
+chmod +x "$OPEN_GH/gh"
+run_case "57 report: state OPEN 이면 같은 앵커가 그대로 블로킹" \
+  "report:와 다름" PostToolUse "$OPEN_GH" "gh pr comment 42 --body-file anchor.md" \
+  "$FIX" Bash "$COMMENT_URL"
+
+# A malformed heading took an earlier `continue`, so it never reached the state
+# lookup and stayed blocking on a PR nobody can edit into shape (#1451).
+BADREV_CLOSED_GH=$(mktemp -d) || { echo "FATAL: mktemp -d failed" >&2; exit 1; }
+echo "$BADREV_CLOSED_GH" >>"$GH_DIRS_FILE"
+cat >"$BADREV_CLOSED_GH/gh" <<EOF
+#!/usr/bin/env bash
+if [ "\$1" = "api" ]; then cat "$FIX/en-badrev.md"; exit 0; fi
+echo "$SHA main MERGED"
+exit 0
+EOF
+chmod +x "$BADREV_CLOSED_GH/gh"
+
+run_case "58a context(advisory): 머지된 PR 의 malformed heading 은 블로킹하지 않음" \
+  "context:PR state MERGED" PostToolUse "$BADREV_CLOSED_GH" \
+  "gh pr comment 42 --body-file anchor.md" "$FIX" Bash "$COMMENT_URL"
+
+# Positive control: the identical fake differing only in the state field still
+# blocks, so the case above measures the state and not the fixture.
+BADREV_OPEN_GH=$(mktemp -d) || { echo "FATAL: mktemp -d failed" >&2; exit 1; }
+echo "$BADREV_OPEN_GH" >>"$GH_DIRS_FILE"
+cat >"$BADREV_OPEN_GH/gh" <<EOF
+#!/usr/bin/env bash
+if [ "\$1" = "api" ]; then cat "$FIX/en-badrev.md"; exit 0; fi
+echo "$SHA main OPEN"
+exit 0
+EOF
+chmod +x "$BADREV_OPEN_GH/gh"
+
+run_case "58b report: state OPEN 이면 같은 malformed heading 이 그대로 블로킹" \
+  "report:" PostToolUse "$BADREV_OPEN_GH" \
+  "gh pr comment 42 --body-file anchor.md" "$FIX" Bash "$COMMENT_URL"
+
+# A `gh` that answers with two fields predates the state request. Unknown state
+# keeps the old tier rather than buying silence — cases 30-41b run on exactly
+# such a fake, so this is what keeps them meaningful.
+run_case "58 report: state 를 못 읽으면 기존 동작 유지" \
+  "report:와 다름" PostToolUse "$STALE_GH" "gh pr comment 42 --body-file anchor.md" \
+  "$FIX" Bash "$COMMENT_URL"
+
 
 # A post that failed published nothing. Without the tool_response check the
 # URL-loss branch reads the anchor body out of the *command* and reports an

@@ -110,7 +110,7 @@ fail at execution time with the original error.
   "hookSpecificOutput": {
     "hookEventName": "PreToolUse",
     "permissionDecision": "deny",
-    "permissionDecisionReason": "BLOCKED: gh pr view --json has invalid field(s): 'merged' (did you mean 'mergedAt'?). Run 'gh pr view --json help' to see all valid fields. Sample valid fields: ..."
+    "permissionDecisionReason": "[praxis:gh-json-validator] BLOCKED: gh pr view --json has invalid field(s): 'merged' (did you mean 'mergedAt'?). Run 'gh pr view --json help' to see all valid fields. Sample valid fields: ..."
   }
 }
 ```

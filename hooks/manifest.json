@@ -423,7 +423,7 @@
       "mode": {
         "strict_env": "PRAXIS_PR_STATE_REFETCH_STRICT",
         "external_commands": [
-          "gh pr view <N> --json state,mergeStateStatus"
+          "gh pr view <N> --json state,mergeStateStatus,mergeable,isDraft"
         ]
       }
     },
@@ -513,7 +513,7 @@
       "review_by": "2026-12-04"
     },
     {
-      "name": "zsh-word-split-advisory",
+      "name": "zsh-dialect-advisory",
       "role": "advisory-nudge",
       "event": "PreToolUse",
       "matcher": "Bash",
@@ -879,6 +879,9 @@
       "mode": {
         "bypass_env": [
           "PRAXIS_HOOK_BYPASS_SKILL_GATE"
+        ],
+        "external_commands": [
+          "git remote get-url origin"
         ]
       }
     },
@@ -1431,6 +1434,18 @@
       "mode": {
         "bypass_env": [
           "PRAXIS_PROSE_OPTION_MENU_BYPASS"
+        ]
+      }
+    },
+    {
+      "name": "retraction-probe-advisory",
+      "role": "completion-verify",
+      "event": "Stop",
+      "timeout": 10,
+      "review_by": "2026-12-18",
+      "mode": {
+        "bypass_env": [
+          "PRAXIS_RETRACTION_PROBE_BYPASS"
         ]
       }
     },
