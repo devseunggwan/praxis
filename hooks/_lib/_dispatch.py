@@ -23,6 +23,11 @@ every hook event; exactly these lanes are aggregated:
   PreToolUse permission lane (ADR-0002 §2.2):
     - any hook -> deny  (exit 2, or `permissionDecision: "deny"` on stdout) -> deny
     - else any hook -> ask (`permissionDecision: "ask"` on stdout)          -> ask
+      (issue #1477: every OTHER member's non-decision `additionalContext` is
+      folded into the winning ask's `hookSpecificOutput` before it is
+      written, so a sibling advisory is not silently dropped on the exact
+      call it warned about; deny already returns before later members run —
+      see the loop below — so there is no sibling result left to fold there)
     (the substring marker probes run on PreToolUse groups only, so quoted
     marker text in another event's context cannot fake a decision; exit-2
     denies are event-agnostic)
@@ -638,14 +643,33 @@ def _run_group(
 
     # Most-restrictive decision wins: deny > ask > allow. Deny already returned
     # from the loop above, so only ask is left to outrank a plain allow. The
-    # FIRST ask JSON on stdout is surfaced — concatenating two decision objects
-    # would be invalid JSON, and Claude Code surfaces one decision anyway.
-    # Detection is role-agnostic within PreToolUse, since some advisory-nudge
-    # hooks also emit ask — see ADR-0002 §2.2.
+    # FIRST ask JSON on stdout is surfaced as the decision — concatenating two
+    # decision objects would be invalid JSON, and Claude Code surfaces one
+    # decision anyway. Detection is role-agnostic within PreToolUse, since
+    # some advisory-nudge hooks also emit ask — see ADR-0002 §2.2.
     if is_pretooluse:
-        ask = next((so for _rc, so, _se in results if _ASK_MARKER in so), None)
-        if ask is not None:
-            sys.stdout.write(ask)
+        ask_idx = next(
+            (i for i, (_rc, so, _se) in enumerate(results) if _ASK_MARKER in so),
+            None,
+        )
+        if ask_idx is not None:
+            ask_so = results[ask_idx][1]
+            # Issue #1477: every OTHER member's non-decision additionalContext
+            # is folded into the ask before it goes out. Without this, the
+            # moment most worth a sibling's warning (an irreversible command
+            # is about to be approved) is the one moment that dropped it — the
+            # ask short-circuits here exactly like the plain-allow path does
+            # below, so a sibling's context never reaches the later merge.
+            siblings = [
+                so
+                for i, (rc, so, _se) in enumerate(results)
+                if i != ask_idx
+                and so
+                and rc != 2
+                and _DENY_MARKER not in so
+                and _ASK_MARKER not in so
+            ]
+            sys.stdout.write(_merge_ask_with_context(ask_so, siblings, event))
             return 0
 
     # Stop decision lane (issue #1169): a Stop hook blocks via a top-level
@@ -859,6 +883,57 @@ def _payload_tool_input(payload_raw: str) -> dict:
         return {}
     tool_input = obj.get("tool_input") if isinstance(obj, dict) else None
     return tool_input if isinstance(tool_input, dict) else {}
+
+
+def _merge_ask_with_context(ask_so: str, sibling_so: list[str], event: str) -> str:
+    """Fold sibling non-decision `additionalContext` into the winning ask (#1477).
+
+    `ask_so` is the exact stdout string the ask member wrote; `sibling_so` is
+    every OTHER member's stdout that reached this point (deny already returned
+    earlier, so none of these are decisions). Live-measured on Claude Code
+    2.1.278 (session `e4e292a3`, 2026-09-21): a `hookSpecificOutput` carrying
+    both `permissionDecision: "ask"` and `additionalContext` in the SAME
+    object produces a separate `hook_additional_context` transcript
+    attachment — rendered to the model as its own
+    `<system-reminder>PreToolUse:Bash hook additional context: …</system-reminder>`
+    block — independently of whether the ask is approved or denied. So this
+    merge is not a guess about undocumented behavior; it reproduces a shape
+    already confirmed to reach the model.
+
+    Fail-open: if `ask_so` does not parse into the expected
+    `{"hookSpecificOutput": {...}}` shape, it is returned byte-for-byte
+    unchanged — a malformed ask must still reach the model as a decision even
+    when this merge cannot enrich it. A sibling that fails to parse, or whose
+    `hookEventName` does not match the group's own event, is dropped rather
+    than surfaced under the wrong event (mirrors `_merge_hook_specific_output`).
+    """
+    try:
+        obj = json.loads(ask_so)
+    except ValueError:
+        return ask_so
+    hso = obj.get("hookSpecificOutput") if isinstance(obj, dict) else None
+    if not isinstance(hso, dict):
+        return ask_so
+    chunks: list[str] = []
+    existing = hso.get("additionalContext")
+    if isinstance(existing, str) and existing:
+        chunks.append(existing)
+    for raw in sibling_so:
+        try:
+            s_obj = json.loads(raw)
+        except ValueError:
+            continue
+        s_hso = s_obj.get("hookSpecificOutput") if isinstance(s_obj, dict) else None
+        if not isinstance(s_hso, dict):
+            continue
+        if str(s_hso.get("hookEventName") or "") != event:
+            continue
+        text = s_hso.get("additionalContext")
+        if isinstance(text, str) and text:
+            chunks.append(text)
+    if chunks:
+        hso["additionalContext"] = "\n\n".join(chunks)
+    return json.dumps(obj)
 
 
 def _merge_hook_specific_output(

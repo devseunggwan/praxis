@@ -125,12 +125,20 @@ Net: 35 hooks fire on a `Bash` call, **32 are consolidated**, 3 stay independent
 
 Reproduces the current multi-process semantics:
 
-| Condition (first match wins)                                | Dispatcher result                     |
-| ----------------------------------------------------------- | ------------------------------------- |
-| any hook → `deny` (exit 2, or `permissionDecision: "deny"`) | propagate `deny` (+ reasons)          |
-| else any hook → `ask` (`permissionDecision: "ask"`)         | propagate `ask` (+ reasons)           |
-| else any `advisory-nudge` stderr/`additionalContext`        | accumulate and emit as context, allow |
-| else                                                        | exit 0 (transparent pass-through)     |
+| Condition (first match wins)                                | Dispatcher result                                                                                                           |
+| ----------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| any hook → `deny` (exit 2, or `permissionDecision: "deny"`) | propagate `deny` (+ reasons); returns before later members run, so nothing else to fold                                     |
+| else any hook → `ask` (`permissionDecision: "ask"`)         | propagate `ask` (+ reasons), plus every OTHER member's non-decision `additionalContext` folded into the SAME object (#1477) |
+| else any `advisory-nudge` stderr/`additionalContext`        | accumulate and emit as context, allow                                                                                       |
+| else                                                        | exit 0 (transparent pass-through)                                                                                           |
+
+Before #1477, the `ask` row surfaced only the winning member's own JSON —
+every sibling's `additionalContext` was dropped on exactly the calls most
+worth a warning (an ask is usually an irreversible command awaiting
+approval). `deny` keeps the short-circuit: it returns from the aggregation
+loop the moment a member computes it, for the "shorter exposure window"
+reason `_dispatch._run_group`'s own docstring gives, so no sibling result
+exists yet to fold in.
 
 Aggregation is **role-agnostic**: the dispatcher classifies each member's result
 purely by exit code (`2`) or the `permissionDecision` marker on stdout, never by
