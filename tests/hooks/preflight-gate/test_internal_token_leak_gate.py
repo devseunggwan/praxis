@@ -52,6 +52,9 @@ def env(tmp_path: Path) -> dict[str, str]:
         "PRAXIS_INTERNAL_TOKENS": TOKENS,
         "FAKE_GH_VIS": "public",
         "FAKE_GH_LOG": str(tmp_path / "gh.log"),
+        # Without this the cache resolves through an inherited PRAXIS_HOME and the
+        # call-count assertions read another case's (or the operator's) answers.
+        "PRAXIS_INTERNAL_TOKEN_CACHE_PATH": str(tmp_path / "visibility.json"),
     }
 
 
