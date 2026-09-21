@@ -275,6 +275,57 @@ run_case silent "question-form-en" '{}'
 build_transcript "> 리뷰 코멘트를 처리했다고 보고했다 (사용자 인용)" none
 run_case silent "quoted-line" '{}'
 
+# --- fenced block: the other way of reproducing someone else's text (#1444) -
+# A bot comment pasted verbatim inside a fence asserts nothing, and the block
+# used to fire on the verb in that pasted line. Variants pinned separately:
+# a plain fence, an info string, a tilde fence, a longer fence whose inner
+# short run must not close it, and an unclosed fence (which runs to the end of
+# the message, the way it renders). The fence markers come from a variable so
+# the file carries no backslash-escaped backticks — escaping them inside the
+# `$(printf ...)` argument put literal backslashes into the fixture text and
+# silently broke the fence it was supposed to build.
+F3=$(printf '\140\140\140')
+F4=$(printf '\140\140\140\140')
+CLAIM='리뷰 코멘트 처리 완료'
+
+build_transcript "$(printf '봇 원문:\n\n%s\n%s\n%s\n\n이 턴은 아무것도 바꾸지 않았습니다.' "$F3" "$CLAIM" "$F3")" none
+run_case silent "fenced-claim-plain" '{}'
+build_transcript "$(printf '봇 원문:\n\n%stext\n%s\n%s' "$F3" "$CLAIM" "$F3")" none
+run_case silent "fenced-claim-info-string" '{}'
+build_transcript "$(printf '봇 원문:\n\n~~~\n%s\n~~~' "$CLAIM")" none
+run_case silent "fenced-claim-tilde" '{}'
+build_transcript "$(printf '%s\n%s\n%s\n%s\n%s' "$F4" "$F3" "$CLAIM" "$F3" "$F4")" none
+run_case silent "fenced-claim-nested-run" '{}'
+build_transcript "$(printf '봇 원문:\n\n%s\n%s' "$F3" "$CLAIM")" none
+run_case silent "fenced-claim-unclosed" '{}'
+# A closing fence carries nothing after its run (CommonMark), so a line like
+# ```python INSIDE a block is content, not a closer. Read as one it ends the
+# block early and hands the quoted claim back to the scan — the exact block this
+# gate exists to prevent. The two cases below differ only in that suffix.
+build_transcript "$(printf '봇 원문:\n\n%s\n로그 한 줄\n%spython\n%s\n%s' "$F3" "$F3" "$CLAIM" "$F3")" none
+run_case silent "fenced-claim-inner-info-is-not-a-closer" '{}'
+build_transcript "$(printf '봇 원문:\n\n%s\n로그 한 줄\n%s\n%s\n%s' "$F3" "$F3" "$CLAIM" "$F3")" none
+run_case block "fenced-claim-bare-closer-does-close" '{}'
+# The opener carries the mirror rule: a backtick fence's info string may hold no
+# backtick, so this line opens nothing and the claim under it is ordinary prose.
+build_transcript "$(printf '%sa\140b\n%s' "$F3" "$CLAIM")" none
+run_case block "backtick-info-with-backtick-opens-nothing" '{}'
+# …while a claim OUTSIDE the fence still blocks — the skip is scoped to the
+# block, not to any message that happens to contain one.
+build_transcript "$(printf '%s\n무관한 로그\n%s\n\n리뷰 코멘트 3건 처리했습니다.' "$F3" "$F3")" none
+run_case block "fenced-block-does-not-excuse-prose-claim" '{}'
+# A four-space indent is an indented code block, not a fence; this pins that the
+# fence matcher keeps CommonMark's three-space bound rather than swallowing it.
+build_transcript "$(printf '    %s\n%s\n    %s' "$F3" "$CLAIM" "$F3")" none
+run_case block "four-space-indent-is-not-a-fence" '{}'
+
+# --- a processed verb with no PR noun in the line was ALREADY silent ---------
+# The issue proposed requiring a PR-surface term near the verb; _SUBJECT_RE has
+# required one on the same line since the hook was written. Pinned so the
+# property cannot regress unnoticed.
+build_transcript "채널에 올라온 요청은 처리 완료했습니다." none
+run_case silent "verb-without-pr-noun-in-line" '{}'
+
 # --- advisory demote -> systemMessage instead of decision:block -------------
 build_transcript "Fixed the review comments." none
 run_case advisory "advisory-demote" '{}' PRAXIS_PR_CLAIM_ADVISORY=1

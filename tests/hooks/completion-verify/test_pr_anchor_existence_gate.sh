@@ -175,11 +175,43 @@ build_transcript "[$(bash_use t1 'gh pr create --title x --body y'),$(result t1 
 run_case advisory "escalation-first-stop-advisory" '{"session_id":"sESC1"}' PRAXIS_FIRE_TELEMETRY_FILE="$LEDGER"
 run_case block "escalation-second-stop-blocks" '{"session_id":"sESC1"}' PRAXIS_FIRE_TELEMETRY_FILE="$LEDGER"
 
-# forced advisory pins even on repeat fires
+# The variable is a cap on advisories, not a switch (#1443). `forever` is the
+# only spelling that never escalates, and it is the pair above's positive
+# control: without a case that DOES stay advisory, "the cap held" and "the gate
+# never fired" are the same observation.
 LEDGER2=$(mktemp); rm -f "$LEDGER2"
 build_transcript "[$(bash_use t1 'gh pr create --title x --body y'),$(result t1 false 'https://github.com/o/r/pull/179')]"
-run_case advisory "advisory-env-first" '{"session_id":"sESC2"}' PRAXIS_FIRE_TELEMETRY_FILE="$LEDGER2" PRAXIS_PR_ANCHOR_ADVISORY=1
-run_case advisory "advisory-env-pins-repeat" '{"session_id":"sESC2"}' PRAXIS_FIRE_TELEMETRY_FILE="$LEDGER2" PRAXIS_PR_ANCHOR_ADVISORY=1
+run_case advisory "advisory-forever-first" '{"session_id":"sESC2"}' PRAXIS_FIRE_TELEMETRY_FILE="$LEDGER2" PRAXIS_PR_ANCHOR_ADVISORY=forever
+run_case advisory "advisory-forever-pins-repeat" '{"session_id":"sESC2"}' PRAXIS_FIRE_TELEMETRY_FILE="$LEDGER2" PRAXIS_PR_ANCHOR_ADVISORY=forever
+
+# =1 used to mean "never block". It now means one advisory, then the block —
+# the behaviour change the issue asks for, and the case that fails against the
+# pre-fix gate.
+LEDGER3=$(mktemp); rm -f "$LEDGER3"
+build_transcript "[$(bash_use t1 'gh pr create --title x --body y'),$(result t1 false 'https://github.com/o/r/pull/180')]"
+run_case advisory "advisory-one-first" '{"session_id":"sESC3"}' PRAXIS_FIRE_TELEMETRY_FILE="$LEDGER3" PRAXIS_PR_ANCHOR_ADVISORY=1
+run_case block "advisory-one-then-blocks" '{"session_id":"sESC3"}' PRAXIS_FIRE_TELEMETRY_FILE="$LEDGER3" PRAXIS_PR_ANCHOR_ADVISORY=1
+
+# A cap above 1 delays the block by exactly that many fires.
+LEDGER4=$(mktemp); rm -f "$LEDGER4"
+build_transcript "[$(bash_use t1 'gh pr create --title x --body y'),$(result t1 false 'https://github.com/o/r/pull/181')]"
+run_case advisory "advisory-two-first" '{"session_id":"sESC4"}' PRAXIS_FIRE_TELEMETRY_FILE="$LEDGER4" PRAXIS_PR_ANCHOR_ADVISORY=2
+run_case advisory "advisory-two-second" '{"session_id":"sESC4"}' PRAXIS_FIRE_TELEMETRY_FILE="$LEDGER4" PRAXIS_PR_ANCHOR_ADVISORY=2
+run_case block "advisory-two-then-blocks" '{"session_id":"sESC4"}' PRAXIS_FIRE_TELEMETRY_FILE="$LEDGER4" PRAXIS_PR_ANCHOR_ADVISORY=2
+
+# A value the gate cannot read falls to cap 1, never to silence — inheriting an
+# off switch from a typo is the failure this gate reports.
+LEDGER5=$(mktemp); rm -f "$LEDGER5"
+build_transcript "[$(bash_use t1 'gh pr create --title x --body y'),$(result t1 false 'https://github.com/o/r/pull/182')]"
+run_case advisory "advisory-unreadable-first" '{"session_id":"sESC5"}' PRAXIS_FIRE_TELEMETRY_FILE="$LEDGER5" PRAXIS_PR_ANCHOR_ADVISORY=true
+run_case block "advisory-unreadable-then-blocks" '{"session_id":"sESC5"}' PRAXIS_FIRE_TELEMETRY_FILE="$LEDGER5" PRAXIS_PR_ANCHOR_ADVISORY=true
+
+# 0 and a negative are readable integers that would disable the gate entirely;
+# they clamp to 1 for the same reason.
+LEDGER6=$(mktemp); rm -f "$LEDGER6"
+build_transcript "[$(bash_use t1 'gh pr create --title x --body y'),$(result t1 false 'https://github.com/o/r/pull/183')]"
+run_case advisory "advisory-zero-first" '{"session_id":"sESC6"}' PRAXIS_FIRE_TELEMETRY_FILE="$LEDGER6" PRAXIS_PR_ANCHOR_ADVISORY=0
+run_case block "advisory-zero-then-blocks" '{"session_id":"sESC6"}' PRAXIS_FIRE_TELEMETRY_FILE="$LEDGER6" PRAXIS_PR_ANCHOR_ADVISORY=0
 
 # =====================================================================
 # Tiers / env
