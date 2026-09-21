@@ -13,12 +13,14 @@ was NOT invoked this session.
 Set this env var (in your shell profile or Claude Code `env` config) to a
 comma-separated list of entries, each:
 
-```
-<command-pattern>=><required-skill>
+```text
+[repo=<owner>/<repo>:]<command-pattern>=><required-skill>
 ```
 
 The `=>` separator is used because skill names routinely contain colons
-(e.g. `org:skill-name`) and the arrow-right is unambiguous.
+(e.g. `org:skill-name`) and the arrow-right is unambiguous. The optional
+`repo=` head scopes one entry to a single repository — see
+[Repository scope](#repository-scope) below.
 
 ### Supported command patterns
 
@@ -37,14 +39,39 @@ fall back to a naive contiguous non-flag token subsequence match.
 
 ### Example
 
-Gate `gh pr create` behind `example-dev-hub:create-hub-pr` AND
-`gh pr merge` behind `praxis:codex-review-wrap`:
+Gate `gh pr create` behind `acme:create-pr` AND `gh pr merge` behind
+`praxis:codex-review-wrap`:
 
 ```bash
 export PRAXIS_SKILL_GATED_COMMANDS="\
-gh pr create=>example-dev-hub:create-hub-pr,\
+gh pr create=>acme:create-pr,\
 gh pr merge=>praxis:codex-review-wrap"
 ```
+
+### Repository scope
+
+An entry headed with `repo=<owner>/<repo>:` fires only in that repository:
+
+```bash
+export PRAXIS_SKILL_GATED_COMMANDS="\
+repo=acme/web:gh pr create=>acme:code-review,\
+gh pr merge=>praxis:merge-briefing"
+```
+
+`gh pr create` is gated inside `acme/web` and nowhere else; `gh pr merge` is
+gated everywhere. The repository is read from the cwd's `origin` remote and
+compared case-insensitively, so the HTTPS and SSH forms of the same origin
+behave alike.
+
+**Set this var at user level and it reaches every session in every
+repository** — including repos where the named skill does not exist, where the
+only exits are invoking a skill that does not belong there or reaching for the
+bypass token. Scope such an entry, or put it in that project's
+`.claude/settings.local.json` instead.
+
+Outside a git repository, with no `origin`, or with a non-GitHub `origin`, a
+scoped entry is silently inert — no block and no advisory, because a mapping
+for another repository has nothing to say there.
 
 ### Parsing rules
 
@@ -54,6 +81,9 @@ gh pr merge=>praxis:codex-review-wrap"
   skill names containing colons are fully supported).
 - Malformed entries (no `=>` separator, or empty pattern/skill) are silently
   skipped — fail-safe pass.
+- A `repo=` head whose value is not an `owner/repo` slug skips its entry too.
+  It does **not** fall through to the global scope: a typo in a qualifier must
+  not silently widen the gate to every repository.
 
 ## Bypass: `PRAXIS_HOOK_BYPASS_SKILL_GATE`
 

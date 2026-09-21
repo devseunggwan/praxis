@@ -18,15 +18,28 @@ Config env vars:
     (e.g. ``org:skill-name``) and arrow-right is unambiguous.  The command
     pattern is matched after normalisation (see below).  Example:
 
-      "gh pr create=>example-dev-hub:create-hub-pr,gh pr merge=>praxis:codex-review-wrap"
+      "gh pr create=>acme:create-pr,gh pr merge=>praxis:codex-review-wrap"
 
     Supported patterns (matched against the normalised token sequence):
       "gh pr create"   — matches ``gh [global-flags] pr create ...``
       "gh pr merge"    — matches ``gh [global-flags] pr merge ...``
       "git push origin" — matches ``git [global-flags] push origin ...``
 
+    An entry may be scoped to one repository by heading it with
+    ``repo=<owner>/<repo>:`` (issue #1423):
+
+      "repo=acme/web:gh pr create=>acme:code-review,gh pr merge=>praxis:merge-briefing"
+
+    A scoped entry applies only where the cwd's GitHub origin matches that
+    slug (case-insensitively) and is otherwise inert — no block, no advisory.
+    An unscoped entry keeps today's global behaviour. This exists because the
+    env var is usually set at user level, so it reaches every session in every
+    repository, while the skill it names often exists in one project only.
+
     Malformed entries (no ``=>`` separator or empty fields) are silently
-    skipped — fail-safe PASS.
+    skipped — fail-safe PASS. A ``repo=`` head whose value is not a
+    well-formed slug skips the entry too rather than falling through to the
+    global scope: a typo must not widen a gate.
 
   PRAXIS_HOOK_BYPASS_SKILL_GATE
     When set to any non-empty value, the hook exits 0 (pass) without checking.
@@ -57,11 +70,13 @@ granularity as the other skill-gate hooks.
 from __future__ import annotations
 
 import os
+import re
 import sys
 from pathlib import Path
 from typing import NamedTuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "_lib"))
+from _git import origin_slug  # type: ignore[import-not-found]  # noqa: E402
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
 from _transcript import TranscriptReadError, iter_transcript_bounded, json_needle  # type: ignore[import-not-found]  # noqa: E402
 from _payload import read_payload  # type: ignore[import-not-found]  # noqa: E402
@@ -77,19 +92,38 @@ _MAX_BYTES = 50 * 1024 * 1024
 class GatedCommand(NamedTuple):
     pattern: str        # normalised pattern string, e.g. "gh pr create"
     required_skill: str  # qualified skill name, may contain colons
+    repo: str | None = None  # lowercased owner/repo this entry is scoped to
+
+
+# `repo=<owner>/<repo>:` heading an entry. The slug cannot contain a colon, so
+# the first colon after it ends the qualifier and the rest is the ordinary
+# `<pattern>=><skill>` body — a skill name's own colons are never reached.
+_REPO_QUALIFIER_RE = re.compile(
+    r"^repo=(?P<slug>[A-Za-z0-9._-]+/[A-Za-z0-9._-]+):(?P<rest>.+)$",
+    re.IGNORECASE,
+)
 
 
 def _parse_gated_commands(raw: str) -> list[GatedCommand]:
     """Parse PRAXIS_SKILL_GATED_COMMANDS into a list of GatedCommand.
 
-    Each comma-separated entry: <command-pattern>=><required-skill>
-    Entries with no ``=>`` separator or empty fields are silently skipped.
+    Each comma-separated entry: ``[repo=<owner>/<repo>:]<pattern>=><skill>``.
+    Entries with no ``=>`` separator or empty fields are silently skipped, and
+    so is a `repo=` head whose value is not a well-formed slug — a malformed
+    scope must not silently widen into the global one (issue #1423).
     """
     configs: list[GatedCommand] = []
     for entry in raw.split(","):
         entry = entry.strip()
         if not entry:
             continue
+        repo: str | None = None
+        qualified = _REPO_QUALIFIER_RE.match(entry)
+        if qualified:
+            repo = qualified.group("slug").lower()
+            entry = qualified.group("rest").strip()
+        elif entry.lower().startswith("repo="):
+            continue  # malformed qualifier — never fall through to global
         sep = entry.find("=>")
         if sep == -1:
             continue  # malformed — no separator
@@ -97,7 +131,9 @@ def _parse_gated_commands(raw: str) -> list[GatedCommand]:
         required_skill = entry[sep + 2:].strip()
         if not pattern or not required_skill:
             continue  # malformed — empty field
-        configs.append(GatedCommand(pattern=pattern, required_skill=required_skill))
+        configs.append(
+            GatedCommand(pattern=pattern, required_skill=required_skill, repo=repo)
+        )
     return configs
 
 
@@ -299,6 +335,38 @@ def _command_matches_pattern(tokens: list[str], pattern: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# Repository scope (issue #1423)
+# ---------------------------------------------------------------------------
+
+
+class _Unresolved:
+    """Sentinel: the current repo has not been looked up yet.
+
+    `None` is a real answer here — "this cwd has no GitHub origin" — so it
+    cannot double as "not asked yet" without spawning `git` once per entry.
+    """
+
+
+_UNRESOLVED = _Unresolved()
+
+
+def _current_repo_slug(payload: dict) -> str | None:
+    """Lowercased `owner/repo` of the cwd's GitHub origin, or None.
+
+    The payload's `cwd` is the session's, which is what a repo-scoped mapping
+    is about; `os.getcwd()` is the fallback for a host that omits it. None
+    covers every unresolvable case — not a repo, no origin, a non-GitHub
+    origin, git missing or too slow — and a scoped entry stays inert there.
+    Silence is deliberate: a mapping for another repo has nothing to say here.
+    """
+    cwd = payload.get("cwd") or os.getcwd()
+    if not isinstance(cwd, str):
+        return None
+    slug = origin_slug(cwd=cwd)
+    return slug.lower() if slug else None
+
+
+# ---------------------------------------------------------------------------
 # Transcript scan (reused from block-commit-without-codex-review)
 # ---------------------------------------------------------------------------
 
@@ -379,10 +447,16 @@ def main() -> int:
         return 0  # unparseable command → fail-open
 
     transcript_path = payload.get("transcript_path")
+    current_repo: str | None | _Unresolved = _UNRESOLVED
 
     for cfg in gated:
         if not _command_matches_pattern(tokens, cfg.pattern):
             continue
+        if cfg.repo is not None:
+            if current_repo is _UNRESOLVED:
+                current_repo = _current_repo_slug(payload)
+            if current_repo != cfg.repo:
+                continue  # scoped elsewhere — inert here, silently
         # Pattern matched — check transcript for the required skill.
         if not transcript_path:
             return 0  # no transcript → cannot enforce → fail-open
