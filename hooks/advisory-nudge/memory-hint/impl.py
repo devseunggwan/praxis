@@ -53,18 +53,19 @@ from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
     strip_prefix,
 )
 from _memory_dir import resolve_memory_dir  # type: ignore[import-not-found]  # noqa: E402
+from _memory_frontmatter import (  # type: ignore[import-not-found]  # noqa: E402
+    hookable_is_truthy,
+    parse_keywords,
+)
 from _payload import read_payload  # type: ignore[import-not-found]  # noqa: E402
 
 
 HIT_LIMIT = 3
-TRUTHY_VALUES = {"true", "yes"}
 
 SUPPORTED_EVENTS = ("Bash", "Edit", "Write", "NotebookEdit", "AskUserQuestion")
 DEFAULT_EVENTS = ("Bash",)
 
 FRONTMATTER_FENCE = re.compile(r"^---\s*$", re.MULTILINE)
-HOOKABLE_RE = re.compile(r"^\s*hookable\s*:\s*(.+)$", re.MULTILINE)
-KEYWORDS_RE = re.compile(r"^\s*hookKeywords\s*:\s*(.+)$", re.MULTILINE)
 EVENTS_RE = re.compile(r"^\s*hookEvents\s*:\s*(.+)$", re.MULTILINE)
 DESCRIPTION_RE = re.compile(r"^\s*description\s*:\s*(.+)$", re.MULTILINE)
 
@@ -102,40 +103,14 @@ def parse_frontmatter(raw: str) -> dict | None:
     end = matches[1].start()
     block = raw[start:end]
 
-    hookable_match = HOOKABLE_RE.search(block)
-    if not hookable_match:
+    # Both decisions live in `_lib/_memory_frontmatter.py` so the write-time
+    # gate and the lint ask this module rather than re-deriving it (#1426).
+    # Scalar form (`hookKeywords: kubectl`) is rejected per AC-22; the `]`
+    # search tolerates a trailing inline comment.
+    if not hookable_is_truthy(block):
         return None
-    hookable_value = (
-        _strip_inline_comment(hookable_match.group(1))
-        .strip()
-        .lower()
-        .strip('"\'')
-    )
-    if hookable_value not in TRUTHY_VALUES:
-        return None
-
-    keywords_match = KEYWORDS_RE.search(block)
-    if not keywords_match:
-        return None
-    keywords_raw = keywords_match.group(1).strip()
-    if not keywords_raw.startswith("["):
-        # Scalar form (`hookKeywords: kubectl`) is rejected per AC-22.
-        return None
-    # Find the first `]` so a trailing inline comment doesn't break parse.
-    # `[a, b] # comment` is the natural YAML shape — anything after the
-    # closing bracket is treated as comment/garbage.
-    close_idx = keywords_raw.find("]")
-    if close_idx == -1:
-        return None
-    inner = keywords_raw[1:close_idx].strip()
-    if not inner:
-        return None
-    keywords = [
-        item.strip().strip('"\'')
-        for item in inner.split(",")
-    ]
-    keywords = [k for k in keywords if k]
-    if not keywords:
+    keywords = parse_keywords(block)
+    if keywords is None:
         return None
 
     description_match = DESCRIPTION_RE.search(block)

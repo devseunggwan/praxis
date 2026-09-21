@@ -3464,6 +3464,64 @@ assert_helper "G4H11_control_env_map_answers_when_the_api_cannot" \
 RUN_CASE_ENV=()
 unset STDIN
 
+# --------------------------------------------------------------------------- #
+# Gate-13 — a Falsification line promising the check (issue #1424)
+# --------------------------------------------------------------------------- #
+# The line exists to record an observation that could have refuted the finding
+# and did not. "will check in Stage 4" inverts it: the approval is spent first
+# and the refutation arrives after. The gate reads tense, never truth.
+
+mk_stage3_with_falsification() {
+  printf '%s\n\n%s\n' "$(mk_retrospect_stage3 "$T1_CARD" "$T1_ROW")" "$1"
+}
+
+# FT1: block — the English promise, the exact shape the motivating cycle wrote.
+run_case "FT1_block_will_verify_in_stage_4" "block" \
+  "$(mk_assistant "$(mk_stage3_with_falsification \
+    'Falsification: will verify the hook mechanics in Stage 4')")"
+
+# FT2: block — the same promise in Korean, where the tense sits in the noun.
+run_case "FT2_block_korean_stage4_promise" "block" \
+  "$(mk_assistant "$(mk_stage3_with_falsification \
+    '- Falsification: Stage 4에서 훅 출력을 재생해 확인')")"
+
+# FT3: block — "예정" with no Stage 4 mention at all.
+run_case "FT3_block_korean_scheduled_check" "block" \
+  "$(mk_assistant "$(mk_stage3_with_falsification \
+    '**Falsification:** 기존 게이트 유무는 확인 예정')")"
+
+# FT4: pass — an observation already made is what the line is for.
+run_case "FT4_pass_past_tense_observation" "pass" \
+  "$(mk_assistant "$(mk_stage3_with_falsification \
+    "Falsification: ran \`ls hooks/completion-verify\` — no gate covers this path, so the novelty claim survives")")"
+
+# FT5: pass — "will not fire" is a claim about behaviour, not a promise to
+# check. A verb-agnostic "will" match would block this, which is why the
+# pattern names only the verbs that are the verification act itself.
+run_case "FT5_pass_behaviour_claim_with_will" "pass" \
+  "$(mk_assistant "$(mk_stage3_with_falsification \
+    'Falsification: replayed the transcript — the advisory will not fire on the quoted form')")"
+
+# FT6: pass — the same words outside a Falsification line. Stage 3 prose
+# legitimately describes what Stage 4 will do.
+run_case "FT6_pass_future_tense_outside_the_line" "pass" \
+  "$(mk_assistant "$(mk_stage3_with_falsification \
+    "Falsification: ran the probe, premise held
+Verification plan: will verify the written file in Stage 4")")"
+
+# FT7: block — the shape `references/report-template.md` actually renders: the
+# line sits inside the card's blockquote and the colon is outside the bold.
+# Both features were unmatched, so the gate missed its own canonical form.
+run_case "FT7_block_canonical_blockquote_bold_colon" "block" \
+  "$(mk_assistant "$(mk_stage3_with_falsification \
+    '> - **Falsification**: 기존 게이트 유무는 확인 예정')")"
+
+# FT8: pass — the control for FT7. Same blockquote, same bold spelling, an
+# observation already made: what FT7 catches is the tense, not the rendering.
+run_case "FT8_pass_canonical_blockquote_past_tense" "pass" \
+  "$(mk_assistant "$(mk_stage3_with_falsification \
+    '> - **Falsification**: premise survived — `ls hooks/completion-verify` 에 해당 게이트 없음')")"
+
 echo
 echo "================================"
 echo "Cases:    $PASS passed, $FAIL failed"

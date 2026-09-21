@@ -41,6 +41,7 @@ drift.
 | Hook | Command | Purpose |
 | ------ | --------- | --------- |
 | `hooks/preflight-gate/pre-gh-pr-create-dedup-gate/impl.py` | `git remote get-url origin` | Resolve the repo owner/name for the dedup search |
+| `hooks/preflight-gate/skill-gate-commands/impl.py` | `git remote get-url origin` | Resolve the repo the mapping is scoped to, so a gate declared for one repository does not fire in another |
 | `hooks/preflight-gate/pre-edit-protected-branch-guard/impl.py` | `git rev-parse --show-toplevel` | Locate the git repo root |
 | `hooks/preflight-gate/pre-edit-protected-branch-guard/impl.py` | `git rev-parse --abbrev-ref HEAD` | Read the current branch name |
 | `hooks/preflight-gate/pre-edit-protected-branch-guard/impl.py` | `git status --porcelain` | Check for a dirty working tree |
@@ -56,7 +57,7 @@ drift.
 | Hook                                                          | Command                                                                 | Purpose                                                                                                    |
 |---------------------------------------------------------------|-------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------|
 | `hooks/preflight-gate/pre-gh-pr-create-dedup-gate/impl.py`    | `gh pr list --repo <r> --state all --search <kw> --json ...`            | Search existing PRs before creating a new one                                                              |
-| `hooks/preflight-gate/pr-state-refetch-gate/impl.py`          | `gh pr view <N> --json state,mergeStateStatus`                          | Re-fetch live PR state before a PR-state-contingent AskUserQuestion                                        |
+| `hooks/preflight-gate/pr-state-refetch-gate/impl.py`          | `gh pr view <N> --json state,mergeStateStatus,mergeable,isDraft`        | Re-fetch live PR state before a PR-state-contingent AskUserQuestion                                        |
 | `hooks/preflight-gate/gh-merge-worktree-precondition/impl.py` | `gh pr view <identifier> --json headRefName -q .headRefName`            | Resolve a PR's live head branch before checking it against `git worktree list`                             |
 | `hooks/preflight-gate/anchor-comment-gate/impl.py`            | `gh api /repos/{owner}/{repo}/issues/comments/{id} --jq .body`          | Read back the verification anchor that was just published, from the comment URL the command itself printed |
 | `hooks/preflight-gate/anchor-comment-gate/impl.py`            | `gh api /repos/{owner}/{repo}/issues/comments/{id} --jq .issue_url`     | Resolve which PR a comment belongs to when the post printed no URL to follow                               |

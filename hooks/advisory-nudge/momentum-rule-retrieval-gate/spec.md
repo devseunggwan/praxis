@@ -177,14 +177,38 @@ before approving). Safety gates on the extension:
   > #795 failure), not an adversarial security boundary — `deny` merely adds
   > teeth, and `PRAXIS_MOMENTUM_MERGE_ADVISORY=1` is a standing escape hatch. Two
   > CLI forms that only an adversarial target-swap would use are therefore left
-  > as documented gaps rather than chased across further rounds: (a) an
+  > as documented gaps rather than chased across further rounds: an
   > `xargs`-wrapped merge (`… | xargs -n1 gh pr merge`) is not recognized by the
   > trigger tokenizer (`xargs` is not a peeled prefix), so it bypasses the gate
-  > entirely; (b) a bare-number reference is not repo-scoped, so a cross-repo
-  > `gh -R org/other pr merge 833` after briefing *this* repo's #833 (or a
-  > `Closes #833` line in a different PR's briefing) can false-correlate. Both
-  > require an explicit-signal redesign to close soundly and are out of scope for
-  > the honest-agent nudge.
+  > entirely. Closing it soundly needs an explicit-signal redesign, out of scope
+  > for the honest-agent nudge. (A second gap listed here — an unscoped
+  > cross-repo number — is now handled by **Repo scoping** below, down to the
+  > residual that section names.)
+
+- **Repo scoping (#1419).** Every repo has a `#999`, so a number alone does not
+  identify a PR. When the *merge command* names a repo and the correlated
+  approval window names a **different** one, the approval does not transfer:
+  both `_correlated_prior_turn_text` (prior-turn path) and the `answered`
+  expression in `_merge_escalation_reason` (serial path) bail out via
+  `_repo_conflict`.
+  - The merge's repo is read from the command **only** — `-R`/`--repo` in any
+    spelling (`-R o/r`, `-RO/r`, `--repo=o/r`) or a `…/pull/N` URL argument. A
+    leading host is dropped (`github.com/o/r` == `o/r`) and comparison is
+    case-insensitive. `cd`-based inference is deliberately absent: `cwd` resets
+    between Bash calls, so it would be a guess.
+  - The window's repo comes from the same two sources over the correlated turn
+    range, last-wins — mirroring `_context_pr_from_window`.
+  - **Both sides must resolve, or it is not a conflict.** `None` vs `o/r` is
+    left alone. Measured over the local corpus (851 transcripts, 787 executed
+    `gh pr merge` calls): 393 merges name a repo — 377 agree with their window,
+    **14 differ** — while 123 name none, and **96 of those 123** sit in a window
+    that does name one (the ordinary `gh pr checks 999` → `gh pr merge --repo
+    o/r 999` shape). Treating `None` as a disagreement would therefore deny 96
+    honest merges to reach the same 14.
+  - **Residual:** the issue's literal repro — a briefing/approval window whose
+    prose names no repo at all, followed by `gh -R org/other pr merge 833` — is
+    *not* caught, because the window side is unresolved. What is caught is the
+    common shape where the window did probe a repo.
 - **No multi-target / loop transfer.** A compound `gh pr merge A && gh pr merge
   B` (≥2 merge segments) OR a shell loop / `xargs` repeating one segment
   (`for pr in 833 999; do gh pr merge "$pr"; done`, detected via whole-token
@@ -238,7 +262,7 @@ approve blindly.
   only for a **single** merge segment with no loop (No Approval Transfer). A
   `# briefing-surfaced` inside a heredoc body (`<<EOF … EOF`) is the one residual
   the scanner does not exclude — accepted under the non-adversarial threat model,
-  as with the `xargs`/cross-repo gaps above.
+  as with the `xargs` gap above.
 
   **The marker attests completeness, never existence (issue #940).** It used to
   short-circuit before the transcript was read, so it released the merge no
@@ -379,6 +403,43 @@ approve blindly.
   #1214 shipped it — `merge_serial_rebriefed_passes` pins that a briefing item
   written after the first merge re-arms the marker on its own — so a marked
   merge is the one release this check does not reach.
+
+  **A deny says why a briefing the user saw was not scored (issue #1433).**
+  Message-only; no decision moves. When the two deny paths above fire —
+  "fewer than 4 of 6 items" and the marker with no briefing — and the latest
+  turn in which the assistant wrote text before the last human message holds
+  a briefing that would have passed that path's threshold (4 items, or the
+  marker's 1), the `why` gains one clause naming the check that excluded it.
+  `_excluded_briefing_reason` asks the decision's own questions again, in the
+  decision's order, so the named reason is the one that fired:
+
+  | Reason | Check re-asked |
+  | ------ | -------------- |
+  | one approval releases one merge, and this command runs more than one | `_merge_segments` / `_has_repetition` |
+  | the last user message (`…`) is not an approval reply | `_is_approval_reply` |
+  | a user message (`…`) came between the briefing and the approval | briefing turn ends before the approval's own prior turn |
+  | the briefed turn does not name the PR this merge targets | `_correlated_prior_turn_text` |
+  | it precedes a merge that already ran in this session | serial-merge `floor` (marker path only) |
+
+  "The latest turn in which the assistant wrote text" rather than "the turn
+  right before the last user message" is deliberate. An interrupt arrives as a
+  `text` block with no `isMeta` and no `origin` (263 such entries across 868
+  local transcripts), so `_human_user_indices` counts it as a human message:
+  in briefing → interrupt → `continue` the turn before `continue` is empty and
+  the briefing sits one further back. Keyed on the turn right before, the
+  clause would never fire on the very sequence that motivated it. The same
+  split is why briefing → interrupt → `ok` is denied today even though the
+  user approved; the clause names it, and changing that decision is out of
+  this scope.
+
+  Replayed over every recorded `gh pr merge` in local transcripts (791 calls
+  across 867 transcripts, each transcript cut right before the merge and fed
+  to the pre-change and changed builds): 0 decision disagreements, 0
+  tracebacks. Of the 187 denies, 99 gain the clause — 96 not an approval
+  reply, 1 an intervening user message, 1 the briefed turn names a different
+  PR, 1 the serial-merge cut. The replay matters because this code runs inside
+  a `@fail_open` hook: an exception here would not surface as an error, it
+  would release the merge.
 
   **Both directions fail open.** A merge counts as executed only on a clean
   `tool_result`, and only when the shell could not have jumped over it —

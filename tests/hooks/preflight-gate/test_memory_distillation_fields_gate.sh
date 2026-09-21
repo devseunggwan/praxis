@@ -175,6 +175,119 @@ run_case "unresolvable memory dir fails open" pass \
 
 # ---------------------------------------------------------------------------
 # fail-open wrapping
+
+# ---------------------------------------------------------------------------
+# hookKeywords the hint index cannot read (issue #1426)
+#
+# The distillation fields are correct in every fixture below, so what is
+# measured is only the second check. Each case is a WHOLE memory file, because
+# the gate reads the Write payload rather than a frontmatter fragment.
+# ---------------------------------------------------------------------------
+
+dark_memory() {
+  # dark_memory <hookable-value> <hookKeywords lines, or empty for none>
+  printf -- '---\nname: feedback-something\ndescription: one line\nmetadata:\n  type: feedback\n  hookable: %s\n%s  recurrence: 1\n  enforcement: none\n  escalated_to: none\n---\n\nbody\n' "$1" "$2"
+}
+
+check_dark_block() {
+  local rc="$1" err="$2"
+  [ "$rc" -eq 2 ] || return 1
+  echo "$err" | grep -qi "hint index cannot read" || return 1
+  return 0
+}
+
+# run_dark_case <name> <expected:block|pass> <file> <content>
+run_dark_case() {
+  local name="$1" expected="$2" path="$3" content="$4"
+  local payload; payload=$(build_payload Write "$path" "$content")
+  local out_file err_file
+  out_file=$(mktemp); err_file=$(mktemp)
+  (
+    for kv in "${COMMON_ENV[@]}"; do
+      # shellcheck disable=SC2163  # kv holds a literal KEY=VALUE pair
+      export "$kv"
+    done
+    printf '%s' "$payload" | python3 "$HOOK"
+  ) >"$out_file" 2>"$err_file"
+  local rc=$?
+  local err; err=$(cat "$err_file")
+  rm -f "$out_file" "$err_file"
+
+  local ok=1
+  case "$expected" in
+    block) check_dark_block "$rc" "$err" || ok=0 ;;
+    pass)  [ "$rc" -eq 0 ] || ok=0; [ -z "$err" ] || ok=0 ;;
+  esac
+
+  if [ "$ok" -eq 1 ]; then
+    echo "PASS  [$expected] $name"
+    PASS=$((PASS+1))
+  else
+    echo "FAIL  [$expected] $name (rc=$rc)"
+    echo "      stderr: $err"
+    FAIL=$((FAIL+1)); FAILED_NAMES+=("$name")
+  fi
+}
+
+run_dark_case "hookable true, flat list" pass \
+  "$MEM_DIR/feedback_kw_ok.md" "$(dark_memory true '  hookKeywords: [git, push]
+')"
+
+run_dark_case "hookable true, flat list with trailing comment" pass \
+  "$MEM_DIR/feedback_kw_comment.md" "$(dark_memory true '  hookKeywords: [git] # why
+')"
+
+run_dark_case "hookable true, block-list form" block \
+  "$MEM_DIR/feedback_kw_block.md" "$(dark_memory true '  hookKeywords:
+    - git
+    - push
+')"
+
+run_dark_case "hookable true, scalar form" block \
+  "$MEM_DIR/feedback_kw_scalar.md" "$(dark_memory true '  hookKeywords: git
+')"
+
+run_dark_case "hookable true, unclosed bracket" block \
+  "$MEM_DIR/feedback_kw_unclosed.md" "$(dark_memory true '  hookKeywords: [git, push
+')"
+
+run_dark_case "hookable true, empty list" block \
+  "$MEM_DIR/feedback_kw_empty.md" "$(dark_memory true '  hookKeywords: []
+')"
+
+# The shape the issue's own predicate could not see: no key at all. Six entries
+# in the measured corpus are dark this way.
+run_dark_case "hookable true, no hookKeywords key" block \
+  "$MEM_DIR/feedback_kw_absent.md" "$(dark_memory true '')"
+
+# hookable:false is not this gate's business at any shape — nothing indexes the
+# entry, so no shape can hide it from anything.
+run_dark_case "hookable false, block-list form" pass \
+  "$MEM_DIR/feedback_kw_off_block.md" "$(dark_memory false '  hookKeywords:
+    - git
+')"
+
+run_dark_case "hookable false, no hookKeywords key" pass \
+  "$MEM_DIR/feedback_kw_off_absent.md" "$(dark_memory false '')"
+
+# Priority: a file wrong on BOTH axes reports the distillation fields, the
+# check this gate already had. No pre-existing violation changes its message.
+BOTH_WRONG='---
+name: feedback-something
+description: one line
+metadata:
+  type: feedback
+  hookable: true
+  hookKeywords:
+    - git
+  recurrence: 1
+---
+
+body
+'
+run_case "both axes wrong reports the distillation fields" block \
+  Write "$MEM_DIR/feedback_both.md" "$BOTH_WRONG"
+
 # ---------------------------------------------------------------------------
 
 _failopen_out=$(python3 - "$HOOK" <<'PYEOF'

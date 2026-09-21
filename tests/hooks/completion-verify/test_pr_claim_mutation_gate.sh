@@ -14,7 +14,8 @@ FAIL=0
 # build_transcript <final_text> <evidence>
 #   evidence: none|push|comment|review|api-write|api-read|mcp|write|prev-turn-push
 #             |api-write-labels|push-dry-run|push-echoed|push-failed
-#             |push-succeeded|mcp-read
+#             |push-succeeded|mcp-read|subst-push-dry-run|subst-comment-help
+#             |grep-pattern-push
 # -> writes path to $TRANSCRIPT
 build_transcript() {
   local final_text="$1" evidence="$2"
@@ -75,6 +76,57 @@ elif evidence == "mcp-read":
     events.append({"message": {"role": "assistant", "content": [
         {"type": "tool_use", "name": "mcp__github__get_review_comments",
          "input": {"pr": 868}}]}})
+elif evidence == "push-guarded-by-n":
+    # `-n` belongs to the `[` test in the preceding segment, not to the push.
+    events.append(bash_ev(
+        'if [ -n "$CLAUDE_SESSION_ID" ]; then\n'
+        '  git commit -q -F - --trailer "Session-Id: $CLAUDE_SESSION_ID"\n'
+        'fi\n'
+        'git push origin issue-868'))
+elif evidence == "comment-body-quotes-dash-n":
+    # `-N` lives inside the --body value; the comment itself is a real write.
+    events.append(bash_ev(
+        "gh pr comment 868 --repo o/r --body 'avoid `2>&1 | tail -N` here'"))
+elif evidence == "api-write-after-heredoc-sed-n":
+    # `sed -n` sits in a heredoc body built for the comment payload.
+    events.append(bash_ev(
+        "cat > /tmp/anchor.md <<'EOF'\n"
+        "sed -n '10,16p' impl.py\n"
+        "EOF\n"
+        "gh api --method PATCH repos/o/r/issues/comments/1 -F body=@/tmp/anchor.md"))
+elif evidence == "api-write-with-header-flag":
+    # `-H` is gh's header flag, not `-h`; only IGNORECASE ever confused them.
+    events.append(bash_ev(
+        'gh api -H "Accept: application/vnd.github+json" --method POST '
+        'repos/o/r/pulls/868/comments -f body=fixed'))
+elif evidence == "commit-message-quotes-mutation":
+    # A commit message that merely QUOTES the mutation is not the mutation.
+    events.append(bash_ev('git commit -m "gh pr comment done"'))
+elif evidence == "heredoc-quotes-push":
+    events.append(bash_ev("cat <<EOF\ngit push origin issue-868\nEOF"))
+elif evidence == "equals-message-quotes-mutation":
+    # The equals form carries its value inside the FLAG token itself, so the
+    # separate-token exclusion never reaches it.
+    events.append(bash_ev('git commit --message="gh pr comment done"'))
+elif evidence == "api-write-equals-method":
+    # `--method=POST` is the same call as `--method POST`.
+    events.append(bash_ev(
+        "gh api --method=POST repos/o/r/pulls/868/comments -f body=fixed"))
+elif evidence == "api-write-equals-x":
+    events.append(bash_ev("gh api -X=PATCH repos/o/r/pulls/868/comments -f body=fixed"))
+elif evidence == "man-push":
+    events.append(bash_ev("man git push origin issue-868"))
+elif evidence == "man-path-push":
+    # The command word carries its path; the inspection test must still see `man`.
+    events.append(bash_ev("/usr/bin/man git push origin issue-868"))
+elif evidence == "subst-push-dry-run":
+    # The substitution is one SUBST_RUN token, so `--dry-run` is never a FLAG.
+    events.append(bash_ev("OUT=$(git push --dry-run origin issue-868)"))
+elif evidence == "subst-comment-help":
+    events.append(bash_ev("X=$(gh pr comment 1 --help)"))
+elif evidence == "grep-pattern-push":
+    # `git push` is grep's pattern argument; the git segment is a read.
+    events.append(bash_ev("git log --oneline | grep 'git push' | head -n 1"))
 elif evidence == "write":
     events.append({"message": {"role": "assistant", "content": [
         {"type": "tool_use", "name": "Write",
@@ -223,6 +275,57 @@ run_case silent "question-form-en" '{}'
 build_transcript "> 리뷰 코멘트를 처리했다고 보고했다 (사용자 인용)" none
 run_case silent "quoted-line" '{}'
 
+# --- fenced block: the other way of reproducing someone else's text (#1444) -
+# A bot comment pasted verbatim inside a fence asserts nothing, and the block
+# used to fire on the verb in that pasted line. Variants pinned separately:
+# a plain fence, an info string, a tilde fence, a longer fence whose inner
+# short run must not close it, and an unclosed fence (which runs to the end of
+# the message, the way it renders). The fence markers come from a variable so
+# the file carries no backslash-escaped backticks — escaping them inside the
+# `$(printf ...)` argument put literal backslashes into the fixture text and
+# silently broke the fence it was supposed to build.
+F3=$(printf '\140\140\140')
+F4=$(printf '\140\140\140\140')
+CLAIM='리뷰 코멘트 처리 완료'
+
+build_transcript "$(printf '봇 원문:\n\n%s\n%s\n%s\n\n이 턴은 아무것도 바꾸지 않았습니다.' "$F3" "$CLAIM" "$F3")" none
+run_case silent "fenced-claim-plain" '{}'
+build_transcript "$(printf '봇 원문:\n\n%stext\n%s\n%s' "$F3" "$CLAIM" "$F3")" none
+run_case silent "fenced-claim-info-string" '{}'
+build_transcript "$(printf '봇 원문:\n\n~~~\n%s\n~~~' "$CLAIM")" none
+run_case silent "fenced-claim-tilde" '{}'
+build_transcript "$(printf '%s\n%s\n%s\n%s\n%s' "$F4" "$F3" "$CLAIM" "$F3" "$F4")" none
+run_case silent "fenced-claim-nested-run" '{}'
+build_transcript "$(printf '봇 원문:\n\n%s\n%s' "$F3" "$CLAIM")" none
+run_case silent "fenced-claim-unclosed" '{}'
+# A closing fence carries nothing after its run (CommonMark), so a line like
+# ```python INSIDE a block is content, not a closer. Read as one it ends the
+# block early and hands the quoted claim back to the scan — the exact block this
+# gate exists to prevent. The two cases below differ only in that suffix.
+build_transcript "$(printf '봇 원문:\n\n%s\n로그 한 줄\n%spython\n%s\n%s' "$F3" "$F3" "$CLAIM" "$F3")" none
+run_case silent "fenced-claim-inner-info-is-not-a-closer" '{}'
+build_transcript "$(printf '봇 원문:\n\n%s\n로그 한 줄\n%s\n%s\n%s' "$F3" "$F3" "$CLAIM" "$F3")" none
+run_case block "fenced-claim-bare-closer-does-close" '{}'
+# The opener carries the mirror rule: a backtick fence's info string may hold no
+# backtick, so this line opens nothing and the claim under it is ordinary prose.
+build_transcript "$(printf '%sa\140b\n%s' "$F3" "$CLAIM")" none
+run_case block "backtick-info-with-backtick-opens-nothing" '{}'
+# …while a claim OUTSIDE the fence still blocks — the skip is scoped to the
+# block, not to any message that happens to contain one.
+build_transcript "$(printf '%s\n무관한 로그\n%s\n\n리뷰 코멘트 3건 처리했습니다.' "$F3" "$F3")" none
+run_case block "fenced-block-does-not-excuse-prose-claim" '{}'
+# A four-space indent is an indented code block, not a fence; this pins that the
+# fence matcher keeps CommonMark's three-space bound rather than swallowing it.
+build_transcript "$(printf '    %s\n%s\n    %s' "$F3" "$CLAIM" "$F3")" none
+run_case block "four-space-indent-is-not-a-fence" '{}'
+
+# --- a processed verb with no PR noun in the line was ALREADY silent ---------
+# The issue proposed requiring a PR-surface term near the verb; _SUBJECT_RE has
+# required one on the same line since the hook was written. Pinned so the
+# property cannot regress unnoticed.
+build_transcript "채널에 올라온 요청은 처리 완료했습니다." none
+run_case silent "verb-without-pr-noun-in-line" '{}'
+
 # --- advisory demote -> systemMessage instead of decision:block -------------
 build_transcript "Fixed the review comments." none
 run_case advisory "advisory-demote" '{}' PRAXIS_PR_CLAIM_ADVISORY=1
@@ -245,6 +348,63 @@ run_case block "push-dry-run-still-fires" '{}'
 
 build_transcript "리뷰 코멘트 전부 반영했습니다." push-echoed
 run_case block "echoed-push-still-fires" '{}'
+
+build_transcript "리뷰 코멘트 전부 반영했습니다." man-push
+run_case block "man-page-push-still-fires" '{}'
+
+build_transcript "리뷰 코멘트 전부 반영했습니다." man-path-push
+run_case block "path-prefixed-man-push-still-fires" '{}'
+
+# --- incidental tokens no longer void a real mutation (#1434) ---------------
+# Each of these turns DID mutate the PR surface; the whole-string rehearsal
+# scan discarded the call over a token that was never a flag on it.
+build_transcript "리뷰 코멘트 전부 반영했습니다." push-guarded-by-n
+run_case silent "guard-dash-n-does-not-void-push" '{}'
+
+build_transcript "리뷰 코멘트 전부 반영했습니다." comment-body-quotes-dash-n
+run_case silent "body-dash-n-does-not-void-comment" '{}'
+
+build_transcript "리뷰 코멘트 전부 반영했습니다." api-write-after-heredoc-sed-n
+run_case silent "heredoc-sed-n-does-not-void-api-write" '{}'
+
+build_transcript "리뷰 코멘트 전부 반영했습니다." api-write-with-header-flag
+run_case silent "header-flag-does-not-void-api-write" '{}'
+
+# --- the same gap with the polarity flipped (#1434) -------------------------
+# A mutation verb quoted inside an argument or a heredoc body used to CLEAR
+# the claim, silencing a turn that touched nothing on the PR.
+build_transcript "리뷰 코멘트 전부 반영했습니다." commit-message-quotes-mutation
+run_case block "quoted-mutation-in-commit-message-still-fires" '{}'
+
+build_transcript "리뷰 코멘트 전부 반영했습니다." heredoc-quotes-push
+run_case block "heredoc-quoted-push-still-fires" '{}'
+
+# --- the equals form of a value-taking flag (#1434 review round) ------------
+# `--message=...` is ONE token carrying its own value, so the separate-token
+# exclusion above does not reach it; and requiring whitespace after `--method`
+# read a real write call as having no write method at all.
+build_transcript "리뷰 코멘트 전부 반영했습니다." equals-message-quotes-mutation
+run_case block "equals-message-quoting-mutation-still-fires" '{}'
+
+build_transcript "리뷰 코멘트 전부 반영했습니다." api-write-equals-method
+run_case silent "equals-method-api-write-clears" '{}'
+
+build_transcript "리뷰 코멘트 전부 반영했습니다." api-write-equals-x
+run_case silent "equals-x-api-write-clears" '{}'
+
+# --- a mutation shape inside `$(...)` is not evidence -----------------------
+# The rehearsal flag sits inside the substitution token, out of the flag check's
+# reach, so the substitution text is kept out of the scan altogether.
+build_transcript "리뷰 코멘트 전부 반영했습니다." subst-push-dry-run
+run_case block "substituted-dry-run-push-still-fires" '{}'
+
+build_transcript "리뷰 코멘트 전부 반영했습니다." subst-comment-help
+run_case block "substituted-help-comment-still-fires" '{}'
+
+# --- the shape must be the segment's own git/gh call ------------------------
+# A grep pattern that spells `git push` is grep's data, not a push.
+build_transcript "리뷰 코멘트 전부 반영했습니다." grep-pattern-push
+run_case block "grep-pattern-push-still-fires" '{}'
 
 # --- failed vs successful mutation -----------------------------------------
 # A rejected push leaves the PR exactly as it was.

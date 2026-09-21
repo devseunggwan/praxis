@@ -59,6 +59,34 @@ comments") does not match either verb set.
 | Hedge | `처리한 것 같습니다`, `I might have addressed ...` | disclosed uncertainty, not a completion claim |
 | Question | `처리했나요?`, `Did I fix the comments?` | the user's/assistant's own question, not an assertion |
 | Quoted line (`>` prefix) | `> 처리했다고 보고했다` | reporting that a claim was made, not making one |
+| Fenced block (` ``` ` / `~~~`) | a bot comment pasted verbatim, ending in `리뷰 코멘트 처리 완료` | the other standard way of reproducing someone else's text (#1444) |
+
+**Known gap — inline code and indented blocks.** The fence skip covers
+` ``` `/`~~~` blocks only. A claim inside an inline-code span
+(`` `리뷰 코멘트 처리 완료` ``) and inside a four-space-indented code block still
+fires. Both are ways of reproducing text, but inline code is far more often an
+identifier than a whole sentence, and a four-space indent is ambiguous inside
+list items — neither was the reported case (#1444).
+
+**Known gap — fence handling is the seventh local copy.** Six other hooks
+compile their own fence-opener regex, with subtly different rules — the leading
+bound is `^ {0,3}`, `^(\s*)`, `^[ \t]*` or nothing, and only some check that
+the closing run matches the opening character and length:
+`composed-command-gate`, `exclusion-probe-gate`,
+`menu-mutation-tier-advisory`, `artifact-verdict-evidence-gate`,
+`block-pr-without-caller-evidence`, `block-pr-without-precommit-evidence`.
+That list is what this scan returns:
+
+```sh
+grep -rn 'r"[^"]*`{3,}' hooks --include='*.py'
+```
+
+`anchor-comment-gate` handles fences too, with a fixed three-backtick pattern
+the scan above does not reach. This hook mirrors the most complete of the six
+(`exclusion-probe-gate`) with CommonMark's three-space bound.
+Consolidating them into `hooks/_lib/` is a separate change: it touches six
+hooks, each with its own fixtures, so folding it into #1444 would bundle a
+cross-hook refactor into a one-narrowing fix.
 
 **Known accepted gap — double negation.** `처리하지 않은 게 아닙니다`
 ("it is not the case that it was not processed" — i.e. affirmative) still
@@ -82,7 +110,7 @@ A turn clears the gate if any assistant `tool_use` matches:
 | Push | `git push` |
 | PR comment | `gh pr comment ...` |
 | PR review | `gh pr review ...` |
-| Write-method `gh api` | `gh api ... --method POST\|PATCH\|PUT\|DELETE` (or `-X ...`) **on a `comments`/`reviews`/`threads` endpoint** |
+| Write-method `gh api` | `gh api ... --method POST\|PATCH\|PUT\|DELETE` (or `--method=...`, `-X ...`, `-XPOST`, `-X=...`) **on a `comments`/`reviews`/`threads` endpoint** |
 | GraphQL thread resolve | a command containing `resolveReviewThread` |
 | GitHub MCP mutation | `mcp__github__*` tool whose name carries a write verb (`add`/`create`/`submit`/`update`/`edit`/`delete`/`reply`/`resolve`/`dismiss`/`merge`); a `get`/`list`/`search`/`read` prefix always loses |
 
@@ -98,6 +126,63 @@ the gate:
 A write-method `gh api` on a non-review endpoint (`.../labels`,
 `.../milestones`) mutates GitHub but not the surface the claim is about, so
 the endpoint segment is required rather than decorative.
+
+### Where the rehearsal test looks (issue #1434)
+
+Both tests above are decided **per command segment** (`&&`, `||`, `;`, `|`,
+newline) via `tokenize_with_roles`, and the rehearsal flags are compared
+**case-sensitively against that segment's `FLAG`-role tokens** — not searched
+for in the raw command string.
+
+The earlier whole-string form had no locality and no quoting awareness, so a
+token that was never a flag on the mutating call still voided it: a `-n` in a
+neighbouring `[ -n "$CLAUDE_SESSION_ID" ]` guard, a `sed -n` inside the heredoc
+that builds a comment body, a `tail -N` quoted inside `--body`, and — through
+`re.IGNORECASE` — `gh api`'s own `-H` header flag. The same gap ran in reverse:
+a mutation verb quoted inside `git commit -m` or a heredoc body counted as a
+real mutation and silenced a turn that touched nothing on the PR.
+
+Two consequences of the token view worth stating, because both are deliberate:
+
+- **Flag values are excluded from the scanned text.** A `--body` that merely
+  quotes `gh pr comment` is prose, not a call. The one exception is
+  `resolveReviewThread`, which reaches `gh` only inside `-f query=...`; that
+  pattern alone is matched against the segment *including* values.
+- **`--method` / `-X` are absent from the tokenizer's value spec**, so `POST` /
+  `PATCH` stays a positional and the write-method pattern can still see it.
+- **A `$(...)` substitution is excluded from the scanned text.** The tokenizer
+  returns it as one `SUBST_RUN` token, so the `--dry-run` in
+  `OUT=$(git push --dry-run …)` or the `--help` in `X=$(gh pr comment 1 --help)`
+  never reaches the flag check, while the substitution's text still matches the
+  mutation shape. Counting it cleared the claim on a rehearsal; a mutation
+  shape seen only inside a substitution is therefore not evidence, which fails
+  closed the same way the whole-string scan did.
+- **The shape has to be the segment's own `git` / `gh` call.** A segment counts
+  only when its `COMMAND`-role token (by basename) is `git` or `gh`, and the
+  mutation pattern is matched from that command word forward, not anywhere in
+  the segment. In `git log --oneline | grep 'git push'` the push is `grep`'s
+  pattern argument, so it is data; `man git push` and `echo git push` fall out
+  by the same rule. A `bash -c 'git push …'` falls out with them — the same
+  fail-closed miss as the accepted gap below.
+- **Accepted gap — a mutation the shell runs from inside data.** A
+  `$(gh pr comment …)` inside a flag value, or a `git push` inside a heredoc
+  that `bash -s` / `sh` executes, is dropped with the rest of the data, so the
+  real mutation goes unseen and the claim blocks. The whole-string scan caught
+  these only because it read every quoted byte as argv, which is the false
+  positive #1434 removed. The miss fails closed — a visible block, never a
+  silent pass — and a command hidden inside a string is outside the guard
+  parser's boundary (`SECURITY.md` → Guard Parser Boundary).
+
+The **equals form needs its own step**, because `--message=gh pr comment done`
+is a single `FLAG` token carrying its own value — the separate-token exclusion
+above never reaches inside it, so the quoted text was scanned as argv and a
+commit message read as a PR comment. A `FLAG` token spelled `name=value` is
+therefore reduced to `name` when `name` is one of the value-taking flags the
+spec declares. `--method=POST` keeps its value for the same reason it keeps its
+positional: `--method` is not declared value-taking, and the write-method
+pattern has to see the verb. That pattern accepts `=` as well as whitespace
+after `--method` / `-X`; requiring whitespace read a real write call as having
+no write method at all.
 
 A **read-only** `gh api .../comments` call (no explicit write method — the
 default HTTP verb is GET) does **not** clear the gate: listing comments is
@@ -147,7 +232,7 @@ no mutation evidence blocks, per the Escalation section above.
 bash tests/hooks/completion-verify/test_pr_claim_mutation_gate.sh
 ```
 
-33 cases: the motivating incident verbatim (KR, zero mutation → block),
+47 cases: the motivating incident verbatim (KR, zero mutation → block),
 4 EN/KR claim variants without mutation (block), claim cleared by `git
 push` / `gh pr comment` / `gh pr review` / write-method `gh api` / GitHub MCP
 comment tool (silent, 5 cases).
@@ -160,12 +245,40 @@ one half of a matched pair — a failed push (`is_error`) blocks while an
 otherwise identical succeeded push stays silent, so what the pair
 distinguishes is the result correlation, not the command text.
 
+Two pin the inspection command: `man git push` blocks, and so does
+`/usr/bin/man git push` — the command word is compared by basename (now via
+the command-argv rule), since an exact match let the path-prefixed form read
+as a real push.
+
+Three pin the equals form, which the separate-token exclusion cannot reach: a
+`git commit --message=` quoting a mutation still blocks, and `--method=POST` /
+`-X=PATCH` on a comments endpoint clear the gate.
+
+Six more pin the scan's locality (#1434), and each fails against the
+pre-fix implementation in the direction its name states. Four are turns that
+genuinely mutated the PR and must stay **silent**: a push beside a `[ -n ... ]`
+guard, a `gh pr comment` whose body quotes `tail -N`, a write-method `gh api`
+after a heredoc containing `sed -n`, and a `gh api` carrying `-H`. Two are
+turns that mutated nothing and must still **block**: a `git commit -m` whose
+message quotes `gh pr comment`, and a heredoc body quoting `git push`.
+
+Two pin the substitution rule: `OUT=$(git push --dry-run …)` and
+`X=$(gh pr comment 1 --help)` both block, because the rehearsal flag inside
+the `SUBST_RUN` token is out of the flag check's reach. One pins the
+command-argv rule: `git log --oneline | grep 'git push'` blocks, because the
+push is `grep`'s pattern, not a call.
+
 The rest: `Write` tool_use does not count as PR mutation (block), mutation in
 the **previous** turn does not back a claim in this one (block — turn-scoped
 evidence), no PR subject (silent — out of this hook's scope), subject present
 but no claim verb (silent), negated claim EN/KR (silent), the documented
 double-negation gap (silent, accepted trade-off), hedged EN/KR forms
 (silent), question-form EN/KR (silent), a quoted line reporting a claim
-rather than making one (silent), `PRAXIS_PR_CLAIM_ADVISORY` demote
+rather than making one (silent), a claim inside a fenced block in five
+variants — plain, info string, tilde, a longer fence whose inner short run does
+not close it, and an unclosed fence (all silent) — against a claim in prose
+beside a fence and a four-space-indented block, which both still block;
+a processed verb with no PR noun on the line (silent, a property
+`_SUBJECT_RE` already had), `PRAXIS_PR_CLAIM_ADVISORY` demote
 (`systemMessage`, no `decision`), bypass env (silent), `stop_hook_active`
 loop guard (silent), missing transcript (fail-open).

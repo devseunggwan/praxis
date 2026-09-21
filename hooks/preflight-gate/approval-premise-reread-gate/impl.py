@@ -53,8 +53,10 @@ from _payload import read_payload  # type: ignore[import-not-found]  # noqa: E40
 from block_message import format_block  # type: ignore[import-not-found]  # noqa: E402
 from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
     has_state_changing_redirect,
+    heredoc_sources,
     iter_command_starts,
     safe_tokenize,
+    strip_heredoc_bodies,
     strip_prefix,
 )
 
@@ -383,6 +385,88 @@ def _carries_prod_marker(blob: str) -> bool:
     return PROD_MARKER_RE.search(blob) is not None
 
 
+# Languages whose inline program is data to the shell. A shell is absent on
+# purpose: `sh -c 'kubectl --context prod-x delete pod p'` names a production
+# target in its program, so dropping that program would silence the one call
+# this gate exists for.
+_INTERPRETERS = frozenset((
+    "python", "python2", "python3", "node", "nodejs", "deno", "bun",
+    "perl", "ruby", "php", "Rscript", "osascript", "jq",
+))
+
+# `python -c "..."` / `node -e "..."` — the quoted program, so that a `prod`
+# literal printed by the script is not read as the shell's own argument. A path
+# prefix (`/usr/bin/python3`) is the same interpreter, as the heredoc opener
+# check already treats it.
+_INLINE_PROGRAM_RE = re.compile(
+    r"""(?<![A-Za-z0-9_./-])(?:[^\s'"/]*/)*(?:%s)(?:[0-9.]*)\s+(?:-\w+\s+)*-[ce]\s+
+        (?P<prog>'(?:[^']*)'|"(?:\\.|[^"\\])*")"""
+    % "|".join(sorted(_INTERPRETERS)),
+    re.VERBOSE,
+)
+
+
+# A `$(…)` or backtick run anywhere the shell reads: the shell runs its
+# contents, so nothing around it is program text any more.
+_SHELL_RUNS_RE = re.compile(r"\$\(|`")
+
+
+def _strip_inline_programs(text: str) -> str:
+    return _INLINE_PROGRAM_RE.sub(lambda m: m.group(0).replace(m.group("prog"), ""), text)
+
+
+def _lone_interpreter(command: str, delimiters: frozenset[str]) -> bool:
+    """True when the whole command is one simple call to an interpreter.
+
+    Anything else — a pipeline, an `&&` chain, a substitution running a second
+    command — keeps all of its text, because binding a body or a program to
+    the command that owns it needs an analysis this gate does not have and
+    every earlier attempt at one produced a bypass (issue #1449): a `$(python3
+    -c …)` inside `kubectl --context` stripped the argument the gate exists to
+    read, and a heredoc body line shaped like `python3 <<EOF` was credited
+    with a `kubectl apply` manifest.
+    """
+    # A heredoc terminator survives `strip_heredoc_bodies` on its own line, so
+    # the tokenizer reads it as a second command; it is punctuation, not one.
+    segments = [seg for seg in iter_command_starts(safe_tokenize(command))
+                if not (len(seg) == 1 and seg[0] in delimiters)]
+    if len(segments) != 1:
+        return False
+    argv = strip_prefix(segments[0])
+    return bool(argv) and argv[0].rsplit("/", 1)[-1] in _INTERPRETERS
+
+
+def _bash_marker_text(command: str) -> str:
+    """The part of `command` that can name the command's own target.
+
+    A prod marker inside a non-shell interpreter's program is a string literal
+    in another language, not an argument to anything the shell runs — issue
+    #1428, where `python3 - <<'EOF'` rewriting a scratch file asked about a
+    production target. The exclusion is deliberately narrow: only a command
+    that is nothing but that interpreter call drops any text, and only its own
+    single heredoc and inline `-c`/`-e` program. Everything else is kept.
+
+    An unquoted heredoc body holding a substitution is kept whole: bash runs
+    it before the interpreter ever sees the body, so that text is the shell's
+    own call, and extracting only the substitution missed a nesting the
+    extractor could not parse.
+    """
+    sources = heredoc_sources(command)
+    if not _lone_interpreter(command, frozenset(delim for delim, _b, _q in sources)):
+        return command
+    if len(sources) > 1:
+        return command  # a second heredoc is not this interpreter's program
+    shell_text = strip_heredoc_bodies(command)
+    if _SHELL_RUNS_RE.search(shell_text):
+        return command  # the shell runs part of the argument text
+    stripped = _strip_inline_programs(shell_text)
+    if sources:
+        _delim, body, quoted = sources[0]
+        if not quoted and _SHELL_RUNS_RE.search(body):
+            return command
+    return stripped
+
+
 # The two questions are the whole point of the gate, so they live in the
 # `correct_path` field the shared renderer prints under "Do this instead".
 _ANSWER_BOTH = (
@@ -537,7 +621,7 @@ def main() -> int:
         command = tool_input.get("command", "") or ""
         if _bash_ack(command):
             return 0
-        if not _carries_prod_marker(command):
+        if not _carries_prod_marker(_bash_marker_text(command)):
             return 0
         if _bash_is_readonly(command):
             return 0
