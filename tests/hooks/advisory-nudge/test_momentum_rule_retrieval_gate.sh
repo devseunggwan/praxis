@@ -741,6 +741,24 @@ run_merge_escalation_case "merge_escalation_prior_turn_briefing_passes" \
 run_merge_escalation_case "merge_escalation_prior_turn_wrong_pr_denies" \
   "yes" "" "momentum-merge-prior-turn-wrong-pr.jsonl" "gh pr merge 833 --squash"
 
+# Interrupt between the briefing and the approval (issue #1459). The marker is
+# not typed content, so it does not cut the window — but only when it is the
+# whole message. These four fixtures differ in that one respect, so they are
+# what separates "the user was interrupted" from "the user said something".
+#
+#   interrupt-ok            briefing → interrupt → `ok`              → allow
+#   interrupt-continue      briefing → interrupt → `continue`        → deny
+#   interrupt-then-other    briefing → interrupt → content → `ok`    → deny
+#   interrupt-quoted        briefing → marker inside a sentence → ok → deny
+run_merge_escalation_case "merge_escalation_interrupt_then_ok_passes" \
+  "no" "" "momentum-merge-interrupt-ok.jsonl" "gh pr merge 833 --squash --delete-branch"
+run_merge_escalation_case "merge_escalation_interrupt_then_continue_denies" \
+  "yes" "" "momentum-merge-interrupt-continue.jsonl" "gh pr merge 833 --squash --delete-branch"
+run_merge_escalation_case "merge_escalation_interrupt_then_other_content_denies" \
+  "yes" "" "momentum-merge-interrupt-then-other.jsonl" "gh pr merge 833 --squash --delete-branch"
+run_merge_escalation_case "merge_escalation_interrupt_marker_quoted_denies" \
+  "yes" "" "momentum-merge-interrupt-quoted.jsonl" "gh pr merge 833 --squash --delete-branch"
+
 # --- serial-merge window cut (issue #1214) -----------------------------------
 #
 # All three fixtures share a PARTIAL prior-turn briefing (2 of 6 items), so the
@@ -1470,11 +1488,17 @@ print(json.dumps({"tool_name": "Bash", "tool_input": {"command": sys.argv[2]},
 run_exclusion_case "exclusion_interrupt_then_continue" \
   "momentum-merge-interrupt-continue.jsonl" "gh pr merge 833 --squash --delete-branch" \
   'the last user message (`continue`) is not an approval reply'
-# Same, answered `ok`: the gate still denies, and the reason must name the
-# interrupt — "not an approval reply" would be false here.
-run_exclusion_case "exclusion_interrupt_then_ok" \
-  "momentum-merge-interrupt-ok.jsonl" "gh pr merge 833 --squash --delete-branch" \
-  'a user message (`[Request interrupted by user]`) came between the briefing and the approval'
+# Answered `ok`, the interrupt no longer cuts the window (issue #1459), so the
+# merge is released and there is no exclusion clause left to explain. The
+# decision itself is asserted by merge_escalation_interrupt_then_ok_passes.
+# A user message that carries content of its own still cuts it, whether that
+# content follows the interrupt or quotes the marker inside a longer sentence.
+run_exclusion_case "exclusion_interrupt_then_other_content" \
+  "momentum-merge-interrupt-then-other.jsonl" "gh pr merge 833 --squash --delete-branch" \
+  'came between the briefing and the approval'
+run_exclusion_case "exclusion_interrupt_marker_quoted_in_message" \
+  "momentum-merge-interrupt-quoted.jsonl" "gh pr merge 833 --squash --delete-branch" \
+  'came between the briefing and the approval'
 run_exclusion_case "exclusion_continue_without_interrupt" \
   "momentum-merge-prior-turn-continue.jsonl" "gh pr merge 833 --squash --delete-branch" \
   'the last user message (`continue`) is not an approval reply'

@@ -478,6 +478,14 @@ _APPROVAL_TOKENS = frozenset({
 # still fails, which is the property exact equality was protecting.
 _CLAUSE_TAIL_RE = re.compile(r"[.!?。…\n,;·]+")
 
+# The harness writes the interrupt as a `role: user` entry with this exact text
+# and no flag distinguishing it from typed input. Anchored at both ends: the
+# same phrase inside a longer message is the user quoting it, not an interrupt.
+# Both spellings occur in this machine's transcripts (146 and 100 of 246 bare
+# markers); the corpus holds no third.
+_INTERRUPT_ONLY_RE = re.compile(
+    r"^\[request interrupted by user(?: for tool use)?\]$", re.IGNORECASE)
+
 # Each `"question"="answer"` pair in an AskUserQuestion tool_result; the answer
 # is the option label (or the typed "Other" text) the user picked.
 _ASK_ANSWER_RE = re.compile(r'"((?:[^"\\]|\\.)*)"=\s*"((?:[^"\\]|\\.)*)"')
@@ -586,6 +594,12 @@ def _human_user_indices(entries: list[dict]) -> list[int]:
     merge otherwise becomes the last user message and closes the prior-turn
     extension. An entry with no `origin` stays human, since transcripts written
     before the field existed carry none.
+
+    An interrupt marker carries neither flag (issue #1459) and is not typed
+    content either: it records that the user stopped the reply, so a briefing
+    answered with `ok` right after one was still answered in that turn. Only a
+    message whose whole text IS the marker is skipped — the phrase quoted inside
+    a longer message is something the user wrote, and it still closes the window.
     """
     idxs: list[int] = []
     for i, ev in enumerate(entries):
@@ -598,6 +612,8 @@ def _human_user_indices(entries: list[dict]) -> list[int]:
         if isinstance(origin, dict) and origin.get("kind") not in (None, "human"):
             continue
         content = msg.get("content", [])
+        if _INTERRUPT_ONLY_RE.match(_user_message_text(content).strip()):
+            continue
         if isinstance(content, str):
             if content.strip():
                 idxs.append(i)

@@ -398,15 +398,14 @@ approve blindly.
   | it precedes a merge that already ran in this session | serial-merge `floor` (marker path only) |
 
   "The latest turn in which the assistant wrote text" rather than "the turn
-  right before the last user message" is deliberate. An interrupt arrives as a
-  `text` block with no `isMeta` and no `origin` (263 such entries across 868
-  local transcripts), so `_human_user_indices` counts it as a human message:
-  in briefing → interrupt → `continue` the turn before `continue` is empty and
-  the briefing sits one further back. Keyed on the turn right before, the
-  clause would never fire on the very sequence that motivated it. The same
-  split is why briefing → interrupt → `ok` is denied today even though the
-  user approved; the clause names it, and changing that decision is out of
-  this scope.
+  right before the last user message" is deliberate. A user message that
+  carries content of its own still empties the turn behind it — briefing →
+  interrupt → `잠깐, CI 로그부터` → `ok` leaves the briefing one turn further
+  back — so keyed on the turn right before, the clause would never fire on the
+  sequences that motivated it. A bare interrupt marker no longer produces that
+  shape: issue #1459 stopped counting it as a human message, so briefing →
+  interrupt → `ok` is released rather than explained. `continue` after an
+  interrupt still denies, and the clause is what names the reason.
 
   Replayed over every recorded `gh pr merge` in local transcripts (791 calls
   across 867 transcripts, each transcript cut right before the merge and fed
@@ -486,6 +485,20 @@ approve blindly.
   none on real user messages. Measured over 3,136 local transcripts: 9,592
   `task-notification` entries, none with `isMeta`; 428 of 3,003 `gh pr merge`
   calls had one as the last user entry.
+- **An interrupt marker does not start a new window either (issue #1459).** The
+  harness writes `[Request interrupted by user]` (or `… for tool use]`) as a
+  `role: user` entry with no `isMeta` and no `origin`, so it was counted as a
+  typed message: briefing → interrupt → `ok` → merge was denied although the
+  user had just approved. It records that the reply was stopped, not something
+  the user said, so `_human_user_indices` skips an entry whose **whole** text is
+  the marker. The anchors are load-bearing: the same phrase inside a longer
+  message is the user writing about the interrupt, and that message still closes
+  the window. Measured over 1,254 local transcripts: 246 bare-marker entries in
+  the countable shape (146 `[Request interrupted by user]`, 100 `… for tool
+  use]`, no third spelling), against 41 entries carrying the phrase inside
+  longer text, which stay counted. `continue` after an interrupt still denies —
+  it is a progress signal, not consent — and that split is what the four
+  `momentum-merge-interrupt-*` fixtures fix in place.
 - Trivial-PR markers (`typo`, `comment-only`, `single-line`, `오타`, `주석만`,
   `trivial pr`, `2-line report`, …) in the briefing text → no escalation,
   matching the *Pre-Merge Reporting* rule's "Trivial PRs: a 2-line report is
