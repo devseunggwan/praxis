@@ -889,8 +889,9 @@ def _merge_ask_with_context(ask_so: str, sibling_so: list[str], event: str) -> s
     """Fold sibling non-decision `additionalContext` into the winning ask (#1477).
 
     `ask_so` is the exact stdout string the ask member wrote; `sibling_so` is
-    every OTHER member's stdout that reached this point (deny already returned
-    earlier, so none of these are decisions). Live-measured on Claude Code
+    every OTHER member's stdout that reached this point. The caller's marker
+    filter misses decisions written as compact JSON, so a sibling whose parsed
+    `permissionDecision` is set is skipped here as well. Live-measured on Claude Code
     2.1.278 (session `e4e292a3`, 2026-09-21): a `hookSpecificOutput` carrying
     both `permissionDecision: "ask"` and `additionalContext` in the SAME
     object produces a separate `hook_additional_context` transcript
@@ -927,6 +928,9 @@ def _merge_ask_with_context(ask_so: str, sibling_so: list[str], event: str) -> s
         if not isinstance(s_hso, dict):
             continue
         if str(s_hso.get("hookEventName") or "") != event:
+            continue
+        # The marker filter is spacing-sensitive; compact JSON slips past it.
+        if s_hso.get("permissionDecision") is not None:
             continue
         text = s_hso.get("additionalContext")
         if isinstance(text, str) and text:

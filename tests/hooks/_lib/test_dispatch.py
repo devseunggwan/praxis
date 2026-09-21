@@ -833,6 +833,43 @@ def test_ask_merge_ignores_mismatched_event_sibling(tmp_path, monkeypatch, capsy
     assert "additionalContext" not in hso
 
 
+def _fake_compact_decision(decision: str, text: str) -> str:
+    # Compact separators leave no space after the colon, so the spacing-sensitive
+    # marker substrings never match — only the parsed field can exclude it.
+    return (
+        "import json, sys\n"
+        "def main():\n"
+        "    json.dump({'hookSpecificOutput': {'hookEventName': 'PreToolUse',"
+        " 'permissionDecision': %r, 'additionalContext': %r}}, sys.stdout,"
+        " separators=(',', ':'))\n"
+        "    sys.stdout.write('\\n')\n"
+        "    return 0\n" % (decision, text)
+    )
+
+
+@pytest.mark.parametrize("decision", ["ask", "deny"])
+def test_ask_merge_skips_compact_decision_sibling(decision, tmp_path, monkeypatch, capsys):
+    members = [
+        ("preflight-gate", "ask", _write_fake(tmp_path, "ask", _FAKE_ASK)),
+        (
+            "advisory-nudge",
+            "compact",
+            _write_fake(tmp_path, "compact", _fake_compact_decision(decision, "decision-text")),
+        ),
+        (
+            "advisory-nudge",
+            "ctx",
+            _write_fake(tmp_path, "ctx", _fake_context("PreToolUse", "sibling-warning")),
+        ),
+    ]
+    _patch_members(monkeypatch, members)
+    rc = _dispatch.run_group("PreToolUse", "Bash", NOOP_PAYLOAD)
+    hso = _sole_hso(capsys.readouterr().out)
+    assert rc == 0
+    assert hso["permissionDecision"] == "ask"
+    assert hso["additionalContext"] == "sibling-warning"
+
+
 def test_all_pass_allows(tmp_path, monkeypatch, capsys):
     members = [
         ("preflight-gate", "p1", _write_fake(tmp_path, "p1", _FAKE_PASS)),
