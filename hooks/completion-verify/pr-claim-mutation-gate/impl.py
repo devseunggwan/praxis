@@ -122,12 +122,47 @@ _HEDGE_RE = re.compile(
 # assistant assertion, and must not fire.
 _QUESTION_RE = re.compile(r"[?？]\s*$|했나요|됐나요|했습니까")
 
+# A fenced block is the other standard way of reproducing someone else's text,
+# so its lines are quoted for the same reason `>` lines are (issue #1444: a bot
+# comment ending in "리뷰 코멘트 처리 완료", pasted verbatim, blocked a message
+# that claimed nothing). CommonMark: up to 3 leading spaces, and a closing run
+# must use the same char and be at least as long as the opening one, so an inner
+# ``` inside a ```` block does not close it. An opening fence with no closer runs
+# to the end of the text, which is how the message renders.
+#
+# The suffix is captured because it decides which role the line can play. A
+# closing fence carries nothing after its run, so ```` ```python ```` inside a
+# block is an ordinary content line — read as a closer it ends the block early
+# and hands the quoted text back to the claim scan, which is the block this gate
+# exists to prevent. An opening fence may carry an info string, except that a
+# backtick fence's info string may not itself contain a backtick.
+_FENCE_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
+
 
 def detect_claim(text: str) -> bool:
     """True if `text` asserts a PR-surface processed claim (subject + claim on
-    the same line, not negated, not hedged, not a question). Quoted lines
-    (`>` — reporting a claim rather than making one) are skipped."""
+    the same line, not negated, not hedged, not a question). Lines that
+    reproduce someone else's text rather than assert — a `>` blockquote or a
+    fenced block — are skipped."""
+    fence_char = ""
+    fence_len = 0
     for raw_line in text.splitlines():
+        m = _FENCE_RE.match(raw_line)
+        if m:
+            token, suffix = m.group(1), m.group(2)
+            if fence_char:
+                # Inside a block every line is quoted, this one included; it
+                # only ends the block when it is a well-formed closer.
+                if token[0] == fence_char and len(token) >= fence_len and not suffix.strip():
+                    fence_char, fence_len = "", 0
+                continue
+            if not (token[0] == "`" and "`" in suffix):
+                fence_char, fence_len = token[0], len(token)
+                continue
+            # A backtick info string may hold no backtick, so this opens
+            # nothing: the line is ordinary text and gets scanned below.
+        elif fence_char:
+            continue
         line = raw_line.strip()
         if not line or line.startswith(">"):
             continue
