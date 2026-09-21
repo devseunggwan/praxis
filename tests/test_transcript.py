@@ -576,6 +576,12 @@ _CONSUMERS = {
     # refusal sentence the never-ran markers are keyed on (#1117).
     HOOKS / "advisory-nudge" / "composed-command-gate" / "impl.py":
         ["tail_lines", "TranscriptReadError"],
+    # Only the turn reader is imported (issue #1476): the last-assistant-uuid
+    # selection is a local helper — `extract_last_assistant_text` alone drops
+    # the uuid the dedup keys on, and widening that shared function's return
+    # shape for this one caller was not worth it.
+    HOOKS / "advisory-nudge" / "response-language-nudge" / "impl.py":
+        ["load_current_turn"],
 }
 
 # Constants are values, not bindings, so the function map above cannot pin them:
