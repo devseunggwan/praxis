@@ -110,6 +110,18 @@ run_case "ro_kubectl_logs"   "$(verdict "$(bash_payload 'kubectl logs pod-x --pr
 # An org-internal CLI is no longer on the allowlist (issue #1470), so it takes
 # the fall-through the paragraph above describes: one question, not silence.
 run_case "internal_cli_asks" "$(verdict "$(bash_payload 'orgctl token fetch datadog --phase prod')")"   "ask"
+# `orgctl` was never allowlisted, so the case above passes with the removed entry
+# restored too. Pinning the key set catches a new allowlist binary by any name;
+# adding a public read-only CLI means updating this line on purpose.
+run_case "allowlist_binaries_pinned" \
+  "$(python3 - "$HOOK" <<'EOF'
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("gate", sys.argv[1])
+gate = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(gate)
+print(",".join(sorted(gate.READONLY_SUBCOMMANDS)))
+EOF
+)" "aws,docker,gh,git,kubectl"
 run_case "ro_aws_sts"        "$(verdict "$(bash_payload 'aws sts get-caller-identity --profile prod')")" "quiet"
 run_case "ro_git_log"        "$(verdict "$(bash_payload 'git log --oneline --phase prod')")"             "quiet"
 run_case "ro_gh_pr_view"     "$(verdict "$(bash_payload 'gh pr view 1 --profile prod')")"                "quiet"
