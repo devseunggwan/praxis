@@ -91,7 +91,7 @@ The enumeration below is measured, still true, and still worth checking — but
 the ADVISE grade does not rest on it. A grade that ships to every host cannot
 stand on a premise that varies per host, and this one does.
 
-Seven sibling `PreToolUse(Bash)` hooks gate a `git commit` argv on their own —
+Eight sibling `PreToolUse(Bash)` hooks gate a `git commit` argv on their own —
 derived from the `"gates": ["git-commit"]` field each carries in
 `hooks/manifest.json`, and each verified by reading its detector to key on the
 `commit` subcommand:
@@ -103,10 +103,11 @@ derived from the `"gates": ["git-commit"]` field each carries in
 | `commit-message-paren-check` | all | a message line release-please's parser rejects |
 | `commit-title-format-check` | all | Conventional Commits title format |
 | `commit-title-length-check` | all | title length |
+| `internal-token-leak-gate` | all | an internal identifier headed for a public repo |
 | `pre-commit-staged-file-enumeration` | `claude` | staging without enumerating files |
 | `verify-commit-flag-override` | all | `-n` / `--no-verify` flag override |
 
-Four of the seven siblings are the checklist `verify-commit-flag-override`
+Four of the eight siblings are the checklist `verify-commit-flag-override`
 already prints on its own deny (issue #941). By contrast **no** sibling hook
 gates `kubectl apply` at all.
 
@@ -132,18 +133,21 @@ The sibling set is therefore a per-host set:
 
 | Host | Sibling commit gates | Also in the deny checklist |
 | ------ | ---------------------- | ---------------------------- |
-| `claude` | 7 | 4 |
-| `codex` | 4 | 2 |
-| `cursor` | 4 | 2 |
+| `claude` | 8 | 4 |
+| `codex` | 5 | 2 |
+| `cursor` | 5 | 2 |
 
 Both columns are re-derived per host by `scripts/check-sibling-commit-gates.py`
 — every hook-installing platform must have a row, and a row for a platform that
 installs no hooks is itself drift.
 
 Outside `claude` the survivors are `commit-title-format-check`,
-`commit-title-length-check` and `verify-commit-flag-override`. Two of those gate
-only the *shape* of the commit title; the third fires only when a `-n` /
-`--no-verify`-class override is present. None of them asks whether the commit
+`commit-title-length-check`, `internal-token-leak-gate` and
+`verify-commit-flag-override`. The two `commit-title-*` checks gate only the
+*shape* of the commit title; `internal-token-leak-gate` fires only when an
+internal identifier heads for a public repo; `verify-commit-flag-override`
+fires only when a `-n` / `--no-verify`-class override is present. None of them
+asks whether the commit
 was intended at all. The siblings that carry that weight — the codex-review
 gate, the staged-file enumeration and the decomposition advisory — are
 `claude`-only, as the `Hosts` column records. The
@@ -170,7 +174,7 @@ carry the `git-commit` label; the demotion does not follow them down, because
 the reversibility ground fails for them. What a wrapper process does inside
 itself is not readable from the argv the hook sees: `iceberg-schema promote`
 writes a shared catalog, not this checkout's `.git`, so there is no
-`git reset` that undoes it. The seven sibling gates match a literal
+`git reset` that undoes it. The eight sibling gates match a literal
 `git commit` argv and never see it either. They keep asking, under their own
 category name.
 

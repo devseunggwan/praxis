@@ -50,7 +50,7 @@
           {
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/_dispatch.sh PreToolUse Bash cursor",
-            "timeout": 8
+            "timeout": 10
           }
         ]
       },
