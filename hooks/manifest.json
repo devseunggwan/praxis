@@ -310,6 +310,7 @@
         "state_paths": ["PRAXIS_INTERNAL_TOKEN_CACHE_PATH"],
         "external_commands": [
           "git -C <cwd> diff --no-color --no-ext-diff -U0 (--cached or HEAD)",
+          "git remote get-url origin",
           "gh api repos/<owner>/<repo> --jq .visibility"
         ]
       }

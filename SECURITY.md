@@ -47,6 +47,7 @@ drift.
 | `hooks/preflight-gate/pre-edit-protected-branch-guard/impl.py` | `git log --oneline -3` | Detect recent PR-suffix commits on a clean tree |
 | `hooks/preflight-gate/gh-merge-worktree-precondition/impl.py` | `git worktree list --porcelain` | Check whether a PR's head branch is checked out in another worktree before `gh pr merge --delete-branch` |
 | `hooks/preflight-gate/internal-token-leak-gate/impl.py` | `git -C <cwd> diff --no-color --no-ext-diff -U0 (--cached or HEAD)` | Read the ADDED lines a `git commit` would record, to scan them for internal identifiers |
+| `hooks/preflight-gate/internal-token-leak-gate/impl.py` | `git remote get-url origin` | Resolve the write target's owner/name when neither `--repo` nor a `repos/` endpoint names it |
 | `hooks/preflight-gate/anchor-comment-gate/impl.py` | `git merge-base origin/<base> HEAD` | Find the PR's fork point so the coverage advisory measures against its own base |
 | `hooks/preflight-gate/anchor-comment-gate/impl.py` | `git diff --name-only <merge-base> HEAD` | List changed files to flag ones no verification-anchor table row mentions (advisory only) |
 | `hooks/advisory-nudge/codex-review-route/impl.py` | `git worktree list --porcelain` | Count active non-bare worktrees before a bare `/codex:review` so the multi-worktree advisory can redirect to `codex-review-wrap` |
@@ -57,7 +58,7 @@ drift.
 | Hook                                                          | Command                                                                 | Purpose                                                                                                    |
 |---------------------------------------------------------------|-------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------|
 | `hooks/preflight-gate/pre-gh-pr-create-dedup-gate/impl.py`    | `gh pr list --repo <r> --state all --search <kw> --json ...`            | Search existing PRs before creating a new one                                                              |
-| `hooks/preflight-gate/internal-token-leak-gate/impl.py` | `gh api repos/<owner>/<repo> --jq .visibility` | Decide whether the write target is public before blocking on an internal identifier |
+| `hooks/preflight-gate/internal-token-leak-gate/impl.py`       | `gh api repos/<owner>/<repo> --jq .visibility`                          | Decide whether the write target is public before blocking on an internal identifier                        |
 | `hooks/preflight-gate/pr-state-refetch-gate/impl.py`          | `gh pr view <N> --json state,mergeStateStatus,mergeable,isDraft`        | Re-fetch live PR state before a PR-state-contingent AskUserQuestion                                        |
 | `hooks/preflight-gate/gh-merge-worktree-precondition/impl.py` | `gh pr view <identifier> --json headRefName -q .headRefName`            | Resolve a PR's live head branch before checking it against `git worktree list`                             |
 | `hooks/preflight-gate/anchor-comment-gate/impl.py`            | `gh api /repos/{owner}/{repo}/issues/comments/{id} --jq .body`          | Read back the verification anchor that was just published, from the comment URL the command itself printed |
