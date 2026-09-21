@@ -335,7 +335,8 @@ approve blindly.
   `병합`, that
   neither negates it nor asks whether it happened or how it stands
   (`머지하지 말까요?`, `머지됐나요?`, `머지했나요?`, `Did we merge PR #999?`,
-  `PR #999 merge status?`, `머지 상태`),
+  `PR #999 merge status?`, `머지 상태`) — in either spelling of the verb, so
+  `merging status|state|conflicts|results` is excluded exactly as `merge` is,
   and that is about the PR. When the merge verb takes PR references as its
   object — a list right before `머지`/`병합` or right after `merge` — the ask is
   about exactly those PRs (`#833, #999 를 머지할까요?` asks about both;
@@ -350,7 +351,10 @@ approve blindly.
   picked label leads with an approval token
   (`승인 — 머지`, `Approve merge`), a reference to the PR itself set aside (`PR #999 머지`),
   with no negation anywhere in the label — a qualifier can reverse the lead
-  rather than narrow it (`승인 — 머지하지 않기`, `Approve — do not merge`). A reply is not an approval: an unrelated message, a status
+  rather than narrow it, whether the negator follows the verb
+  (`승인 — 머지하지 않기`, `Approve — do not merge`), precedes it
+  (`승인 — 안 머지`), sits in a consequence clause (`승인 — 머지하면 안 됨`) or
+  is a bare English determiner (`Approve — no merge`). A reply is not an approval: an unrelated message, a status
   request that names the PR (`PR #999 머지 상태만 알려줘`), a refusal that does
   not end on an approval token, a reply that ends in a question mark
   (`Approve merge?` typed back, `ok?`), a bare `ok` to a turn about something else or
