@@ -35,7 +35,7 @@ elif evidence == "bash":
          "input": {"command": "git status --porcelain ../wt-4024"}}]}})
 elif evidence == "mcp":
     events.append({"message": {"role": "assistant", "content": [
-        {"type": "tool_use", "name": "mcp__laplace-airflow__airflow_dag_runs",
+        {"type": "tool_use", "name": "mcp__airflow__airflow_dag_runs",
          "input": {"dag_id": "x"}}]}})
 elif evidence == "write":
     events.append({"message": {"role": "assistant", "content": [

@@ -14,8 +14,8 @@ The agent surfaced this verdict to the user:
 
     게이트 결과가 나왔습니다 — 매핑 규칙이 없습니다.
 
-The evidence was a read of `dags/tests/laplace/templates/sql` (PLURAL, 1
-test). The real asset lives at `dags/tests/laplace/template/sql` (SINGULAR,
+The evidence was a read of `dags/tests/example/templates/sql` (PLURAL, 1
+test). The real asset lives at `dags/tests/example/template/sql` (SINGULAR,
 37 tests) — a one-character directory-name difference. Accepted as-is, the
 verdict would have discarded approach A entirely (the AC's kill branch). It
 was retracted only by the agent's own later probe.
