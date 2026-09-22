@@ -160,6 +160,7 @@ per-hook `spec.md` before promoting any of them.
 | `PRAXIS_WORKTREE_SOURCE_EXTENSIONS` | `worktree-edit-gate` | File extensions the gate applies to |
 | `PRAXIS_MD_ESCAPE_MODE` | `pre-edit-md-escape-advisory` | Select advisory vs block mode |
 | `PRAXIS_INTENT_PIVOT_MODE` | `session-intent` | Pivot-detection mode |
+| `PRAXIS_SKIP_JEV_ROUTING` | `cmux-delegate` (skill, not a hook) | `1` stops the delegation route script from calling TypeSafe's System One API, so an omitted `--model` keeps the pre-jev default. See [`../PRIVACY.md`](../PRIVACY.md) Direct egress (issue #1481) |
 | `PRAXIS_RESPONSE_LANGUAGE` | `postcompact-context`, `response-language-nudge` | User's response-language instruction. `postcompact-context` echoes it verbatim as one context line; `response-language-nudge` additionally requires it to normalize to Korean before it runs its drift check. No default, no hardcoded language — unset or blank leaves both hooks' output unchanged (issue #1476) |
 
 ## Path / test (relocate state, caches, logs)
