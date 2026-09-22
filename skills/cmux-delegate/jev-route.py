@@ -48,9 +48,13 @@ def route(task: str) -> dict[str, object]:
     if len(samples) < SAMPLES:
         return {"source": "fallback", "reason": f"{len(samples)}/{SAMPLES} samples returned"}
     try:
-        means = {k: round(sum(float(s[k]["noul"]) for s in samples) / SAMPLES, 3) for k in QUESTIONS}
+        values = {k: [float(s[k]["noul"]) for s in samples] for k in QUESTIONS}
     except (KeyError, TypeError, ValueError):
         return {"source": "fallback", "reason": "unexpected answer shape"}
+    # A noul is a probability; NaN fails both comparisons and is rejected too.
+    if not all(0.0 <= v <= 1.0 for vs in values.values() for v in vs):
+        return {"source": "fallback", "reason": "noul out of range"}
+    means = {k: round(sum(vs) / SAMPLES, 3) for k, vs in values.items()}
     for key, provider, tier in DECISION_ORDER:
         if round(abs(means[key] - 0.5), 3) < AMBIGUITY_BAND:
             return {"source": "fallback", "reason": f"{key} ambiguous", "nouls": means}

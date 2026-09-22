@@ -99,3 +99,9 @@ def test_cli_empty_task_prints_fallback():
     proc = run_cli()
     assert proc.returncode == 0
     assert json.loads(proc.stdout) == {"source": "fallback", "reason": "empty task"}
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), -0.1, 2.0])
+def test_out_of_range_noul_falls_back(answers, bad):
+    answers.extend([sample(bad, 0, 0, 0)] * 3)
+    assert jev_route.route("task") == {"source": "fallback", "reason": "noul out of range"}
