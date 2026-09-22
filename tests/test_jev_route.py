@@ -74,6 +74,11 @@ def test_band_edge_is_outside_the_band(answers):
     assert jev_route.route("task")["tier"] == "opus"
 
 
+def test_mean_just_inside_band_is_not_rounded_out(answers):
+    answers.extend([sample(0.5996, 0, 0, 0)] * 3)
+    assert jev_route.route("task")["reason"] == "deep ambiguous"
+
+
 def test_missing_samples_fall_back(answers):
     answers.extend([sample(0.9, 0, 0, 0)] * 2)
     assert jev_route.route("task") == {"source": "fallback", "reason": "2/3 samples returned"}

@@ -54,11 +54,13 @@ def route(task: str) -> dict[str, object]:
     # A noul is a probability; NaN fails both comparisons and is rejected too.
     if not all(0.0 <= v <= 1.0 for vs in values.values() for v in vs):
         return {"source": "fallback", "reason": "noul out of range"}
-    means = {k: round(sum(vs) / SAMPLES, 3) for k, vs in values.items()}
+    raw = {k: sum(vs) / SAMPLES for k, vs in values.items()}
+    means = {k: round(v, 3) for k, v in raw.items()}
     for key, provider, tier in DECISION_ORDER:
-        if round(abs(means[key] - 0.5), 3) < AMBIGUITY_BAND:
+        # Round only away float noise (0.6 - 0.5 is 0.0999...), not real distance.
+        if round(abs(raw[key] - 0.5), 9) < AMBIGUITY_BAND:
             return {"source": "fallback", "reason": f"{key} ambiguous", "nouls": means}
-        if means[key] >= 0.5:
+        if raw[key] >= 0.5:
             return {"source": "jev", "provider": provider, "tier": tier, "nouls": means}
     return {"source": "jev", "provider": "claude", "tier": "sonnet", "nouls": means}
 
