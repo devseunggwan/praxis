@@ -79,7 +79,7 @@ attach the PR to.
 | Argument | Default | Description |
 | ---------- | --------- | ------------- |
 | `<task>` | (required) | Description of the task to delegate |
-| `--model` | jev route, else `sonnet` | Provider:model notation. `opus`/`sonnet`/`haiku` = claude. Also supports `claude`, `claude:opus`, `codex` (= `gpt-5.6-terra`, effort `medium`), `codex:gpt-5.6-sol`, `codex:gpt-5.6-sol:xhigh`, `gemini`, `gemini:flash`. See project `ARCHITECTURE.md` Provider Routing. |
+| `--model` | jev route, else `sonnet` | Provider:model notation. `fable`/`opus`/`sonnet`/`haiku` = claude. Also supports `claude`, `claude:opus`, `codex` (= `gpt-5.6-terra`, effort `medium`), `codex:gpt-5.6-sol`, `codex:gpt-5.6-sol:xhigh`, `gemini`, `gemini:flash`. See project `ARCHITECTURE.md` Provider Routing. |
 | `--cwd` | current dir | Working directory for the new session |
 | `--max-budget-usd` | — | **Unsupported (#1054).** A print-mode-only flag, so it cannot be used with an interactive worker. If given, do not ignore it silently — tell the user |
 | `--account` | (default account) | Claude account profile (e.g. `claude-2` → `CLAUDE_CONFIG_DIR=~/.claude-2`) |
@@ -122,7 +122,7 @@ else:
 if model matches /^(codex|gemini)(?::(.+))?$/:
   provider = match[1]           # "codex" or "gemini"
   sub_model = match[2] || ""    # "" or "gpt-5.6-sol:xhigh" or "flash" (first colon stripped)
-elif model in ["opus", "sonnet", "haiku"]:
+elif model in ["fable", "opus", "sonnet", "haiku"]:
   provider = "claude"
   sub_model = model
 elif model matches /^claude(?::(.+))?$/:

@@ -83,7 +83,7 @@ Unified `--model` flag across all skills: `<provider>:<model>` or bare model nam
 
 | Notation | Resolves to | CLI command |
 | ---------- | ------------- | ------------- |
-| `opus`, `sonnet`, `haiku` | `claude:{name}` | `claude --model {name}` |
+| `fable`, `opus`, `sonnet`, `haiku` | `claude:{name}` | `claude --model {name}` |
 | `claude` | Claude default model | `claude` |
 | `claude:opus` | Claude Opus | `claude --model opus` |
 | `codex` | Codex, terra at medium effort | `codex exec -m gpt-5.6-terra -c model_reasoning_effort=medium` |
@@ -93,7 +93,7 @@ Unified `--model` flag across all skills: `<provider>:<model>` or bare model nam
 | `gemini` | Gemini default model | `gemini` |
 | `gemini:flash` | Gemini Flash | `gemini -m flash` |
 
-Bare names (`opus`, `sonnet`, `haiku`) always resolve to Claude — full backward compatibility.
+Bare names (`fable`, `opus`, `sonnet`, `haiku`) always resolve to Claude — full backward compatibility.
 
 ### Task-Type Routing
 
@@ -151,7 +151,7 @@ input = "--model" value
 if input matches /^(codex|gemini)(?::(.+))?$/:
   provider = match[1]           # "codex" or "gemini"
   sub_model = match[2] || ""    # "" or "gpt-5.6-sol:xhigh" or "flash" (first colon stripped)
-elif input in ["opus", "sonnet", "haiku"]:
+elif input in ["fable", "opus", "sonnet", "haiku"]:
   provider = "claude"
   sub_model = input
 elif input matches /^claude(?::(.+))?$/:
