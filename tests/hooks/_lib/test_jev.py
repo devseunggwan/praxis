@@ -8,6 +8,7 @@ Coverage:
   - success: `answers` passthrough; request carries bearer key, model, questions
   - no egress without a key, and none under the kill switch
   - HTTP 401, non-JSON body, body without `answers`, timeout -> None
+  - a redirect is refused, so the key never reaches the Location target
   - ask_samples: all succeed, partial failure, kill switch
 """
 from __future__ import annotations
@@ -56,10 +57,18 @@ class _Server:
         self.status = 200
         self.body: bytes = json.dumps(LIVE_RESPONSE).encode()
         self.delay = 0.0
+        self.location: str | None = None
         self.requests: list[dict[str, Any]] = []
         outer = self
 
         class Handler(BaseHTTPRequestHandler):
+            def do_GET(self) -> None:  # noqa: N802
+                # A followed 301/302/303 arrives as GET, so record it too.
+                outer.requests.append({"auth": self.headers.get("Authorization"), "json": None})
+                self.send_response(200)
+                self.end_headers()
+                self.wfile.write(json.dumps(LIVE_RESPONSE).encode())
+
             def do_POST(self) -> None:  # noqa: N802
                 length = int(self.headers.get("Content-Length", 0))
                 outer.requests.append({
@@ -68,6 +77,8 @@ class _Server:
                 })
                 time.sleep(outer.delay)
                 self.send_response(outer.status)
+                if outer.location:
+                    self.send_header("Location", outer.location)
                 self.end_headers()
                 self.wfile.write(outer.body)
 
@@ -148,3 +159,16 @@ def test_ask_samples_all_succeed(server, keyed):
 def test_ask_samples_drops_failures(server, keyed):
     server.status = 500
     assert _jev.ask_samples("s", QUESTIONS, 3, endpoint=server.url) == []
+
+
+@pytest.mark.parametrize("status", [301, 302, 303, 307, 308])
+def test_redirect_is_refused_and_key_not_forwarded(keyed, status):
+    origin, target = _Server(), _Server()
+    try:
+        origin.status, origin.location = status, target.url
+        assert _jev.ask("s", QUESTIONS, endpoint=origin.url) is None
+        assert target.requests == []
+    finally:
+        origin.close()
+        target.close()
+

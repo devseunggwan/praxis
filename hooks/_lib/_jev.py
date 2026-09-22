@@ -7,7 +7,8 @@ probability distribution and a confidence. There is no rationale string.
 Contract, mirroring the sibling `_git.py`:
 
   - `ask` returns the response's `answers` dict, or None on ANY failure:
-    no key, kill switch set, network error, timeout, non-2xx status, a body
+    no key, kill switch set, network error, timeout, non-2xx status, a
+    redirect, a body
     that is not JSON or carries no `answers` object, no runway to spawn.
   - Never raises.
   - Nothing is logged. The state is user task text and PRIVACY.md forbids
@@ -42,6 +43,16 @@ ENDPOINT = "https://api.typesafe.ai/v1/systemone"
 MODEL = "jev-latest"
 KEYCHAIN_SERVICE = "typesafe-api-key"
 SKIP_ENV = "PRAXIS_SKIP_JEV_ROUTING"
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Refuse redirects: urllib would resend the bearer key to any origin."""
+
+    def redirect_request(self, *args: Any, **kwargs: Any) -> None:
+        return None
+
+
+_OPENER = urllib.request.build_opener(_NoRedirect)
 
 
 def api_key(timeout: float = 3) -> Optional[str]:
@@ -96,7 +107,7 @@ def ask(
         },
     )
     try:
-        with urllib.request.urlopen(request, timeout=min(timeout, budget)) as resp:
+        with _OPENER.open(request, timeout=min(timeout, budget)) as resp:
             payload = json.loads(resp.read().decode("utf-8"))
     except (OSError, ValueError, urllib.error.URLError):
         return None
