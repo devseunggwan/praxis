@@ -142,6 +142,11 @@ if provider == "codex":
   sub_model, _, effort = sub_model.partition(":")
   sub_model = sub_model || CODEX_DEFAULT_MODEL
   effort = effort || CODEX_EFFORT.get(sub_model, "")
+  # Step 4 interpolates both into a bash wrapper unquoted, so a value like
+  # `xhigh; touch /tmp/x` would run. Reject anything that is not a plain
+  # identifier instead of quoting, which `"` and `$( )` would still defeat.
+  if sub_model does not match /^[A-Za-z0-9._-]+$/: abort "invalid codex model"
+  if effort and effort does not match /^[A-Za-z0-9._-]+$/: abort "invalid codex reasoning effort"
 
 # Pre-flight: verify provider CLI is available
 if ! command -v "$provider" &>/dev/null:

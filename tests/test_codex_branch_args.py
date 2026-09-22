@@ -60,3 +60,15 @@ def test_codex_branch_argv(tmp_path: pathlib.Path, sub_model: str, effort: str, 
 def test_stub_sees_a_changed_argv(tmp_path: pathlib.Path) -> None:
     """Control: the stub reports what it was given, so a dropped flag would show."""
     assert _run(tmp_path, "gpt-5.6-luna", "") != _run(tmp_path / "b", "gpt-5.6-luna", "low")
+
+
+def test_codex_values_are_validated_before_the_wrapper() -> None:
+    """Step 1 must reject shell metacharacters; the wrapper interpolates unquoted.
+
+    The rendered branch runs what it is given: `_run(..., "xhigh; touch f")`
+    creates `f`. So the only guard is the rule in the skill's Step 1, which is
+    prose the agent follows and cannot be executed here.
+    """
+    step1 = SKILL.read_text(encoding="utf-8")
+    assert "if sub_model does not match /^[A-Za-z0-9._-]+$/" in step1
+    assert "if effort and effort does not match /^[A-Za-z0-9._-]+$/" in step1

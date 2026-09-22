@@ -166,6 +166,8 @@ if provider == "codex":
   sub_model, _, effort = sub_model.partition(":")
   sub_model = sub_model || "gpt-5.6-terra"
   effort = effort || {"gpt-5.6-luna": "low", "gpt-5.6-terra": "medium", "gpt-5.6-sol": "high"}.get(sub_model, "")
+  # both are interpolated into a shell command, so anything outside
+  # /^[A-Za-z0-9._-]+$/ is rejected rather than quoted
 ```
 
 ## Hook index
