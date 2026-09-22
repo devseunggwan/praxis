@@ -79,7 +79,7 @@ attach the PR to.
 | Argument | Default | Description |
 | ---------- | --------- | ------------- |
 | `<task>` | (required) | Description of the task to delegate |
-| `--model` | `sonnet` | Provider:model notation. `opus`/`sonnet`/`haiku` = claude. Also supports `claude`, `claude:opus`, `codex`, `codex:o3`, `gemini`, `gemini:flash`. See project `ARCHITECTURE.md` Provider Routing. |
+| `--model` | jev route, else `sonnet` | Provider:model notation. `opus`/`sonnet`/`haiku` = claude. Also supports `claude`, `claude:opus`, `codex`, `codex:o3`, `gemini`, `gemini:flash`. See project `ARCHITECTURE.md` Provider Routing. |
 | `--cwd` | current dir | Working directory for the new session |
 | `--max-budget-usd` | — | **Unsupported (#1054).** A print-mode-only flag, so it cannot be used with an interactive worker. If given, do not ignore it silently — tell the user |
 | `--account` | (default account) | Claude account profile (e.g. `claude-2` → `CLAUDE_CONFIG_DIR=~/.claude-2`) |
@@ -95,7 +95,6 @@ Parse the arguments from `{{ARGUMENTS}}`:
 
 ```
 args = parse("{{ARGUMENTS}}")
-model = args.model || "sonnet"
 cwd = args.cwd || $(pwd)
 # Accept the budget flag but do not forward it; tell the user it was received (#1054).
 # Dropping it silently lets the user delegate believing a cap is in place.
@@ -106,6 +105,18 @@ distribute = args.distribute || false
 task = args.task (remaining text after flags)
 short_task = task[:30], sanitized to [a-zA-Z0-9가-힣 -] only (for cmux workspace name)
 timestamp = epoch seconds + PID (e.g., 1744163800-12345) to avoid collision
+
+# An explicit --model is never overridden. Without one, jev picks the worker;
+# on {"source": "fallback"} the default stays sonnet (#1481).
+route_source = "explicit"
+if args.model: model = args.model
+else:
+  route = json(python3 "${CLAUDE_PLUGIN_ROOT}/skills/cmux-delegate/jev-route.py" "$task")
+  route_source = route.source
+  if route.source == "jev":
+    model = route.provider == "claude" ? route.tier : route.provider
+  else:
+    model = "sonnet"
 
 # Provider resolution (from project ARCHITECTURE.md Provider Resolution Logic)
 if model matches /^(codex|gemini)(?::(.+))?$/:
@@ -455,7 +466,10 @@ N issues that are already mutually independent, each on its own.
    pair is what `{prompt_file}` and `{script_file}` mean for that worker;
    reusing the base names would have every worker read one prompt and every
    trap delete one script
-4. Routing: If `--model` is explicit, apply uniformly. Otherwise, auto-assign by task type (see project `ARCHITECTURE.md` Task-Type Routing):
+4. Routing: If `--model` is explicit, apply uniformly. Otherwise run
+   `jev-route.py` on each item's text, as in Step 1, and use its pick when
+   `source` is `jev`. On `fallback`, auto-assign by task type (see project
+   `ARCHITECTURE.md` Task-Type Routing):
    - Code implementation/fix → `codex` (if CLI available) or `claude:sonnet`
    - Search/analysis/large context → `gemini` (if CLI available) or `claude:sonnet`
    - Design/security/review → `claude:opus`
@@ -677,6 +691,7 @@ Delegated to {WS_REF}
   Task: {short_task}
   Provider: {provider}
   Model: {sub_model || "default"}
+  Routing: {route_source}
   Account: {account || "default"}
   Prompt: /tmp/cmux-delegate-{timestamp}.md
   CWD: {cwd}
@@ -691,9 +706,9 @@ cmux에서 {WS_REF} 탭을 확인하세요.
 
 ```text
 Distributed to {N} workspaces:
-  | Workspace | Task | Provider | Model | Account |
-  |-----------|------|----------|-------|---------|
-  | {ws_ref}  | {item_title} | {provider} | {sub_model} | {account} |
+  | Workspace | Task | Provider | Model | Routing | Account |
+  |-----------|------|----------|-------|---------|---------|
+  | {ws_ref}  | {item_title} | {provider} | {sub_model} | {route_source} | {account} |
   ...
 
 각 cmux 탭에서 진행 상황을 확인하세요.
