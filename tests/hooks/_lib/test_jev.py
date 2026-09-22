@@ -9,6 +9,7 @@ Coverage:
   - no egress without a key, and none under the kill switch
   - HTTP 401, non-JSON body, body without `answers`, timeout -> None
   - a redirect is refused, so the key never reaches the Location target
+  - a body dripped past the timeout, or over the size cap, -> None
   - ask_samples: all succeed, partial failure, kill switch
 """
 from __future__ import annotations
@@ -58,6 +59,7 @@ class _Server:
         self.body: bytes = json.dumps(LIVE_RESPONSE).encode()
         self.delay = 0.0
         self.location: str | None = None
+        self.drip = 0.0
         self.requests: list[dict[str, Any]] = []
         outer = self
 
@@ -80,7 +82,13 @@ class _Server:
                 if outer.location:
                     self.send_header("Location", outer.location)
                 self.end_headers()
-                self.wfile.write(outer.body)
+                if not outer.drip:
+                    self.wfile.write(outer.body)
+                    return
+                for byte in outer.body:
+                    self.wfile.write(bytes([byte]))
+                    self.wfile.flush()
+                    time.sleep(outer.drip)
 
             def log_message(self, format: str, *args: Any) -> None:
                 pass
@@ -172,3 +180,15 @@ def test_redirect_is_refused_and_key_not_forwarded(keyed, status):
         origin.close()
         target.close()
 
+
+def test_dripped_body_past_deadline_returns_none(server, keyed):
+    # Each byte arrives well inside the socket timeout; the whole body does not.
+    server.drip = 0.05
+    start = time.monotonic()
+    assert _jev.ask("s", QUESTIONS, timeout=1.0, endpoint=server.url) is None
+    assert time.monotonic() - start < 3
+
+
+def test_oversized_body_returns_none(server, keyed):
+    server.body = json.dumps({"answers": {"x": "y" * (_jev.MAX_BODY_BYTES + 1)}}).encode()
+    assert _jev.ask("s", QUESTIONS, endpoint=server.url) is None

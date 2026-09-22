@@ -8,7 +8,7 @@ Contract, mirroring the sibling `_git.py`:
 
   - `ask` returns the response's `answers` dict, or None on ANY failure:
     no key, kill switch set, network error, timeout, non-2xx status, a
-    redirect, a body
+    redirect, a body over 64 KiB or still arriving past the timeout, a body
     that is not JSON or carries no `answers` object, no runway to spawn.
   - Never raises.
   - Nothing is logged. The state is user task text and PRIVACY.md forbids
@@ -27,6 +27,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 import urllib.error
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
@@ -43,6 +44,8 @@ ENDPOINT = "https://api.typesafe.ai/v1/systemone"
 MODEL = "jev-latest"
 KEYCHAIN_SERVICE = "typesafe-api-key"
 SKIP_ENV = "PRAXIS_SKIP_JEV_ROUTING"
+MAX_BODY_BYTES = 64 * 1024
+_CHUNK = 4096
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -53,6 +56,22 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 
 
 _OPENER = urllib.request.build_opener(_NoRedirect)
+
+
+def _read_within(resp: Any, deadline: float) -> Optional[bytes]:
+    # The socket timeout bounds each read, not the whole body.
+    chunks: list[bytes] = []
+    size = 0
+    while True:
+        if time.monotonic() > deadline:
+            return None
+        chunk = resp.read1(_CHUNK)
+        if not chunk:
+            return b"".join(chunks)
+        size += len(chunk)
+        if size > MAX_BODY_BYTES:
+            return None
+        chunks.append(chunk)
 
 
 def api_key(timeout: float = 3) -> Optional[str]:
@@ -106,9 +125,14 @@ def ask(
             "Content-Type": "application/json",
         },
     )
+    limit = min(timeout, budget)
+    deadline = time.monotonic() + limit
     try:
-        with _OPENER.open(request, timeout=min(timeout, budget)) as resp:
-            payload = json.loads(resp.read().decode("utf-8"))
+        with _OPENER.open(request, timeout=limit) as resp:
+            raw = _read_within(resp, deadline)
+            if raw is None:
+                return None
+            payload = json.loads(raw.decode("utf-8"))
     except (OSError, ValueError, urllib.error.URLError):
         return None
     answers = payload.get("answers") if isinstance(payload, dict) else None
