@@ -234,7 +234,9 @@ to multiple AI providers via a unified `--model` flag using
 `<provider>:<model>` notation (e.g. `claude:opus`, `codex:o3`,
 `gemini:flash`). Bare names (`opus`, `sonnet`, `haiku`) always resolve to
 Claude — full backward compatibility. When only `claude` is installed,
-the system behaves exactly as before — no errors, no degradation.
+the system behaves exactly as before — no errors, no degradation — except
+that an omitted `--model` may pick a Claude tier through jev when a TypeSafe
+key is present (see [PRIVACY.md → Direct egress](PRIVACY.md#direct-egress)).
 
 See [ARCHITECTURE.md → Provider Routing](ARCHITECTURE.md#provider-routing) for
 the full task-type / complexity routing matrix and fallback policy.
