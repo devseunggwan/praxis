@@ -2,7 +2,8 @@
 
 Praxis is a local-only plugin for Claude Code, Codex, and Cursor. Praxis code
 stores state only on the user's filesystem and does not transmit data on its
-own. It does invoke external CLIs (`git`, `gh`, `zsh`, `cmux`, `claude`,
+own, with one opt-in exception described under
+[Direct egress](#direct-egress). It does invoke external CLIs (`git`, `gh`, `zsh`, `cmux`, `claude`,
 `codex`, `gemini`) on the user's behalf, and some of those CLIs make network
 calls — see [External CLI Invocations](#external-cli-invocations) and
 [Telemetry](#telemetry) for the enumerated egress paths.
@@ -140,4 +141,20 @@ those invocations make network calls — most notably:
 These egress paths are visible in the hook/skill source (see SECURITY.md
 "Hook External-Command Allowlist") and run under the user's environment.
 Praxis does not intercept, store, or transmit additional data via its own
-code paths beyond what the invoked CLI requires.
+code paths beyond what the invoked CLI requires, except the one path below.
+
+### Direct egress
+
+`skills/cmux-delegate/jev-route.py` (through `hooks/_lib/_jev.py`) is the one
+place praxis code sends data itself. When `cmux-delegate` runs without
+`--model`, it POSTs the delegated task text to TypeSafe's System One API
+(`https://api.typesafe.ai/v1/systemone`) to pick the worker.
+
+- **Opt-in by key.** It runs only when a key is found in `TYPESAFE_API_KEY` or
+  the macOS Keychain generic password with service `typesafe-api-key`. No key
+  means no request.
+- **Kill switch.** `PRAXIS_SKIP_JEV_ROUTING=1` disables it with a key present.
+- **Payload.** The task text and four fixed routing questions. The same text
+  goes on to the `claude` / `codex` / `gemini` CLI as the delegated prompt.
+- **Nothing is kept.** Neither the request nor the response is logged or
+  written to disk.

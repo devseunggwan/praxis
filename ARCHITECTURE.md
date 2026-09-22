@@ -40,7 +40,7 @@ a microkernel made of plugins.
 
 ## Provider Routing
 
-Skills that dispatch external CLI workers (`cmux-delegate`) can route tasks to multiple AI providers. When only `claude` is installed, the system behaves exactly as before — no errors, no degradation.
+Skills that dispatch external CLI workers (`cmux-delegate`) can route tasks to multiple AI providers. When only `claude` is installed, the system behaves exactly as before — no errors, no degradation. The one exception is the jev pick below: with a TypeSafe key present it can choose `opus` or `haiku` where the default was `sonnet`, and a `codex` / `gemini` pick falls back to `claude:sonnet` as before.
 
 ### Provider CLI Spec
 
@@ -113,6 +113,15 @@ Two-phase routing: task keywords select the provider, then complexity selects th
 | `claude` | haiku | sonnet | opus |
 | `codex` | (default) | (default) | (default or explicit) |
 | `gemini` | (default) | (default) | (default or explicit) |
+
+**jev pick (issue #1481):** when `--model` is omitted, `cmux-delegate` first
+asks TypeSafe's System One model through `skills/cmux-delegate/jev-route.py`.
+Four yes/no questions (deep design, corpus analysis, spec-driven code,
+mechanical) are averaged over three samples and read in that order. A mean
+within 0.10 of 0.5, a missing sample, no key, or `PRAXIS_SKIP_JEV_ROUTING=1`
+returns `fallback`, and the phases above apply unchanged. On a 30-task
+hand-labelled fixture this matched 13 labels against 9 for both the keyword
+table and constant `sonnet`.
 
 ### Fallback Policy
 
