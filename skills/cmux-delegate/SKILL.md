@@ -79,7 +79,7 @@ attach the PR to.
 | Argument | Default | Description |
 | ---------- | --------- | ------------- |
 | `<task>` | (required) | Description of the task to delegate |
-| `--model` | jev route, else `sonnet` | Provider:model notation. `opus`/`sonnet`/`haiku` = claude. Also supports `claude`, `claude:opus`, `codex`, `codex:o3`, `gemini`, `gemini:flash`. See project `ARCHITECTURE.md` Provider Routing. |
+| `--model` | jev route, else `sonnet` | Provider:model notation. `opus`/`sonnet`/`haiku` = claude. Also supports `claude`, `claude:opus`, `codex` (= `gpt-5.6-terra`, effort `medium`), `codex:gpt-5.6-sol`, `codex:gpt-5.6-sol:xhigh`, `gemini`, `gemini:flash`. See project `ARCHITECTURE.md` Provider Routing. |
 | `--cwd` | current dir | Working directory for the new session |
 | `--max-budget-usd` | — | **Unsupported (#1054).** A print-mode-only flag, so it cannot be used with an interactive worker. If given, do not ignore it silently — tell the user |
 | `--account` | (default account) | Claude account profile (e.g. `claude-2` → `CLAUDE_CONFIG_DIR=~/.claude-2`) |
@@ -121,7 +121,7 @@ else:
 # Provider resolution (from project ARCHITECTURE.md Provider Resolution Logic)
 if model matches /^(codex|gemini)(?::(.+))?$/:
   provider = match[1]           # "codex" or "gemini"
-  sub_model = match[2] || ""    # "" or "o3" or "flash" (colon stripped)
+  sub_model = match[2] || ""    # "" or "gpt-5.6-sol:xhigh" or "flash" (first colon stripped)
 elif model in ["opus", "sonnet", "haiku"]:
   provider = "claude"
   sub_model = model
@@ -132,11 +132,23 @@ else:
   provider = "claude"
   sub_model = model
 
+# codex never falls through to the config default model: a bare `codex`
+# (explicit or a jev pick) gets terra, and a listed model gets its effort
+# unless `codex:<model>:<effort>` names one (#1483).
+CODEX_DEFAULT_MODEL = "gpt-5.6-terra"
+CODEX_EFFORT = {"gpt-5.6-luna": "low", "gpt-5.6-terra": "medium", "gpt-5.6-sol": "high"}
+effort = ""
+if provider == "codex":
+  sub_model, _, effort = sub_model.partition(":")
+  sub_model = sub_model || CODEX_DEFAULT_MODEL
+  effort = effort || CODEX_EFFORT.get(sub_model, "")
+
 # Pre-flight: verify provider CLI is available
 if ! command -v "$provider" &>/dev/null:
   warn "⚠ ${provider} CLI not found, falling back to claude:sonnet"
   provider = "claude"
   sub_model = "sonnet"
+  effort = ""
 ```
 
 ### Step 1.5: Session Resolution
@@ -475,6 +487,9 @@ N issues that are already mutually independent, each on its own.
    - Design/security/review → `claude:opus`
    - Data lookup/status check → `claude:haiku`
 
+   Each item's pick then goes through Step 1's provider resolution, so a
+   `codex` item gets its own `{sub_model}` and `{effort}` the same way.
+
 ### Step 4: Generate Wrapper Script
 
 Generate `{script_file}`, substituting this worker's own pair:
@@ -560,7 +575,8 @@ case "{provider}" in
     ;;
   codex)
     cat "$PROMPT_FILE" | codex exec \
-      {sub_model:+-m {sub_model}}
+      -m {sub_model} \
+      {effort:+-c model_reasoning_effort={effort}}
     ;;
   gemini)
     gemini -p "$(cat "$PROMPT_FILE")" \
@@ -603,7 +619,8 @@ esac
 exit "$rc"
 ```
 
-`{provider}` and `{sub_model}` are substituted from the provider resolution result in Step 1.
+`{provider}`, `{sub_model}` and `{effort}` are substituted from the provider resolution result in Step 1.
+`{effort:+…}` expands to its text only when `effort` is non-empty, so an unlisted codex model runs at its config default effort.
 `{claude_env}` is substituted with `CLAUDE_CONFIG_DIR=~/.{account}` when account is specified (claude provider only).
 `{budget_flag}` is no longer substituted (#1054). `--max-budget-usd` is
 print-mode only and cannot be used with an interactive worker — and
@@ -690,7 +707,7 @@ Report the skill execution result to the user:
 Delegated to {WS_REF}
   Task: {short_task}
   Provider: {provider}
-  Model: {sub_model || "default"}
+  Model: {sub_model || "default"}{effort:+ (effort {effort})}
   Routing: {route_source}
   Account: {account || "default"}
   Prompt: /tmp/cmux-delegate-{timestamp}.md
