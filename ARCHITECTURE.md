@@ -119,9 +119,10 @@ asks TypeSafe's System One model through `skills/cmux-delegate/jev-route.py`.
 Four yes/no questions (deep design, corpus analysis, spec-driven code,
 mechanical) are averaged over three samples and read in that order. A mean
 within 0.10 of 0.5, a missing sample, no key, or `PRAXIS_SKIP_JEV_ROUTING=1`
-returns `fallback`, and the phases above apply unchanged. On a 30-task
-hand-labelled fixture this matched 13 labels against 9 for both the keyword
-table and constant `sonnet`.
+returns `fallback`, and each mode keeps its pre-jev default: a single
+delegation uses `sonnet`, and distribute mode applies the phases above. On a
+30-task hand-labelled fixture this matched 13 labels against 9 for both the
+keyword table and constant `sonnet`.
 
 ### Fallback Policy
 
