@@ -231,8 +231,8 @@ declaration would turn every tier below into a hard requirement; see
 
 Skills that dispatch external CLI workers (`cmux-delegate`) can route tasks
 to multiple AI providers via a unified `--model` flag using
-`<provider>:<model>` notation (e.g. `claude:opus`, `codex:o3`,
-`gemini:flash`). Bare names (`opus`, `sonnet`, `haiku`) always resolve to
+`<provider>:<model>` notation (e.g. `claude:opus`, `codex:gpt-5.6-sol`,
+`gemini:flash`). Bare names (`fable`, `opus`, `sonnet`, `haiku`) always resolve to
 Claude — full backward compatibility. When only `claude` is installed,
 the system behaves exactly as before — no errors, no degradation — except
 that an omitted `--model` may pick a Claude tier through jev when a TypeSafe

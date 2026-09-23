@@ -83,15 +83,17 @@ Unified `--model` flag across all skills: `<provider>:<model>` or bare model nam
 
 | Notation | Resolves to | CLI command |
 | ---------- | ------------- | ------------- |
-| `opus`, `sonnet`, `haiku` | `claude:{name}` | `claude --model {name}` |
+| `fable`, `opus`, `sonnet`, `haiku` | `claude:{name}` | `claude --model {name}` |
 | `claude` | Claude default model | `claude` |
 | `claude:opus` | Claude Opus | `claude --model opus` |
-| `codex` | Codex default model | `codex exec` |
-| `codex:o3` | Codex with o3 | `codex exec -m o3` |
+| `codex` | Codex, terra at medium effort | `codex exec -m gpt-5.6-terra -c model_reasoning_effort=medium` |
+| `codex:gpt-5.6-sol` | A listed Codex model at its table effort | `codex exec -m gpt-5.6-sol -c model_reasoning_effort=high` |
+| `codex:gpt-5.6-sol:xhigh` | A Codex model at an explicit effort | `codex exec -m gpt-5.6-sol -c model_reasoning_effort=xhigh` |
+| `codex:<other>` | An unlisted Codex model | `codex exec -m <other>` (config default effort) |
 | `gemini` | Gemini default model | `gemini` |
 | `gemini:flash` | Gemini Flash | `gemini -m flash` |
 
-Bare names (`opus`, `sonnet`, `haiku`) always resolve to Claude — full backward compatibility.
+Bare names (`fable`, `opus`, `sonnet`, `haiku`) always resolve to Claude — full backward compatibility.
 
 ### Task-Type Routing
 
@@ -106,13 +108,19 @@ Two-phase routing: task keywords select the provider, then complexity selects th
 | review, design, architecture, security, debug | `claude` | Reasoning depth, nuanced judgment |
 | Default (unmatched) | `claude` | Safe default |
 
-**Phase 2 — Complexity to model (claude only; codex/gemini use provider defaults):**
+**Phase 2 — Complexity to model (claude only; codex and gemini use fixed defaults):**
 
 | Provider | Low | Medium | High |
 | ---------- | ----- | -------- | ------ |
 | `claude` | haiku | sonnet | opus |
-| `codex` | (default) | (default) | (default or explicit) |
+| `codex` | terra, medium | terra, medium | terra, medium, or explicit |
 | `gemini` | (default) | (default) | (default or explicit) |
+
+codex does not scale with complexity on its own. A jev difficulty question
+tried in #1483 found no signal in task titles that separated the levels, so
+codex runs one fixed default and the user raises it explicitly
+(`codex:gpt-5.6-sol`, `codex:gpt-5.6-sol:xhigh`). The effort each listed
+model gets is `luna` low, `terra` medium, `sol` high.
 
 **jev pick (issue #1481):** when `--model` is omitted, `cmux-delegate` first
 asks TypeSafe's System One model through `skills/cmux-delegate/jev-route.py`.
@@ -142,8 +150,8 @@ input = "--model" value
 
 if input matches /^(codex|gemini)(?::(.+))?$/:
   provider = match[1]           # "codex" or "gemini"
-  sub_model = match[2] || ""    # "" or "o3" or "flash" (colon stripped)
-elif input in ["opus", "sonnet", "haiku"]:
+  sub_model = match[2] || ""    # "" or "gpt-5.6-sol:xhigh" or "flash" (first colon stripped)
+elif input in ["fable", "opus", "sonnet", "haiku"]:
   provider = "claude"
   sub_model = input
 elif input matches /^claude(?::(.+))?$/:
@@ -152,6 +160,14 @@ elif input matches /^claude(?::(.+))?$/:
 else:
   provider = "claude"
   sub_model = input
+
+effort = ""
+if provider == "codex":
+  sub_model, _, effort = sub_model.partition(":")
+  sub_model = sub_model || "gpt-5.6-terra"
+  effort = effort || {"gpt-5.6-luna": "low", "gpt-5.6-terra": "medium", "gpt-5.6-sol": "high"}.get(sub_model, "")
+  # both are interpolated into a shell command, so anything outside
+  # /^[A-Za-z0-9._-]+$/ is rejected rather than quoted
 ```
 
 ## Hook index
