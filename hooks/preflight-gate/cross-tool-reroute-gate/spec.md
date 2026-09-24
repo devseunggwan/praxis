@@ -153,3 +153,8 @@ each tool call.
    fires followed a block from a gate that watches Edit, Write and
    NotebookEdit together, with the gate already satisfied before the Edit ran
    — no reroute among them.
+8. A Bash write is matched on the raw command, not on tokenized argv, so a
+   write verb inside quoted text (`gh pr comment --body 'run rm <path>'`)
+   still asks. None of the replay's fires came from this shape; moving the
+   write forms (redirects, `cp`, `sed -i`, ...) onto the tokenizer is a
+   rewrite of their whole matcher.
