@@ -44,8 +44,8 @@ TARGETS — a closed list, compared literally after normalization:
 SAME-TOOL CALLS ARE SILENT. Re-issuing a corrected call on the blocked tool is
 the recovery the block asks for; repeat blocks there are `block_message`'s
 repeat notice's job. Edit, Write and NotebookEdit count as one tool family:
-gates register them under one matcher, so switching among them reaches the
-same gate again.
+most gates register them under one matcher, so switching among them reaches
+the same gate again. A gate on Write or Edit alone is a known miss (spec).
 
 LIFTING. The block is never lifted by a later call on the original tool
 succeeding. In the incident the describe the gate asked for *ran* and failed
@@ -173,7 +173,7 @@ def sql_targets(text: str) -> set[str]:
 
 
 def tool_family(tool_name: str) -> str:
-    """Edit / Write / NotebookEdit are one tool: gates register them together."""
+    """Edit / Write / NotebookEdit are one tool: most gates register them together."""
     return "file-edit" if tool_name in PATH_FIELDS else tool_name
 
 

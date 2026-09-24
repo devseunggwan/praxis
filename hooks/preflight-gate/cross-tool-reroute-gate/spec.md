@@ -69,8 +69,9 @@ replay below:
 ## Same tool family is silent
 
 Retrying the blocked tool with a corrected call is the recovery the block asks
-for. Edit, Write and NotebookEdit count as one family, because gates register
-them under one matcher: switching among them reaches the same gate again. MCP
+for. Edit, Write and NotebookEdit count as one family, because most gates
+register them under one matcher: switching among them reaches the same gate
+again. Not every gate does (see *Known limitations* 7). MCP
 tools are compared by full name, so a second tool on the same server is a
 different tool — that is the originating incident.
 
@@ -143,3 +144,10 @@ each tool call.
    a Bash command: there the query is often the single-quoted argument and
    `--` starts a flag. A table named only inside a literal or comment of a
    Bash query still asks.
+7. A gate registered on `Write` alone (`memory-distillation-fields-gate`) or
+   `Edit` alone is left behind by a switch within the file-edit family, and
+   the switch passes without an ask. Comparing tools one by one instead was
+   measured on the *Recurrence evidence* replay: fires rose from 6 to 13, and all seven added
+   fires followed a block from a gate that watches Edit, Write and
+   NotebookEdit together, with the gate already satisfied before the Edit ran
+   — no reroute among them.
