@@ -112,6 +112,27 @@ T_BASH_SQL="$TMP/bash-sql.jsonl";        mk_transcript "$T_BASH_SQL" "[$BLOCK_BA
 T_BASH_PATH="$TMP/bash-path.jsonl";      mk_transcript "$T_BASH_PATH" "[$BLOCK_BASH_PATH]"
 T_WRITE="$TMP/write.jsonl";              mk_transcript "$T_WRITE" "[$BLOCK_WRITE]"
 
+# A resumed transcript repeating one tool_use id: the block names its source
+# record (tbl_x), and a later record reuses the id for another table.
+T_DUP_ID="$TMP/dup-id.jsonl"
+python3 - "$T_DUP_ID" "$Q_A" <<'PY'
+import json, sys
+out, tool = sys.argv[1], sys.argv[2]
+def use(uuid, sql):
+    return {"type": "assistant", "uuid": uuid, "message": {"role": "assistant", "content": [
+        {"type": "tool_use", "id": "toolu_dup", "name": tool, "input": {"sql": sql}}]}}
+events = [
+    use("asst-x", "SELECT 1 FROM cat.sch.tbl_x"),
+    use("asst-z", "SELECT 1 FROM cat.sch.tbl_z"),
+    {"type": "user", "uuid": "res-x", "sourceToolAssistantUUID": "asst-x",
+     "toolDenialKind": "permission-rule", "message": {"role": "user", "content": [
+         {"type": "tool_result", "tool_use_id": "toolu_dup", "is_error": True,
+          "content": "GATE blocked: describe the table first"}]}},
+]
+with open(out, "w", encoding="utf-8") as fh:
+    fh.write("\n".join(json.dumps(e) for e in events) + "\n")
+PY
+
 mk_payload() {  # mk_payload <tool> <input-json> <transcript>
   python3 -c '
 import json, sys
@@ -182,6 +203,9 @@ run_case "the operator rejected the earlier ask; the pair stays armed" ask \
 
 run_case "block named two tables; running one through B leaves the other armed" ask \
   "$Q_B" "$(sql_input "SELECT 1 FROM cat.sch.tbl_y")" "$T_LIFTED_X_OF_XY"
+
+run_case "a repeated tool_use id resolves to the record the denial names" ask \
+  "$Q_B" "$(sql_input "SELECT 1 FROM cat.sch.tbl_x")" "$T_DUP_ID"
 
 run_case "blocked query tool, SQL client behind a wrapper and env assignment" ask \
   Bash "$(bash_input "HOST=h timeout 60 trino --server \"\$HOST\" --execute \"$SQL_X\"")" "$T_BLOCK"

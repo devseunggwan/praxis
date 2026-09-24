@@ -242,8 +242,9 @@ def _block_text(block: dict) -> str:
     return ""
 
 
-def _note_tool_uses(state: dict, msg: dict) -> None:
+def _note_tool_uses(state: dict, ev: dict, msg: dict) -> None:
     """Park each tool_use in the ring and arm it against earlier blocks."""
+    uuid = ev.get("uuid") if isinstance(ev.get("uuid"), str) else ""
     for block in msg.get("content") or []:
         if not isinstance(block, dict) or block.get("type") != "tool_use":
             continue
@@ -254,7 +255,8 @@ def _note_tool_uses(state: dict, msg: dict) -> None:
         if not isinstance(tool_input, dict):
             tool_input = {}
         state["recent"].append(
-            {"id": use_id, "name": name, "targets": sorted(blocked_targets(name, tool_input))}
+            {"id": use_id, "uuid": uuid, "name": name,
+             "targets": sorted(blocked_targets(name, tool_input))}
         )
         pairs = [
             _lift_key(b["id"], name, target) for b in state["blocks"]
@@ -284,7 +286,14 @@ def _note_results(state: dict, ev: dict, msg: dict) -> None:
             del state["lifted"][:-MAX_LIFTED]
         if denial != HOOK_BLOCK_DENIAL_KIND or block.get("is_error") is not True:
             continue
-        use = next((u for u in reversed(state["recent"]) if u["id"] == use_id), None)
+        # A replayed or resumed transcript can repeat a tool_use id; when the
+        # denial names its source record, only that record is the blocked call.
+        source = ev.get("sourceToolAssistantUUID")
+        use = next((
+            u for u in reversed(state["recent"])
+            if u["id"] == use_id
+            and not (isinstance(source, str) and source and u.get("uuid") != source)
+        ), None)
         if use is None or not use["targets"]:
             continue
         state["blocks"].append({
@@ -302,7 +311,7 @@ def reduce_event(state: dict, ev: dict) -> None:
     if not isinstance(msg, dict) or not isinstance(msg.get("content"), list):
         return
     if msg.get("role") == "assistant":
-        _note_tool_uses(state, msg)
+        _note_tool_uses(state, ev, msg)
     elif msg.get("role") == "user":
         _note_results(state, ev, msg)
 
