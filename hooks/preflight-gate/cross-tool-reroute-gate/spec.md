@@ -162,3 +162,8 @@ each tool call.
    id for a second block after the first was lifted, the second would read as
    lifted too. No local transcript repeats an id (0 in 185,644 `tool_use`
    blocks), so the key stays the id.
+10. A Bash command that runs a SQL client is read whole for tables, so prose
+    in another segment of the same command (`trino ...; gh pr comment --body
+    "FROM <table>"`) still asks. Reading only the client's segment would drop
+    a query fed through a heredoc, because the shared tokenizer blanks heredoc
+    bodies. None of the replay's fires came from this shape.
