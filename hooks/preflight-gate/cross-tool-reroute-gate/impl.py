@@ -108,10 +108,14 @@ _SQL_TARGET_RE = re.compile(
     rf"(?i)\b(from|join|into|update|describe|table)\s+"
     rf"(?:(?:only|table|if\s+(?:not\s+)?exists)\s+)*{_QUALIFIED}"
 )
-# `FROM a x, b`: each further comma item in a FROM list, past an optional alias.
-_SQL_FROM_ITEM_RE = re.compile(
-    rf"(?i)\s*(?:(?:as\s+)?(?!(?:where|join|on|group|order|limit|union)\b){_IDENT}\s*)?"
-    rf",\s*{_QUALIFIED}"
+# A FROM list (`FROM a x, UNNEST(arr) u, (SELECT ...) s, b`): each item is a
+# table or a parenthesized expression, then an optional alias, then a comma.
+_SQL_FROM_RE = re.compile(r"(?i)\bfrom\s+")
+_SQL_FROM_ITEM_HEAD_RE = re.compile(r"(?i)(?:only\s+|lateral\s+|unnest\s*(?=\())?")
+_SQL_QUALIFIED_RE = re.compile(_QUALIFIED)
+_SQL_FROM_SEP_RE = re.compile(
+    rf"(?i)\s*(?:(?:as\s+)?(?!(?:where|join|on|group|order|limit|union)\b){_IDENT}"
+    r"(?:\s*\([^()]*\))?\s*)?,\s*"
 )
 # Words that follow the keywords above without naming a table.
 _SQL_NON_TARGETS = frozenset({
@@ -193,17 +197,40 @@ def runs_sql_client(command: str) -> bool:
 def sql_targets(text: str) -> set[str]:
     """Normalized SQL identifiers named after a table-position keyword."""
     text = _PY_IMPORT_RE.sub(" ", text)
-    idents = []
-    for match in _SQL_TARGET_RE.finditer(text):
-        idents.append(match.group(2))
-        if match.group(1).lower() != "from":
-            continue
-        end = match.end()
-        while item := _SQL_FROM_ITEM_RE.match(text, end):
-            idents.append(item.group(1))
-            end = item.end()
+    idents = [match.group(2) for match in _SQL_TARGET_RE.finditer(text)]
+    for match in _SQL_FROM_RE.finditer(text):
+        idents.extend(_from_list_items(text, match.end()))
     found = {ident.replace("`", "").replace('"', "").lower() for ident in idents}
     return found - _SQL_NON_TARGETS
+
+
+def _from_list_items(text: str, pos: int) -> list[str]:
+    """The table names in the FROM list starting at `pos`."""
+    items = []
+    while True:
+        if head := _SQL_FROM_ITEM_HEAD_RE.match(text, pos):
+            pos = head.end()
+        if text.startswith("(", pos):
+            pos = _past_parens(text, pos)
+        elif name := _SQL_QUALIFIED_RE.match(text, pos):
+            items.append(name.group(1))
+            pos = name.end()
+        else:
+            return items
+        sep = _SQL_FROM_SEP_RE.match(text, pos)
+        if not sep:
+            return items
+        pos = sep.end()
+
+
+def _past_parens(text: str, pos: int) -> int:
+    """The index just past the parenthesis group opening at `pos`."""
+    depth = 0
+    for i in range(pos, len(text)):
+        depth += {"(": 1, ")": -1}.get(text[i], 0)
+        if depth == 0:
+            return i + 1
+    return len(text)
 
 
 def tool_family(tool_name: str) -> str:

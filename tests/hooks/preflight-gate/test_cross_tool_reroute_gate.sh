@@ -195,6 +195,9 @@ run_case "a modifier between the keyword and the table (DROP TABLE IF EXISTS)" a
 run_case "the table as a later comma item of a FROM list" ask \
   "$Q_B" "$(sql_input "SELECT * FROM cat.sch.other o, cat.sch.tbl_x")" "$T_BLOCK"
 
+run_case "the table after a parenthesized FROM item (UNNEST, subquery)" ask \
+  "$Q_B" "$(sql_input "SELECT * FROM UNNEST(arr) AS u(v), (SELECT 1) s, cat.sch.tbl_x")" "$T_BLOCK"
+
 run_case "blocked query tool, same table through a Bash CLI" ask \
   Bash "$(bash_input "trino --execute \"$SQL_X\"")" "$T_BLOCK"
 
