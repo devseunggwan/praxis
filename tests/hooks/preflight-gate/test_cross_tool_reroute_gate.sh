@@ -111,6 +111,8 @@ T_EDIT="$TMP/edit.jsonl";                mk_transcript "$T_EDIT" "[$BLOCK_EDIT]"
 T_BASH_SQL="$TMP/bash-sql.jsonl";        mk_transcript "$T_BASH_SQL" "[$BLOCK_BASH_SQL]"
 T_BASH_PATH="$TMP/bash-path.jsonl";      mk_transcript "$T_BASH_PATH" "[$BLOCK_BASH_PATH]"
 T_WRITE="$TMP/write.jsonl";              mk_transcript "$T_WRITE" "[$BLOCK_WRITE]"
+BLOCK_A_KEYWORD=$(step "$Q_A" "$(sql_input 'SELECT 1 FROM "table"')" block)
+T_BLOCK_KEYWORD="$TMP/block-keyword.jsonl"; mk_transcript "$T_BLOCK_KEYWORD" "[$BLOCK_A_KEYWORD]"
 
 # A resumed transcript repeating one tool_use id: the block names its source
 # record (tbl_x), and a later record reuses the id for another table.
@@ -182,6 +184,9 @@ run_case "the describe the gate asked for ran and failed on A; B still asks" ask
 
 run_case "table identifier case and quoting normalize equal" ask \
   "$Q_B" "$(sql_input 'select 1 from "CAT"."SCH"."TBL_X"')" "$T_BLOCK"
+
+run_case "a quoted table name that spells a keyword is a name" ask \
+  "$Q_B" "$(sql_input 'SELECT 1 FROM "table"')" "$T_BLOCK_KEYWORD"
 
 run_case "a modifier between the keyword and the table (FROM ONLY)" ask \
   "$Q_B" "$(sql_input "SELECT 1 FROM ONLY cat.sch.tbl_x")" "$T_BLOCK"

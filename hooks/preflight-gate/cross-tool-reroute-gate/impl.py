@@ -200,8 +200,12 @@ def sql_targets(text: str) -> set[str]:
     idents = [match.group(2) for match in _SQL_TARGET_RE.finditer(text)]
     for match in _SQL_FROM_RE.finditer(text):
         idents.extend(_from_list_items(text, match.end()))
-    found = {ident.replace("`", "").replace('"', "").lower() for ident in idents}
-    return found - _SQL_NON_TARGETS
+    # A quoted identifier is a name even when it spells a keyword (`"table"`).
+    return {
+        ident.replace("`", "").replace('"', "").lower()
+        for ident in idents
+        if ident.lower() not in _SQL_NON_TARGETS
+    }
 
 
 def _from_list_items(text: str, pos: int) -> list[str]:
