@@ -293,6 +293,37 @@
       "timeout": 5
     },
     {
+      "name": "rejected-call-probe-gate",
+      "role": "preflight-gate",
+      "event": "PreToolUse",
+      "matcher": "Bash",
+      "hosts": [
+        "claude"
+      ],
+      "timeout": 5,
+      "review_by": "2026-12-23"
+    },
+    {
+      "name": "rejected-call-probe-gate",
+      "role": "preflight-gate",
+      "event": "PreToolUse",
+      "matcher": "Edit|NotebookEdit|Write",
+      "hosts": [
+        "claude"
+      ],
+      "timeout": 5
+    },
+    {
+      "name": "rejected-call-probe-gate",
+      "role": "preflight-gate",
+      "event": "PreToolUse",
+      "matcher": "mcp__.*",
+      "hosts": [
+        "claude"
+      ],
+      "timeout": 5
+    },
+    {
       "name": "block-pr-without-caller-evidence",
       "role": "preflight-gate",
       "event": "PreToolUse",
