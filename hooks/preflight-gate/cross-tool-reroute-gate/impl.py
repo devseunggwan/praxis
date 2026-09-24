@@ -120,8 +120,11 @@ _SQL_CLI_RE = re.compile(
 _BASH_WRITE_PREFIXES = (
     r"(?<![-=])>>?\s*", r"\btee\s+(?:-a\s+)?", r"\btouch\s+(?:-\S+\s+)*",
     r"\b(?:sed|perl)\s+[^|;&\n]*-i\b[^|;&\n]*?",
-    r"\b(?:cp|mv|install|ln|rm|truncate)\s+[^|;&\n]*?",
+    r"\b(?:mv|rm|truncate)\s+[^|;&\n]*?",
 )
+# cp / install / ln write only their last operand; an earlier one is a read.
+_BASH_DEST_ONLY_PREFIX = r"\b(?:cp|install|ln)\s+[^|;&\n]*\s"
+_SEGMENT_END = r"""["']?(?=\s*(?:$|[|;&\n<>]|\d+>))"""
 # `open("<path>", "w")` in an inline script; a bare `open(path)` is a read.
 _PY_OPEN_WRITE = r"""open\(\s*["']{path}["']\s*,\s*["'][wax]"""
 _PY_IMPORT_RE = re.compile(r"\bfrom\s+[\w.]+\s+import\b")
@@ -170,6 +173,8 @@ def bash_writes(command: str, path: str) -> bool:
     """Whether a Bash command writes `path` (see TARGETS); reads do not count."""
     quoted = r"[\"']?" + re.escape(path) + r"(?![\w./-])"
     if re.search(_PY_OPEN_WRITE.format(path=re.escape(path)), command):
+        return True
+    if re.search(_BASH_DEST_ONLY_PREFIX + quoted + _SEGMENT_END, command):
         return True
     return any(re.search(prefix + quoted, command) for prefix in _BASH_WRITE_PREFIXES)
 

@@ -47,7 +47,9 @@ A closed list, compared literally after normalization.
 
 A pending call reaches a blocked path when it is an Edit / Write / NotebookEdit
 on that exact path, or a Bash command that **writes** it: a redirect, `tee`,
-`touch`, `sed -i`, `cp` / `mv` / `rm`, or a write-mode `open(...)`.
+`touch`, `sed -i`, `mv` / `rm` / `truncate` on any operand, `cp` / `install` /
+`ln` with the path as the last operand (the destination), or a write-mode
+`open(...)`.
 
 Deliberately excluded, each because it produced false positives on the corpus
 replay below:
@@ -130,3 +132,5 @@ each tool call.
    hook that also watches the new tool asks once where the second hook would
    have blocked anyway.
 3. Only the 20 most recent blocks with targets are kept.
+4. `cp`, `install` and `ln` count only their last operand as a write, so the
+   `-t <dir>` form, where the destination comes first, is a miss.

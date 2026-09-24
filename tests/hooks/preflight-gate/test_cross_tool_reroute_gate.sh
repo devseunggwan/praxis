@@ -180,6 +180,9 @@ run_case "blocked Edit, an inline script opens the file for writing" ask \
 run_case "blocked Write, the same file created through touch" ask \
   Bash "$(bash_input "touch $FILE && ls -la $FILE")" "$T_WRITE"
 
+run_case "blocked Edit, the file overwritten as the destination of cp" ask \
+  Bash "$(bash_input "cp /tmp/new.sql $FILE && echo ok")" "$T_EDIT"
+
 # ---------------------------------------------------------------------------
 # PASS — silent controls
 # ---------------------------------------------------------------------------
@@ -213,6 +216,9 @@ run_case "Edit after a blocked Write on the same file (one tool family)" pass \
 
 run_case "blocked Edit, Bash only reads the file" pass \
   Bash "$(bash_input "wc -c $FILE && grep -n x $FILE")" "$T_EDIT"
+
+run_case "blocked Edit, cp and ln only read the file as their source" pass \
+  Bash "$(bash_input "cp $FILE /tmp/tbl_x.sql.bak && ln -s $FILE /tmp/link")" "$T_EDIT"
 
 run_case "blocked query tool, a PR body names the client and the table" pass \
   Bash "$(bash_input "gh pr comment 1 --body \"- [ ] trino-plugin
