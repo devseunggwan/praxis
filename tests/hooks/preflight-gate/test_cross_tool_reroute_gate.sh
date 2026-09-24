@@ -233,6 +233,9 @@ run_case "blocked query tool, SQL client with a positional database argument" as
 run_case "blocked query tool, SQL client behind timeout with an option argument" ask \
   Bash "$(bash_input "timeout -k 5 60 psql -c \"$SQL_X\"")" "$T_BLOCK"
 
+run_case "blocked Edit, perl edits the file in place with a combined flag (-pi)" ask \
+  Bash "$(bash_input "perl -pi -e 's/a/b/' $FILE")" "$T_EDIT"
+
 run_case "blocked Edit, an inline script opens the file for writing" ask \
   Bash "$(bash_input "python3 -c 'open(\"$FILE\", \"w\").write(\"x\")'")" "$T_EDIT"
 

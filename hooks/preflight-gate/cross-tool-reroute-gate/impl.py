@@ -140,7 +140,7 @@ _TIMEOUT_OPTS_WITH_ARG = frozenset({"-k", "--kill-after", "-s", "--signal"})
 # Shell forms that write the path right after them.
 _BASH_WRITE_PREFIXES = (
     r"(?<![-=])>>?\s*", r"\btee\s+(?:-a\s+)?", r"\btouch\s+(?:-\S+\s+)*",
-    r"\b(?:sed|perl)\s+[^|;&\n]*-i\b[^|;&\n]*?",
+    r"\b(?:sed|perl)\s+[^|;&\n]*-[A-Za-z]*i\b[^|;&\n]*?",
     r"\b(?:mv|rm|truncate)\s+[^|;&\n]*?",
 )
 # cp / install / ln write only their last operand; an earlier one is a read.
