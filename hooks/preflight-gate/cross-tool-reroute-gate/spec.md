@@ -158,3 +158,7 @@ each tool call.
    still asks. None of the replay's fires came from this shape; moving the
    write forms (redirects, `cp`, `sed -i`, ...) onto the tokenizer is a
    rewrite of their whole matcher.
+9. A block is keyed by its `tool_use` id. If a resumed transcript reused an
+   id for a second block after the first was lifted, the second would read as
+   lifted too. No local transcript repeats an id (0 in 185,644 `tool_use`
+   blocks), so the key stays the id.
