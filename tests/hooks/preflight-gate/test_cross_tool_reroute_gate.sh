@@ -216,6 +216,12 @@ run_case "a repeated tool_use id resolves to the record the denial names" ask \
 run_case "blocked query tool, SQL client behind a wrapper and env assignment" ask \
   Bash "$(bash_input "HOST=h timeout 60 trino --server \"\$HOST\" --execute \"$SQL_X\"")" "$T_BLOCK"
 
+run_case "blocked query tool, SQL client with a positional database argument" ask \
+  Bash "$(bash_input "env DB=prod psql analytics -c \"$SQL_X\"")" "$T_BLOCK"
+
+run_case "blocked query tool, SQL client behind timeout with an option argument" ask \
+  Bash "$(bash_input "timeout -k 5 60 psql -c \"$SQL_X\"")" "$T_BLOCK"
+
 run_case "blocked Edit, an inline script opens the file for writing" ask \
   Bash "$(bash_input "python3 -c 'open(\"$FILE\", \"w\").write(\"x\")'")" "$T_EDIT"
 
@@ -278,6 +284,9 @@ $SQL_X\"")" "$T_BLOCK"
 
 run_case "blocked query tool, a markdown table cell names the client" pass \
   Bash "$(bash_input "gh pr comment 1 --body \"| 4 | trino matcher | $SQL_X |\"")" "$T_BLOCK"
+
+run_case "blocked query tool, a quoted body holds a separator and a client" pass \
+  Bash "$(bash_input "gh pr comment 1 --body 'example; trino --execute $SQL_X'")" "$T_BLOCK"
 
 run_case "blocked Edit, an inline script reads the file with open()" pass \
   Bash "$(bash_input "python3 -c 'print(open(\"$FILE\").read())'")" "$T_EDIT"

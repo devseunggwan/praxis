@@ -75,6 +75,11 @@ from _compound import compound_cascade_hint  # type: ignore[import-not-found]  #
 from _hook_io import emit_decision  # type: ignore[import-not-found]  # noqa: E402
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
 from _payload import read_payload  # type: ignore[import-not-found]  # noqa: E402
+from _shell_tokenize import (  # type: ignore[import-not-found]  # noqa: E402
+    iter_command_starts,
+    safe_tokenize,
+    strip_prefix,
+)
 from _transcript import (  # type: ignore[import-not-found]  # noqa: E402
     HOOK_BLOCK_DENIAL_KIND,
     TranscriptReadError,
@@ -121,17 +126,13 @@ _QUERY_FIELDS = frozenset({"sql", "query", "statement"})
 # Bash command, where the query itself is often the single-quoted argument and
 # `--` starts a flag.
 _SQL_NOISE_RE = re.compile(r"'(?:[^']|'')*'|--[^\n]*|/\*.*?\*/", re.DOTALL)
-# A SQL client counts only in command position — line start or after a shell
-# separator, past env assignments and wrappers — so a PR body that mentions
-# `trino-plugin` or quotes `$ trino` output is not read as running it.
-_SQL_CLI_RE = re.compile(
-    r"(?m)(?:^|[;&|(])\s*(?:[A-Za-z_]\w*=\S*\s+)*"
-    r"(?:(?:timeout\s+\S+|sudo|time|command|exec|env)\s+)*"
-    r"(?:trino|presto|psql|mysql|duckdb|sqlite3|clickhouse(?:-client)?|bq|snowsql)"
-    # An invocation takes a flag, stdin, a subcommand, or a database file; a
-    # markdown table cell (`| trino ...`) takes none of them.
-    r"(?=\s+(?:-|<|query\b|\S+\.(?:db|duckdb|sqlite3?)\b))"
-)
+_SQL_CLIENTS = frozenset({
+    "trino", "presto", "psql", "mysql", "duckdb", "sqlite3",
+    "clickhouse", "clickhouse-client", "bq", "snowsql",
+})
+# Wrappers `strip_prefix` leaves in place.
+_LOCAL_WRAPPERS = frozenset({"timeout", "exec"})
+_TIMEOUT_OPTS_WITH_ARG = frozenset({"-k", "--kill-after", "-s", "--signal"})
 # Shell forms that write the path right after them.
 _BASH_WRITE_PREFIXES = (
     r"(?<![-=])>>?\s*", r"\btee\s+(?:-a\s+)?", r"\btouch\s+(?:-\S+\s+)*",
@@ -167,7 +168,26 @@ def query_text(tool_name: str, tool_input: dict) -> str:
             if key in _QUERY_FIELDS and isinstance(value, str)
         ))
     command = bash_command(tool_name, tool_input)
-    return command if _SQL_CLI_RE.search(command) else ""
+    return command if runs_sql_client(command) else ""
+
+
+def runs_sql_client(command: str) -> bool:
+    """Whether a SQL client runs in command position.
+
+    Quoted text is data: a PR body quoting `trino ... FROM x` runs nothing.
+    """
+    for start in iter_command_starts(safe_tokenize(command)):
+        argv = strip_prefix(list(start))
+        while argv and argv[0] in _LOCAL_WRAPPERS:
+            rest = argv[1:]
+            if argv[0] == "timeout":
+                while rest and rest[0].startswith("-"):
+                    rest = rest[2:] if rest[0] in _TIMEOUT_OPTS_WITH_ARG else rest[1:]
+                rest = rest[1:]  # the duration
+            argv = strip_prefix(rest)
+        if argv and argv[0].lstrip("(){}$`").rsplit("/", 1)[-1] in _SQL_CLIENTS:
+            return True
+    return False
 
 
 def sql_targets(text: str) -> set[str]:

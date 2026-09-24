@@ -42,7 +42,7 @@ A closed list, compared literally after normalization.
 
 | Kind | Read from | Normalization |
 | --- | --- | --- |
-| SQL table | the identifier after `FROM` / `JOIN` / `INTO` / `UPDATE` / `DESCRIBE` / `TABLE`, past an `ONLY`, `TABLE` or `IF [NOT] EXISTS` modifier, plus every comma item of a `FROM` list, in text that **executes a query**: an MCP input's `sql` / `query` / `statement` field, or a Bash command that runs a SQL client in command position (`trino`, `psql`, `mysql`, `duckdb`, `sqlite3`, `clickhouse`, `bq`, `snowsql`) | lowercased, quotes stripped |
+| SQL table | the identifier after `FROM` / `JOIN` / `INTO` / `UPDATE` / `DESCRIBE` / `TABLE`, past an `ONLY`, `TABLE` or `IF [NOT] EXISTS` modifier, plus every comma item of a `FROM` list, in text that **executes a query**: an MCP input's `sql` / `query` / `statement` field, or a Bash command that runs a SQL client in command position, as the shared shell tokenizer splits it (quoted text is data; `env`, assignments, `timeout` and `exec` are peeled) (`trino`, `psql`, `mysql`, `duckdb`, `sqlite3`, `clickhouse`, `bq`, `snowsql`) | lowercased, quotes stripped |
 | File path | the path of a blocked Edit / Write / NotebookEdit | absolute, exact |
 
 A pending call reaches a blocked path when it is an Edit / Write / NotebookEdit
