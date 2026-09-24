@@ -10,7 +10,8 @@ The gate emits `ask` when **all** of the following hold:
 
 1. The call is a mutation — a `Bash` command that is **not** provably read-only,
    or an MCP tool one of whose leaf-name tokens is a mutating verb
-   (`MUTATING_MCP_VERBS`). Read-only calls are out of scope; a gate that fires
+   (`MUTATING_MCP_VERBS`). Both tests live in the shared
+   `hooks/_lib/_mutating_call.py` (#1490). Read-only calls are out of scope; a gate that fires
    on queries becomes the noise it exists to replace. The two branches ask the
    question from opposite ends, and the section below says why.
 2. The call's arguments carry a production phase marker (`PROD_MARKER_RE`).
