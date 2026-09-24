@@ -167,3 +167,8 @@ each tool call.
     "FROM <table>"`) still asks. Reading only the client's segment would drop
     a query fed through a heredoc, because the shared tokenizer blanks heredoc
     bodies. None of the replay's fires came from this shape.
+11. SQL targets are read by pattern, not by a SQL parser. A comma item after
+    a `JOIN` clause (`FROM a CROSS JOIN b, c`) is missed: reaching it means
+    skipping an `ON` condition whose own commas the pattern cannot tell
+    apart. Other dialect corners behave the same way; each review round on
+    this pattern found a new one.
