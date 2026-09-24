@@ -189,6 +189,12 @@ run_case "a modifier between the keyword and the table (FROM ONLY)" ask \
 run_case "a modifier between the keyword and the table (DESCRIBE TABLE)" ask \
   "$Q_B" "$(sql_input "DESCRIBE TABLE cat.sch.tbl_x")" "$T_BLOCK"
 
+run_case "a modifier between the keyword and the table (DROP TABLE IF EXISTS)" ask \
+  "$Q_B" "$(sql_input "DROP TABLE IF EXISTS cat.sch.tbl_x")" "$T_BLOCK"
+
+run_case "the table as a later comma item of a FROM list" ask \
+  "$Q_B" "$(sql_input "SELECT * FROM cat.sch.other o, cat.sch.tbl_x")" "$T_BLOCK"
+
 run_case "blocked query tool, same table through a Bash CLI" ask \
   Bash "$(bash_input "trino --execute \"$SQL_X\"")" "$T_BLOCK"
 

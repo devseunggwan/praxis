@@ -23,7 +23,8 @@ All four → `permissionDecision: "ask"`.
 TARGETS — a closed list, compared literally after normalization:
 
   SQL identifiers following FROM / JOIN / INTO / UPDATE / DESCRIBE / TABLE
-  (past an ONLY or TABLE modifier), lowercased with quotes stripped, read only
+  (past an ONLY, TABLE or IF [NOT] EXISTS modifier, and every comma item of a
+  FROM list), lowercased with quotes stripped, read only
   from text that executes a query:
   an MCP input's `sql` / `query` / `statement` field, or a Bash command that
   runs a SQL client. A commit body saying "from the" or a file that mentions a
@@ -95,10 +96,17 @@ REASON_MAX_CHARS = 400
 PATH_FIELDS = {"Edit": "file_path", "Write": "file_path", "NotebookEdit": "notebook_path"}
 
 _IDENT = r"[`\"]?[A-Za-z_][\w$]*[`\"]?"
+_QUALIFIED = rf"((?:{_IDENT}\.){{0,3}}{_IDENT})"
 _SQL_TARGET_RE = re.compile(
-    # `FROM ONLY x`, `DESCRIBE TABLE x`: the modifier is not the table.
-    rf"(?i)\b(?:from|join|into|update|describe|table)\s+(?:(?:only|table)\s+)?"
-    rf"((?:{_IDENT}\.){{0,3}}{_IDENT})"
+    # `FROM ONLY x`, `DESCRIBE TABLE x`, `DROP TABLE IF EXISTS x`: the modifier
+    # is not the table.
+    rf"(?i)\b(from|join|into|update|describe|table)\s+"
+    rf"(?:(?:only|table|if\s+(?:not\s+)?exists)\s+)*{_QUALIFIED}"
+)
+# `FROM a x, b`: each further comma item in a FROM list, past an optional alias.
+_SQL_FROM_ITEM_RE = re.compile(
+    rf"(?i)\s*(?:(?:as\s+)?(?!(?:where|join|on|group|order|limit|union)\b){_IDENT}\s*)?"
+    rf",\s*{_QUALIFIED}"
 )
 # Words that follow the keywords above without naming a table.
 _SQL_NON_TARGETS = frozenset({
@@ -164,13 +172,18 @@ def query_text(tool_name: str, tool_input: dict) -> str:
 
 def sql_targets(text: str) -> set[str]:
     """Normalized SQL identifiers named after a table-position keyword."""
-    found = set()
-    for match in _SQL_TARGET_RE.finditer(_PY_IMPORT_RE.sub(" ", text)):
-        ident = match.group(1).replace("`", "").replace('"', "").lower()
-        if ident in _SQL_NON_TARGETS:
+    text = _PY_IMPORT_RE.sub(" ", text)
+    idents = []
+    for match in _SQL_TARGET_RE.finditer(text):
+        idents.append(match.group(2))
+        if match.group(1).lower() != "from":
             continue
-        found.add(ident)
-    return found
+        end = match.end()
+        while item := _SQL_FROM_ITEM_RE.match(text, end):
+            idents.append(item.group(1))
+            end = item.end()
+    found = {ident.replace("`", "").replace('"', "").lower() for ident in idents}
+    return found - _SQL_NON_TARGETS
 
 
 def tool_family(tool_name: str) -> str:
