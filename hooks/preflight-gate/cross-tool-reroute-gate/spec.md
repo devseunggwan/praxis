@@ -48,8 +48,8 @@ A closed list, compared literally after normalization.
 A pending call reaches a blocked path when it is an Edit / Write / NotebookEdit
 on that exact path, or a Bash command that **writes** it: a redirect, `tee`,
 `touch`, `sed -i`, `mv` / `rm` / `truncate` on any operand, `cp` / `install` /
-`ln` with the path as the last operand (the destination), or a write-mode
-`open(...)`.
+`ln` with the path as the last operand (the destination), a write-mode
+`open(...)`, or `Path(...).write_text` / `write_bytes`.
 
 Deliberately excluded, each because it produced false positives on the corpus
 replay below:
@@ -128,7 +128,9 @@ each tool call.
 ## Known limitations
 
 1. A SQL client driven from an inline script (`import trino` in a heredoc) is
-   not a query surface; neither is a path held in a shell variable. Both are
+   not a query surface; neither is a path held in a shell variable, nor an
+   inline-script write through any API other than `open(...)` and
+   `Path(...).write_text` / `write_bytes` (`os.open`, `shutil`). All are
    misses, not false positives.
 2. The gate cannot know which tools the blocking hook watches. A block from a
    hook that also watches the new tool asks once where the second hook would

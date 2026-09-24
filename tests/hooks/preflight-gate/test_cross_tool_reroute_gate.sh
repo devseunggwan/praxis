@@ -192,6 +192,9 @@ run_case "blocked Edit, an inline script opens the file for writing" ask \
 run_case "blocked Edit, an inline script opens the file read-write (r+)" ask \
   Bash "$(bash_input "python3 -c 'open(\"$FILE\", \"r+\").write(\"x\")'")" "$T_EDIT"
 
+run_case "blocked Edit, an inline script writes the file through Path.write_text" ask \
+  Bash "$(bash_input "python3 -c 'from pathlib import Path; Path(\"$FILE\").write_text(\"x\")'")" "$T_EDIT"
+
 run_case "blocked Write, the same file created through touch" ask \
   Bash "$(bash_input "touch $FILE && ls -la $FILE")" "$T_WRITE"
 
@@ -248,6 +251,9 @@ run_case "blocked query tool, a markdown table cell names the client" pass \
 
 run_case "blocked Edit, an inline script reads the file with open()" pass \
   Bash "$(bash_input "python3 -c 'print(open(\"$FILE\").read())'")" "$T_EDIT"
+
+run_case "blocked Edit, an inline script reads the file with Path.read_text" pass \
+  Bash "$(bash_input "python3 -c 'from pathlib import Path; print(Path(\"$FILE\").read_text())'")" "$T_EDIT"
 
 run_case "blocked Edit, prose arrow before the path is not a redirect" pass \
   Bash "$(bash_input "gh pr comment 1 --body \"link -> $FILE\"")" "$T_EDIT"

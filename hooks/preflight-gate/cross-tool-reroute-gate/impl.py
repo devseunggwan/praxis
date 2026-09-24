@@ -135,6 +135,7 @@ _BASH_DEST_ONLY_PREFIX = r"\b(?:cp|install|ln)\s+[^|;&\n]*\s"
 _SEGMENT_END = r"""["']?(?=\s*(?:$|[|;&\n<>]|\d+>))"""
 # `open("<path>", "w")` in an inline script; a bare `open(path)` is a read.
 _PY_OPEN_WRITE = r"""open\(\s*["']{path}["']\s*,\s*["'](?:[wax]|r[bt]?\+)"""
+_PY_PATH_WRITE = r"""Path\(\s*["']{path}["']\s*\)\s*\.write_(?:text|bytes)\("""
 _PY_IMPORT_RE = re.compile(r"\bfrom\s+[\w.]+\s+import\b")
 
 # The runtime prefixes a hook block with the hook's own command line, which can
@@ -180,8 +181,9 @@ def tool_family(tool_name: str) -> str:
 def bash_writes(command: str, path: str) -> bool:
     """Whether a Bash command writes `path` (see TARGETS); reads do not count."""
     quoted = r"[\"']?" + re.escape(path) + r"(?![\w./-])"
-    if re.search(_PY_OPEN_WRITE.format(path=re.escape(path)), command):
-        return True
+    for py_write in (_PY_OPEN_WRITE, _PY_PATH_WRITE):
+        if re.search(py_write.format(path=re.escape(path)), command):
+            return True
     if re.search(_BASH_DEST_ONLY_PREFIX + quoted + _SEGMENT_END, command):
         return True
     return any(re.search(prefix + quoted, command) for prefix in _BASH_WRITE_PREFIXES)
