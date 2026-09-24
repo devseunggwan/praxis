@@ -282,6 +282,9 @@ run_case "block named two tables; the one B already ran on stays lifted" pass \
 run_case "a Bash block contributes no path targets" pass \
   Write "{\"file_path\":\"$FILE\",\"content\":\"x\"}" "$T_BASH_PATH"
 
+run_case "blocked Edit, a backup file named by a suffix on the path" pass \
+  Bash "$(bash_input "echo x > $FILE~")" "$T_EDIT"
+
 run_case "blocked Edit, a different file sharing a prefix" pass \
   Write "{\"file_path\":\"/repo/templates/tbl_x_test.sql\",\"content\":\"x\"}" "$T_EDIT"
 

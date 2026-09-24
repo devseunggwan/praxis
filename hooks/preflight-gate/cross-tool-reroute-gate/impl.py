@@ -244,7 +244,7 @@ def tool_family(tool_name: str) -> str:
 
 def bash_writes(command: str, path: str) -> bool:
     """Whether a Bash command writes `path` (see TARGETS); reads do not count."""
-    quoted = r"[\"']?" + re.escape(path) + r"(?![\w./-])"
+    quoted = r"[\"']?" + re.escape(path) + r"""(?=["'\s|;&<>)]|$)"""
     for py_write in (_PY_OPEN_WRITE, _PY_PATH_WRITE):
         if re.search(py_write.format(path=re.escape(path)), command):
             return True
