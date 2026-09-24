@@ -148,6 +148,7 @@ run_case "task_notification_does_not_lift" \
 run_case "question_mark"          "$(bash_after 'rm -rf build' 'human:is the cache stale?')"                "ask"
 run_case "fullwidth_question"     "$(bash_after 'rm -rf build' 'human:캐시가 낡았나요？')"                 "ask"
 run_case "en_opener_no_mark"      "$(bash_after 'rm -rf build' 'human:why is the cache stale')"             "ask"
+run_case "period_in_filename"     "$(bash_after 'rm -rf build' 'human:why is config.json missing')"         "ask"
 run_case "ko_ending_no_mark"      "$(bash_after 'rm -rf build' 'human:왜 캐시가 낡았는지')"                  "ask"
 run_case "ko_challenge_no_mark"   "$(bash_after 'rm -rf build' 'human:이게 뭐야 진짜')"                      "ask"
 run_case "question_then_order"    "$(bash_after 'rm -rf build' 'human:why did it fail? fix it.')"           "quiet"

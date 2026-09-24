@@ -88,13 +88,14 @@ _KO_CHALLENGE = (
 # echoes, pasted text) and fenced code carry no ask of the user's own.
 _TAGGED_BLOCK_RE = re.compile(r"<([A-Za-z][\w-]*)\b[^>]*>.*?</\1>", re.DOTALL)
 _FENCE_RE = re.compile(r"```.*?```", re.DOTALL)
-_SENTENCE_RE = re.compile(r"[^.!?。！？\n]*[.!?。！？]*")
+# A stop ends a sentence only before whitespace or the end, so `config.json` stays whole.
+_SENTENCE_BREAK_RE = re.compile(r"(?<=[.!?。！？])\s+|\n")
 _TRAILING_NOISE = " \t~.!…ㅋㅎㅠㅜ^;:)"
 
 
 def _last_sentence(text: str) -> str:
     text = _FENCE_RE.sub(" ", _TAGGED_BLOCK_RE.sub(" ", text))
-    sentences = [s.strip() for s in _SENTENCE_RE.findall(text) if s.strip()]
+    sentences = [s.strip() for s in _SENTENCE_BREAK_RE.split(text) if s.strip()]
     return sentences[-1] if sentences else ""
 
 
