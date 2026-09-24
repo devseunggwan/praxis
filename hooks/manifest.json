@@ -228,6 +228,28 @@
       "timeout": 5
     },
     {
+      "name": "cross-tool-reroute-gate",
+      "role": "preflight-gate",
+      "event": "PreToolUse",
+      "matcher": "Bash",
+      "timeout": 5,
+      "review_by": "2026-12-23"
+    },
+    {
+      "name": "cross-tool-reroute-gate",
+      "role": "preflight-gate",
+      "event": "PreToolUse",
+      "matcher": "Edit|NotebookEdit|Write",
+      "timeout": 5
+    },
+    {
+      "name": "cross-tool-reroute-gate",
+      "role": "preflight-gate",
+      "event": "PreToolUse",
+      "matcher": "mcp__.*",
+      "timeout": 5
+    },
+    {
       "name": "block-pr-without-caller-evidence",
       "role": "preflight-gate",
       "event": "PreToolUse",
