@@ -127,6 +127,7 @@ Fail-open on infrastructure errors by design.
 | Hook | Trigger | Purpose |
 | ------ | --------- | --------- |
 | [momentum-rule-retrieval-gate](../../hooks/advisory-nudge/momentum-rule-retrieval-gate/spec.md) | PreToolUse | Advisory nudge at high-momentum action points (`gh pr merge`, `cmux new-workspace`, `git push --force`) — surfaces relevant CLAUDE.md rules + memory entries to prevent "Loaded ≠ Retrieved" failures |
+| [cited-rule-gate](../../hooks/advisory-nudge/cited-rule-gate/spec.md) | PreToolUse | Advisory (or strict-mode `ask`) before a mutating call when the assistant text since the previous tool call has no `Rule: <section>` line naming a heading of the loaded rule file (#1487) |
 | [cli-flag-incompat-advisory](../../hooks/advisory-nudge/cli-flag-incompat-advisory/spec.md) | PreToolUse | Advisory nudge for known mode-incompatible flag combos (`git merge-tree --name-only` 3-arg form, `kubectl --use-protocol-buffers`) |
 | [inspection-chain-advisory](../../hooks/advisory-nudge/inspection-chain-advisory/spec.md) | PreToolUse | Advisory nudge when 2+ inspection-only commands are chained with `&&` (non-match exit silently drops downstream probes) — issue #469 |
 | [pipefail-advisory](../../hooks/advisory-nudge/pipefail-advisory/spec.md) | PreToolUse | Advisory nudge when a mutating `git`/`gh` command is piped into `tail`/`head`/`grep` without `set -o pipefail` (non-zero exit masked by the sink's own exit 0) — issue #788 |

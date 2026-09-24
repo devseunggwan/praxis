@@ -920,6 +920,55 @@
       }
     },
     {
+      "name": "cited-rule-gate",
+      "role": "advisory-nudge",
+      "event": "PreToolUse",
+      "matcher": "Bash",
+      "hosts": [
+        "claude"
+      ],
+      "timeout": 5,
+      "review_by": "2026-12-24",
+      "mode": {
+        "strict_env": "PRAXIS_CITED_RULE_STRICT",
+        "bypass_env": [
+          "PRAXIS_HOOK_BYPASS_CITED_RULE"
+        ]
+      }
+    },
+    {
+      "name": "cited-rule-gate",
+      "role": "advisory-nudge",
+      "event": "PreToolUse",
+      "matcher": "Edit|NotebookEdit|Write",
+      "hosts": [
+        "claude"
+      ],
+      "timeout": 5,
+      "mode": {
+        "strict_env": "PRAXIS_CITED_RULE_STRICT",
+        "bypass_env": [
+          "PRAXIS_HOOK_BYPASS_CITED_RULE"
+        ]
+      }
+    },
+    {
+      "name": "cited-rule-gate",
+      "role": "advisory-nudge",
+      "event": "PreToolUse",
+      "matcher": "mcp__.*",
+      "hosts": [
+        "claude"
+      ],
+      "timeout": 5,
+      "mode": {
+        "strict_env": "PRAXIS_CITED_RULE_STRICT",
+        "bypass_env": [
+          "PRAXIS_HOOK_BYPASS_CITED_RULE"
+        ]
+      }
+    },
+    {
       "name": "negation-answer-quote-advisory",
       "role": "advisory-nudge",
       "event": "PreToolUse",
