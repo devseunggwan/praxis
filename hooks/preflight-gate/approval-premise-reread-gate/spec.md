@@ -254,7 +254,9 @@ Three properties carry it, each pinned by a test:
   per-binary. Scanning every token for a read-only word would pass `gh pr create
   --title view` and `git commit -m log`.
 - **A state-changing redirect disqualifies the command** regardless of its
-  verbs, via the existing `has_state_changing_redirect`.
+  verbs, via the existing `has_state_changing_redirect`. A redirect that
+  writes no file (a descriptor duplication such as `2>&1` or `>&2`, or
+  `/dev/null`) is removed first; `>&file` and `/dev/null.bak` still write and still count.
 - **a substitution anywhere in the command** — `$(…)`, a backtick, `<(…)` or
   `>(…)`. The outer binary's name says nothing about what the shell runs
   inside: `echo "$(kubectl delete pod x -n prod-apne2)"` is an `echo` by every
@@ -267,7 +269,16 @@ argument. `find`, `yq`, `sort`, `uniq` and `date` therefore are not: each writes
 under a flag or a second positional (`find -delete`, `yq -i`, `sort -o`,
 `uniq in out`, `date -s`), which makes its read-onlyness a property of the
 arguments rather than of the command. Admitting one buys a quiet path in
-exchange for the guarantee the allowlist exists to give.
+exchange for the guarantee the allowlist exists to give. `sort` and `uniq` are
+admitted the way `gh api` is, by their arguments: every flag must be a known
+read-only one (no `-o`, `--output`, `--compress-program`, `-T`), and `uniq`
+takes at most one operand, since a second is its output file.
+
+A segment that runs nothing is read-only: variable assignments alone (`S=1`),
+shell keywords alone (`do`, `done`), a `for NAME in WORDS` header, and the
+builtins `true`, `false`, `:` and `set` with option flags only. The words of a
+`for` header are literals because a substitution anywhere refuses the whole
+command first.
 
 `git branch`, `tag`, `remote`, `worktree` and `config` are absent from the
 allowlist on purpose: each has a write form one flag away (`git branch -D`,
