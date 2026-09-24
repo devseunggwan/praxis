@@ -111,7 +111,7 @@ _SQL_TARGET_RE = re.compile(
 # A FROM list (`FROM a x, UNNEST(arr) u, (SELECT ...) s, b`): each item is a
 # table or a parenthesized expression, then an optional alias, then a comma.
 _SQL_FROM_RE = re.compile(r"(?i)\bfrom\s+")
-_SQL_FROM_ITEM_HEAD_RE = re.compile(r"(?i)(?:only\s+|lateral\s+|unnest\s*(?=\())?")
+_SQL_FROM_ITEM_HEAD_RE = re.compile(r"(?i)(?:(?:only|lateral)\s+)*(?:unnest\s*(?=\())?")
 _SQL_QUALIFIED_RE = re.compile(_QUALIFIED)
 _SQL_FROM_SEP_RE = re.compile(
     rf"(?i)\s*(?:(?:as\s+)?(?!(?:where|join|on|group|order|limit|union)\b){_IDENT}"
