@@ -224,6 +224,26 @@ class TestReadLastUserMessage:
         ])
         assert T.read_last_user_message(path) == "real human message"
 
+    def _injected(self, tmp_path):
+        meta = _user(text="skill body loaded mid-turn")
+        meta["isMeta"] = True
+        summary = _user(text="compacted summary")
+        summary["isCompactSummary"] = True
+        notice = _user(text="background task finished")
+        notice["origin"] = {"kind": "task-notification"}
+        typed = _user(text="later typed message")
+        typed["origin"] = {"kind": "human"}
+        return _write_jsonl(tmp_path, [_user(text="real human message"),
+                                       typed, meta, summary, notice])
+
+    def test_human_only_skips_injected_records(self, tmp_path):
+        path = self._injected(tmp_path)
+        assert T.read_last_user_message(path, human_only=True) == "later typed message"
+
+    def test_default_still_returns_injected_records(self, tmp_path):
+        path = self._injected(tmp_path)
+        assert T.read_last_user_message(path) == "background task finished"
+
 
 # ---------------------------------------------------------------------------
 # scan_user_rejections (#1007 / #1013)
@@ -586,6 +606,10 @@ _CONSUMERS = {
     # whole transcript through a session-keyed cursor (#1485).
     HOOKS / "preflight-gate" / "cross-tool-reroute-gate" / "impl.py":
         ["scan_transcript_resumable", "scan_cursor_path", "TranscriptReadError"],
+    # Classifies the human message that opened the turn, so it reads past
+    # injected user records with `human_only=True` (#1486).
+    HOOKS / "preflight-gate" / "question-turn-mutation-gate" / "impl.py":
+        ["read_last_user_message"],
 }
 
 # Constants are values, not bindings, so the function map above cannot pin them:

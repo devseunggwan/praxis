@@ -682,8 +682,24 @@ def stop_last_assistant_text(payload: dict, turn: list[dict]) -> str:
     return extract_last_assistant_text(turn)
 
 
-def read_last_user_message(transcript_path: str) -> str | None:
+def _is_injected_user_record(entry: dict) -> bool:
+    if entry.get("isMeta") or entry.get("isCompactSummary"):
+        return True
+    origin = entry.get("origin")
+    return isinstance(origin, dict) and origin.get("kind") not in (None, "human")
+
+
+def read_last_user_message(
+    transcript_path: str, *, human_only: bool = False
+) -> str | None:
     """Return the text of the most recent user-authored message in the transcript.
+
+    `human_only=True` also skips user-role records the host injected rather
+    than the human typed: `isMeta` (a skill body, a slash-command expansion),
+    `isCompactSummary`, and any `origin.kind` other than `human` (a background
+    task notification). A record with no `origin` stays human, since
+    transcripts written before the field existed carry none. The default
+    keeps the reading every earlier caller was written against.
 
     Returns None when the transcript is missing or unreadable — the caller
     must fail open per the project hook design contract (`Fail-open on
@@ -741,6 +757,8 @@ def read_last_user_message(transcript_path: str) -> str | None:
         # so this reader cannot surface an agent prompt as the last user
         # message (#1097).
         if entry.get("isSidechain"):
+            continue
+        if human_only and _is_injected_user_record(entry):
             continue
 
         # Extract text. Possible shapes:
