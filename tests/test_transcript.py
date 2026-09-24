@@ -582,6 +582,10 @@ _CONSUMERS = {
     # shape for this one caller was not worth it.
     HOOKS / "advisory-nudge" / "response-language-nudge" / "impl.py":
         ["load_current_turn"],
+    # A block anywhere earlier in the session arms the gate, so it folds the
+    # whole transcript through a session-keyed cursor (#1485).
+    HOOKS / "preflight-gate" / "cross-tool-reroute-gate" / "impl.py":
+        ["scan_transcript_resumable", "scan_cursor_path", "TranscriptReadError"],
 }
 
 # Constants are values, not bindings, so the function map above cannot pin them:
@@ -602,6 +606,8 @@ _CONSTANT_CONSUMERS = {
         ["TRANSCRIPT_SCAN_LINES"],
     HOOKS / "completion-verify" / "denied-action-report-gate" / "impl.py":
         ["DENIAL_KINDS", "HOOK_BLOCK_DENIAL_KIND", "REJECTION_DENIAL_KIND"],
+    HOOKS / "preflight-gate" / "cross-tool-reroute-gate" / "impl.py":
+        ["HOOK_BLOCK_DENIAL_KIND"],
 }
 
 

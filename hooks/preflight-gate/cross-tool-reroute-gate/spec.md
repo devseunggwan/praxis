@@ -1,0 +1,174 @@
+# PreToolUse Cross-Tool Reroute Gate
+
+Supported hosts: claude, codex
+
+Reference: [Autonomy vs Convention — ETHOS.md](../../../ETHOS.md#autonomy-vs-convention)
+
+`hooks/preflight-gate/cross-tool-reroute-gate/impl.py` asks before a call
+reaches a target that a hook already blocked earlier in the session, through a
+**different tool** than the one that was blocked (issue #1485).
+
+## Why this exists
+
+Observed sequence:
+
+1. A describe-before-query gate blocked a SQL query on one query tool.
+2. The describe the gate asked for ran on that tool and failed as an ordinary
+   tool result.
+3. The agent queried the same table through a second query tool the gate does
+   not watch. Nothing stopped it.
+
+A hook block is a statement about a target, not about a tool. Every existing
+repeat-block signal (`block_message`'s repeat notice, the second-block rule) is
+keyed on the same tool, so switching tools reset all of them.
+
+## Trigger
+
+All four, the cheapest first:
+
+| # | Condition | Source |
+| --- | --- | --- |
+| 1 | The pending call names a target (see *Targets*) | `tool_input` |
+| 2 | An earlier call this session was denied with `toolDenialKind: "permission-rule"` and `is_error: true`, and that call named targets | `transcript_path`, resumable scan |
+| 3 | The pending call is a **different tool family** and shares at least one target with the blocked call | set intersection |
+| 4 | No call with the pending tool on that target has run since the block (see *Lifting*) | same scan |
+
+All four → `permissionDecision: "ask"`. The reason names the target and quotes
+the original block's text, so the operator sees what was refused and why.
+
+## Targets
+
+A closed list, compared literally after normalization.
+
+| Kind | Read from | Normalization |
+| --- | --- | --- |
+| SQL table | the identifier after `FROM` / `JOIN` / `INTO` / `UPDATE` / `DESCRIBE` / `TABLE`, past an `ONLY`, `TABLE` or `IF [NOT] EXISTS` modifier, plus every comma item of a `FROM` list (past a parenthesized item such as `UNNEST(...)` or a subquery), in text that **executes a query**: an MCP input's `sql` / `query` / `statement` field, or a Bash command that runs a SQL client in command position, as the shared shell tokenizer splits it (quoted text is data; `env`, assignments, `timeout` and `exec` are peeled) (`trino`, `psql`, `mysql`, `duckdb`, `sqlite3`, `clickhouse`, `bq`, `snowsql`) | lowercased, quotes stripped |
+| File path | the path of a blocked Edit / Write / NotebookEdit | absolute, exact |
+
+A pending call reaches a blocked path when it is an Edit / Write / NotebookEdit
+on that exact path, or a Bash command that **writes** it: a redirect, `tee`,
+`touch`, `sed -i`, `mv` / `rm` / `truncate` on any operand, `cp` / `install` /
+`ln` with the path as the last operand (the destination), a write-mode
+`open(...)`, or `Path(...).write_text` / `write_bytes`.
+
+Deliberately excluded, each because it produced false positives on the corpus
+replay below:
+
+- **Prose and code.** A commit body saying "from the", a PR body quoting
+  `$ trino` output, a markdown table cell, and a `from x import y` line name
+  words after SQL keywords without querying anything.
+- **Writing a file that mentions a table.** Recording a query in an anchor is
+  not running it.
+- **Reads of a blocked file.** `wc -c`, `grep`, `open(path).read()`.
+- **Unqualified names.** `tbl` does not match `cat.sch.tbl`: guessing which
+  qualified name an unqualified one resolves to turns a literal gate into a
+  fuzzy one.
+- **Paths from a blocked Bash call.** A Bash block is usually about the
+  command's shape (a glob, a flag, a title), not the files it mentions.
+
+## Same tool family is silent
+
+Retrying the blocked tool with a corrected call is the recovery the block asks
+for. Edit, Write and NotebookEdit count as one family, because most gates
+register them under one matcher: switching among them reaches the same gate
+again. Not every gate does (see *Known limitations* 7). MCP
+tools are compared by full name, so a second tool on the same server is a
+different tool — that is the originating incident.
+
+## Lifting
+
+The block is **never** lifted by a later call on the original tool succeeding.
+In the incident the describe the gate asked for *ran* and failed as an ordinary
+result, so "a later call was not denied" would have lifted the block one call
+before the reroute.
+
+What lifts it, per (block, new tool, target), is a call with that new tool on
+that target that actually ran — the operator approved this very ask once. A
+rejected ask leaves it armed, and a block naming two tables stays armed on the
+one the new tool has not run on. The lift is derived from the transcript, so
+no state file can drift from what happened.
+
+## Fail-open
+
+Every read failure is silent: missing transcript, read error, or a scan that
+has not caught up (`scan_transcript_resumable` returns `complete=False`).
+Unlike `rejected-mutation-reconsent-gate`, the reach here is every SQL query
+and every file edit, so failing closed would ask on routine calls.
+
+## Tier
+
+`ask`, with no bypass marker. Approving the ask is the operator's decision to
+take the new route; an agent-attachable token would let the agent make it.
+
+## Recurrence evidence
+
+Replay of the reducer over every local Claude Code transcript
+(`~/.claude/projects/*/*.jsonl`, 886 files), evaluating the gate at each tool
+call against the state folded from the records before it:
+
+| Revision | Fires | Sessions with a fire | What the fires were |
+| --- | --- | --- | --- |
+| First draft (SQL keywords read from any text, path matched as a substring) | 238 | 108 | Mostly prose: `from the`, `into a`, Python imports, anchors that mention a table |
+| SQL read only from query fields and command-position clients; one file-edit family; Bash must write the path | 6 | 5 | All six are reroutes (below) |
+
+The six, each read against the blocked call's reason and the pending call's
+input:
+
+| Blocked | Rerouted through | Target |
+| --- | --- | --- |
+| MCP query tool (describe-before-query gate) | a second MCP query tool on another server | the table (the originating incident) |
+| MCP query tool (describe-before-query gate) | another MCP tool on the same server | the table |
+| MCP query tool (describe-before-query gate) ×2 | the SQL client CLI in Bash | the table |
+| Write (protected-branch guard) ×2 | `touch` in Bash | the file |
+
+The replay script is not committed: it imports this `impl.py` and folds the
+transcript line by line through `reduce_event`, calling `find_reroute` before
+each tool call.
+
+## Known limitations
+
+1. A SQL client driven from an inline script (`import trino` in a heredoc) is
+   not a query surface; neither is a path held in a shell variable, nor an
+   inline-script write through any API other than `open(...)` and
+   `Path(...).write_text` / `write_bytes` (`os.open`, `shutil`). All are
+   misses, not false positives.
+2. The gate cannot know which tools the blocking hook watches. A block from a
+   hook that also watches the new tool asks once where the second hook would
+   have blocked anyway.
+3. Only the 20 most recent blocks with targets are kept.
+4. The gate is not registered on Cursor, whose `preToolUse` accepts `ask` but
+   does not enforce it, so a reroute would pass without a prompt. Codex parses
+   `ask` as not yet supported: it reports the hook run as failed and lets the
+   call through, so on Codex the gate does not stop a reroute.
+5. `cp`, `install` and `ln` count only their last operand as a write, so the
+   `-t <dir>` form, where the destination comes first, is a miss.
+6. String literals and comments are dropped from an MCP query field, not from
+   a Bash command: there the query is often the single-quoted argument and
+   `--` starts a flag. A table named only inside a literal or comment of a
+   Bash query still asks.
+7. A gate registered on `Write` alone (`memory-distillation-fields-gate`) or
+   `Edit` alone is left behind by a switch within the file-edit family, and
+   the switch passes without an ask. Comparing tools one by one instead was
+   measured on the *Recurrence evidence* replay: fires rose from 6 to 13, and all seven added
+   fires followed a block from a gate that watches Edit, Write and
+   NotebookEdit together, with the gate already satisfied before the Edit ran
+   — no reroute among them.
+8. A Bash write is matched on the raw command, not on tokenized argv, so a
+   write verb inside quoted text (`gh pr comment --body 'run rm <path>'`)
+   still asks. None of the replay's fires came from this shape; moving the
+   write forms (redirects, `cp`, `sed -i`, ...) onto the tokenizer is a
+   rewrite of their whole matcher.
+9. A block is keyed by its `tool_use` id. If a resumed transcript reused an
+   id for a second block after the first was lifted, the second would read as
+   lifted too. No local transcript repeats an id (0 in 185,644 `tool_use`
+   blocks), so the key stays the id.
+10. A Bash command that runs a SQL client is read whole for tables, so prose
+    in another segment of the same command (`trino ...; gh pr comment --body
+    "FROM <table>"`) still asks. Reading only the client's segment would drop
+    a query fed through a heredoc, because the shared tokenizer blanks heredoc
+    bodies. None of the replay's fires came from this shape.
+11. SQL targets are read by pattern, not by a SQL parser. A comma item after
+    a `JOIN` clause (`FROM a CROSS JOIN b, c`) is missed: reaching it means
+    skipping an `ON` condition whose own commas the pattern cannot tell
+    apart. Other dialect corners behave the same way; each review round on
+    this pattern found a new one.
