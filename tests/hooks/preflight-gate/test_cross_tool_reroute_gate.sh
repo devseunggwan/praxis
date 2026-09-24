@@ -189,6 +189,9 @@ run_case "blocked query tool, SQL client behind a wrapper and env assignment" as
 run_case "blocked Edit, an inline script opens the file for writing" ask \
   Bash "$(bash_input "python3 -c 'open(\"$FILE\", \"w\").write(\"x\")'")" "$T_EDIT"
 
+run_case "blocked Edit, an inline script opens the file read-write (r+)" ask \
+  Bash "$(bash_input "python3 -c 'open(\"$FILE\", \"r+\").write(\"x\")'")" "$T_EDIT"
+
 run_case "blocked Write, the same file created through touch" ask \
   Bash "$(bash_input "touch $FILE && ls -la $FILE")" "$T_WRITE"
 

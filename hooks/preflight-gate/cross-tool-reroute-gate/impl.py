@@ -130,7 +130,7 @@ _BASH_WRITE_PREFIXES = (
 _BASH_DEST_ONLY_PREFIX = r"\b(?:cp|install|ln)\s+[^|;&\n]*\s"
 _SEGMENT_END = r"""["']?(?=\s*(?:$|[|;&\n<>]|\d+>))"""
 # `open("<path>", "w")` in an inline script; a bare `open(path)` is a read.
-_PY_OPEN_WRITE = r"""open\(\s*["']{path}["']\s*,\s*["'][wax]"""
+_PY_OPEN_WRITE = r"""open\(\s*["']{path}["']\s*,\s*["'](?:[wax]|r[bt]?\+)"""
 _PY_IMPORT_RE = re.compile(r"\bfrom\s+[\w.]+\s+import\b")
 
 # The runtime prefixes a hook block with the hook's own command line, which can
