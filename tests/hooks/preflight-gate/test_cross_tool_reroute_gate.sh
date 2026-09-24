@@ -255,6 +255,13 @@ run_case "blocked Edit, prose arrow before the path is not a redirect" pass \
 run_case "blocked query tool, a Python import line is not a query" pass \
   Bash "$(bash_input "python3 -c 'from cat.sch.tbl_x import y'")" "$T_BLOCK"
 
+run_case "blocked query tool, the table only inside a string literal" pass \
+  "$Q_B" "$(sql_input "SELECT 'from cat.sch.tbl_x'")" "$T_BLOCK"
+
+run_case "blocked query tool, the table only inside SQL comments" pass \
+  "$Q_B" "$(sql_input "SELECT 1 -- FROM cat.sch.tbl_x
+/* JOIN cat.sch.tbl_x */")" "$T_BLOCK"
+
 run_case "pending call names no table and no path" pass \
   "$Q_B" "$(sql_input "SELECT 1")" "$T_BLOCK"
 

@@ -139,3 +139,7 @@ each tool call.
    call through, so on Codex the gate does not stop a reroute.
 5. `cp`, `install` and `ln` count only their last operand as a write, so the
    `-t <dir>` form, where the destination comes first, is a miss.
+6. String literals and comments are dropped from an MCP query field, not from
+   a Bash command: there the query is often the single-quoted argument and
+   `--` starts a flag. A table named only inside a literal or comment of a
+   Bash query still asks.

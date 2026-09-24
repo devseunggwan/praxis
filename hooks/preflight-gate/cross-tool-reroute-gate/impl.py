@@ -109,6 +109,10 @@ _SQL_NON_TARGETS = frozenset({
 # that runs a SQL client. Prose (commit bodies, docs) and code (`from x import`)
 # name tables without querying them.
 _QUERY_FIELDS = frozenset({"sql", "query", "statement"})
+# String literals and comments in a query field name no table. Not applied to a
+# Bash command, where the query itself is often the single-quoted argument and
+# `--` starts a flag.
+_SQL_NOISE_RE = re.compile(r"'(?:[^']|'')*'|--[^\n]*|/\*.*?\*/", re.DOTALL)
 # A SQL client counts only in command position — line start or after a shell
 # separator, past env assignments and wrappers — so a PR body that mentions
 # `trino-plugin` or quotes `$ trino` output is not read as running it.
@@ -149,10 +153,10 @@ def bash_command(tool_name: str, tool_input: dict) -> str:
 def query_text(tool_name: str, tool_input: dict) -> str:
     """The SQL a call executes, or "" when it executes none (see TARGETS)."""
     if tool_name.startswith("mcp__"):
-        return "\n".join(
+        return _SQL_NOISE_RE.sub(" ", "\n".join(
             value for key, value in tool_input.items()
             if key in _QUERY_FIELDS and isinstance(value, str)
-        )
+        ))
     command = bash_command(tool_name, tool_input)
     return command if _SQL_CLI_RE.search(command) else ""
 
