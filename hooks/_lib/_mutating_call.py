@@ -80,9 +80,9 @@ MUTATING_MCP_VERBS = frozenset((
 # `sort -o`, `uniq in out`, `date -s`), so its read-onlyness is a property of
 # the arguments rather than of the command. That is not a read-only *shape*,
 # and admitting one costs the guarantee the whole allowlist exists to give.
-# Their absence costs a question on a prod-marked `find`, which is rare.
-# `sort` and `uniq` came back through `_ARG_CHECKED` below, the way `gh api`
-# is admitted: every flag must be recognised, so a write flag falls through.
+# `sort`, `uniq`, `find` and `sed` came back through `_ARG_CHECKED` below, the
+# way `gh api` is admitted: the arguments are checked, so a write form falls
+# through. A session replay showed their absence was not rare.
 READONLY_ANY_ARGS = frozenset({
     "ls", "cat", "head", "tail", "wc", "grep", "rg", "egrep", "fgrep",
     "echo", "printf", "jq", "cut", "tr", "column", "diff",
@@ -92,12 +92,12 @@ READONLY_ANY_ARGS = frozenset({
 })
 
 READONLY_SUBCOMMANDS = {
-    # `branch`, `tag`, `remote`, `worktree` and `config` are absent on purpose:
-    # each has a write form one flag away (`git branch -D`, `git remote add`),
-    # and falling through only costs a question.
+    # `tag`, `remote`, `worktree` and `config` are absent on purpose: each has
+    # a write form one flag away (`git remote add`), and falling through only
+    # costs a question. `branch` is admitted in its listing forms only, below.
     "git": frozenset({"log", "status", "diff", "show", "rev-parse", "rev-list",
                       "describe", "blame", "shortlog", "ls-files", "ls-remote",
-                      "cat-file"}),
+                      "cat-file", "grep", "branch"}),
     "gh": frozenset({"view", "list", "status", "checks", "diff", "search", "api"}),
     "kubectl": frozenset({"get", "describe", "logs", "top", "explain", "api-resources"}),
     "aws": frozenset({"sts"}),
@@ -346,7 +346,100 @@ def _set_is_readonly(argv: list[str]) -> bool:
     return True
 
 
-_ARG_CHECKED = {"sort": _sort_is_readonly, "uniq": _uniq_is_readonly, "set": _set_is_readonly}
+def _cd_is_readonly(argv: list[str]) -> bool:
+    # Moves only this shell's cwd; `-L`/`-P` pick how symlinks resolve.
+    return _flags_are_readonly(
+        argv[1:], bool_short="LP", value_short="", bool_long=frozenset(),
+        value_long=frozenset(), max_operands=1,
+    )
+
+
+# The write primaries of BSD find(1) and GNU findutils. A denylist, unlike the
+# flag sets above, because find's tests are open-ended while the primaries that
+# write or run something are a closed set in both manuals.
+_FIND_WRITE_PRIMARIES = frozenset({
+    "-delete", "-exec", "-execdir", "-ok", "-okdir",
+    "-fprint", "-fprint0", "-fprintf", "-fls",
+})
+
+
+def _find_is_readonly(argv: list[str]) -> bool:
+    return not any(tok in _FIND_WRITE_PRIMARIES for tok in argv[1:])
+
+
+_SED_ADDRESS = r"(?:\d+|\$)(?:,(?:\d+|\$))?"
+_SED_PRINT_RE = re.compile(rf"(?:{_SED_ADDRESS})?[pdq=]")
+_SED_SUBST_FLAGS_RE = re.compile(r"[gIip0-9]*")
+
+
+def _sed_subst_is_readonly(script: str) -> bool:
+    """`[addr]s<d>re<d>repl<d>flags` with no `w` (write) or `e` (exec) flag."""
+    m = re.match(_SED_ADDRESS, script)
+    body = script[m.end():] if m else script
+    if len(body) < 2 or body[0] != "s" or body[1].isalnum() or body[1] in "\\\n":
+        return False
+    delim, cur, i = body[1], "", 2
+    parts: list[str] = []
+    while i < len(body):
+        ch = body[i]
+        if ch == "\\" and i + 1 < len(body):
+            cur += body[i:i + 2]
+            i += 2
+            continue
+        if ch == delim:
+            parts.append(cur)
+            cur = ""
+        else:
+            cur += ch
+        i += 1
+    return len(parts) == 2 and bool(_SED_SUBST_FLAGS_RE.fullmatch(cur))
+
+
+def _sed_is_readonly(argv: list[str]) -> bool:
+    """Only single print/delete/substitute scripts; `-i`, `-f` and the `w`/`e`
+    commands write or run something, and a `;`-joined script is not parsed."""
+    scripts: list[str] = []
+    operands: list[str] = []
+    i = 1
+    while i < len(argv):
+        tok = argv[i]
+        i += 1
+        if tok in ("-e", "--expression"):
+            if i >= len(argv):
+                return False
+            scripts.append(argv[i])
+            i += 1
+        elif tok.startswith("--expression="):
+            scripts.append(tok.split("=", 1)[1])
+        elif tok in ("--quiet", "--silent", "--regexp-extended"):
+            continue
+        elif tok.startswith("-") and tok != "-":
+            if not all(ch in "nEru" for ch in tok[1:]):
+                return False
+        else:
+            operands.append(tok)
+    if not scripts:
+        if not operands:
+            return False
+        scripts.append(operands[0])
+    return all(_SED_PRINT_RE.fullmatch(s) or _sed_subst_is_readonly(s) for s in scripts)
+
+
+_ARG_CHECKED = {
+    "sort": _sort_is_readonly, "uniq": _uniq_is_readonly, "set": _set_is_readonly,
+    "cd": _cd_is_readonly, "find": _find_is_readonly, "sed": _sed_is_readonly,
+}
+
+# Listing forms only; any operand or other flag creates, renames or deletes.
+_GIT_BRANCH_READ_FLAGS = frozenset({
+    "--show-current", "-a", "--all", "-r", "--remotes", "-v", "-vv", "--verbose",
+    "--no-color",
+})
+
+
+def _git_branch_is_readonly(argv: list[str]) -> bool:
+    rest = argv[argv.index("branch") + 1:]
+    return all(tok in _GIT_BRANCH_READ_FLAGS for tok in rest)
 
 _ASSIGNMENT_RE = re.compile(r"[A-Za-z_]\w*=")
 _LOOP_VAR_RE = re.compile(r"[A-Za-z_]\w*")
@@ -383,6 +476,8 @@ def _segment_is_readonly(argv: list[str]) -> bool:
 
     if binary == "gh" and sub == "api":
         return _gh_api_is_readonly(argv)
+    if binary == "git" and sub == "branch":
+        return _git_branch_is_readonly(argv)
     if binary == "aws":
         # `aws sts get-caller-identity` and its siblings only.
         return any(a.startswith(_AWS_READ_PREFIXES) for a in argv[2:])
