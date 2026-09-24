@@ -49,9 +49,10 @@ same gate again.
 LIFTING. The block is never lifted by a later call on the original tool
 succeeding. In the incident the describe the gate asked for *ran* and failed
 as an ordinary tool result, so "a later call was not denied" would have lifted
-the block one call before the reroute. What lifts it, per (block, new tool)
-pair, is a call with that new tool on that target that actually ran — the
-operator approved this very ask once. A rejected ask leaves the pair armed.
+the block one call before the reroute. What lifts it, per (block, new tool,
+target), is a call with that new tool on that target that actually ran — the
+operator approved this very ask once. A rejected ask leaves it armed, and a
+block naming two tables stays armed on the one the new tool has not run on.
 
 INDETERMINATE SCAN IS SILENT. Unlike `rejected-mutation-reconsent-gate`, the
 reach here is every SQL query and every edit, so failing closed on a long
@@ -211,6 +212,11 @@ def shared_targets(tool_name: str, tool_input: dict, targets) -> set[str]:
 # ---------------------------------------------------------------------------
 
 
+def _lift_key(block_id: str, tool_name: str, target: str) -> str:
+    # Per target: running a block's other table must not approve this one.
+    return f"{block_id}|{tool_name}|{target}"
+
+
 def _new_state() -> dict:
     return {"recent": [], "blocks": [], "armed": {}, "lifted": []}
 
@@ -242,9 +248,9 @@ def _note_tool_uses(state: dict, msg: dict) -> None:
             {"id": use_id, "name": name, "targets": sorted(blocked_targets(name, tool_input))}
         )
         pairs = [
-            f"{b['id']}|{name}" for b in state["blocks"]
+            _lift_key(b["id"], name, target) for b in state["blocks"]
             if tool_family(b["tool"]) != tool_family(name)
-            and shared_targets(name, tool_input, b["targets"])
+            for target in shared_targets(name, tool_input, b["targets"])
         ]
         if pairs:
             state["armed"][use_id] = pairs
@@ -297,9 +303,10 @@ def find_reroute(state: dict, tool_name: str, tool_input: dict):
     for block in reversed(state["blocks"]):
         if tool_family(block["tool"]) == tool_family(tool_name):
             continue
-        if f"{block['id']}|{tool_name}" in state["lifted"]:
-            continue
-        shared = shared_targets(tool_name, tool_input, block["targets"])
+        shared = {
+            target for target in shared_targets(tool_name, tool_input, block["targets"])
+            if _lift_key(block["id"], tool_name, target) not in state["lifted"]
+        }
         if shared:
             return block, sorted(shared)
     return None

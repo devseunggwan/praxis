@@ -81,10 +81,11 @@ In the incident the describe the gate asked for *ran* and failed as an ordinary
 result, so "a later call was not denied" would have lifted the block one call
 before the reroute.
 
-What lifts it, per (block, new tool) pair, is a call with that new tool on that
-target that actually ran — the operator approved this very ask once. A
-rejected ask leaves the pair armed. The lift is derived from the transcript,
-so no state file can drift from what happened.
+What lifts it, per (block, new tool, target), is a call with that new tool on
+that target that actually ran — the operator approved this very ask once. A
+rejected ask leaves it armed, and a block naming two tables stays armed on the
+one the new tool has not run on. The lift is derived from the transcript, so
+no state file can drift from what happened.
 
 ## Fail-open
 

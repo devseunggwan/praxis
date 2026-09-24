@@ -101,6 +101,9 @@ BLOCK_WRITE=$(step Write "{\"file_path\":\"$FILE\",\"content\":\"x\"}" block)
 T_BLOCK="$TMP/block.jsonl";              mk_transcript "$T_BLOCK" "[$BLOCK_A]"
 T_BLOCK_DESCRIBE_FAIL="$TMP/describe.jsonl"; mk_transcript "$T_BLOCK_DESCRIBE_FAIL" "[$BLOCK_A,$DESCRIBE_A_OK]"
 T_LIFTED="$TMP/lifted.jsonl";            mk_transcript "$T_LIFTED" "[$BLOCK_A,$B_RAN]"
+SQL_XY="SELECT 1 FROM cat.sch.tbl_x JOIN cat.sch.tbl_y ON true"
+BLOCK_A_XY=$(step "$Q_A" "$(sql_input "$SQL_XY")" block)
+T_LIFTED_X_OF_XY="$TMP/lifted-x-of-xy.jsonl"; mk_transcript "$T_LIFTED_X_OF_XY" "[$BLOCK_A_XY,$B_RAN]"
 T_ASK_REJECTED="$TMP/ask-rejected.jsonl"; mk_transcript "$T_ASK_REJECTED" "[$BLOCK_A,$B_REJECTED]"
 T_USER_REJECT="$TMP/user-reject.jsonl";  mk_transcript "$T_USER_REJECT" "[$USER_REJECT_A]"
 T_EMPTY="$TMP/none.jsonl";               mk_transcript "$T_EMPTY" "[]"
@@ -171,6 +174,9 @@ run_case "blocked Edit, same file rewritten through Bash" ask \
 run_case "the operator rejected the earlier ask; the pair stays armed" ask \
   "$Q_B" "$(sql_input "$SQL_X")" "$T_ASK_REJECTED"
 
+run_case "block named two tables; running one through B leaves the other armed" ask \
+  "$Q_B" "$(sql_input "SELECT 1 FROM cat.sch.tbl_y")" "$T_LIFTED_X_OF_XY"
+
 run_case "blocked query tool, SQL client behind a wrapper and env assignment" ask \
   Bash "$(bash_input "HOST=h timeout 60 trino --server \"\$HOST\" --execute \"$SQL_X\"")" "$T_BLOCK"
 
@@ -204,6 +210,9 @@ run_case "a user refusal is not a hook block" pass \
 
 run_case "pair already approved once (the B call ran)" pass \
   "$Q_B" "$(sql_input "$SQL_X")" "$T_LIFTED"
+
+run_case "block named two tables; the one B already ran on stays lifted" pass \
+  "$Q_B" "$(sql_input "$SQL_X")" "$T_LIFTED_X_OF_XY"
 
 run_case "a Bash block contributes no path targets" pass \
   Write "{\"file_path\":\"$FILE\",\"content\":\"x\"}" "$T_BASH_PATH"
