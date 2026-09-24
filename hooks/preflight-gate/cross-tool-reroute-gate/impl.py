@@ -22,8 +22,9 @@ All four → `permissionDecision: "ask"`.
 
 TARGETS — a closed list, compared literally after normalization:
 
-  SQL identifiers following FROM / JOIN / INTO / UPDATE / DESCRIBE / TABLE,
-  lowercased with quotes stripped, read only from text that executes a query:
+  SQL identifiers following FROM / JOIN / INTO / UPDATE / DESCRIBE / TABLE
+  (past an ONLY or TABLE modifier), lowercased with quotes stripped, read only
+  from text that executes a query:
   an MCP input's `sql` / `query` / `statement` field, or a Bash command that
   runs a SQL client. A commit body saying "from the" or a file that mentions a
   table is not a query on it. `cat.sch.tbl` does not match `tbl`: guessing
@@ -95,7 +96,9 @@ PATH_FIELDS = {"Edit": "file_path", "Write": "file_path", "NotebookEdit": "noteb
 
 _IDENT = r"[`\"]?[A-Za-z_][\w$]*[`\"]?"
 _SQL_TARGET_RE = re.compile(
-    rf"(?i)\b(?:from|join|into|update|describe|table)\s+((?:{_IDENT}\.){{0,3}}{_IDENT})"
+    # `FROM ONLY x`, `DESCRIBE TABLE x`: the modifier is not the table.
+    rf"(?i)\b(?:from|join|into|update|describe|table)\s+(?:(?:only|table)\s+)?"
+    rf"((?:{_IDENT}\.){{0,3}}{_IDENT})"
 )
 # Words that follow the keywords above without naming a table.
 _SQL_NON_TARGETS = frozenset({

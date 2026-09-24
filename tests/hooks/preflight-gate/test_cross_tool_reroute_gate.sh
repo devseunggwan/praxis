@@ -162,6 +162,12 @@ run_case "the describe the gate asked for ran and failed on A; B still asks" ask
 run_case "table identifier case and quoting normalize equal" ask \
   "$Q_B" "$(sql_input 'select 1 from "CAT"."SCH"."TBL_X"')" "$T_BLOCK"
 
+run_case "a modifier between the keyword and the table (FROM ONLY)" ask \
+  "$Q_B" "$(sql_input "SELECT 1 FROM ONLY cat.sch.tbl_x")" "$T_BLOCK"
+
+run_case "a modifier between the keyword and the table (DESCRIBE TABLE)" ask \
+  "$Q_B" "$(sql_input "DESCRIBE TABLE cat.sch.tbl_x")" "$T_BLOCK"
+
 run_case "blocked query tool, same table through a Bash CLI" ask \
   Bash "$(bash_input "trino --execute \"$SQL_X\"")" "$T_BLOCK"
 
