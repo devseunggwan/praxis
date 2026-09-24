@@ -114,7 +114,7 @@ run_case "internal_cli_asks" "$(verdict "$(bash_payload 'orgctl token fetch data
 # restored too. Pinning the key set catches a new allowlist binary by any name;
 # adding a public read-only CLI means updating this line on purpose.
 run_case "allowlist_binaries_pinned" \
-  "$(python3 - "$HOOK" <<'EOF'
+  "$(python3 - "$ROOT_DIR/hooks/_lib/_mutating_call.py" <<'EOF'
 import importlib.util, sys
 spec = importlib.util.spec_from_file_location("gate", sys.argv[1])
 gate = importlib.util.module_from_spec(spec)
