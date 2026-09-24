@@ -610,6 +610,9 @@ _CONSUMERS = {
     # injected user records with `human_only=True` (#1486).
     HOOKS / "preflight-gate" / "question-turn-mutation-gate" / "impl.py":
         ["read_last_user_message"],
+    # The window is the text since the previous tool call, at the very end.
+    HOOKS / "advisory-nudge" / "cited-rule-gate" / "impl.py":
+        ["tail_lines", "TranscriptReadError"],
 }
 
 # Constants are values, not bindings, so the function map above cannot pin them:
@@ -621,6 +624,8 @@ _CONSTANT_CONSUMERS = {
     HOOKS / "advisory-nudge" / "pre-output-falsification-gate" / "impl.py":
         ["TRANSCRIPT_SCAN_LINES"],
     HOOKS / "advisory-nudge" / "momentum-rule-retrieval-gate" / "impl.py":
+        ["TRANSCRIPT_SCAN_LINES"],
+    HOOKS / "advisory-nudge" / "cited-rule-gate" / "impl.py":
         ["TRANSCRIPT_SCAN_LINES"],
     HOOKS / "advisory-nudge" / "source-citation-probe-gate" / "impl.py":
         ["TRANSCRIPT_SCAN_LINES"],

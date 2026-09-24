@@ -30,6 +30,7 @@ in [`../SECURITY.md`](../SECURITY.md).
 | `PRAXIS_JOINT_LIABILITY_BYPASS` | `joint-liability-attribution-gate` | Skip the opening-move attribution check. Exact value `1` |
 | `PRAXIS_HOOK_BYPASS_PROTECTED_PATHS` | `protected-paths-guard` | Skip the sensitive-file write guard |
 | `PRAXIS_HOOK_BYPASS_SETTINGS_PATH` | `settings-path-advisory` | Skip the Claude Code settings-file write advisory |
+| `PRAXIS_HOOK_BYPASS_CITED_RULE` | `cited-rule-gate` | Skip the rule-citation check on mutating calls |
 | `PRAXIS_HOOK_BYPASS_PARALLEL_MUTATION` | `parallel-gated-mutation-gate` | Skip the repeated-mutation check on a resolved parallel batch. Exact value `1` after stripping — `true` / `yes` / `0` leave the gate active |
 | `PRAXIS_HOOK_BYPASS_DELEGATION_CONTEXT` | `delegation-context-inject` | Skip the subagent shared-state isolation contract injection. Exact value `1` after stripping — `true` / `yes` / `0` leave the injection active |
 | `PRAXIS_HOOK_BYPASS_DESTRUCTIVE_BASH` | `destructive-bash-guard` | Skip the destructive-command guard |
@@ -89,6 +90,7 @@ in [`../SECURITY.md`](../SECURITY.md).
 | `PRAXIS_JOINT_LIABILITY_STRICT` | `joint-liability-attribution-gate` | Exact value `1` only. The advisory tier reaches the user but not the model, so this is the tier that makes the finding actionable in-session (#1265) |
 | `PRAXIS_PROTECTED_PATHS_STRICT` | `protected-paths-guard` | |
 | `PRAXIS_SETTINGS_PATH_STRICT` | `settings-path-advisory` | Exact value `1` only |
+| `PRAXIS_CITED_RULE_STRICT` | `cited-rule-gate` | Exact value `1` after stripping. Escalates to `ask`, not to a block |
 | `PRAXIS_DESTRUCTIVE_BASH_STRICT` | `destructive-bash-guard` | |
 | `PRAXIS_PERSONAL_LEAK_STRICT` | `block-personal-asset-leak` | Exact value `1` only, unstripped — surrounding whitespace keeps it advisory |
 | `PRAXIS_PATH_PROBE_STRICT` | `path-probe-gate` | |
@@ -156,6 +158,8 @@ per-hook `spec.md` before promoting any of them.
 | `PRAXIS_SKILL_GATED_COMMANDS` | `skill-gate-commands` | Commands that require a skill invocation |
 | `PRAXIS_HUB_MEDIATED_ORGS` | `block-child-repo-issue-create` | Orgs whose child-repo issues route through the hub |
 | `PRAXIS_WORKTREE_ENFORCED_REPOS` | `worktree-edit-gate` | Repos where the worktree workflow is enforced |
+| `PRAXIS_CITED_RULE_PREFIXES` | `cited-rule-gate` | Comma-separated citation prefixes (default `Rule:`) |
+| `PRAXIS_CITED_RULE_FILES` | `cited-rule-gate` | Path-separator list of rule files whose headings a citation may name |
 | `PRAXIS_WORKTREE_BASE_BRANCHES` | `worktree-edit-gate` | Base branches treated as "not a worktree" |
 | `PRAXIS_WORKTREE_SOURCE_EXTENSIONS` | `worktree-edit-gate` | File extensions the gate applies to |
 | `PRAXIS_MD_ESCAPE_MODE` | `pre-edit-md-escape-advisory` | Select advisory vs block mode |
