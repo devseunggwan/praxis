@@ -606,6 +606,10 @@ _CONSUMERS = {
     # whole transcript through a session-keyed cursor (#1485).
     HOOKS / "preflight-gate" / "cross-tool-reroute-gate" / "impl.py":
         ["scan_transcript_resumable", "scan_cursor_path", "TranscriptReadError"],
+    # Classifies the human message that opened the turn, so it reads past
+    # injected user records with `human_only=True` (#1486).
+    HOOKS / "preflight-gate" / "question-turn-mutation-gate" / "impl.py":
+        ["read_last_user_message"],
 }
 
 # Constants are values, not bindings, so the function map above cannot pin them:
