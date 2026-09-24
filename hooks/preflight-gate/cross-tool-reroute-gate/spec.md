@@ -1,6 +1,6 @@
 # PreToolUse Cross-Tool Reroute Gate
 
-Supported hosts: all
+Supported hosts: claude, codex
 
 Reference: [Autonomy vs Convention — ETHOS.md](../../../ETHOS.md#autonomy-vs-convention)
 
@@ -132,5 +132,9 @@ each tool call.
    hook that also watches the new tool asks once where the second hook would
    have blocked anyway.
 3. Only the 20 most recent blocks with targets are kept.
-4. `cp`, `install` and `ln` count only their last operand as a write, so the
+4. The gate is not registered on Cursor, whose `preToolUse` accepts `ask` but
+   does not enforce it, so a reroute would pass without a prompt. Codex parses
+   `ask` as not yet supported: it reports the hook run as failed and lets the
+   call through, so on Codex the gate does not stop a reroute.
+5. `cp`, `install` and `ln` count only their last operand as a write, so the
    `-t <dir>` form, where the destination comes first, is a miss.
