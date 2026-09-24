@@ -236,6 +236,9 @@ run_case "blocked query tool, SQL client behind timeout with an option argument"
 run_case "blocked Edit, an inline script opens the file for writing" ask \
   Bash "$(bash_input "python3 -c 'open(\"$FILE\", \"w\").write(\"x\")'")" "$T_EDIT"
 
+run_case "blocked Edit, an inline script passes the write mode by keyword" ask \
+  Bash "$(bash_input "python3 -c 'open(\"$FILE\", mode=\"w\").write(\"x\")'")" "$T_EDIT"
+
 run_case "blocked Edit, an inline script opens the file read-write (r+)" ask \
   Bash "$(bash_input "python3 -c 'open(\"$FILE\", \"r+\").write(\"x\")'")" "$T_EDIT"
 
