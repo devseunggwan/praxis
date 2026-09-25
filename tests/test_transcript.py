@@ -539,6 +539,10 @@ _CONSUMERS = {
         ["load_current_turn", "extract_last_assistant_text"],
     HOOKS / "completion-verify" / "prose-option-menu-advisory" / "impl.py":
         ["load_current_turn", "extract_last_assistant_text"],
+    # Grades the Stop text, and reads the human message that opened the turn
+    # to stay silent when that message asked for the report or plan (#1498).
+    HOOKS / "completion-verify" / "early-stop-advisory" / "impl.py":
+        ["load_stop_turn", "stop_last_assistant_text", "read_last_user_message"],
     HOOKS / "completion-verify" / "pr-claim-mutation-gate" / "impl.py":
         ["load_current_turn", "extract_last_assistant_text"],
     # Also streams the turns BEFORE the current one, reusing the shared boundary

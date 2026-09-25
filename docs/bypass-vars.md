@@ -58,6 +58,7 @@ in [`../SECURITY.md`](../SECURITY.md).
 | `PRAXIS_PR_ANCHOR_ADVISORY` | `pr-anchor-existence-gate` | How many Stop fires advise before the block: `=<N>` (default 1), `=forever` never escalates. An unreadable value reads as `N=1`, never as silence (#1443) |
 | `PRAXIS_PROPOSAL_PREMISE_BYPASS` | `proposal-premise-gate` | Skip the prose-proposal premise advisory |
 | `PRAXIS_PROSE_OPTION_MENU_BYPASS` | `prose-option-menu-advisory` | Skip the prose option-menu advisory |
+| `PRAXIS_EARLY_STOP_BYPASS` | `early-stop-advisory` | Skip the early-stop advisory (turn ended with requested work still open) |
 | `PRAXIS_RETRACTION_PROBE_BYPASS` | `retraction-probe-advisory` | Skip the unprobed-retraction advisory |
 | `PRAXIS_DENIED_ACTION_BYPASS` | `denied-action-report-gate` | Skip the denied-action report gate. Exact value `1` after stripping; read before the strict variable, so it wins when both are set |
 | `PRAXIS_HOOK_BYPASS_PR_REPORT_DESTINATION_GATE` | `pr-report-destination-gate` | Skip the PR-report-destination advisory (local report not posted to the PR) |
