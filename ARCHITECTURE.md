@@ -86,6 +86,7 @@ Unified `--model` flag across all skills: `<provider>:<model>` or bare model nam
 | `fable`, `opus`, `sonnet`, `haiku` | `claude:{name}` | `claude --model {name}` |
 | `claude` | Claude default model | `claude` |
 | `claude:opus` | Claude Opus | `claude --model opus` |
+| `claude:opus:low`, `opus:low` | Claude Opus at an explicit effort | `claude --model opus --effort low` |
 | `codex` | Codex, terra at medium effort | `codex exec -m gpt-5.6-terra -c model_reasoning_effort=medium` |
 | `codex:gpt-5.6-sol` | A listed Codex model at its table effort | `codex exec -m gpt-5.6-sol -c model_reasoning_effort=high` |
 | `codex:gpt-5.6-sol:xhigh` | A Codex model at an explicit effort | `codex exec -m gpt-5.6-sol -c model_reasoning_effort=xhigh` |
@@ -94,6 +95,14 @@ Unified `--model` flag across all skills: `<provider>:<model>` or bare model nam
 | `gemini:flash` | Gemini Flash | `gemini -m flash` |
 
 Bare names (`fable`, `opus`, `sonnet`, `haiku`) always resolve to Claude — full backward compatibility.
+
+Claude effort (#1499) is passed only when named, and must be one of `low`,
+`medium`, `high`, `xhigh`, `max` — anything else aborts, because
+`claude --effort <bad>` only warns and runs at the default. Unlike codex there
+is no per-tier default: effort names do not map to the same amount of thinking
+across Claude models, and each model's own default (`medium` on Opus 5.5,
+`high` on Opus 5) is the calibrated one. A jev pick is a bare tier and never
+carries an effort.
 
 ### Task-Type Routing
 
@@ -151,9 +160,9 @@ input = "--model" value
 if input matches /^(codex|gemini)(?::(.+))?$/:
   provider = match[1]           # "codex" or "gemini"
   sub_model = match[2] || ""    # "" or "gpt-5.6-sol:xhigh" or "flash" (first colon stripped)
-elif input in ["fable", "opus", "sonnet", "haiku"]:
+elif input matches /^(fable|opus|sonnet|haiku)(?::.+)?$/:
   provider = "claude"
-  sub_model = input
+  sub_model = input             # "opus" or "opus:low"
 elif input matches /^claude(?::(.+))?$/:
   provider = "claude"
   sub_model = match[1] || ""
@@ -168,6 +177,11 @@ if provider == "codex":
   effort = effort || {"gpt-5.6-luna": "low", "gpt-5.6-terra": "medium", "gpt-5.6-sol": "high"}.get(sub_model, "")
   # both are interpolated into a shell command, so anything outside
   # /^[A-Za-z0-9._-]+$/ is rejected rather than quoted
+elif provider == "claude":
+  # only an alphabetic tail after the last colon is an effort (Bedrock `…-v1:0` passes through)
+  if sub_model matches /^(.*):([A-Za-z]+)$/: sub_model, effort = match[1], match[2]
+  # no default: nothing is passed unless named; the model is held to /^[A-Za-z0-9._:\[\]-]*$/
+  if effort and effort not in ["low", "medium", "high", "xhigh", "max"]: abort
 ```
 
 ## Hook index
