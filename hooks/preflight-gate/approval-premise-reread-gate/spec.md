@@ -254,7 +254,9 @@ Three properties carry it, each pinned by a test:
   per-binary. Scanning every token for a read-only word would pass `gh pr create
   --title view` and `git commit -m log`.
 - **A state-changing redirect disqualifies the command** regardless of its
-  verbs, via the existing `has_state_changing_redirect`.
+  verbs, via the existing `has_state_changing_redirect`. A redirect that
+  writes no file (a descriptor duplication such as `2>&1` or `>&2`, or
+  `/dev/null`) is removed first; `>&file` and `/dev/null.bak` still write and still count.
 - **a substitution anywhere in the command** — `$(…)`, a backtick, `<(…)` or
   `>(…)`. The outer binary's name says nothing about what the shell runs
   inside: `echo "$(kubectl delete pod x -n prod-apne2)"` is an `echo` by every
@@ -267,11 +269,37 @@ argument. `find`, `yq`, `sort`, `uniq` and `date` therefore are not: each writes
 under a flag or a second positional (`find -delete`, `yq -i`, `sort -o`,
 `uniq in out`, `date -s`), which makes its read-onlyness a property of the
 arguments rather than of the command. Admitting one buys a quiet path in
-exchange for the guarantee the allowlist exists to give.
+exchange for the guarantee the allowlist exists to give. `sort` and `uniq` are
+admitted the way `gh api` is, by their arguments: every flag must be a known
+read-only one (no `-o`, `--output`, `--compress-program`, `-T`), and `uniq`
+takes at most one operand, since a second is its output file. `find` is
+admitted without a write primary (`-delete`, `-exec`, `-execdir`, `-ok`,
+`-okdir`, `-fprint`, `-fprint0`, `-fprintf`, `-fls`); that is a denylist,
+because find's tests are open-ended while its write primaries are a closed set
+in both the BSD and GNU manuals. `sed` is admitted only with the flags `-n`,
+`-E`, `-r`, `-u` and `-e`, and only when every script is a single print,
+delete, quit or `=` command with an optional line address, or a substitution
+whose flags are among `g`, `I`, `i`, `p` and digits. `-i`, `-f`, the `w`
+command and the `w` and `e` substitution flags write or run something, and a
+`;`-joined script is not parsed.
 
-`git branch`, `tag`, `remote`, `worktree` and `config` are absent from the
-allowlist on purpose: each has a write form one flag away (`git branch -D`,
-`git remote add`). `gh api` and `aws` are admitted only in their query shapes. `aws` needs a
+A segment that runs nothing is read-only: variable assignments alone (`S=1`),
+shell keywords alone (`do`, `done`), a `for NAME in WORDS` header, the builtins
+`true`, `false`, `:` and `set` with option flags only, and `cd` with at most
+one operand, which moves only the shell's working directory. The words of a
+`for` header are literals because a substitution anywhere refuses the whole
+command first.
+
+`git tag`, `remote`, `worktree` and `config` are absent from the allowlist on
+purpose: each has a write form one flag away (`git remote add`). `git branch`
+is admitted only bare or with listing flags (`--show-current`, `-a`, `-r`,
+`-v`, `-vv`, `--no-color`); any operand creates, renames or deletes a branch.
+Every admitted `git` subcommand refuses `--output`, which writes a file for
+`log`, `diff` and `show`, and `git grep` also refuses `-O` and
+`--open-files-in-pager`, which run their value as a pager command. git accepts
+any unambiguous prefix of a long option, so `--outp` and `--open` are refused
+too.
+`gh api` and `aws` are admitted only in their query shapes. `aws` needs a
 `describe-` / `get-` / `list-` style verb. `gh api` is classified token by
 token against the complete flag list from `gh api --help`, because it reaches
 every verb the service has and a write is one flag away:
