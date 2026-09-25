@@ -294,6 +294,11 @@ command first.
 purpose: each has a write form one flag away (`git remote add`). `git branch`
 is admitted only bare or with listing flags (`--show-current`, `-a`, `-r`,
 `-v`, `-vv`, `--no-color`); any operand creates, renames or deletes a branch.
+Every admitted `git` subcommand refuses `--output`, which writes a file for
+`log`, `diff` and `show`, and `git grep` also refuses `-O` and
+`--open-files-in-pager`, which run their value as a pager command. git accepts
+any unambiguous prefix of a long option, so `--outp` and `--open` are refused
+too.
 `gh api` and `aws` are admitted only in their query shapes. `aws` needs a
 `describe-` / `get-` / `list-` style verb. `gh api` is classified token by
 token against the complete flag list from `gh api --help`, because it reaches

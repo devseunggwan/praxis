@@ -441,6 +441,30 @@ def _git_branch_is_readonly(argv: list[str]) -> bool:
     rest = argv[argv.index("branch") + 1:]
     return all(tok in _GIT_BRANCH_READ_FLAGS for tok in rest)
 
+
+def _abbreviates(tok: str, long_flag: str) -> bool:
+    # git accepts any unambiguous prefix of a long option (`--open` for
+    # `--open-files-in-pager`); four characters clear `--o` and `--on`.
+    name = tok.split("=", 1)[0]
+    return len(name) >= 4 and long_flag.startswith(name)
+
+
+def _git_options_are_readonly(argv: list[str], sub: str) -> bool:
+    """`--output` writes a file for every admitted diff-family subcommand, and
+    `git grep -O` runs its value as a pager command."""
+    for tok in argv[argv.index(sub) + 1:]:
+        if tok == "--":
+            break
+        if _abbreviates(tok, "--output"):
+            return False
+        if sub == "grep" and (
+            _abbreviates(tok, "--open-files-in-pager")
+            or (tok.startswith("-") and not tok.startswith("--") and "O" in tok[1:])
+        ):
+            return False
+    return True
+
+
 _ASSIGNMENT_RE = re.compile(r"[A-Za-z_]\w*=")
 _LOOP_VAR_RE = re.compile(r"[A-Za-z_]\w*")
 
@@ -478,6 +502,8 @@ def _segment_is_readonly(argv: list[str]) -> bool:
         return _gh_api_is_readonly(argv)
     if binary == "git" and sub == "branch":
         return _git_branch_is_readonly(argv)
+    if binary == "git":
+        return _git_options_are_readonly(argv, sub)
     if binary == "aws":
         # `aws sts get-caller-identity` and its siblings only.
         return any(a.startswith(_AWS_READ_PREFIXES) for a in argv[2:])

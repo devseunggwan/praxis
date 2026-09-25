@@ -85,6 +85,9 @@ def test_writing_or_unknown_bash_is_mutating(command):
     "git branch --show-current",
     "git -C /x branch -a -v",
     "git grep -n foo",
+    "git grep --no-open-files-in-pager -e a",
+    "git grep -e a -- -O",
+    "git log --oneline -5",
     "sed -n 1,5p f",
     "sed -n '$p' f",
     "sed 's|^|  |' f",
@@ -140,6 +143,15 @@ def test_readonly_shell_forms_are_not_mutating(command):
     "find . -execdir echo {} ;",
     "find . -fprint out",
     "find . -ok rm {} ;",
+    "git grep -Ocmd -e a",
+    "git grep -O cmd -e a",
+    "git grep -nO -e a",
+    "git grep --open-files-in-pager=cmd -e a",
+    "git grep --open -e a",
+    "git log -1 --output=o.txt",
+    "git diff --output o.txt",
+    "git show --outp=o HEAD",
+    "git -C /x log --output=o",
 ])
 def test_write_forms_beside_them_stay_mutating(command):
     assert not bash_is_readonly(command)
