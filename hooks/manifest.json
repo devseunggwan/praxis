@@ -1396,6 +1396,35 @@
       "review_by": "2026-12-04"
     },
     {
+      "name": "elapsed-time-signal",
+      "role": "advisory-nudge",
+      "body": "impl.sh",
+      "event": "UserPromptSubmit",
+      "hosts": ["claude"],
+      "args": ["UserPromptSubmit"],
+      "timeout": 3,
+      "review_by": "2026-12-24"
+    },
+    {
+      "name": "elapsed-time-signal",
+      "role": "advisory-nudge",
+      "body": "impl.sh",
+      "event": "PostToolUse",
+      "matcher": ".*",
+      "hosts": ["claude"],
+      "args": ["PostToolUse"],
+      "timeout": 3
+    },
+    {
+      "name": "elapsed-time-signal",
+      "role": "advisory-nudge",
+      "body": "impl.sh",
+      "event": "PostToolUseFailure",
+      "hosts": ["claude"],
+      "args": ["PostToolUseFailure"],
+      "timeout": 3
+    },
+    {
       "name": "parallel-gated-mutation-gate",
       "role": "preflight-gate",
       "event": "PostToolBatch",
