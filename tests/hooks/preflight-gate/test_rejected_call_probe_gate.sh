@@ -8,9 +8,9 @@
 #   ask  — stdout contains permissionDecision "ask", exit 0
 #   pass — exit 0, stdout empty, stderr empty
 #
-# The first two PASS cases are the issue's replay fixture: a `git status` or a
-# `gh pr list` between the rejected call and the next mutation keeps the gate
-# silent; without one it asks.
+# The issue's replay fixture: the refused call is a CLI the gate does not know,
+# so local git, the remote ref and GitHub must all be probed. `git status`
+# alone or `gh pr list` alone still asks; the two together keep it silent.
 #
 # Usage: bash tests/hooks/preflight-gate/test_rejected_call_probe_gate.sh
 # Exit:  0 = all pass, 1 = at least one failure
@@ -107,7 +107,29 @@ GIT_STATUS_REJECTED=$(step Bash "$(bash_input "git status")" reject)
 MCP_GET_OK=$(step mcp__srv__get_item '{"id":"1"}' ok)
 LS_OK=$(step Bash "$(bash_input "ls /repo")" ok)
 PUSH_OK=$(step Bash "$(bash_input "$PUSH")" ok)
+PUSH_REJECTED=$(step Bash "$(bash_input "$PUSH")" reject)
+COMMIT_REJECTED=$(step Bash "$(bash_input "git commit -m x")" reject)
+CD_SHIP_REJECTED=$(step Bash "$(bash_input "cd /repo && $SHIP")" reject)
+KUBE_REJECTED=$(step Bash "$(bash_input "kubectl apply -f x.yaml")" reject)
+LS_REMOTE_OK=$(step Bash "$(bash_input "git ls-remote origin feat-x")" ok)
+READ_OK=$(step Read '{"file_path":"/repo/a.py"}' ok)
+OTHER_MCP_GET_OK=$(step mcp__other__get_item '{"id":"1"}' ok)
+KUBE_GET_OK=$(step Bash "$(bash_input "kubectl get deploy x")" ok)
+CD_REPO_STATUS_OK=$(step Bash "$(bash_input "cd /repo && git status")" ok)
+CD_OTHER_STATUS_OK=$(step Bash "$(bash_input "cd /other && git status")" ok)
+CD_OTHER_PR_LIST_OK=$(step Bash "$(bash_input "cd /other && gh pr list --head feat-x")" ok)
+GH_REPO_PR_LIST_OK=$(step Bash "$(bash_input "gh pr list --repo o/r --head feat-x")" ok)
 
+T_BOTH="$TMP/both.jsonl";                     mk_transcript "$T_BOTH" "[$SHIP_REJECTED,$GH_PR_LIST_OK,$GIT_STATUS_OK]"
+T_PUSH_STATUS="$TMP/push-status.jsonl";       mk_transcript "$T_PUSH_STATUS" "[$PUSH_REJECTED,$GIT_STATUS_OK]"
+T_PUSH_LS_REMOTE="$TMP/push-ls-remote.jsonl"; mk_transcript "$T_PUSH_LS_REMOTE" "[$PUSH_REJECTED,$GIT_STATUS_OK,$LS_REMOTE_OK]"
+T_COMMIT_STATUS="$TMP/commit-status.jsonl";   mk_transcript "$T_COMMIT_STATUS" "[$COMMIT_REJECTED,$GIT_STATUS_OK]"
+T_EDIT_READ="$TMP/edit-read.jsonl";           mk_transcript "$T_EDIT_READ" "[$EDIT_REJECTED,$READ_OK]"
+T_EDIT_LS="$TMP/edit-ls.jsonl";               mk_transcript "$T_EDIT_LS" "[$EDIT_REJECTED,$LS_OK]"
+T_MCP_OTHER="$TMP/mcp-other.jsonl";           mk_transcript "$T_MCP_OTHER" "[$MCP_REJECTED,$OTHER_MCP_GET_OK]"
+T_KUBE_GET="$TMP/kube-get.jsonl";             mk_transcript "$T_KUBE_GET" "[$KUBE_REJECTED,$KUBE_GET_OK]"
+T_WRONG_DIR="$TMP/wrong-dir.jsonl";           mk_transcript "$T_WRONG_DIR" "[$CD_SHIP_REJECTED,$CD_OTHER_PR_LIST_OK,$CD_OTHER_STATUS_OK]"
+T_SAME_DIR="$TMP/same-dir.jsonl";             mk_transcript "$T_SAME_DIR" "[$CD_SHIP_REJECTED,$GH_REPO_PR_LIST_OK,$CD_REPO_STATUS_OK]"
 T_REJECT="$TMP/reject.jsonl";                 mk_transcript "$T_REJECT" "[$SHIP_REJECTED]"
 T_INTERRUPT="$TMP/interrupt.jsonl";           mk_transcript "$T_INTERRUPT" "[$SHIP_INTERRUPTED]"
 T_EDIT_REJECT="$TMP/edit-reject.jsonl";       mk_transcript "$T_EDIT_REJECT" "[$EDIT_REJECTED]"
@@ -178,7 +200,7 @@ run_case "rejected file edit, next mutation is a Bash write" ask \
 run_case "rejected MCP write, next MCP write" ask \
   mcp__srv__update_item '{"id":"1"}' "$T_MCP_REJECT"
 
-run_case "a read that inspects no state (ls) is not a probe" ask \
+run_case "ls covers local files only, not an unknown CLI's surfaces" ask \
   Bash "$(bash_input "$PUSH")" "$T_LS"
 
 run_case "a probe that was itself refused never ran" ask \
@@ -187,6 +209,24 @@ run_case "a probe that was itself refused never ran" ask \
 run_case "a later refused mutation re-arms after an earlier probe" ask \
   Bash "$(bash_input "$PUSH")" "$T_REARMED"
 
+run_case "unknown CLI refused, git status alone leaves remote ref and GitHub (issue fixture)" ask \
+  Bash "$(bash_input "$PUSH")" "$T_STATUS"
+
+run_case "unknown CLI refused, gh pr list alone leaves local git (issue fixture)" ask \
+  Bash "$(bash_input "$PUSH")" "$T_PR_LIST"
+
+run_case "unknown CLI refused, cd <repo> && git log alone" ask \
+  Bash "$(bash_input "$PUSH")" "$T_CD_LOG"
+
+run_case "git push refused, git status alone leaves the remote ref" ask \
+  Bash "$(bash_input "$PUSH")" "$T_PUSH_STATUS"
+
+run_case "MCP write refused, a read on a different server" ask \
+  mcp__srv__update_item '{"id":"1"}' "$T_MCP_OTHER"
+
+run_case "probes aimed at a different directory cover nothing" ask \
+  Bash "$(bash_input "$PUSH")" "$T_WRONG_DIR"
+
 run_case "a leading cd does not turn a mutation into a probe" ask \
   Bash "$(bash_input "cd /repo && $PUSH")" "$T_REJECT"
 
@@ -194,14 +234,26 @@ run_case "a leading cd does not turn a mutation into a probe" ask \
 # PASS — silent controls
 # ---------------------------------------------------------------------------
 
-run_case "git status ran between (issue fixture)" pass \
-  Bash "$(bash_input "$PUSH")" "$T_STATUS"
+run_case "unknown CLI refused, gh pr list and git status both ran (issue fixture)" pass \
+  Bash "$(bash_input "$PUSH")" "$T_BOTH"
 
-run_case "gh pr list ran between (issue fixture)" pass \
-  Bash "$(bash_input "$PUSH")" "$T_PR_LIST"
+run_case "git push refused, git status and git ls-remote ran" pass \
+  Bash "$(bash_input "$PUSH")" "$T_PUSH_LS_REMOTE"
 
-run_case "cd <repo> && git log ran between" pass \
-  Bash "$(bash_input "$PUSH")" "$T_CD_LOG"
+run_case "git commit refused, git status covers local git" pass \
+  Bash "$(bash_input "$PUSH")" "$T_COMMIT_STATUS"
+
+run_case "file edit refused, the Read tool covers local files" pass \
+  Bash "$(bash_input "$PUSH")" "$T_EDIT_READ"
+
+run_case "file edit refused, ls covers local files" pass \
+  Bash "$(bash_input "$PUSH")" "$T_EDIT_LS"
+
+run_case "kubectl apply refused, kubectl get covers it" pass \
+  Bash "$(bash_input "$PUSH")" "$T_KUBE_GET"
+
+run_case "probes in the same directory, and a --repo probe that cannot be compared to it" pass \
+  Bash "$(bash_input "$PUSH")" "$T_SAME_DIR"
 
 run_case "a read-only MCP call ran between" pass \
   mcp__srv__update_item '{"id":"1"}' "$T_MCP_GET"
@@ -249,6 +301,14 @@ if echo "$out" | grep -q "shipcli open --branch feat-x" && echo "$out" | grep -q
 else
   echo "FAIL  [ask] reason names the refused call and its denial kind"; FAIL=$((FAIL+1))
   FAILED_NAMES+=("reason names the refused call")
+fi
+
+out=$(mk_payload Bash "$(bash_input "$PUSH")" "$T_STATUS" | PRAXIS_HOME="$TMP/home-unprobed" "$HOOK" 2>/dev/null)
+if echo "$out" | grep -q "Not yet probed since: GitHub, remote ref; and"; then
+  echo "PASS  [ask] reason lists only the surfaces still unprobed"; PASS=$((PASS+1))
+else
+  echo "FAIL  [ask] reason lists only the surfaces still unprobed"; FAIL=$((FAIL+1))
+  FAILED_NAMES+=("reason lists only the surfaces still unprobed")
 fi
 
 echo

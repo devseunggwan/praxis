@@ -7,27 +7,30 @@ refusal sentence. The pull request existed, created at the time of that call.
 The agent read the refusal as "nothing happened" and moved on.
 
 A refused or interrupted call may still have run. This hook reads the session's
-refusals and, when the newest refused MUTATING call has not been followed by a
-probe of state, asks before the next mutating call.
+refusals and, until probes have looked at every surface the newest refused
+MUTATING call could have changed, asks before the next mutating call.
 
   1. the pending call is mutating and is not itself a probe;
   2. an earlier mutating call in this session was refused: `toolDenialKind`
      `user-rejected` with the refusal sentence, or `interrupted`;
-  3. since that refusal, no probe has run and no mutating call has run.
+  3. since that refusal, some surface of it is still unprobed and no mutating
+     call has run.
 
 All three -> `permissionDecision: "ask"`.
 
-MUTATING is `_mutating_call.is_mutating_call`, applied after peeling leading
-`cd <dir> &&` segments: the shared allowlist has no `cd`, so without the peel
-`cd <repo> && git status` reads as a mutation.
+MUTATING is `_mutating_call.is_mutating_call`.
 
-A PROBE is a call that ran and reads state (the maintainer's-call default, see
-spec): a read-only Bash command with at least one `git` / `gh` / `kubectl` /
-`aws` / `docker` segment (the subcommand-gated families of the shared
-allowlist), or an MCP call whose name carries no write verb. `ls` and `cat`
-read local files only and are not probes. Any probe disarms, whatever surface
-the refused call touched: in the incident the CLI's surface was a branch, a
-push and a pull request, and `git status` / `gh pr list` are what saw them.
+SURFACES a refused call could have changed: local git, a remote ref, GitHub,
+local files, kubectl / aws / docker, or one MCP server. A CLI the gate does not
+know (the incident's branch-push-PR tool) could have changed any of local git,
+a remote ref and GitHub, so all three must be probed.
+
+A PROBE is a call that ran and reads state, and it covers the surfaces it
+reads: a read-only `git` command covers local git (`git ls-remote` also a
+remote ref), a read-only `gh` command covers GitHub and remote refs, any
+read-only Bash command and the Read / Grep / Glob tools cover local files, and
+an MCP call with no write verb covers its own server. A probe aimed at a
+different directory or repository than the refused call covers nothing.
 
 NOT A REFUSAL: a hook block (`permission-rule`) or a declined hook ask
 (`user-rejected` without the refusal sentence). Both stop the call before it
@@ -52,8 +55,13 @@ from _compound import compound_cascade_hint  # type: ignore[import-not-found]  #
 from _hook_io import emit_decision  # type: ignore[import-not-found]  # noqa: E402
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
 from _mutating_call import (  # type: ignore[import-not-found]  # noqa: E402
-    READONLY_SUBCOMMANDS,
+    _NONWRITING_REDIRECT_RE,
+    _SUBSTITUTION_RE,
+    READONLY_ANY_ARGS,
+    _segment_is_readonly,
+    _subcommand,
     bash_is_readonly,
+    has_state_changing_redirect,
     is_mutating_call,
     mcp_is_mutating,
 )
@@ -81,42 +89,136 @@ SCAN_MAX_BYTES = 20 * 1024 * 1024
 RECENT_TOOL_USES = 32
 SUMMARY_MAX_CHARS = 200
 
-PROBE_BINARIES = frozenset(READONLY_SUBCOMMANDS)
 PATH_FIELDS = {"Edit": "file_path", "Write": "file_path", "NotebookEdit": "notebook_path"}
-
-_LEADING_CD_RE = re.compile(r"""^\s*cd\s+(?:"[^"]*"|'[^']*'|[^\s;&|]+)\s*(?:&&|;)\s*""")
 _NEEDLES = (b'"tool_use"', b'"tool_result"')
 
+LOCAL_GIT = "local git"
+REMOTE_REF = "remote ref"
+GITHUB = "GitHub"
+LOCAL_FILES = "local files"
+UNKNOWN_CLI_SURFACES = (LOCAL_GIT, REMOTE_REF, GITHUB)
 
-def _peel_cd(command: str) -> str:
-    while match := _LEADING_CD_RE.match(command):
-        command = command[match.end():]
-    return command
-
-
-def _command(tool_name: str, tool_input: dict) -> str:
-    command = tool_input.get("command") if tool_name == "Bash" else None
-    return _peel_cd(command) if isinstance(command, str) else ""
+_GIT_REMOTE_SUBCOMMANDS = frozenset({"push", "fetch", "pull", "clone", "remote",
+                                     "ls-remote", "submodule"})
+_OWN_SURFACE_BINARIES = frozenset({"kubectl", "aws", "docker"})
+# Writers whose whole effect lands in local files, so a local read shows it.
+_LOCAL_FILE_WRITERS = frozenset({
+    "rm", "rmdir", "mv", "cp", "mkdir", "touch", "ln", "chmod", "chown", "tee",
+    "truncate", "install", "patch", "tar", "unzip", "zip", "gzip", "gunzip",
+    "sed", "sort", "uniq", "find", "yq", "cd", "set",
+}) | READONLY_ANY_ARGS
+_FILE_READ_TOOLS = frozenset({"Read", "Grep", "Glob"})
+_LEADING_CD_RE = re.compile(r"""^\s*cd\s+("[^"]*"|'[^']*'|[^\s;&|]+)\s*(?:&&|;)""")
 
 
 def is_mutating(tool_name: str, tool_input: dict) -> bool:
-    if tool_name == "Bash":
-        return is_mutating_call("Bash", {"command": _command(tool_name, tool_input)})
     return is_mutating_call(tool_name, tool_input)
 
 
-def is_probe(tool_name: str, tool_input: dict) -> bool:
-    """Whether the call reads state (see PROBE in the module docstring)."""
+def _bash_command(tool_name: str, tool_input: dict) -> str:
+    command = tool_input.get("command") if tool_name == "Bash" else None
+    return command if isinstance(command, str) else ""
+
+
+def _segments(command: str) -> list[list[str]]:
+    return [list(seg) for seg in iter_command_starts(safe_tokenize(command)) if seg]
+
+
+def _mcp_server(tool_name: str) -> str:
+    return "MCP " + tool_name.split("__")[1] if tool_name.count("__") >= 2 else tool_name
+
+
+def _segment_surfaces(argv: list[str]) -> set[str]:
+    binary = argv[0].rsplit("/", 1)[-1]
+    if binary == "git":
+        sub = _subcommand("git", argv)
+        return {LOCAL_GIT} if sub and sub not in _GIT_REMOTE_SUBCOMMANDS else {LOCAL_GIT, REMOTE_REF}
+    if binary == "gh":
+        return {GITHUB}
+    if binary in _OWN_SURFACE_BINARIES:
+        return {binary}
+    if binary in _LOCAL_FILE_WRITERS:
+        return {LOCAL_FILES}
+    return set(UNKNOWN_CLI_SURFACES)
+
+
+def mutation_surfaces(tool_name: str, tool_input: dict) -> set[str]:
+    """What a mutating call could have changed (see SURFACES)."""
+    if tool_name in PATH_FIELDS:
+        return {LOCAL_FILES}
     if tool_name.startswith("mcp__"):
-        return not mcp_is_mutating(tool_name)
-    command = _command(tool_name, tool_input)
+        return {_mcp_server(tool_name)}
+    command = _bash_command(tool_name, tool_input)
+    if not command:
+        return set(UNKNOWN_CLI_SURFACES)
+    surfaces: set[str] = set()
+    if has_state_changing_redirect(_NONWRITING_REDIRECT_RE.sub(" ", command)):
+        surfaces.add(LOCAL_FILES)
+    if _SUBSTITUTION_RE.search(command):
+        surfaces.update(UNKNOWN_CLI_SURFACES)
+    for argv in _segments(command):
+        if not _segment_is_readonly(argv):
+            argv = strip_prefix(argv) or argv
+            surfaces |= _segment_surfaces(argv)
+    return surfaces or set(UNKNOWN_CLI_SURFACES)
+
+
+def probe_surfaces(tool_name: str, tool_input: dict) -> set[str]:
+    """What a call reads, if it reads state and writes nothing (see PROBE)."""
+    if tool_name.startswith("mcp__"):
+        return set() if mcp_is_mutating(tool_name) else {_mcp_server(tool_name)}
+    if tool_name in _FILE_READ_TOOLS:
+        return {LOCAL_FILES}
+    command = _bash_command(tool_name, tool_input)
     if not command or not bash_is_readonly(command):
-        return False
-    for start in iter_command_starts(safe_tokenize(command)):
-        argv = strip_prefix(list(start))
-        if argv and argv[0].rsplit("/", 1)[-1] in PROBE_BINARIES:
-            return True
-    return False
+        return set()
+    surfaces = {LOCAL_FILES}
+    for argv in _segments(command):
+        argv = strip_prefix(argv) or argv
+        binary = argv[0].rsplit("/", 1)[-1]
+        if binary == "git":
+            surfaces.add(LOCAL_GIT)
+            if _subcommand("git", argv) == "ls-remote":
+                surfaces.add(REMOTE_REF)
+        elif binary == "gh":
+            surfaces |= {GITHUB, REMOTE_REF}
+        elif binary in _OWN_SURFACE_BINARIES:
+            surfaces.add(binary)
+    return surfaces
+
+
+def is_probe(tool_name: str, tool_input: dict) -> bool:
+    return bool(probe_surfaces(tool_name, tool_input))
+
+
+def call_target(tool_name: str, tool_input: dict) -> str | None:
+    """Where the call is aimed: `dir:<path>` from a leading `cd` or `git -C`,
+    `repo:<owner/name>` from `--repo` / `-R`, or None when it names neither."""
+    command = _bash_command(tool_name, tool_input)
+    if not command:
+        return None
+    if match := _LEADING_CD_RE.match(command):
+        return "dir:" + match.group(1).strip("\"'").rstrip("/")
+    for argv in _segments(command):
+        for i, tok in enumerate(argv[:-1]):
+            if argv[0].rsplit("/", 1)[-1] == "git" and tok == "-C":
+                return "dir:" + argv[i + 1].rstrip("/")
+            if tok in ("--repo", "-R"):
+                return "repo:" + argv[i + 1]
+        for tok in argv:
+            if tok.startswith("--repo="):
+                return "repo:" + tok.split("=", 1)[1]
+    return None
+
+
+def same_target(armed_target: str | None, probe_target: str | None) -> bool:
+    # Targets of different kinds (a directory and a repository) cannot be
+    # compared, and a call that names none runs wherever the session is.
+    if armed_target is None or probe_target is None:
+        return True
+    if armed_target.split(":", 1)[0] != probe_target.split(":", 1)[0]:
+        return True
+    return armed_target == probe_target
 
 
 def summarize(tool_name: str, tool_input: dict) -> str:
@@ -176,10 +278,13 @@ def _note_tool_uses(state: dict, ev: dict, msg: dict) -> None:
             continue
         if not isinstance(tool_input, dict):
             tool_input = {}
+        mutating = is_mutating(name, tool_input)
         state["recent"].append({
             "id": use_id, "uuid": uuid,
-            "mutating": is_mutating(name, tool_input),
-            "probe": is_probe(name, tool_input),
+            "mutating": mutating,
+            "needs": sorted(mutation_surfaces(name, tool_input)) if mutating else [],
+            "covers": sorted(probe_surfaces(name, tool_input)),
+            "target": call_target(name, tool_input),
             "summary": summarize(name, tool_input),
         })
     del state["recent"][:-RECENT_TOOL_USES]
@@ -201,11 +306,25 @@ def _note_results(state: dict, ev: dict, msg: dict) -> None:
         kind = refusal_kind(ev, block)
         if kind:
             if use["mutating"]:
-                state["armed"] = {"summary": use["summary"], "kind": kind}
+                state["armed"] = {"summary": use["summary"], "kind": kind,
+                                  "unprobed": use["needs"], "target": use["target"]}
         elif ev.get("toolDenialKind"):
             continue  # stopped before it ran: neither a probe nor a mutation
-        elif use["probe"] or use["mutating"]:
+        elif use["mutating"]:
             state["armed"] = None
+        elif use["covers"] and state["armed"]:
+            _note_probe(state, use)
+
+
+def _note_probe(state: dict, use: dict) -> None:
+    armed = state["armed"]
+    if not same_target(armed.get("target"), use["target"]):
+        return
+    unprobed = [s for s in armed.get("unprobed", []) if s not in use["covers"]]
+    if not unprobed:
+        state["armed"] = None
+    elif len(unprobed) < len(armed.get("unprobed", [])):
+        state["armed"] = {**armed, "unprobed": unprobed}
 
 
 def reduce_event(state: dict, ev: dict) -> None:
@@ -224,13 +343,16 @@ def build_reason(armed: dict, tool_name: str) -> str:
         rule_name="rejected call probe",
         why=(
             f"an earlier mutating call was refused ({armed['kind']}) and may "
-            f"still have run: {armed['summary']}. No probe of state has run "
-            f"since, and this `{tool_name}` call mutates again"
+            f"still have run: {armed['summary']}. Not yet probed since: "
+            f"{', '.join(armed.get('unprobed') or UNKNOWN_CLI_SURFACES)}; and "
+            f"this `{tool_name}` call mutates again"
         ),
         correct_path=(
-            "look before acting: run a read-only probe of the surface that call "
-            "touched (git status, git log, gh pr list, a remote ref lookup, a "
-            "read-only MCP query), then retry. Approve here only if the user "
+            "look before acting: probe each surface listed above, in the "
+            "directory or repository that call used (local git: git status / "
+            "git log; remote ref: git ls-remote or a gh read; GitHub: gh pr "
+            "list / gh issue list; local files: ls or Read; an MCP server: a "
+            "read-only call on it), then retry. Approve here only if the user "
             "has chosen to act without looking."
         ),
         bypass_env=None,
