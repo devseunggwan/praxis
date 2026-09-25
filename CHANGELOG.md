@@ -5,6 +5,30 @@ All notable changes to praxis are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.19.0](https://github.com/devseunggwan/praxis/compare/v7.18.0...v7.19.0) (2026-09-25)
+
+
+### Added
+
+* **delegate:** default codex model and effort ([#1484](https://github.com/devseunggwan/praxis/issues/1484)) ([b44a2e7](https://github.com/devseunggwan/praxis/commit/b44a2e7ac4048d40af74dcf3642df67d4c9994fc))
+* **delegate:** route tiers with jev decisions ([#1482](https://github.com/devseunggwan/praxis/issues/1482)) ([3c7948d](https://github.com/devseunggwan/praxis/commit/3c7948dbf2754938ce5a8fc82b2129ea59ab4b6f)), closes [#1481](https://github.com/devseunggwan/praxis/issues/1481)
+* **hooks:** add cited-rule-gate ([#1493](https://github.com/devseunggwan/praxis/issues/1493)) ([66dc690](https://github.com/devseunggwan/praxis/commit/66dc6901d6a00c83164100cb323d5765447d7839))
+* **hooks:** add cross-tool-reroute-gate ([#1489](https://github.com/devseunggwan/praxis/issues/1489)) ([4bb0991](https://github.com/devseunggwan/praxis/commit/4bb0991fc8ffcf2cb852e258b16e9f88b43a4462))
+* **hooks:** add rejected-call-probe-gate ([#1494](https://github.com/devseunggwan/praxis/issues/1494)) ([d2ba6a0](https://github.com/devseunggwan/praxis/commit/d2ba6a0d949c67964dab5dd80dee906c4e2bc955))
+* **hooks:** gate mutation in a turn opened by a user question ([#1492](https://github.com/devseunggwan/praxis/issues/1492)) ([5a4b679](https://github.com/devseunggwan/praxis/commit/5a4b679322a39da32d2b647914d43c64fe25ff24))
+* **hooks:** language rule survives compaction ([#1479](https://github.com/devseunggwan/praxis/issues/1479)) ([23a30cb](https://github.com/devseunggwan/praxis/commit/23a30cb18c3b869dbc15b0d769b1242a4c93d931))
+
+
+### Fixed
+
+* **hooks:** ask decision keeps sibling advisories ([#1478](https://github.com/devseunggwan/praxis/issues/1478)) ([3e01113](https://github.com/devseunggwan/praxis/commit/3e011130ee0ce5b3c31548cb24cd5feadc22cba9))
+* **hooks:** recognize read-only shell forms ([#1497](https://github.com/devseunggwan/praxis/issues/1497)) ([f72d56e](https://github.com/devseunggwan/praxis/commit/f72d56e438f0be62a6a287196343ab61b3234175))
+
+
+### Changed
+
+* **hooks:** extract mutating-call classifier to _lib ([#1491](https://github.com/devseunggwan/praxis/issues/1491)) ([5b2535a](https://github.com/devseunggwan/praxis/commit/5b2535a8aca0920ef993bad1a6a9d66a7b8361b3))
+
 ## [7.18.0](https://github.com/devseunggwan/praxis/compare/v7.17.0...v7.18.0) (2026-09-21)
 
 
