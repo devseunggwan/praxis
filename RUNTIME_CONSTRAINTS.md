@@ -442,6 +442,84 @@ same dump file is the positive control.
 
 ---
 
+## 11. Mid-turn assistant notes can land in a `text` block or a `thinking` block
+
+**Constraint**: On Opus 5.5 a note the model writes between tool calls is
+recorded in the transcript JSONL in one of two shapes, and both occurred in
+one session on one host version:
+
+- a `text` block in an assistant message with `stop_reason: "tool_use"`,
+  carrying the full note; or
+- a `thinking` block whose `thinking` field carries the full note, following
+  an empty `thinking` block in the same message (same `message.id`).
+
+The per-message reasoning block itself is always recorded with an empty
+`thinking` field (keys `signature`, `thinking`, `type`). The final reply was a
+`text` block with `stop_reason: "end_turn"` in every turn measured. This
+matches the Opus 5.5 prompting guide's
+[User-facing progress updates](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-opus-5-5#user-facing-progress-updates):
+at the API level, notes between tool calls can arrive as progress-update
+`thinking` blocks.
+
+**Why it bites hooks**: many hooks gather assistant prose by keeping only
+`type == "text"` blocks. A note recorded in the second shape is invisible to
+them, so a gate that looks for evidence or a claim anywhere in the turn can
+miss it without error. Readers that filter on `type == "text"` over assistant
+content (checked against `origin/main` on 2026-09-25):
+
+- `hooks/completion-verify/completion-verify/impl.sh:187` — `$last_text`,
+  the last assistant message's `text` blocks. Line 203 filters `text` blocks
+  too, but on `tool_result` content, which this entry does not cover.
+- `hooks/advisory-nudge/cited-rule-gate/impl.py:221` — `window_text`, the
+  assistant text since the previous tool call.
+- `hooks/advisory-nudge/momentum-rule-retrieval-gate/impl.py:672` —
+  `_assistant_text`, assistant text across an index range.
+- `hooks/_lib/_transcript.py:552` — `extract_last_assistant_text`, the Stop
+  fallback when `last_assistant_message` is absent.
+
+`hooks/preflight-gate/block-commit-without-codex-review/impl.py:657`
+(`_has_slash_command`) was listed in issue #1502 but reads **user** events,
+not assistant text, so it is not affected.
+
+**Workaround**: none applied yet — no hook behavior changed with this entry.
+Do not assume a mid-turn note is a `text` block. A reader that needs every
+note in the turn should also take `thinking` blocks whose `thinking` field is
+non-empty. Re-measure on a host upgrade with the census helper:
+
+```bash
+scripts/transcript-block-census.py ~/.claude/projects/<proj>/<session>.jsonl
+```
+
+It counts the assistant content blocks by type, the `thinking` blocks with a
+non-empty `thinking` field (and their `stop_reason`), and the `text` blocks by
+`stop_reason`. An equivalent `jq` one-liner:
+
+```bash
+jq -c 'select(.type=="assistant") | {stop:.message.stop_reason,
+  blocks:[.message.content[]? | {t:.type, len:((.text // .thinking // "")|length)}]}' <transcript>
+```
+
+**Verified**: 2026-09-25 / Claude Code 2.1.282 / model `claude-opus-5-5`,
+effort `medium` / Issue #1502 — status: **measured live**, one session
+transcript, measured twice.
+
+- First census (the `jq` command above, early in the session): 9 `thinking`
+  blocks, all with an empty `thinking` field. Both mid-turn user-facing notes
+  were `text` blocks with their full content in `stop_reason: "tool_use"`
+  messages; the final reply was a `text` block with `stop_reason: "end_turn"`.
+- Second census (the helper, later in the same session): 80 assistant lines;
+  blocks `text=7, thinking=32, tool_use=41`. 5 of the 32 `thinking` blocks
+  carried non-empty text, all in `stop_reason: "tool_use"` messages, each the
+  second `thinking` block of its message after an empty one, and each a
+  user-facing progress note. `text` blocks: `tool_use=4`, `end_turn=3`.
+
+What the first census alone would have recorded — "`thinking` blocks carry no
+text" — did not survive the same session, so the shape is not fixed per host
+version. Not measured: other hosts or versions, other models or effort
+levels, and sessions with a non-default `thinking.display`.
+
+---
+
 ## Adding a new entry
 
 1. Observe a constraint that is **fixed by the runtime** (not a project
