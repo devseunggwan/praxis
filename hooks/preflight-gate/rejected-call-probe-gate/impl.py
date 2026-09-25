@@ -87,6 +87,8 @@ SCAN_MAX_BYTES = 20 * 1024 * 1024
 # A refusal resolves against the tool_use it refused, in the same or the
 # previous assistant turn, so a short ring suffices.
 RECENT_TOOL_USES = 32
+# Refusals pending a probe; bounded because the state crosses the cursor file.
+MAX_PENDING = 16
 SUMMARY_MAX_CHARS = 200
 
 PATH_FIELDS = {"Edit": "file_path", "Write": "file_path", "NotebookEdit": "notebook_path"}
@@ -240,7 +242,14 @@ def summarize(tool_name: str, tool_input: dict) -> str:
 
 
 def new_state() -> dict:
-    return {"recent": [], "armed": None}
+    return {"recent": [], "armed": []}
+
+
+def decode_state(raw: dict) -> dict:
+    """A cursor state in an older shape is refused, costing one re-scan."""
+    if not isinstance(raw.get("armed"), list) or not isinstance(raw.get("recent"), list):
+        raise ValueError("stale state shape")
+    return raw
 
 
 def _result_text(block: dict) -> str:
@@ -306,25 +315,27 @@ def _note_results(state: dict, ev: dict, msg: dict) -> None:
         kind = refusal_kind(ev, block)
         if kind:
             if use["mutating"]:
-                state["armed"] = {"summary": use["summary"], "kind": kind,
-                                  "unprobed": use["needs"], "target": use["target"]}
+                state["armed"].append({"summary": use["summary"], "kind": kind,
+                                       "unprobed": use["needs"], "target": use["target"]})
+                del state["armed"][:-MAX_PENDING]
         elif ev.get("toolDenialKind"):
             continue  # stopped before it ran: neither a probe nor a mutation
         elif use["mutating"]:
-            state["armed"] = None
+            state["armed"] = []
         elif use["covers"] and state["armed"]:
-            _note_probe(state, use)
+            state["armed"] = [e for e in (_probe_entry(e, use) for e in state["armed"]) if e]
 
 
-def _note_probe(state: dict, use: dict) -> None:
-    armed = state["armed"]
-    if not same_target(armed.get("target"), use["target"]):
-        return
-    unprobed = [s for s in armed.get("unprobed", []) if s not in use["covers"]]
+def _probe_entry(entry: dict, use: dict) -> dict | None:
+    """The pending refusal after this probe; None once every surface is covered."""
+    if not same_target(entry.get("target"), use["target"]):
+        return entry
+    unprobed = [s for s in entry.get("unprobed", []) if s not in use["covers"]]
     if not unprobed:
-        state["armed"] = None
-    elif len(unprobed) < len(armed.get("unprobed", [])):
-        state["armed"] = {**armed, "unprobed": unprobed}
+        return None
+    if len(unprobed) < len(entry.get("unprobed", [])):
+        return {**entry, "unprobed": unprobed}
+    return entry
 
 
 def reduce_event(state: dict, ev: dict) -> None:
@@ -338,13 +349,16 @@ def reduce_event(state: dict, ev: dict) -> None:
         _note_results(state, ev, msg)
 
 
-def build_reason(armed: dict, tool_name: str) -> str:
+def build_reason(armed: list[dict], tool_name: str) -> str:
+    latest = armed[-1]
+    unprobed = sorted({s for e in armed for s in (e.get("unprobed") or UNKNOWN_CLI_SURFACES)})
+    earlier = f" (and {len(armed) - 1} earlier refused call(s))" if len(armed) > 1 else ""
     return format_block(
         rule_name="rejected call probe",
         why=(
-            f"an earlier mutating call was refused ({armed['kind']}) and may "
-            f"still have run: {armed['summary']}. Not yet probed since: "
-            f"{', '.join(armed.get('unprobed') or UNKNOWN_CLI_SURFACES)}; and "
+            f"an earlier mutating call was refused ({latest['kind']}) and may "
+            f"still have run: {latest['summary']}{earlier}. Not yet probed since: "
+            f"{', '.join(unprobed)}; and "
             f"this `{tool_name}` call mutates again"
         ),
         correct_path=(
@@ -384,6 +398,7 @@ def main() -> int:
             scan_cursor_path(_HOOK_NAME, payload.get("session_id")),
             new_state,
             reduce_event,
+            decode=decode_state,
             needle=_NEEDLES,
             max_bytes=SCAN_MAX_BYTES,
         )

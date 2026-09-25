@@ -88,11 +88,16 @@ compared with a repository.
 
 ## Disarming
 
-- probes that together cover every surface of the refused call;
-- a mutating call that ran: the user approved this very ask or chose to act,
-  and asking on every later mutation would be noise.
+Each refused call stays pending on its own, with its own surfaces and target,
+so a second refusal does not replace the first. A probe is applied to every
+pending refusal whose target it matches. A refusal leaves the list when:
 
-The ask lists the surfaces still unprobed.
+- probes have together covered every surface of it;
+- a mutating call ran, which clears the whole list: the user approved this
+  very ask or chose to act, and asking on every later mutation would be noise.
+
+The ask names the latest pending refusal, counts the earlier ones, and lists
+the union of their unprobed surfaces.
 
 ## Fail-open
 
@@ -113,7 +118,7 @@ enforce it, and Codex reports an `ask` hook as failed and lets the call through
 
 ## Recurrence evidence
 
-Replay over every local Claude Code transcript (871 files), folding each record
+Replay over every local Claude Code transcript (873 files), folding each record
 into the gate's own state and evaluating every tool_use against the state
 before it, with the shared classifier as of #1497:
 
@@ -124,6 +129,10 @@ before it, with the shared classifier as of #1497:
 | Probes that covered some surfaces but not all | 10 |
 | Asks raised | 28, in 25 sessions |
 | Asks raised if any probe disarmed | 20 |
+| Refusals made while an earlier one was still pending | 1 |
+
+The any-probe row and the breakdown below were measured over 871 files; the
+set has since grown by two with the other counts unchanged.
 
 Of the 8 asks that surface matching adds, 3 follow a refused command that did
 reach a remote (`git fetch`, a download, a schema-sync CLI of the incident's
@@ -146,7 +155,9 @@ transcript once.
    `gh --repo owner/name` probe count as the same place.
 4. The shared classifier is fail-closed: a read-only command it does not
    recognise is mutating and not a probe, and a refused one arms the gate.
-5. How a headless run (`claude -p`) resolves the ask was not tested.
+5. At most 16 refusals stay pending; a seventeenth drops the oldest. The list
+   crosses the scan cursor file, so it is bounded.
+6. How a headless run (`claude -p`) resolves the ask was not tested.
 
 ## Relationship to sibling hooks
 

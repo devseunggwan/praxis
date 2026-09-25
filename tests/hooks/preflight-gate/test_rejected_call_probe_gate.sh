@@ -130,6 +130,9 @@ T_MCP_OTHER="$TMP/mcp-other.jsonl";           mk_transcript "$T_MCP_OTHER" "[$MC
 T_KUBE_GET="$TMP/kube-get.jsonl";             mk_transcript "$T_KUBE_GET" "[$KUBE_REJECTED,$KUBE_GET_OK]"
 T_WRONG_DIR="$TMP/wrong-dir.jsonl";           mk_transcript "$T_WRONG_DIR" "[$CD_SHIP_REJECTED,$CD_OTHER_PR_LIST_OK,$CD_OTHER_STATUS_OK]"
 T_SAME_DIR="$TMP/same-dir.jsonl";             mk_transcript "$T_SAME_DIR" "[$CD_SHIP_REJECTED,$GH_REPO_PR_LIST_OK,$CD_REPO_STATUS_OK]"
+T_STACKED="$TMP/stacked.jsonl";               mk_transcript "$T_STACKED" "[$SHIP_REJECTED,$EDIT_REJECTED,$READ_OK]"
+T_TWO_PENDING="$TMP/two-pending.jsonl";       mk_transcript "$T_TWO_PENDING" "[$SHIP_REJECTED,$EDIT_REJECTED]"
+T_STACKED_ALL="$TMP/stacked-all.jsonl";       mk_transcript "$T_STACKED_ALL" "[$SHIP_REJECTED,$EDIT_REJECTED,$READ_OK,$GH_PR_LIST_OK,$GIT_STATUS_OK]"
 T_REJECT="$TMP/reject.jsonl";                 mk_transcript "$T_REJECT" "[$SHIP_REJECTED]"
 T_INTERRUPT="$TMP/interrupt.jsonl";           mk_transcript "$T_INTERRUPT" "[$SHIP_INTERRUPTED]"
 T_EDIT_REJECT="$TMP/edit-reject.jsonl";       mk_transcript "$T_EDIT_REJECT" "[$EDIT_REJECTED]"
@@ -208,6 +211,12 @@ run_case "a probe that was itself refused never ran" ask \
 
 run_case "a later refused mutation re-arms after an earlier probe" ask \
   Bash "$(bash_input "$PUSH")" "$T_REARMED"
+
+run_case "a second refusal keeps the first one's unprobed surfaces" ask \
+  Bash "$(bash_input "$PUSH")" "$T_STACKED"
+
+run_case "cd into a command substitution is not a probe" ask \
+  Bash "$(bash_input "cd \"\$(sh -c 'gh pr create')\" && git status")" "$T_REJECT"
 
 run_case "unknown CLI refused, git status alone leaves remote ref and GitHub (issue fixture)" ask \
   Bash "$(bash_input "$PUSH")" "$T_STATUS"
@@ -288,6 +297,9 @@ run_case "a declined hook ask is not a runtime refusal" pass \
 run_case "no refusal in the transcript" pass \
   Bash "$(bash_input "$PUSH")" "$T_EMPTY"
 
+run_case "probes covering both refusals' surfaces disarm" pass \
+  Bash "$(bash_input "$PUSH")" "$T_STACKED_ALL"
+
 run_case "missing transcript fails open" pass \
   Bash "$(bash_input "$PUSH")" "$TMP/does-not-exist.jsonl"
 
@@ -309,6 +321,41 @@ if echo "$out" | grep -q "Not yet probed since: GitHub, remote ref; and"; then
 else
   echo "FAIL  [ask] reason lists only the surfaces still unprobed"; FAIL=$((FAIL+1))
   FAILED_NAMES+=("reason lists only the surfaces still unprobed")
+fi
+
+out=$(mk_payload Bash "$(bash_input "$PUSH")" "$T_STACKED" | PRAXIS_HOME="$TMP/home-stacked" "$HOOK" 2>/dev/null)
+if echo "$out" | grep -q "shipcli open --branch feat-x" && echo "$out" | grep -q "Not yet probed since: GitHub, local git, remote ref; and"; then
+  echo "PASS  [ask] a fully probed refusal drops out and the earlier one is named"; PASS=$((PASS+1))
+else
+  echo "FAIL  [ask] a fully probed refusal drops out and the earlier one is named"; FAIL=$((FAIL+1))
+  FAILED_NAMES+=("a fully probed refusal drops out and the earlier one is named")
+fi
+
+out=$(mk_payload Bash "$(bash_input "$PUSH")" "$T_TWO_PENDING" | PRAXIS_HOME="$TMP/home-two" "$HOOK" 2>/dev/null)
+if echo "$out" | grep -q "Not yet probed since: GitHub, local files, local git, remote ref; and" && echo "$out" | grep -q "1 earlier refused call"; then
+  echo "PASS  [ask] reason unions the surfaces of every pending refusal"; PASS=$((PASS+1))
+else
+  echo "FAIL  [ask] reason unions the surfaces of every pending refusal"; FAIL=$((FAIL+1))
+  FAILED_NAMES+=("reason unions the surfaces of every pending refusal")
+fi
+
+# A cursor saved by an older state shape must be refused, not folded into.
+if python3 - "$REPO_ROOT" <<'PYEOF'
+import importlib.util, sys
+sys.path.insert(0, sys.argv[1] + "/hooks/_lib")
+spec = importlib.util.spec_from_file_location("gate", sys.argv[1] + "/hooks/preflight-gate/rejected-call-probe-gate/impl.py")
+gate = importlib.util.module_from_spec(spec); spec.loader.exec_module(gate)
+try:
+    gate.decode_state({"recent": [], "armed": None})
+except ValueError:
+    sys.exit(0)
+sys.exit(1)
+PYEOF
+then
+  echo "PASS  [decode] a cursor state with a single armed entry is refused"; PASS=$((PASS+1))
+else
+  echo "FAIL  [decode] a cursor state with a single armed entry is refused"; FAIL=$((FAIL+1))
+  FAILED_NAMES+=("decode refuses an older state shape")
 fi
 
 echo
