@@ -3,8 +3,8 @@ name: cmux-delegate
 description: Hand off an existing independent issue that surfaced mid-task to its own Claude Code session in a new cmux workspace, with auto-collected context; that session runs issue→worktree→PR alone. Not for splitting the current task.
 when_to_use: Triggers on "cmux delegate", "delegate issue", "delegate to new session", "별도 세션", "세션에 위임", "별건으로 빼서".
 verified-against-runtime: true
-runtime-verified-at: 2026-09-09
-runtime-verified-note: "cmux 0.64.22 (2026-09-04) — the selected workspace's `list-workspaces` row is prefixed `* `, so field 1 without the strip is `*` and `cmux send --workspace '*'` fails with `Invalid workspace handle`; stripped, `--session` resolves and `send` returns `OK`. The legacy-alias notice goes to stderr, so it cannot reach the grep. AskUserQuestion (2026-09-09) — a single 4-option question round-tripped and came back as the user's own sentence rather than any listed label, so Step 2.6's escalation reads the answer as text instead of branching on an option label."
+runtime-verified-at: 2026-09-26
+runtime-verified-note: "cmux 0.64.22 (2026-09-04) — the selected workspace's `list-workspaces` row is prefixed `* `, so field 1 without the strip is `*` and `cmux send --workspace '*'` fails with `Invalid workspace handle`; stripped, `--session` resolves and `send` returns `OK`. The legacy-alias notice goes to stderr, so it cannot reach the grep. AskUserQuestion (2026-09-09) — a single 4-option question round-tripped and came back as the user's own sentence rather than any listed label, so Step 2.6's escalation reads the answer as text instead of branching on an option label. od (GNU coreutils) 9.4 (2026-09-26) — `od -An -N3 -tx1 /dev/urandom | tr -d ' \n'` prints 6 lowercase hex chars, different per run, so Step 2's PASTE_ID draw needs no shell beyond POSIX od and tr; no live cmux worker round-trip."
 ---
 
 # cmux-delegate
