@@ -442,6 +442,123 @@ same dump file is the positive control.
 
 ---
 
+## 11. Mid-turn assistant notes can land in a `text` block or a `thinking` block
+
+**Constraint**: On Opus 5.5 a note the model writes between tool calls is
+recorded in the transcript JSONL in one of two shapes, and both occurred in
+one session on one host version:
+
+- a `text` block in an assistant message with `stop_reason: "tool_use"`,
+  carrying the note; or
+- a `thinking` block whose `thinking` field carries the note text, following
+  an empty `thinking` block in the same message (same `message.id`).
+
+A reasoning `thinking` block, when present, is recorded with an empty
+`thinking` field (keys `signature`, `thinking`, `type`). The final reply was a
+`text` block with `stop_reason: "end_turn"` in every turn measured.
+
+The second shape matches the `display: "updates"` shape documented on the API
+Thinking page,
+[Progress updates between tool calls](https://platform.claude.com/docs/en/build-with-claude/thinking#progress-updates):
+under `"updates"`, "The first block is reasoning and stays empty [...] The
+second carries text, so it's a progress update", and that text "is a summary
+of the progress update". It does **not** match the default the Opus 5.5
+prompting guide's
+[User-facing progress updates](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-opus-5-5#user-facing-progress-updates)
+describes: these notes come back as progress-update `thinking` blocks "and
+their text is empty at the default `thinking.display`" (`"omitted"` on Opus
+5.5, per the Thinking page). The `thinking.display` value the host sent was
+not determined, so neither is whether the recorded text is the note itself or
+the API's summary of it.
+
+**Why it bites hooks**: many hooks gather assistant prose by keeping only
+`type == "text"` blocks. A note recorded in the second shape is invisible to
+them. Readers that filter on `type == "text"` over assistant content, from a
+grep of `origin/main` for `== "text"` / `type == "text"` dated 2026-09-26
+(line numbers point at the filter):
+
+(a) Window and session readers, which scan assistant text across events —
+**affected**: a gate that looks for evidence or a claim anywhere in the window
+can miss a note without error.
+
+- `hooks/advisory-nudge/cited-rule-gate/impl.py:221` — `window_text`, the
+  assistant text since the previous tool call.
+- `hooks/advisory-nudge/momentum-rule-retrieval-gate/impl.py:672` —
+  `_assistant_text`, assistant text across an index range.
+- `hooks/advisory-nudge/negation-answer-quote-advisory/impl.py:259` —
+  `pending_negation_answer`, which disarms when a later assistant `text`
+  block quotes the answer.
+- `hooks/completion-verify/pr-report-destination-gate/impl.py:247` —
+  `_reduce_event`, the PR numbers named in each event's `text` blocks.
+- `hooks/completion-verify/runtime-state-claim-gate/impl.py:330` —
+  `_event_verdict_mentions`, the verdict claims each prior assistant event
+  states.
+
+(b) Last-message readers, which read only the last assistant message of the
+turn — **unaffected** unless the final reply itself lands in a `thinking`
+block, which was not observed.
+
+- `hooks/completion-verify/completion-verify/impl.sh:187` — `$last_text`.
+  Line 203 filters `text` blocks too, but on `tool_result` content, which
+  this entry does not cover.
+- `hooks/completion-verify/retrospect-mix-check/impl.sh:106` — `LAST_TEXT`.
+- `hooks/advisory-nudge/response-language-nudge/impl.py:176` —
+  `_last_assistant_uuid_and_text`.
+- `hooks/_lib/_transcript.py:568` — `extract_last_assistant_text`. It is the
+  fallback in `stop_last_assistant_text` when the Stop payload has no
+  `last_assistant_message`, and eight completion-verify hooks also call it
+  directly (e.g. `prose-option-menu-advisory/impl.py:151`).
+
+The grep's other hits read user messages or `tool_result` content.
+`hooks/preflight-gate/block-commit-without-codex-review/impl.py:657`
+(`_has_slash_command`) was listed in issue #1502 but reads **user** events,
+not assistant text, so it is not affected.
+
+**Workaround**: none applied yet — no hook behavior changed with this entry.
+Do not assume a mid-turn note is a `text` block. A reader that needs every
+note in the turn should also take `thinking` blocks whose `thinking` field is
+non-empty (under `display: "updates"`; under `"summarized"` this would also
+pick up reasoning summaries). Re-measure on a host upgrade with the census
+helper:
+
+```bash
+scripts/transcript-block-census.py ~/.claude/projects/<proj>/<session>.jsonl
+```
+
+It counts the assistant content blocks by type, the `thinking` blocks with a
+non-empty `thinking` field (and their `stop_reason`), and the `text` blocks by
+`stop_reason`. A per-line inspection command (no aggregation; whitespace-only
+thinking counts as non-empty; string content yields no blocks):
+
+```bash
+jq -c 'select(.type=="assistant") | {stop:.message.stop_reason,
+  blocks:[.message.content[]? | {t:.type, len:((.text // .thinking // "")|length)}]}' <transcript>
+```
+
+**Verified**: 2026-09-25 / Claude Code 2.1.282 / model `claude-opus-5-5`,
+effort `medium` / Issue #1502 — status: **measured live**, one session
+transcript, measured twice.
+
+- First census (the `jq` command above, early in the session): 9 `thinking`
+  blocks, all with an empty `thinking` field. Both mid-turn user-facing notes
+  were `text` blocks with their full content in `stop_reason: "tool_use"`
+  messages; the final reply was a `text` block with `stop_reason: "end_turn"`.
+- Second census (the helper, later in the same session): 80 assistant lines;
+  blocks `text=7, thinking=32, tool_use=41`. 5 of the 32 `thinking` blocks
+  carried non-empty text, all in `stop_reason: "tool_use"` messages, and each
+  a user-facing progress note. `text` blocks: `tool_use=4`, `end_turn=3`.
+  A separate check, grouping the lines on `message.id` (the helper does not
+  group), found each of the 5 was the second `thinking` block of its message,
+  after an empty one.
+
+What the first census alone would have recorded — "`thinking` blocks carry no
+text" — did not survive the same session, so the shape is not fixed per host
+version. Not measured: other hosts or versions, and other models or effort
+levels. Not determined: the `thinking.display` value the host sends (see
+**Constraint**).
+
+---
+
 ## Adding a new entry
 
 1. Observe a constraint that is **fixed by the runtime** (not a project
