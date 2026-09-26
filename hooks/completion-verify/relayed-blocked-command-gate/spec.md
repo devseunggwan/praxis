@@ -23,7 +23,7 @@ The command itself is not one of its nouns, so a menu whose first option was
 The incident: a guard blocked `git push origin main`. The next message reported
 the block, then offered as its recommended option:
 
-```
+```text
 ! git -C <path> push origin main
 ```
 
