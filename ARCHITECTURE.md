@@ -99,10 +99,18 @@ Bare names (`fable`, `opus`, `sonnet`, `haiku`) always resolve to Claude — ful
 Claude effort (#1499) is passed only when named, and must be one of `low`,
 `medium`, `high`, `xhigh`, `max` — anything else aborts, because
 `claude --effort <bad>` only warns and runs at the default. Unlike codex there
-is no per-tier default: effort names do not map to the same amount of thinking
-across Claude models, and each model's own default (`medium` on Opus 5.5,
-`high` on Opus 5) is the calibrated one. A jev pick is a bare tier and never
-carries an effort.
+is no per-tier default table. The
+[Opus 5.5 prompting guide → Calibrate effort](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-opus-5-5#calibrate-effort)
+says "Effort level names don't correspond to the same amount of thinking
+across models" and advises choosing a level per model by testing several
+against your own evals rather than carrying one over, so none is baked in:
+with no effort named, the model's own default applies (`medium` on Opus 5.5,
+`high` on Opus 5). The same section says to "Reserve `xhigh` and `max` for
+work where you've measured a quality gain." A jev pick is a bare tier and
+never carries an effort.
+
+The claude model is single-quoted in the wrapper (`--model 'opus[1m]'`), so a
+`[1m]` suffix cannot glob against files in the cwd.
 
 ### Task-Type Routing
 
@@ -160,7 +168,7 @@ input = "--model" value
 if input matches /^(codex|gemini)(?::(.+))?$/:
   provider = match[1]           # "codex" or "gemini"
   sub_model = match[2] || ""    # "" or "gpt-5.6-sol:xhigh" or "flash" (first colon stripped)
-elif input matches /^(fable|opus|sonnet|haiku)(?::.+)?$/:
+elif input matches /^(fable|opus|sonnet|haiku)(?::[A-Za-z]+)?$/:
   provider = "claude"
   sub_model = input             # "opus" or "opus:low"
 elif input matches /^claude(?::(.+))?$/:
@@ -178,10 +186,14 @@ if provider == "codex":
   # both are interpolated into a shell command, so anything outside
   # /^[A-Za-z0-9._-]+$/ is rejected rather than quoted
 elif provider == "claude":
-  # only an alphabetic tail after the last colon is an effort (Bedrock `…-v1:0` passes through)
+  # only an alphabetic tail after the last colon is an effort
+  # (Bedrock `…-v1:0` and ARNs ending `…/<id>` pass through)
   if sub_model matches /^(.*):([A-Za-z]+)$/: sub_model, effort = match[1], match[2]
-  # no default: nothing is passed unless named; the model is held to /^[A-Za-z0-9._:\[\]-]*$/
-  if effort and effort not in ["low", "medium", "high", "xhigh", "max"]: abort
+  # no default: nothing is passed unless named
+  if sub_model ends with ":" or sub_model matches /^(fable|opus|sonnet|haiku):/: abort "invalid claude model"
+  # the model is single-quoted in the wrapper, so it must hold no `'` or shell metacharacter
+  if sub_model does not match /^[A-Za-z0-9._:@\/\[\]-]*$/: abort "invalid claude model"
+  if effort and effort not in ["low", "medium", "high", "xhigh", "max"]: abort "invalid claude effort"
 ```
 
 ## Hook index
