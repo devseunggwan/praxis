@@ -72,6 +72,16 @@
             "timeout": 5
           }
         ]
+      },
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/elapsed-time-signal.sh PostToolUse",
+            "timeout": 3
+          }
+        ]
       }
     ],
     "UserPromptSubmit": [
@@ -96,6 +106,11 @@
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/retrospect-active-marker.sh",
             "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/elapsed-time-signal.sh UserPromptSubmit",
+            "timeout": 3
           }
         ]
       }
@@ -324,6 +339,11 @@
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/second-failure-advisory.sh",
             "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/elapsed-time-signal.sh PostToolUseFailure",
+            "timeout": 3
           }
         ]
       }

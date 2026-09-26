@@ -66,6 +66,7 @@ Specify the **issue** to delegate by its issue number.
 /cmux-delegate "#1140 auth 토큰 갱신 실패" --model opus
 /cmux-delegate "#1141 리뷰에서 나온 후속 항목" --session claude-2
 /cmux-delegate "별건 3개: #1140, #1141, #1142" --account claude-2 --distribute
+/cmux-delegate "별건 2개: #1140, #1141" --distribute --time-budget 1200
 ```
 
 **The issue must already exist at delegation time.** If there is no issue yet,
@@ -82,6 +83,7 @@ attach the PR to.
 | `--model` | jev route, else `sonnet` | Provider:model notation. `fable`/`opus`/`sonnet`/`haiku` = claude. Also supports `claude`, `claude:opus`, `codex` (= `gpt-5.6-terra`, effort `medium`), `codex:gpt-5.6-sol`, `codex:gpt-5.6-sol:xhigh`, `gemini`, `gemini:flash`. See project `ARCHITECTURE.md` Provider Routing. |
 | `--cwd` | current dir | Working directory for the new session |
 | `--max-budget-usd` | — | **Unsupported (#1054).** A print-mode-only flag, so it cannot be used with an interactive worker. If given, do not ignore it silently — tell the user |
+| `--time-budget` | — (off) | **Opt-in** elapsed-time signal (#1501), in seconds. `N > 0`: every prompt and tool result the worker receives ends with `elapsed <n>s / Ns`. `0`: `elapsed <n>s` alone, plus the guide's "Time matters here" sentence in the worker's system prompt. Advisory only — nothing stops the worker at the limit, and there is no hard timeout. The model may verify a little less under time pressure, so leave it off unless the task needs speed. The guide's evidence is for Claude Opus 5.5 in lead/team setups ("small agent teams on research tasks"); per-worker use and other models (a worker defaults to the jev-route pick, else `sonnet`) are untested here. The model paces itself to the budget and "usually finishes well before it", so the guide advises to "set the budget somewhat above the time you actually want spent and tune it on a sample of your own tasks". Applies to `claude` workers launched by this skill only (Step 1) |
 | `--account` | (default account) | Claude account profile (e.g. `claude-2` → `CLAUDE_CONFIG_DIR=~/.claude-2`) |
 | `--session` | (create new) | Deliver into an existing workspace (name or workspace ref) |
 | `--distribute` | false | Parallel distribution at issue granularity. Not sharding of a single task |
@@ -99,6 +101,12 @@ cwd = args.cwd || $(pwd)
 # Accept the budget flag but do not forward it; tell the user it was received (#1054).
 # Dropping it silently lets the user delegate believing a cap is in place.
 if args["max-budget-usd"]: warn("--max-budget-usd 는 대화형 워커에 적용되지 않습니다 (#1054)")
+# Opt-in elapsed-time signal (#1501). Step 4 interpolates it into the wrapper
+# unquoted, so, as with the codex model check below, anything but a plain
+# non-negative integer with no leading zero aborts rather than getting quoted.
+time_budget = args["time-budget"] || ""   # "" = flag absent = signal off
+if time_budget and time_budget does not match /^(0|[1-9][0-9]{0,6})$/:
+  abort "invalid --time-budget: seconds as a non-negative integer (0 = elapsed only)"
 account = args.account || ""
 session = args.session || ""
 distribute = args.distribute || false
@@ -154,6 +162,13 @@ if ! command -v "$provider" &>/dev/null:
   provider = "claude"
   sub_model = "sonnet"
   effort = ""
+
+# The time signal is carried by the `elapsed-time-signal` hook (hosts:
+# claude), which reads env the claude branch of Step 4 sets. Nothing
+# carries it to codex/gemini, and `--session` launches nothing. Say so
+# instead of dropping the flag silently, the same rule as --max-budget-usd.
+if time_budget and (provider != "claude" or session):
+  warn("--time-budget not applied: it works only for a claude worker launched in a new workspace (#1501)")
 ```
 
 ### Step 1.5: Session Resolution
@@ -494,6 +509,9 @@ N issues that are already mutually independent, each on its own.
 
    Each item's pick then goes through Step 1's provider resolution, so a
    `codex` item gets its own `{sub_model}` and `{effort}` the same way.
+5. `--time-budget` applies to every claude item with the same value, and
+   each worker's clock starts at its own launch. An item routed to
+   codex/gemini gets Step 1's not-applied warning under its own name.
 
 ### Step 4: Generate Wrapper Script
 
@@ -507,6 +525,11 @@ SCRIPT_FILE="{script_file}"
 # Cleanup: delete only the .sh. The .md is preserved (another workspace may
 # reference it)
 trap 'rm -f "$SCRIPT_FILE"' EXIT
+
+# The elapsed-time signal is switched on by env alone (#1501). A delegation
+# started from inside a worker that had it would otherwise pass it on, so
+# clear it here, and let only `{time_env}` below set it again.
+unset PRAXIS_TIME_START_EPOCH PRAXIS_TIME_BUDGET_S
 
 # If the prompt file cannot be read, stop here. There is no `set -e`, so if
 # `wc` fails the script keeps going, and then `[ "" -gt N ]` errors out as
@@ -574,8 +597,14 @@ case "{provider}" in
     # only, and this shape of worker is interactive, so there is no print
     # mode to begin with. If Step 1 received a budget, do not drop it
     # silently here — tell the user.
-    {claude_env} claude \
+    #
+    # `{time_env}` and `{time_sysprompt}` carry `--time-budget` (#1501); both
+    # are empty when the flag is absent. The clock starts here, when the
+    # worker actually launches, so every --distribute worker counts from its
+    # own start.
+    {claude_env} {time_env} claude \
       --model {sub_model} \
+      {time_sysprompt} \
       "$(cat "$PROMPT_FILE")"
     ;;
   codex)
@@ -627,6 +656,21 @@ exit "$rc"
 `{provider}`, `{sub_model}` and `{effort}` are substituted from the provider resolution result in Step 1.
 `{effort:+…}` expands to its text only when `effort` is non-empty, so an unlisted codex model runs at its config default effort.
 `{claude_env}` is substituted with `CLAUDE_CONFIG_DIR=~/.{account}` when account is specified (claude provider only).
+`{time_env}` is substituted with
+`PRAXIS_TIME_START_EPOCH="$(date +%s)" PRAXIS_TIME_BUDGET_S={time_budget}` when
+`--time-budget` is given, and is empty otherwise. `{time_sysprompt}` is
+substituted with
+`--append-system-prompt "Time matters here: do not spend time that can be avoided, and the earlier a correct result is obtained, the better."`
+only when `time_budget` is `0`, and is empty otherwise. That sentence is the
+Opus 5.5 prompting guide's wording for runs with no sensible budget, and the
+guide places it in the system prompt. `claude --help` (2.1.282) lists
+`--append-system-prompt` without the "only works with --print" note that
+`--max-budget-usd` carries. The per-message `elapsed …` line itself comes from
+the `elapsed-time-signal` hook
+([spec](../../hooks/advisory-nudge/elapsed-time-signal/spec.md)), which reads
+those two variables in the worker. The hook stops nothing: the budget is
+advisory, and this skill has no hard timeout for a claude worker (see
+Limitations).
 `{budget_flag}` is no longer substituted (#1054). `--max-budget-usd` is
 print-mode only and cannot be used with an interactive worker — and
 codex/gemini do not support budget caps in the first place, so this skill has
@@ -715,6 +759,7 @@ Delegated to {WS_REF}
   Model: {sub_model || "default"}{effort:+ (effort {effort})}
   Routing: {route_source}
   Account: {account || "default"}
+  Time budget: {time_budget ? (time_budget == "0" ? "elapsed only" : time_budget + "s") + ", advisory" : "off"}
   Prompt: /tmp/cmux-delegate-{timestamp}.md
   CWD: {cwd}
 
@@ -732,6 +777,7 @@ Distributed to {N} workspaces:
   |-----------|------|----------|-------|---------|---------|
   | {ws_ref}  | {item_title} | {provider} | {sub_model} | {route_source} | {account} |
   ...
+  Time budget: {same form as single-session mode; claude items only}
 
 각 cmux 탭에서 진행 상황을 확인하세요.
 결과 확인은 탭마다 직접 합니다. claude 워커의 완료 알림은 오지 않습니다 —
@@ -893,6 +939,12 @@ That was equally true in the pipe era, so it is not a regression.
   (Step 2.5) — with thin conversation context only raw git context is
   delivered, and for fresh-eyes delegation it is deliberately minimized to
   prevent bias
+- **`--time-budget` is a signal, not a limit** (#1501) — the worker sees
+  `elapsed <n>s / <budget>s` and paces itself, but nothing stops it at the
+  budget, and this skill has no hard timeout for an interactive claude
+  worker. It reaches claude workers launched in a new workspace only: not
+  codex/gemini, not `--session`. It has not been A/B measured in this
+  repository, so it stays opt-in
 - **codex write constraint**: `codex exec` can exit without error even when
   file writes fail due to its sandboxed environment — after completion,
   always check for actual changes with `git status`. On an empty diff,
