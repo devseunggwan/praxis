@@ -245,6 +245,30 @@ class TestReadLastUserMessage:
         assert T.read_last_user_message(path) == "background task finished"
 
 
+class TestReadLastUserRecord:
+    def test_returns_the_record_with_its_text(self, tmp_path):
+        typed = _user(text="migrate the endpoints")
+        typed["uuid"] = "u-1"
+        path = _write_jsonl(tmp_path, [typed, _assistant(text="ok")])
+        record, text = T.read_last_user_record(path)
+        assert record["uuid"] == "u-1" and text == "migrate the endpoints"
+
+    def test_no_user_text_and_unreadable(self, tmp_path):
+        path = _write_jsonl(tmp_path, [_assistant(text="only assistant")])
+        assert T.read_last_user_record(path) == (None, "")
+        assert T.read_last_user_record("/nonexistent/x.jsonl") is None
+
+    def test_skip_hook_feedback(self, tmp_path):
+        typed = _user(text="migrate the endpoints")
+        feedback = _user(text="Stop hook feedback:\n[some-hook] keep going")
+        path = _write_jsonl(tmp_path, [typed, _assistant(text="x"), feedback])
+        assert T.read_last_user_record(path)[1].startswith("Stop hook feedback:")
+        found = T.read_last_user_record(path, skip_hook_feedback=True)
+        assert found[1] == "migrate the endpoints"
+        # The text-only wrapper keeps its reading.
+        assert T.read_last_user_message(path).startswith("Stop hook feedback:")
+
+
 # ---------------------------------------------------------------------------
 # scan_user_rejections (#1007 / #1013)
 # ---------------------------------------------------------------------------
@@ -539,6 +563,11 @@ _CONSUMERS = {
         ["load_current_turn", "extract_last_assistant_text"],
     HOOKS / "completion-verify" / "prose-option-menu-advisory" / "impl.py":
         ["load_current_turn", "extract_last_assistant_text"],
+    # Grades the Stop text, and reads the human message that opened the turn
+    # to stay silent when that message asked for the report or plan (#1498),
+    # and to key its block-mode continuation count on that record.
+    HOOKS / "completion-verify" / "early-stop-advisory" / "impl.py":
+        ["load_stop_turn", "stop_last_assistant_text", "read_last_user_record"],
     HOOKS / "completion-verify" / "pr-claim-mutation-gate" / "impl.py":
         ["load_current_turn", "extract_last_assistant_text"],
     # Also streams the turns BEFORE the current one, reusing the shared boundary
