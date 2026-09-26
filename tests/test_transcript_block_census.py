@@ -92,3 +92,62 @@ def test_empty_transcript_reports_none():
     text = census_mod.render(census_mod.census([]))
     assert "assistant lines: 0" in text
     assert "thinking with non-empty text: 0 of 0" in text
+
+
+def _run(*args: str) -> subprocess.CompletedProcess:
+    return subprocess.run([sys.executable, str(_SCRIPT), *args],
+                          capture_output=True, text=True, check=False)
+
+
+def test_nonempty_thinking_is_keyed_by_its_own_stop_reason():
+    # A non-empty thinking block outside a tool_use message is counted under
+    # that message's stop_reason, not under a fixed key.
+    lines = [
+        _a("e1", "end_turn", {"type": "thinking", "thinking": "summary", "signature": "s"}),
+        _a("e2", "max_tokens", {"type": "thinking", "thinking": "cut", "signature": "s"}),
+        _a("e3", "tool_use", {"type": "thinking", "thinking": "note", "signature": "s"}),
+    ]
+    r = census_mod.census(lines)
+    assert r["thinking_nonempty"] == 3
+    assert r["thinking_nonempty_by_stop_reason"] == {
+        "end_turn": 1, "max_tokens": 1, "tool_use": 1}
+
+
+def test_non_dict_block_is_ignored():
+    line = json.dumps({"type": "assistant", "message": {
+        "id": "n1", "stop_reason": "end_turn",
+        "content": ["x", {"type": "text", "text": "ok"}]}})
+    r = census_mod.census([line])
+    assert r["assistant_lines"] == 1
+    assert r["blocks_by_type"] == {"text": 1}
+
+
+def test_cli_keeps_a_record_with_raw_line_separators_whole(tmp_path):
+    # JSON may carry U+2028 / U+2029 / U+0085 unescaped inside a string;
+    # str.splitlines() would cut the record there.
+    rec = json.dumps({"type": "assistant", "message": {
+        "id": "u1", "stop_reason": "end_turn",
+        "content": [{"type": "text", "text": "a b c\u0085d"}]}},
+        ensure_ascii=False)
+    p = tmp_path / "t.jsonl"
+    p.write_text(rec + "\n", encoding="utf-8")
+    out = _run(str(p))
+    assert out.returncode == 0
+    assert "skipped (unparseable) lines: 0" in out.stdout
+    assert "assistant lines: 1" in out.stdout
+    assert "blocks by type: text=1" in out.stdout
+
+
+def test_cli_survives_invalid_utf8(tmp_path):
+    good = _a("v1", "end_turn", {"type": "text", "text": "fine"}).encode("utf-8")
+    p = tmp_path / "t.jsonl"
+    p.write_bytes(b'{"type": "assistant", "bad": "\xff\xfe"}\n' + good + b"\n")
+    out = _run(str(p))
+    assert out.returncode == 0, out.stderr
+    assert "blocks by type: text=1" in out.stdout
+
+
+def test_cli_without_argument_exits_two():
+    out = _run()
+    assert out.returncode == 2
+    assert "usage:" in out.stdout
