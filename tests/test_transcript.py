@@ -613,6 +613,9 @@ _CONSUMERS = {
     # The window is the text since the previous tool call, at the very end.
     HOOKS / "advisory-nudge" / "cited-rule-gate" / "impl.py":
         ["tail_lines", "TranscriptReadError"],
+    # A refusal anywhere earlier in the session arms the gate (#1488).
+    HOOKS / "preflight-gate" / "rejected-call-probe-gate" / "impl.py":
+        ["scan_transcript_resumable", "scan_cursor_path", "TranscriptReadError"],
 }
 
 # Constants are values, not bindings, so the function map above cannot pin them:
@@ -637,6 +640,8 @@ _CONSTANT_CONSUMERS = {
         ["DENIAL_KINDS", "HOOK_BLOCK_DENIAL_KIND", "REJECTION_DENIAL_KIND"],
     HOOKS / "preflight-gate" / "cross-tool-reroute-gate" / "impl.py":
         ["HOOK_BLOCK_DENIAL_KIND"],
+    HOOKS / "preflight-gate" / "rejected-call-probe-gate" / "impl.py":
+        ["REJECTION_DENIAL_KIND", "REJECTION_PHRASE"],
 }
 
 
