@@ -124,6 +124,7 @@ in [`../SECURITY.md`](../SECURITY.md).
 | `PRAXIS_COMPOSED_COMMAND_STRICT` | `composed-command-gate` | |
 | `PRAXIS_CALLER_PROBE_STRICT` | `caller-probe-gate` | |
 | `PRAXIS_UNENFORCED_STEP_STRICT` | `unenforced-step-advisory` | |
+| `PRAXIS_UNATTENDED` | `early-stop-advisory` | Unattended-run marker, exact value `1` only, unstripped. Turns the user notice into a Stop block whose reason reaches the model, capped at 2 automatic continuations per human turn; the notice keeps firing in every session. Nothing sets it yet — opt-in by hand (#1498) |
 
 ## Rewrite (correct the input instead of blocking)
 

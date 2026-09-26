@@ -3,9 +3,12 @@
 Supported hosts: all
 
 `hooks/completion-verify/early-stop-advisory/impl.py` fires on the Stop event
-and shows the user a notice when the turn's last assistant message ends the
-turn while the requested work still looks open. The model does not receive
-the notice (see [Output](#output)).
+when the turn's last assistant message ends the turn while the requested work
+still looks open. In every session it shows the user a notice the model does
+not receive. In an unattended run — the marker `PRAXIS_UNATTENDED=1` — it
+blocks the stop instead, and the block's reason goes to the model, at most
+twice per human turn (see [Output](#output) and
+[Continuation cap](#continuation-cap)).
 
 ## Why this exists
 
@@ -23,10 +26,15 @@ was still owed":
 4. stopping to report because the turn was long or a milestone is done.
 
 The guide scopes that addition to unattended runs: "leave the addition out of
-human-in-the-loop applications, where someone is there to answer." **This
-hook does not make that distinction: it fires in every session, attended or
-not.** Gating it to unattended harnesses (for example `cmux-delegate`
-workers) is an open decision on PR #1504.
+human-in-the-loop applications, where someone is there to answer." The same
+section's harness advice is about "An unattended agent loop that treats such a
+turn as the end of the task". The hook splits along that line:
+
+- **The user notice fires in every session**, attended or not. It reaches only
+  the user, who decides whether to reply "continue".
+- **The block fires only with the unattended-run marker** (`PRAXIS_UNATTENDED`
+  set to exactly `1`), which matches the guide's unattended scope. See
+  [Unattended-run marker](#unattended-run-marker).
 
 Before this hook, praxis reacted to type 2 only when it went through
 `AskUserQuestion` (`block-manufactured-action-menu`, `block-ask-end-option`)
@@ -141,19 +149,24 @@ A bare word (`credentials table`, `waiting for the lock`) is not a blocker.
   That hook owns decision menus; reusing its predicate rather than a copy keeps
   the two disjoint even when its vocabulary changes. A menu that also closes on
   a next-step announcement goes to the menu hook alone.
-- **`stop_hook_active` is set** — the host's re-entry flag, true when this Stop
-  follows a continuation that a Stop hook's block forced.
+- **`stop_hook_active` is set, in notice mode** — the host's re-entry flag,
+  true when this Stop follows a continuation that a Stop hook's block forced.
+  Block mode does not read it; the [continuation cap](#continuation-cap)
+  bounds it instead.
 - `PRAXIS_EARLY_STOP_BYPASS` is set to any non-empty value.
 
 ## Output
 
-Advisory only: `{"systemMessage": ...}` on stdout, exit 0. It never blocks.
+Two modes. Which one applies is decided per fire, after every silence rule
+above has passed.
+
+### Notice mode (default, every session)
+
+`{"systemMessage": ...}` on stdout, exit 0. It never blocks.
 
 Per `hooks/_lib/_hook_io.py` (Stop-event emitters), a Stop `systemMessage` is
 "Shown to the user in the transcript; does NOT block the stop and is NOT fed
-to the model." So this is a notice to the user, not the guide's continuation
-message: the guide sends the open items to the model as "a short user message
-naming them", and nothing here reaches the model or continues the run. The
+to the model." So nothing here reaches the model or continues the run. The
 notice names the type, quotes the line, and tells the user they can reply
 "continue":
 
@@ -163,18 +176,111 @@ notice names the type, quotes the line, and tells the user they can reply
   Claude does not see this notice. If nothing blocks the open work, reply "continue". Bypass: PRAXIS_EARLY_STOP_BYPASS=1
 ```
 
-Whether the notice should instead reach the model (a `decision: block` whose
-`reason` is fed back) is an open decision on PR #1504.
+When block mode has spent its cap for the turn, it emits this notice with one
+extra line, `Automatic continuation cap reached (2 this turn): the run stops
+here so it can be reviewed.`
 
-A fire records one `advise` row in the fire ledger.
+### Block mode (`PRAXIS_UNATTENDED=1`)
 
-## Why advisory rather than a block
+`{"decision": "block", "reason": ...}` on stdout, exit 0. Per `_hook_io.py`
+the block tier "Blocks the stop; `reason` is fed to the model so it can
+self-correct." This is the guide's harness pattern: "If a turn ends with items
+still open and no blocker stated, send a short user message naming them, like
+the following one." Its example:
+
+```text
+Your task list still has open items: migrate the remaining two endpoints and update their tests. Continue with them. If one is blocked, say what is blocking it.
+```
+
+The hook has no task list to read, so instead of listing items it names the
+detected type and quotes the line it read. The reason is addressed to the
+model:
+
+```text
+[early-stop-advisory] Your turn ended with requested work still open — a next step announced but not taken:
+  "다음 단계로 남은 `/payments` 엔드포인트를 마이그레이션하고 테스트를 갱신하겠습니다."
+Continue with the open items. If one is blocked, say in one line what is blocking it.
+This does not override the need for confirmation on risky or destructive actions: ask before those as you otherwise would.
+(Unattended run, PRAXIS_UNATTENDED=1: automatic continuation 1 of 2 this turn.)
+```
+
+The confirmation line is there because the guide's standing instruction ends:
+"This does not override the need for confirmation on risky or destructive
+actions." The guide also tells the harness author to "keep your own
+confirmation step for risky or irreversible actions". A forced continuation
+must not read as permission to skip that step.
+
+For type 2 the kind reads "an offer to continue that waits on the user's
+preference": the notice's "your preference" addresses the user, and the model
+is not the user.
+
+A fire records one row in the fire ledger: `advise` for a notice, `block` for
+a block.
+
+### Continuation cap
+
+The guide: "Either way, stop after two or three automatic continuations on the
+same task rather than repeating them indefinitely, so that a run that is
+genuinely stuck ends and can be reviewed."
+
+Block mode blocks at most **2** times per turn (`_MAX_CONTINUATIONS` in
+`impl.py`, a constant with no env override). The third stop in the same turn
+gets the capped notice, and so does any later stop in that turn.
+
+- **What "the same task" means here.** The hook cannot see a task list. It
+  treats the human message that opened the turn as the task: the most recent
+  user record read by `read_last_user_record(human_only=True,
+  skip_hook_feedback=True)` in `hooks/_lib/_transcript.py`. That skips
+  host-injected records (`isMeta`, compaction summaries, non-human `origin`)
+  and Stop-hook feedback, the user-role record whose text starts `Stop hook
+  feedback:` and carries a block's reason back to the model
+  ([`docs/retrospect-prune-audit.md`](../../../docs/retrospect-prune-audit.md)
+  counted 130 of them in a local corpus). Without that skip, every block
+  would read as a new human turn and the cap would never be reached.
+- **The key** is that record's `uuid`, else its `timestamp`, else a hash of
+  its text. A new human message resets the count, even if its text repeats
+  the previous one (a second "continue"). Only the text-hash fallback cannot
+  tell two identical messages apart; live transcripts carry a `uuid`.
+- **Where the count lives:** `early-stop-continuations-<session_id>.json` in
+  the praxis cache dir (`resolve_cache_file`: `~/.praxis/cache/` by default,
+  `PRAXIS_HOME` relocates it, `${TMPDIR}` if unwritable), holding
+  `{"turn": <key>, "blocks": <n>}`. The read-modify-write runs under
+  `_state_lock.state_lock` and stages through a per-pid name, per
+  [`DESIGN.md` → Session-state concurrency](../../../DESIGN.md#session-state-concurrency)
+  (Q1: a threshold reads the count).
+- **`stop_hook_active` in block mode.** The host sets it on every stop that
+  follows a Stop-hook block — this hook's or any sibling's — so it cannot
+  count continuations. Block mode therefore ignores it and relies on the
+  counter. The counter is also what ends a loop with a sibling: at most two
+  blocks from this hook per turn, whatever else blocks. Notice mode keeps the
+  flag as its re-entry guard, unchanged.
+- **Order of writes.** The new count is written before the block is emitted.
+  A count that cannot be written never blocks, so a storage failure can cost
+  a continuation but cannot loop.
+
+### Unattended-run marker
+
+`PRAXIS_UNATTENDED`, exact value `1`, unstripped: `true`, `yes`, ` 1` and every
+other value leave the hook in notice mode. No unattended marker existed in the
+repo before this hook, so the name is new. It is declared as the hook's
+`strict_env` in `hooks/manifest.json` and listed in
+[`docs/bypass-vars.md`](../../../docs/bypass-vars.md) → Strict, because it is
+what promotes this hook's notice to a block.
+
+**Nothing sets it yet.** `cmux-delegate` workers are the intended setter, but
+changing `skills/cmux-delegate/SKILL.md` is left to a follow-up (other open
+PRs edit that file). Until something sets the marker, block mode is opt-in by
+hand: export `PRAXIS_UNATTENDED=1` in the environment of an unattended run.
+
+## Why a notice by default
 
 Every marker is also written by a turn that finished correctly, and a blocker
-the model did not name reads the same as no blocker. A block forces a
-continuation, which would override exactly the stops the guide says to keep.
-So the hook names what looks open and leaves the decision to continue with the
-user.
+the model did not name reads the same as no blocker. In an attended session a
+block would force a continuation over exactly the stops the guide says to keep,
+while the user is there to decide. So outside unattended runs the hook names
+what looks open and leaves the decision with the user. In an unattended run no
+one is there to decide, the guide's harness advice is to continue, and the cap
+bounds the cost of a false positive to two extra continuations per turn.
 
 ## Measured corpus
 
@@ -199,7 +305,20 @@ the hook over `~/.claude*/projects/*/*.jsonl` before the `review_by` audit.
 ## Fail-open
 
 Malformed or missing stdin, an unreadable or absent transcript, no last
-assistant text, `stop_hook_active`, and any uncaught exception all exit 0 with
-no output. A failed load of the sibling's predicate makes this hook silent
-rather than risk a double fire; the fixture suite's must-fire cases then fail,
-so that breakage is caught in CI.
+assistant text, and any uncaught exception all exit 0 with no output. In notice
+mode `stop_hook_active` does too. A failed load of the sibling's predicate
+makes this hook silent rather than risk a double fire; the fixture suite's
+must-fire cases then fail, so that breakage is caught in CI.
+
+No bypass or fail-open path blocks. In block mode, a count that cannot be kept
+degrades to notice mode (a notice, or silence when `stop_hook_active` is set):
+
+- no `session_id` in the payload, or no human message found in the
+  transcript;
+- a state file that cannot be read, is not JSON, is not an object, or holds a
+  non-integer count for this turn. The hook replaces it with a spent count for
+  the current turn, so this turn gets the notice and the next human turn
+  counts from zero;
+- a state write that fails.
+
+`PRAXIS_EARLY_STOP_BYPASS` silences the hook in both modes.
