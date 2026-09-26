@@ -3,8 +3,8 @@ name: cmux-delegate
 description: Hand off an existing independent issue that surfaced mid-task to its own Claude Code session in a new cmux workspace, with auto-collected context; that session runs issue→worktree→PR alone. Not for splitting the current task.
 when_to_use: Triggers on "cmux delegate", "delegate issue", "delegate to new session", "별도 세션", "세션에 위임", "별건으로 빼서".
 verified-against-runtime: true
-runtime-verified-at: 2026-09-25
-runtime-verified-note: "cmux 0.64.22 (2026-09-04) — the selected workspace's `list-workspaces` row is prefixed `* `, so field 1 without the strip is `*` and `cmux send --workspace '*'` fails with `Invalid workspace handle`; stripped, `--session` resolves and `send` returns `OK`. The legacy-alias notice goes to stderr, so it cannot reach the grep. AskUserQuestion (2026-09-09) — a single 4-option question round-tripped and came back as the user's own sentence rather than any listed label, so Step 2.6's escalation reads the answer as text instead of branching on an option label. claude 2.1.282 (2026-09-25) — `--effort low` accepted; `--effort bogus` only warns and runs at the default effort (rc 0), so Step 1 validates the effort itself."
+runtime-verified-at: 2026-09-26
+runtime-verified-note: "cmux 0.64.22 (2026-09-04) — the selected workspace's `list-workspaces` row is prefixed `* `, so field 1 without the strip is `*` and `cmux send --workspace '*'` fails with `Invalid workspace handle`; stripped, `--session` resolves and `send` returns `OK`. The legacy-alias notice goes to stderr, so it cannot reach the grep. AskUserQuestion (2026-09-09) — a single 4-option question round-tripped and came back as the user's own sentence rather than any listed label, so Step 2.6's escalation reads the answer as text instead of branching on an option label. claude 2.1.282 (2026-09-25) — `--effort low` accepted. claude 2.1.283 (2026-09-26) — `claude -p --effort bogus` prints `Warning: Unknown --effort value 'bogus' — ignoring it and using the default effort.` to stderr, still answers, and exits 0; `--effort LOW` is accepted without any warning. So the CLI stops no typo and Step 1 validates the effort itself, case-sensitively."
 ---
 
 # cmux-delegate
@@ -122,7 +122,7 @@ else:
 if model matches /^(codex|gemini)(?::(.+))?$/:
   provider = match[1]           # "codex" or "gemini"
   sub_model = match[2] || ""    # "" or "gpt-5.6-sol:xhigh" or "flash" (first colon stripped)
-elif model matches /^(fable|opus|sonnet|haiku)(?::.+)?$/:
+elif model matches /^(fable|opus|sonnet|haiku)(?::[A-Za-z]+)?$/:
   provider = "claude"
   sub_model = model             # "opus" or "opus:low"; the effort is split off below
 elif model matches /^claude(?::(.+))?$/:
@@ -149,20 +149,33 @@ if provider == "codex":
   if effort and effort does not match /^[A-Za-z0-9._-]+$/: abort "invalid codex reasoning effort"
 
 # claude takes an effort only when one is named: `claude:<tier>:<effort>` or
-# `<tier>:<effort>` (#1499). There is no per-tier default table as codex has —
-# effort names do not buy the same amount of thinking across Claude models, and
-# the model's own default (`medium` on Opus 5.5, `high` on Opus 5) is the
-# calibrated one. So nothing is passed unless the user asked, and a jev pick,
-# which yields a bare tier, never carries one.
+# `<tier>:<effort>` (#1499). There is no per-tier default table as codex has.
+# The Opus 5.5 prompting guide
+# (https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-opus-5-5#calibrate-effort)
+# says "Effort level names don't correspond to the same amount of thinking
+# across models" and advises testing several levels per model against your own
+# evals "rather than carrying over the setting you used on Claude Opus 5". So
+# no table is baked in here: unnamed → nothing is passed and the model's own
+# default applies (`medium` on Opus 5.5, `high` on Opus 5). The guide also
+# says "Reserve `xhigh` and `max` for work where you've measured a quality
+# gain." A jev pick, which yields a bare tier, never carries an effort.
 CLAUDE_EFFORTS = ["low", "medium", "high", "xhigh", "max"]
 if provider == "claude":
   # Only an alphabetic tail after the last colon is an effort, so a model ID
-  # that itself holds a colon (Bedrock `…-v1:0`) passes through untouched.
+  # that itself holds a colon (Bedrock `…-v1:0`, an ARN ending
+  # `…:application-inference-profile/<id>`) passes through untouched.
   if sub_model matches /^(.*):([A-Za-z]+)$/:
     sub_model, effort = match[1], match[2]
-  # Step 4 interpolates the model unquoted as well; same rule as codex, plus
-  # `:` and `[]` for Bedrock IDs and the `[1m]` context suffix.
-  if sub_model does not match /^[A-Za-z0-9._:\[\]-]*$/: abort "invalid claude model"
+  # A malformed tail (`opus:`, `opus::low`, `opus:low:high`) must not reach
+  # the CLI as a model name: no model ID ends in `:` or is a tier alias
+  # followed by `:`.
+  if sub_model ends with ":" or sub_model matches /^(fable|opus|sonnet|haiku):/: abort "invalid claude model"
+  # Step 4 single-quotes the model, so the charset has to exclude `'` and
+  # every shell metacharacter; it admits `:` `/` for Bedrock IDs and ARNs,
+  # `@` for Vertex IDs (`claude-sonnet-4-5@20250929`), and `[]` for the
+  # `[1m]` context suffix. Unquoted, `opus[1m]` would be a glob and become
+  # `opus1` whenever such a file is in the cwd, so the quotes stay.
+  if sub_model does not match /^[A-Za-z0-9._:@\/\[\]-]*$/: abort "invalid claude model"
   # `claude --effort bogus` only warns and runs at the default effort, so the
   # CLI would not catch a typo; this check is the only one.
   if effort and effort not in CLAUDE_EFFORTS: abort "invalid claude effort '{effort}' (expected low|medium|high|xhigh|max)"
@@ -596,7 +609,7 @@ case "{provider}" in
     # mode to begin with. If Step 1 received a budget, do not drop it
     # silently here — tell the user.
     {claude_env} claude \
-      {sub_model:+--model {sub_model}} \
+      {sub_model:+--model '{sub_model}'} \
       {effort:+--effort {effort}} \
       "$(cat "$PROMPT_FILE")"
     ;;
@@ -648,6 +661,7 @@ exit "$rc"
 
 `{provider}`, `{sub_model}` and `{effort}` are substituted from the provider resolution result in Step 1.
 `{name:+…}` expands to its text only when `name` is non-empty, so an unlisted codex model runs at its config default effort, a claude worker without a named effort gets no `--effort` and runs at its model's default, and a bare `claude` gets no `--model`.
+The claude model sits inside single quotes, so `[1m]` reaches the CLI literally instead of globbing; Step 1's charset keeps `'` out of it.
 `{claude_env}` is substituted with `CLAUDE_CONFIG_DIR=~/.{account}` when account is specified (claude provider only).
 `{budget_flag}` is no longer substituted (#1054). `--max-budget-usd` is
 print-mode only and cannot be used with an interactive worker — and

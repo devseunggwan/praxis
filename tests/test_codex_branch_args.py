@@ -86,7 +86,7 @@ def test_codex_values_are_validated_before_the_wrapper() -> None:
 # --- claude (#1499) ---------------------------------------------------------
 
 
-def _run_claude(tmp_path: pathlib.Path, sub_model: str, effort: str) -> list[str]:
+def _run_claude(tmp_path: pathlib.Path, sub_model: str, effort: str, cwd: pathlib.Path | None = None) -> list[str]:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir(parents=True)
     stub = bin_dir / "claude"
@@ -99,9 +99,16 @@ def _run_claude(tmp_path: pathlib.Path, sub_model: str, effort: str) -> list[str
     script.write_text("#!/bin/bash\n" + body.replace("$PROMPT_FILE", str(prompt)))
     env = dict(os.environ, PATH=f"{bin_dir}:{os.environ['PATH']}")
     result = subprocess.run(
-        ["/bin/bash", str(script)], capture_output=True, text=True, env=env, check=True, stdin=subprocess.DEVNULL
+        ["/bin/bash", str(script)],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=True,
+        stdin=subprocess.DEVNULL,
+        cwd=cwd,
     )
-    return result.stdout.split()
+    # One argument per line, so an argument holding a space would show as two.
+    return result.stdout.splitlines()
 
 
 def _claude_efforts() -> list[str]:
@@ -111,13 +118,32 @@ def _claude_efforts() -> list[str]:
     return list(ast.literal_eval(m.group(1)))
 
 
+def _claude_model_charset() -> str:
+    """The claude model charset, read from Step 1 rather than restated here."""
+    m = re.search(
+        r'^  if sub_model does not match /\^(\[.*\]\*)\$/: abort "invalid claude model"$',
+        SKILL.read_text(encoding="utf-8"),
+        re.M,
+    )
+    assert m, "Step 1 no longer holds the claude model to a charset"
+    return m.group(1)
+
+
+def _claude_block() -> str:
+    """Step 1's `if provider == "claude":` block, up to the pre-flight."""
+    text = SKILL.read_text(encoding="utf-8")
+    m = re.search(r'^if provider == "claude":\n(.*?)^# Pre-flight', text, re.S | re.M)
+    assert m, "could not locate Step 1's claude block"
+    return m.group(1)
+
+
 class Abort(Exception):
     pass
 
 
 def _resolve_claude(model: str) -> tuple[str, str]:
-    """Transcription of Step 1's claude path; the valid set comes from the skill."""
-    if re.fullmatch(r"(fable|opus|sonnet|haiku)(?::.+)?", model):
+    """Transcription of Step 1's claude path; the valid set and charset come from the skill."""
+    if re.fullmatch(r"(fable|opus|sonnet|haiku)(?::[A-Za-z]+)?", model):
         sub_model = model
     elif m := re.fullmatch(r"claude(?::(.+))?", model):
         sub_model = m.group(1) or ""
@@ -126,7 +152,9 @@ def _resolve_claude(model: str) -> tuple[str, str]:
     effort = ""
     if m := re.fullmatch(r"(.*):([A-Za-z]+)", sub_model):
         sub_model, effort = m.group(1), m.group(2)
-    if not re.fullmatch(r"[A-Za-z0-9._:\[\]-]*", sub_model):
+    if sub_model.endswith(":") or re.match(r"(fable|opus|sonnet|haiku):", sub_model):
+        raise Abort(f"invalid claude model {sub_model!r}")
+    if not re.fullmatch(_claude_model_charset(), sub_model):
         raise Abort(f"invalid claude model {sub_model!r}")
     if effort and effort not in _claude_efforts():
         raise Abort(f"invalid claude effort {effort!r}")
@@ -154,11 +182,37 @@ def test_claude_effort_set_is_exactly_the_cli_list() -> None:
         # A model ID that holds a colon is not mistaken for an effort.
         ("claude:us.anthropic.claude-opus-4-v1:0", ["--model", "us.anthropic.claude-opus-4-v1:0", "task"]),
         ("claude:us.anthropic.claude-opus-4-v1:0:low", ["--model", "us.anthropic.claude-opus-4-v1:0", "--effort", "low", "task"]),
+        # Vertex IDs carry `@<date>`; they worked on main and must still pass.
+        ("claude:claude-sonnet-4-5@20250929", ["--model", "claude-sonnet-4-5@20250929", "task"]),
+        ("claude:claude-sonnet-4-5@20250929:low", ["--model", "claude-sonnet-4-5@20250929", "--effort", "low", "task"]),
+        # A Bedrock ARN: `/` is admitted, and the tail after its last colon is
+        # not alphabetic-only, so no ARN segment is taken for an effort.
+        (
+            "claude:arn:aws:bedrock:us-east-1:123456789012:application-inference-profile/abc",
+            ["--model", "arn:aws:bedrock:us-east-1:123456789012:application-inference-profile/abc", "task"],
+        ),
+        (
+            "claude:arn:aws:bedrock:us-east-1:123456789012:application-inference-profile/abc:high",
+            ["--model", "arn:aws:bedrock:us-east-1:123456789012:application-inference-profile/abc", "--effort", "high", "task"],
+        ),
+        # The `[1m]` context suffix reaches the CLI literally.
+        ("claude:opus[1m]", ["--model", "opus[1m]", "task"]),
+        ("claude:opus[1m]:low", ["--model", "opus[1m]", "--effort", "low", "task"]),
     ],
 )
 def test_claude_branch_argv(tmp_path: pathlib.Path, model: str, expected_argv: list[str]) -> None:
     sub_model, effort = _resolve_claude(model)
     assert _run_claude(tmp_path, sub_model, effort) == expected_argv
+
+
+def test_claude_model_does_not_glob(tmp_path: pathlib.Path) -> None:
+    """Unquoted, `opus[1m]` is a bracket glob: with `opus1` in the cwd bash
+    rewrites it to `--model opus1`. Step 4 single-quotes the model."""
+    wd = tmp_path / "wd"
+    wd.mkdir()
+    (wd / "opus1").touch()
+    sub_model, effort = _resolve_claude("claude:opus[1m]:low")
+    assert _run_claude(tmp_path, sub_model, effort, cwd=wd) == ["--model", "opus[1m]", "--effort", "low", "task"]
 
 
 @pytest.mark.parametrize("model", ["claude:opus:bogus", "opus:HIGH", "claude:opus:xHigh"])
@@ -167,10 +221,44 @@ def test_claude_invalid_effort_aborts(model: str) -> None:
         _resolve_claude(model)
 
 
-@pytest.mark.parametrize("model", ["claude:opus:low; touch x", "opus:$(id)", "claude:opus low"])
+@pytest.mark.parametrize(
+    "model",
+    ["claude:opus:low; touch x", "opus:$(id)", "claude:opus low", "claude:opus'x", "claude:opus[1m]*", "claude:a b"],
+)
 def test_claude_shell_metacharacters_abort(model: str) -> None:
     with pytest.raises(Abort, match="invalid claude model"):
         _resolve_claude(model)
+
+
+@pytest.mark.parametrize(
+    "model",
+    ["opus:", "opus::low", "opus:low:high", "claude:opus:", "claude:opus::low", "claude:opus:low:high", "claude::"],
+)
+def test_claude_malformed_tail_aborts(model: str) -> None:
+    """A stray or doubled colon must not reach the CLI as part of a model name."""
+    with pytest.raises(Abort, match="invalid claude model"):
+        _resolve_claude(model)
+
+
+def test_claude_charset_excludes_the_quote_char() -> None:
+    """Step 4 single-quotes the model; a `'` in it would close the quote."""
+    charset = _claude_model_charset()
+    assert re.fullmatch(charset, "claude-sonnet-4-5@20250929")
+    assert re.fullmatch(charset, "arn:aws:bedrock:us-east-1:1:application-inference-profile/abc")
+    for bad in ("'", '"', "$", "`", " ", "*", "?", ";", "\\", "{", "}"):
+        assert not re.fullmatch(charset, f"opus{bad}"), bad
+
+
+def test_claude_effort_comes_only_from_the_split() -> None:
+    """No per-tier default (#1499): `effort` is assigned only by the split.
+
+    A table such as codex's `effort = effort || CODEX_EFFORT.get(...)` added to
+    the claude block would make every tier carry an effort it was not given.
+    """
+    block = _claude_block()
+    assignments = [ln.strip() for ln in block.splitlines() if re.search(r"\beffort\s*=(?!=)", ln)]
+    assert assignments == ["sub_model, effort = match[1], match[2]"]
+    assert "effort ||" not in block
 
 
 def test_claude_invalid_effort_rule_is_in_step1() -> None:
@@ -182,8 +270,13 @@ def test_claude_invalid_effort_rule_is_in_step1() -> None:
     step1 = SKILL.read_text(encoding="utf-8")
     assert "if effort and effort not in CLAUDE_EFFORTS: abort" in step1
     assert "if sub_model matches /^(.*):([A-Za-z]+)$/:" in step1
-    assert 'if sub_model does not match /^[A-Za-z0-9._:\\[\\]-]*$/: abort "invalid claude model"' in step1
-    assert "elif model matches /^(fable|opus|sonnet|haiku)(?::.+)?$/:" in step1
+    assert 'if sub_model does not match /^[A-Za-z0-9._:@\\/\\[\\]-]*$/: abort "invalid claude model"' in step1
+    assert (
+        'if sub_model ends with ":" or sub_model matches /^(fable|opus|sonnet|haiku):/: abort "invalid claude model"'
+        in step1
+    )
+    assert "elif model matches /^(fable|opus|sonnet|haiku)(?::[A-Za-z]+)?$/:" in step1
+    assert "{sub_model:+--model '{sub_model}'}" in _branch("claude")
 
 
 def test_claude_stub_sees_a_changed_argv(tmp_path: pathlib.Path) -> None:
