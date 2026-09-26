@@ -237,6 +237,11 @@ gets the capped notice, and so does any later stop in that turn.
   ([`docs/retrospect-prune-audit.md`](../../../docs/retrospect-prune-audit.md)
   counted 130 of them in a local corpus). Without that skip, every block
   would read as a new human turn and the cap would never be reached.
+  Measured live on 2026-09-26 (Claude Code 2.1.283, `claude -p --model
+  haiku` with a canary Stop hook that blocks once): the block's reason was
+  recorded as a user record with `isMeta: true` and content
+  `Stop hook feedback:\n<reason>`. Both guards therefore exclude it: the
+  `isMeta` check in `human_only` and the text-prefix check.
 - **The key** is that record's `uuid`, else its `timestamp`, else a hash of
   its text. A new human message resets the count, even if its text repeats
   the previous one (a second "continue"). Only the text-hash fallback cannot
