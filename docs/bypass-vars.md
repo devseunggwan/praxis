@@ -59,6 +59,7 @@ in [`../SECURITY.md`](../SECURITY.md).
 | `PRAXIS_PROPOSAL_PREMISE_BYPASS` | `proposal-premise-gate` | Skip the prose-proposal premise advisory |
 | `PRAXIS_PROSE_OPTION_MENU_BYPASS` | `prose-option-menu-advisory` | Skip the prose option-menu advisory |
 | `PRAXIS_RETRACTION_PROBE_BYPASS` | `retraction-probe-advisory` | Skip the unprobed-retraction advisory |
+| `PRAXIS_RELAYED_BLOCK_BYPASS` | `relayed-blocked-command-gate` | Skip the relayed-blocked-command gate. Exact value `1` after stripping |
 | `PRAXIS_DENIED_ACTION_BYPASS` | `denied-action-report-gate` | Skip the denied-action report gate. Exact value `1` after stripping; read before the strict variable, so it wins when both are set |
 | `PRAXIS_HOOK_BYPASS_PR_REPORT_DESTINATION_GATE` | `pr-report-destination-gate` | Skip the PR-report-destination advisory (local report not posted to the PR) |
 | `PRAXIS_NEGATIVE_EXISTENCE_ADVISORY` | `negative-existence-verdict-gate` | Demote the negative-existence verdict gate from block to advisory (systemMessage, non-blocking). Set to any non-falsey value (`1` / `true` / `yes`); `0` / `false` / empty keep block mode (mirrors `PRAXIS_ASK_END_ADVISORY`) |

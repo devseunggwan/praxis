@@ -1688,6 +1688,18 @@
       }
     },
     {
+      "name": "relayed-blocked-command-gate",
+      "role": "completion-verify",
+      "event": "Stop",
+      "timeout": 10,
+      "review_by": "2026-12-25",
+      "mode": {
+        "bypass_env": [
+          "PRAXIS_RELAYED_BLOCK_BYPASS"
+        ]
+      }
+    },
+    {
       "name": "denied-action-report-gate",
       "role": "completion-verify",
       "event": "SubagentStop",
