@@ -19,8 +19,9 @@ prose (`prose-option-menu-advisory`). Types 1, 4, and 2-as-prose reach Stop
 with no hook reacting. This hook covers exactly those three.
 
 Scope: the guide says to leave its addition "out of human-in-the-loop
-applications, where someone is there to answer". This hook does not tell the
-two apart; it fires in every session.
+applications, where someone is there to answer". The user notice fires in
+every session; the block (see Delivery) fires only when the unattended-run
+marker `PRAXIS_UNATTENDED=1` is set, which is the guide's unattended scope.
 
 ## Decision predicate
 
@@ -66,47 +67,72 @@ It stays silent — a stop the user wants — when any of these holds:
   question); `prose-option-menu-advisory` would fire on the same text (type
   3: that hook owns decision menus, and loading its predicate keeps the two
   disjoint);
-- `stop_hook_active` is set — the host's re-entry flag, true when this Stop
-  follows a continuation that a Stop hook's block forced.
+- `stop_hook_active` is set, in notice mode only — the host's re-entry flag,
+  true when this Stop follows a continuation that a Stop hook's block forced.
+  Block mode ignores it (see Delivery).
 
 The closing lines are the last three prose lines, plus any short
 `Key: value` status lines after them. The guide's type 1 is a summary that
 *closes* on an announcement; the same verb mid-report usually narrates what
 was done in order.
 
-## Delivery: a notice to the user, not a continuation
+## Delivery: two modes
 
-The output is a Stop `systemMessage`. `_hook_io.py` documents that it is shown
-to the user and NOT fed to the model, so the model never reads it and nothing
-continues on its own. The guide's pattern instead sends the open items to the
-model as the next user message. Here the notice tells the user that work
-still looks open and that they can reply "continue".
+- **Notice (default).** A Stop `systemMessage`. `_hook_io.py` documents that
+  it is shown to the user and NOT fed to the model, so nothing continues on
+  its own; the notice tells the user they can reply "continue". Attended
+  sessions stay here: every marker above is also written by a turn that
+  finished correctly, and someone is there to judge it.
+- **Block (`PRAXIS_UNATTENDED` exactly `1`).** `{"decision": "block",
+  "reason": ...}`; the host feeds `reason` to the model. That is the guide's
+  pattern — "If a turn ends with items still open and no blocker stated, send
+  a short user message naming them" — so the reason names the kind, quotes
+  the line, asks the model to continue or say in one line what blocks it,
+  and states that this does not override confirmation on risky or
+  destructive actions.
 
-It is advisory, not a block, because every marker above is also written by a
-turn that finished correctly, and a blocker the model did not name reads the
-same as no blocker.
+Continuation cap: the guide says to "stop after two or three automatic
+continuations on the same task rather than repeating them indefinitely, so
+that a run that is genuinely stuck ends and can be reviewed". Block mode
+blocks at most `_MAX_CONTINUATIONS` (2) times per turn, a turn being keyed on
+the human message that opened it (Stop-hook feedback and injected records do
+not count). The count lives in `~/.praxis/cache/early-stop-continuations-
+<session_id>.json` (`resolve_cache_file`), locked, per-pid staging. Past the
+cap the fire is the notice, saying the cap was reached. `stop_hook_active`
+is true on every stop after a block, so block mode ignores it and relies on
+the counter; notice mode keeps the flag as its re-entry guard.
 
-Advisory only: `{"systemMessage": ...}`, exit 0. Bypass:
-`PRAXIS_EARLY_STOP_BYPASS=1`.
+Nothing sets the marker yet: `cmux-delegate` workers are the intended
+setter, left to a follow-up. Until then block mode is opt-in by hand.
+
+Bypass: `PRAXIS_EARLY_STOP_BYPASS=1` (silent in both modes).
 
 Fail-open contract: malformed stdin, missing transcript, no last assistant
-text, `stop_hook_active`, or any uncaught exception → exit 0.
+text, or any uncaught exception → exit 0, no output. In block mode, a count
+that cannot be kept (no `session_id`, no opening human message, an
+unreadable or malformed state file, a failed write) never blocks: the fire
+degrades to notice mode. A malformed state file is replaced by a spent count
+for the current turn, so the next human turn starts from zero.
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 import re
 import sys
 from pathlib import Path as _Path
 
 sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
-from _hook_io import emit_stop_advisory  # type: ignore[import-not-found]  # noqa: E402
+from _hook_io import emit_stop_advisory, emit_stop_block  # type: ignore[import-not-found]  # noqa: E402
 import _fire_ledger  # type: ignore[import-not-found]  # noqa: E402
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
+from _paths import resolve_cache_file  # type: ignore[import-not-found]  # noqa: E402
 from _payload import read_payload  # type: ignore[import-not-found]  # noqa: E402
+from _state_lock import state_lock  # type: ignore[import-not-found]  # noqa: E402
 from _transcript import (  # type: ignore[import-not-found]  # noqa: E402
     load_stop_turn,
-    read_last_user_message,
+    read_last_user_record,
     stop_last_assistant_text,
 )
 
@@ -114,6 +140,14 @@ _PREFIX = "[early-stop-advisory]"
 _HOOK_NAME = "early-stop-advisory"
 _ROLE = "completion-verify"
 _BYPASS_ENV = "PRAXIS_EARLY_STOP_BYPASS"
+# Unattended-run marker: exactly "1" (unstripped) turns a fire from the user
+# notice into a Stop block whose reason reaches the model.
+_UNATTENDED_ENV = "PRAXIS_UNATTENDED"
+# Automatic continuations (blocks) per human-opened turn. The guide: "stop
+# after two or three automatic continuations on the same task rather than
+# repeating them indefinitely". Past it, the fire falls back to the notice.
+_MAX_CONTINUATIONS = 2
+_STATE_PREFIX = "early-stop-continuations"
 
 _MENU_IMPL = (
     _Path(__file__).resolve().parent.parent / "prose-option-menu-advisory" / "impl.py"
@@ -482,15 +516,144 @@ def _clip(line: str, limit: int = 160) -> str:
     return line if len(line) <= limit else line[: limit - 1] + "…"
 
 
-def build_message(kind: str, evidence: str) -> str:
+def build_message(kind: str, evidence: str, cap_reached: bool = False) -> str:
     """A notice for the user: a Stop `systemMessage` is not fed to the model."""
+    cap = (
+        f"  Automatic continuation cap reached ({_MAX_CONTINUATIONS} this turn): "
+        "the run stops here so it can be reviewed.\n"
+        if cap_reached
+        else ""
+    )
     return (
         f"{_PREFIX} The turn ended with requested work apparently still open — "
         f"{kind}:\n"
         f"  \"{_clip(evidence)}\"\n"
+        f"{cap}"
         "  Claude does not see this notice. If nothing blocks the open work, "
         f"reply \"continue\". Bypass: {_BYPASS_ENV}=1"
     )
+
+
+# The detected kinds are worded for the user ("your preference"); the block
+# reason is read by the model, for whom the user is a third party.
+_MODEL_KIND = {
+    "an offer to continue that waits on your preference":
+        "an offer to continue that waits on the user's preference",
+}
+
+
+def build_reason(kind: str, evidence: str, count: int) -> str:
+    """The Stop block reason, addressed to the model, which receives it.
+
+    Follows the guide's continuation message ("Your task list still has open
+    items: … Continue with them. If one is blocked, say what is blocking it.")
+    and restates the limit its standing instruction ends on: it "does not
+    override the need for confirmation on risky or destructive actions".
+    """
+    return (
+        f"{_PREFIX} Your turn ended with requested work still open — "
+        f"{_MODEL_KIND.get(kind, kind)}:\n"
+        f"  \"{_clip(evidence)}\"\n"
+        "Continue with the open items. If one is blocked, say in one line what "
+        "is blocking it.\n"
+        "This does not override the need for confirmation on risky or "
+        "destructive actions: ask before those as you otherwise would.\n"
+        f"(Unattended run, {_UNATTENDED_ENV}=1: automatic continuation "
+        f"{count} of {_MAX_CONTINUATIONS} this turn.)"
+    )
+
+
+def is_unattended() -> bool:
+    """The marker, exactly `1` — no stripping, no other truthy spelling."""
+    return os.environ.get(_UNATTENDED_ENV) == "1"
+
+
+def opening_human_message(transcript_path: object) -> tuple[str, str] | None:
+    """`(turn key, text)` of the human message that opened this turn.
+
+    Skips injected records (`human_only`) and Stop-hook feedback — the record
+    a block writes back as a user message — so a forced continuation does not
+    read as a new human turn. The key is the record's `uuid`, else its
+    `timestamp`, else a hash of its text. None when unreadable or absent.
+    """
+    if not isinstance(transcript_path, str) or not transcript_path:
+        return None
+    found = read_last_user_record(
+        transcript_path, human_only=True, skip_hook_feedback=True
+    )
+    if found is None or found[0] is None:
+        return None
+    record, text = found
+    for field in ("uuid", "timestamp"):
+        value = record.get(field)
+        if isinstance(value, str) and value:
+            return f"{field}:{value}", text
+    digest = hashlib.sha1(text.encode("utf-8", errors="replace")).hexdigest()[:16]
+    return f"text:{digest}", text
+
+
+def _state_path(session_id: str) -> str:
+    sid = re.sub(r"[^A-Za-z0-9._-]", "_", session_id)
+    return resolve_cache_file(f"{_STATE_PREFIX}-{sid}.json", session_id=sid)
+
+
+def _save_state(path: str, turn_key: str, blocks: int) -> bool:
+    tmp = f"{path}.{os.getpid()}.tmp"
+    try:
+        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump({"turn": turn_key, "blocks": blocks}, fh)
+        os.replace(tmp, path)
+        return True
+    except OSError:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        return False
+
+
+def claim_continuation(session_id: object, turn_key: str) -> int | None:
+    """Count one automatic continuation for this turn.
+
+    Returns its number (1..`_MAX_CONTINUATIONS`) when the caller may block,
+    0 when this turn's cap is already spent, and None when the count cannot
+    be kept: no session id, an unreadable or malformed state file, or a
+    write that failed. Only a positive return may block, and only after the
+    count that bounds it is on disk — a failure costs a continuation, never
+    a loop.
+
+    A malformed file is replaced by a spent count for this turn, so this
+    turn gets the plain notice and the next human turn starts from zero.
+    The read-modify-write is locked and stages through a per-pid name
+    (DESIGN.md § Session-state concurrency, Q0 and Q1: a threshold reads it).
+    """
+    if not isinstance(session_id, str) or not session_id.strip():
+        return None
+    try:
+        path = _state_path(session_id.strip())
+        with state_lock(path):
+            state: object
+            try:
+                with open(path, "r", encoding="utf-8") as fh:
+                    state = json.load(fh)
+            except FileNotFoundError:
+                state = {}
+            except (OSError, ValueError):
+                state = None  # unreadable or not JSON: malformed below
+            used: object = None
+            if isinstance(state, dict):
+                used = state.get("blocks", 0) if state.get("turn") == turn_key else 0
+            if not isinstance(used, int) or isinstance(used, bool) or used < 0:
+                _save_state(path, turn_key, _MAX_CONTINUATIONS)
+                return None
+            if used >= _MAX_CONTINUATIONS:
+                return 0
+            if not _save_state(path, turn_key, used + 1):
+                return None
+            return used + 1
+    except Exception:
+        return None
 
 
 @fail_open
@@ -501,8 +664,12 @@ def main() -> int:
     payload = read_payload()
     if not isinstance(payload, dict):
         return 0
-    if payload.get("stop_hook_active"):
-        return 0  # re-entry: this Stop follows a Stop-hook-forced continuation
+    unattended = is_unattended()
+    # Notice mode keeps the re-entry guard: the notice is for the stop a
+    # human sees. Block mode ignores the flag — it is true on every stop that
+    # follows a block, so it cannot count continuations; the counter does.
+    if payload.get("stop_hook_active") and not unattended:
+        return 0
 
     turn = load_stop_turn(payload)
     if not turn:
@@ -517,17 +684,28 @@ def main() -> int:
     if is_prose_menu(last_text, turn):
         return 0
 
-    transcript_path = payload.get("transcript_path")
-    if isinstance(transcript_path, str) and user_wants_the_stop(
-        read_last_user_message(transcript_path, human_only=True)
-    ):
+    opening = opening_human_message(payload.get("transcript_path"))
+    if opening is not None and user_wants_the_stop(opening[1]):
         return 0
 
-    emit_stop_advisory(build_message(*signal))
-
     session_id = payload.get("session_id")
+    count = (
+        claim_continuation(session_id, opening[0])
+        if unattended and opening is not None
+        else None
+    )
+    if count:
+        emit_stop_block(build_reason(*signal, count))
+        decision = _fire_ledger.DECISION_BLOCK
+    else:
+        cap_reached = count == 0
+        if payload.get("stop_hook_active") and not cap_reached:
+            return 0  # the counter could not be kept: notice-mode re-entry rule
+        emit_stop_advisory(build_message(*signal, cap_reached=cap_reached))
+        decision = _fire_ledger.DECISION_ADVISE
+
     if _fire_ledger.record_session_fire(
-        _HOOK_NAME, _ROLE, _fire_ledger.DECISION_ADVISE,
+        _HOOK_NAME, _ROLE, decision,
         session_id if isinstance(session_id, str) else "", "Stop",
     ):
         _fire_ledger.suppress_coarse_duplicate()

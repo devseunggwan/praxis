@@ -7,7 +7,7 @@ ROOT_DIR="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 HOOK="$ROOT_DIR/hooks/completion-verify/early-stop-advisory/impl.py"
 MENU_HOOK="$ROOT_DIR/hooks/completion-verify/prose-option-menu-advisory/impl.py"
 
-unset PRAXIS_EARLY_STOP_BYPASS PRAXIS_PROSE_OPTION_MENU_BYPASS
+unset PRAXIS_EARLY_STOP_BYPASS PRAXIS_PROSE_OPTION_MENU_BYPASS PRAXIS_UNATTENDED
 
 PASS=0
 FAIL=0
@@ -443,6 +443,188 @@ run_case silent "missing transcript" '{}'
 TRANSCRIPT="$(mktemp)"; TMP_FILES+=("$TRANSCRIPT")
 printf 'not json\n' >"$TRANSCRIPT"
 run_case silent "malformed transcript" '{}'
+
+# =====================================================================
+# Unattended runs: PRAXIS_UNATTENDED=1 blocks, capped per human turn
+# =====================================================================
+
+STATE_HOME="$(mktemp -d)" || { echo "FAIL  [mktemp -d]"; exit 1; }
+trap 'rm -f "${TMP_FILES[@]}"; rm -rf "$STATE_HOME"' EXIT
+SID="sess-early-stop-test"
+STATE_FILE="$STATE_HOME/cache/early-stop-continuations-$SID.json"
+UA=(PRAXIS_HOME="$STATE_HOME" PRAXIS_UNATTENDED=1)
+
+# build_run_transcript <final_text> <record>... — records are `h:<uuid>`
+# (the opening human message, USER_KO), `f` (Stop-hook feedback written back
+# as a user message after a block), or `a` (an assistant tool call).
+build_run_transcript() {
+  local final_text="$1"
+  shift
+  TRANSCRIPT="$(mktemp)"
+  TMP_FILES+=("$TRANSCRIPT")
+  python3 - "$TRANSCRIPT" "$final_text" "$USER_KO" "$@" <<'PY'
+import json, sys
+path, final_text, user_text, *records = sys.argv[1:]
+events = []
+for rec in records:
+    if rec.startswith("h:"):
+        events.append({"type": "user", "uuid": rec[2:], "origin": {"kind": "human"},
+                       "message": {"role": "user", "content": user_text}})
+    elif rec == "f":
+        events.append({"type": "user", "uuid": f"fb-{len(events)}", "message": {
+            "role": "user",
+            "content": "Stop hook feedback:\n[early-stop-advisory] Your turn ended "
+                       "with requested work still open"}})
+    else:
+        events.append({"type": "assistant", "message": {"role": "assistant", "content": [
+            {"type": "text", "text": "working"}]}})
+events.append({"type": "assistant", "message": {"role": "assistant",
+               "content": [{"type": "text", "text": final_text}]}})
+with open(path, "w", encoding="utf-8") as f:
+    for e in events:
+        f.write(json.dumps(e, ensure_ascii=False) + "\n")
+PY
+}
+
+# expect_block <name> <count> — OUT is a block whose reason reaches the model.
+expect_block() {
+  local name="$1" count="$2"
+  if [ "$RC" -eq 0 ] && [ -z "$ERR" ] && printf '%s' "$OUT" | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+r = d["reason"]
+assert d["decision"] == "block" and "systemMessage" not in d, d
+assert r.startswith("[early-stop-advisory] Your turn ended"), r
+assert "a next step announced but not taken" in r, r
+assert "다음 단계로 남은" in r, r
+assert "Continue with the open items. If one is blocked, say in one line what is blocking it." in r, r
+assert "does not override the need for confirmation on risky or destructive actions" in r, r
+assert "automatic continuation " + sys.argv[1] + " of 2" in r, r
+' "$count"; then
+    echo "PASS  [$name]"; PASS=$((PASS + 1))
+  else
+    echo "FAIL  [$name] rc=$RC out=<$OUT> err=<$ERR>"; FAIL=$((FAIL + 1))
+  fi
+}
+
+# expect_notice <name> <cap|nocap>
+expect_notice() {
+  local name="$1" cap="$2"
+  if [ "$RC" -eq 0 ] && [ -z "$ERR" ] && printf '%s' "$OUT" | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+m = d["systemMessage"]
+assert "decision" not in d, d
+assert m.startswith("[early-stop-advisory] The turn ended"), m
+assert ("continuation cap reached" in m) == (sys.argv[1] == "cap"), m
+' "$cap"; then
+    echo "PASS  [$name]"; PASS=$((PASS + 1))
+  else
+    echo "FAIL  [$name] rc=$RC out=<$OUT> err=<$ERR>"; FAIL=$((FAIL + 1))
+  fi
+}
+
+# Marker unset: the notice, never a decision — even with a session id.
+build_run_transcript "$T1" h:u1
+run_hook "$HOOK" "{\"session_id\": \"$SID\"}" PRAXIS_HOME="$STATE_HOME"
+expect_notice "marker unset: T1 is the user notice, no decision" nocap
+[ ! -e "$STATE_FILE" ] && { echo "PASS  [marker unset keeps no counter]"; PASS=$((PASS + 1)); } \
+  || { echo "FAIL  [marker unset keeps no counter]"; FAIL=$((FAIL + 1)); }
+
+# Anything but exactly `1` is not the marker.
+for v in "true" " 1" "yes"; do
+  run_hook "$HOOK" "{\"session_id\": \"$SID\"}" PRAXIS_HOME="$STATE_HOME" PRAXIS_UNATTENDED="$v"
+  expect_notice "PRAXIS_UNATTENDED='$v' is not the marker" nocap
+done
+
+# Marker set: stop 1 and 2 block, stop 3 in the same human turn is the capped
+# notice. Stops 2 and 3 follow a block, so the host sets stop_hook_active and
+# the transcript carries the block's feedback record.
+build_run_transcript "$T1" h:u1 a
+run_hook "$HOOK" "{\"session_id\": \"$SID\"}" "${UA[@]}"
+expect_block "marker set: T1 blocks with a reason for the model" 1
+
+build_run_transcript "$T1" h:u1 a f a
+run_hook "$HOOK" "{\"session_id\": \"$SID\", \"stop_hook_active\": true}" "${UA[@]}"
+expect_block "second stop in the same turn blocks despite stop_hook_active" 2
+
+build_run_transcript "$T1" h:u1 a f a f a
+run_hook "$HOOK" "{\"session_id\": \"$SID\", \"stop_hook_active\": true}" "${UA[@]}"
+expect_notice "third stop in the same turn falls back to the capped notice" cap
+
+run_hook "$HOOK" "{\"session_id\": \"$SID\", \"stop_hook_active\": true}" "${UA[@]}"
+expect_notice "a further stop in that turn stays capped" cap
+
+# A new human message (new uuid, same text) opens a new turn: count resets.
+build_run_transcript "$T1" h:u1 a f a f a h:u2 a
+run_hook "$HOOK" "{\"session_id\": \"$SID\"}" "${UA[@]}"
+expect_block "a new human message resets the counter" 1
+
+# Marker set but the stop is one this hook does not advise on: silent.
+build_run_transcript '3개 엔드포인트 마이그레이션을 모두 끝냈습니다. `pytest tests/api` 결과 42 passed.' h:u3
+run_hook "$HOOK" "{\"session_id\": \"$SID\"}" "${UA[@]}"
+[ -z "$OUT" ] && [ "$RC" -eq 0 ] && { echo "PASS  [marker set: a finished turn stays silent]"; PASS=$((PASS + 1)); } \
+  || { echo "FAIL  [marker set: a finished turn stays silent] out=<$OUT>"; FAIL=$((FAIL + 1)); }
+
+# Bypass wins over the marker.
+build_run_transcript "$T1" h:u4
+run_case silent "bypass with the marker set" "{\"session_id\": \"$SID\"}" \
+  "${UA[@]}" PRAXIS_EARLY_STOP_BYPASS=1
+
+# Type-3 menu with the marker: the menu hook's lane, this hook stays silent.
+build_run_transcript "$T3" h:u5
+run_case silent "T3 menu with the marker set" "{\"session_id\": \"$SID\"}" "${UA[@]}"
+
+# The user asked for the stop: silent even with the marker.
+build_transcript "$T1" '마이그레이션 계획만 세워줘'
+run_case silent "plan request with the marker set" "{\"session_id\": \"$SID\"}" "${UA[@]}"
+
+# No session id: the count cannot be kept, so no block — the notice.
+build_run_transcript "$T1" h:u6
+run_hook "$HOOK" '{}' "${UA[@]}"
+expect_notice "marker set without session_id: notice, not a block" nocap
+
+# Malformed state file: never a block, never a crash; the next human turn
+# counts from zero again.
+build_run_transcript "$T1" h:u7
+for junk in '{not json' '[1, 2]' '{"turn": "uuid:u7", "blocks": "x"}'; do
+  printf '%s' "$junk" >"$STATE_FILE"
+  run_hook "$HOOK" "{\"session_id\": \"$SID\"}" "${UA[@]}"
+  expect_notice "malformed state <$junk>: notice, not a block" nocap
+done
+printf '{not json' >"$STATE_FILE"
+run_hook "$HOOK" "{\"session_id\": \"$SID\", \"stop_hook_active\": true}" "${UA[@]}"
+if [ "$RC" -eq 0 ] && [ -z "$ERR" ] && ! printf '%s' "$OUT" | grep -q '"decision"'; then
+  echo "PASS  [malformed state after a block: no block]"; PASS=$((PASS + 1))
+else
+  echo "FAIL  [malformed state after a block: no block] out=<$OUT> err=<$ERR>"; FAIL=$((FAIL + 1))
+fi
+build_run_transcript "$T1" h:u7 a h:u8
+run_hook "$HOOK" "{\"session_id\": \"$SID\"}" "${UA[@]}"
+expect_block "after a malformed state, the next human turn blocks again" 1
+
+# Unwritable state: a count that cannot be stored never blocks.
+rm -f "$STATE_FILE"; mkdir -p "$STATE_FILE"
+build_run_transcript "$T1" h:u9
+run_hook "$HOOK" "{\"session_id\": \"$SID\"}" "${UA[@]}"
+expect_notice "state path unusable: notice, not a block" nocap
+rmdir "$STATE_FILE"
+
+# A readable state whose new count cannot be written: no continuation is
+# granted (the block is only emitted after the bounding count is on disk).
+if PRAXIS_HOME="$STATE_HOME" python3 - "$HOOK" "$SID" <<'PY'
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("esa_impl", sys.argv[1])
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+mod._save_state = lambda *a, **k: False
+assert mod.claim_continuation(sys.argv[2], "uuid:write-fails") is None
+PY
+then
+  echo "PASS  [failed count write grants no continuation]"; PASS=$((PASS + 1))
+else
+  echo "FAIL  [failed count write grants no continuation]"; FAIL=$((FAIL + 1))
+fi
 
 echo ""
 echo "== $PASS passed, $FAIL failed =="

@@ -50,6 +50,8 @@ Public API:
   extract_last_assistant_text(turn)                      -> str
   has_tool_in_turn(turn, tool_name)                      -> bool
   read_last_user_message(transcript_path)                -> str | None
+  read_last_user_record(transcript_path, *, human_only, skip_hook_feedback)
+                                                         -> (dict | None, str) | None
   scan_user_rejections(path, max_bytes, max_records, *, kinds)
                                                          -> list[dict] | None
   stop_scan_cursor_path(hook, session_id)               -> str | None
@@ -689,10 +691,40 @@ def _is_injected_user_record(entry: dict) -> bool:
     return isinstance(origin, dict) and origin.get("kind") not in (None, "human")
 
 
+# Prefix of the user-role record the host writes when a Stop hook blocks: the
+# block's `reason` goes back to the model as a user message whose string
+# content starts with this (docs/retrospect-prune-audit.md counted 130 such
+# records in a local corpus). It is hook output, not something a human typed.
+STOP_HOOK_FEEDBACK_PREFIX = "Stop hook feedback:"
+
+
 def read_last_user_message(
     transcript_path: str, *, human_only: bool = False
 ) -> str | None:
-    """Return the text of the most recent user-authored message in the transcript.
+    """Text of the most recent user-authored message; see `read_last_user_record`.
+
+    None when the transcript is missing or unreadable, "" when it was read to
+    the start and no user message carried text.
+    """
+    found = read_last_user_record(transcript_path, human_only=human_only)
+    return None if found is None else found[1]
+
+
+def read_last_user_record(
+    transcript_path: str,
+    *,
+    human_only: bool = False,
+    skip_hook_feedback: bool = False,
+) -> tuple[dict | None, str] | None:
+    """`(record, text)` of the most recent user-authored message in the transcript.
+
+    `record` is the whole JSONL entry, so a caller can tell two messages with
+    the same text apart by its `uuid` / `timestamp`. `(None, "")` is the
+    "read it all, no user text" answer `read_last_user_message` reports as "".
+
+    `skip_hook_feedback=True` also passes over records whose text starts with
+    `STOP_HOOK_FEEDBACK_PREFIX` — a Stop hook's block reason written back as a
+    user message — whether or not the host marked it `isMeta`.
 
     `human_only=True` also skips user-role records the host injected rather
     than the human typed: `isMeta` (a skill body, a slash-command expansion),
@@ -703,7 +735,7 @@ def read_last_user_message(
 
     Returns None when the transcript is missing or unreadable — the caller
     must fail open per the project hook design contract (`Fail-open on
-    infrastructure errors`). Returns empty string when the transcript was
+    infrastructure errors`). Returns `(None, "")` when the transcript was
     read successfully but no user message contained extractable human
     text — that is a real "no signal" answer and may be acted on.
 
@@ -793,16 +825,18 @@ def read_last_user_message(
             text = "\n".join(parts)
         # else: unexpected content shape — fall through to skip
 
-        if text.strip():
-            return text
-        # No human text in this entry — keep walking backward.
+        if not text.strip():
+            continue  # No human text in this entry — keep walking backward.
+        if skip_hook_feedback and text.lstrip().startswith(STOP_HOOK_FEEDBACK_PREFIX):
+            continue
+        return entry, text
 
     # Nothing found. "" means "read it all, there is no signal" and callers may
     # act on it; that is only true when the backward walk actually reached the
     # start of the file. If the scan cap cut it short, the honest answer is the
     # unreadable one — None, which every caller fails open on. The reader
     # reports which of the two happened; a size sampled here cannot.
-    return "" if reached_start else None
+    return (None, "") if reached_start else None
 
 
 # ---------------------------------------------------------------------------

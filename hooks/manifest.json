@@ -1641,6 +1641,7 @@
       "timeout": 10,
       "review_by": "2026-12-25",
       "mode": {
+        "strict_env": "PRAXIS_UNATTENDED",
         "bypass_env": [
           "PRAXIS_EARLY_STOP_BYPASS"
         ]
