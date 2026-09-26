@@ -1434,7 +1434,7 @@
       "hosts": ["claude"],
       "args": ["UserPromptSubmit"],
       "timeout": 3,
-      "review_by": "2026-12-24"
+      "review_by": "2026-12-25"
     },
     {
       "name": "elapsed-time-signal",

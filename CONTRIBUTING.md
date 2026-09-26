@@ -380,7 +380,7 @@ The invocation surface depends on the hook's manifest entry — read `body` and
 # Default: body omitted (impl.py), no args
 printf '%s' "$PAYLOAD" | python3 hooks/<role>/<name>/impl.py; echo "rc=$?"
 
-# body: "impl.sh" (codex-review-route, completion-verify,
+# body: "impl.sh" (codex-review-route, completion-verify, elapsed-time-signal,
 # retrospect-mix-check, strike-counter) — the generated wrapper is the
 # invocation surface, and args are part of the registration
 printf '%s' "$PAYLOAD" | hooks/<name>.sh <args...>; echo "rc=$?"

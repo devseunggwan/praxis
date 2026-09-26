@@ -188,6 +188,13 @@ before the emit. A session without the env var writes nothing to the ledger,
 which is what makes the no-op path free. Missing `jq` means no record, but
 the signal is still emitted.
 
+**Exception to DESIGN.md → Fire-ledger instrumentation.** That rule arms the
+ledger "right after it parses its stdin payload" so every exit writes one
+record. This hook arms later, on the opted-in path only, after its env and
+clock checks: arming earlier would read stdin on every tool call of every
+session, which the no-op path exists to avoid. So a malformed env value or a
+start time in the future exits with no ledger record. Rule 18 still passes.
+
 ## Host filtering
 
 `hosts: ["claude"]`. The transport is the `claude` branch of the
