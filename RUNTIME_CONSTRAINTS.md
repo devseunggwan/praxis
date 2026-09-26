@@ -444,6 +444,12 @@ same dump file is the positive control.
 
 ## 11. Mid-turn assistant notes can land in a `text` block or a `thinking` block
 
+> **Scope of this entry.** "Adding a new entry" asks for a constraint that is
+> fixed by the runtime. What is fixed here is the *variability*: on one host
+> version the same session produced both shapes, and hooks cannot choose
+> between them. The entry records that no single shape can be assumed — not a
+> stable shape. Revisit it once the host's `thinking.display` value is known.
+
 **Constraint**: On Opus 5.5 a note the model writes between tool calls is
 recorded in the transcript JSONL in one of two shapes, and both occurred in
 one session on one host version:
@@ -535,9 +541,9 @@ jq -c 'select(.type=="assistant") | {stop:.message.stop_reason,
   blocks:[.message.content[]? | {t:.type, len:((.text // .thinking // "")|length)}]}' <transcript>
 ```
 
-**Verified**: 2026-09-25 / Claude Code 2.1.282 / model `claude-opus-5-5`,
-effort `medium` / Issue #1502 — status: **measured live**, one session
-transcript, measured twice.
+**Verified**: 2026-09-25 / Claude Code 2.1.282 (`claude-opus-5-5`, effort
+`medium`) / Issue #1502 — status: **measured live**, one session transcript,
+measured twice.
 
 - First census (the `jq` command above, early in the session): 9 `thinking`
   blocks, all with an empty `thinking` field. Both mid-turn user-facing notes
