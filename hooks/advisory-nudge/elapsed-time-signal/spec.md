@@ -19,8 +19,8 @@ only timeouts in the repository were the hooks' own `timeout` fields.
 The Opus 5.5 prompting guide, section *Time signals for multiagent
 harnesses*
 (<https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-opus-5-5#time-signals-for-multi-agent-harnesses>,
-read 2026-09-25), recommends that the harness "add a short line at the end
-of each message it sends back to the model giving the elapsed time against
+read 2026-09-25, re-read 2026-09-26), recommends that the harness "add a
+short line at the end of each message it sends back to the model giving the elapsed time against
 that budget, in seconds, for example `elapsed 340s / 1200s`". Without a
 sensible budget it recommends the elapsed time alone plus one system-prompt
 sentence. The guide gives two caveats, and both shape this design:
@@ -31,6 +31,20 @@ sentence. The guide gives two caveats, and both shape this design:
   `cmux-delegate` has none today (see *Known limitations*).
 - "Under time pressure the model might search and verify a little less." For
   that reason the signal is **opt-in per delegation** and is never a default.
+
+**Scope of the guide's evidence.** The guide's claim is about one model:
+"Claude Opus 5.5 pays close attention to information about elapsed time".
+Its setting is "a multiagent setup, for example a lead agent that delegates
+to subagents", its evidence is "Anthropic's evaluations of small agent teams
+on research tasks", and its stated mechanism is that "a budget mostly keeps
+more agents working in parallel". This hook applies the signal differently:
+it goes to each independent `cmux-delegate` worker, and not to the
+orchestrator that delegates. A worker's model defaults to the `jev-route`
+pick, else `sonnet`, so it is not necessarily Opus 5.5. Per-worker use and
+models other than Opus 5.5 are untested here. The guide also says the model
+paces its work to the budget and "usually finishes well before it", so it
+advises to "set the budget somewhat above the time you actually want spent
+and tune it on a sample of your own tasks".
 
 ## Transport
 
@@ -81,14 +95,23 @@ result, two different values, so neither came from a cached fixture. The
 fire ledger had two `advise` rows. Negative control: the same command with
 both variables unset gave `NONE` / `NONE` and no ledger rows.
 
+**Second canary, 2026-09-26, measured by a reviewer, print mode only.**
+Claude Code 2.1.283, `claude -p --settings …`, model `haiku`, budget `0`
+(elapsed-only), with the `--append-system-prompt` sentence that
+`cmux-delegate` passes. The model reported receiving `elapsed 301s` on the
+prompt, `elapsed 304s` from `PostToolUseFailure:Bash`, `elapsed 304s` from
+`PostToolUse:Bash`, and the "Time matters here…" sentence verbatim. So in
+print mode, `PostToolUseFailure` delivers `additionalContext` and the
+`--append-system-prompt` path reaches the model.
+
 Still unmeasured:
 
-- the interactive shape `cmux-delegate` actually launches. The canary ran in
-  print mode, including whether an interactive session's first argv prompt
-  fires `UserPromptSubmit`. If it does not, the first signal arrives with the
-  first tool result.
-- the `PostToolUseFailure` registration.
-- the elapsed-only `--append-system-prompt` path.
+- the interactive shape `cmux-delegate` actually launches. Both canaries ran
+  in print mode. That includes whether an interactive session's first argv
+  prompt fires `UserPromptSubmit`. If it does not, the first signal arrives
+  with the first tool result.
+- any model other than `haiku` in these canaries, and any effect on pacing:
+  the canaries show only that the line and the sentence arrive.
 
 ## Output
 
@@ -98,29 +121,48 @@ Still unmeasured:
 
 `hookEventName` echoes the event, which comes from the registration's `args`
 (`UserPromptSubmit` / `PostToolUse` / `PostToolUseFailure`), so the hook
-needs no JSON parse to answer. The text is exactly the guide's format. There
-is no `[hook-name]` tag and no prose, because the guide measured that short
-line and not a longer one.
+needs no JSON parse to answer. The text follows the guide's example format
+(it asks for "a short line" and gives `elapsed 340s / 1200s` "for example").
+There is no `[hook-name]` tag and no prose, so the line stays that short.
 
 **Elapsed-only mode.** With `--time-budget 0` the line is `elapsed <n>s`.
 The guide places its sentence ("Time matters here: do not spend time that can
 be avoided, and the earlier a correct result is obtained, the better.") in
 the *system prompt*, once. The `cmux-delegate` wrapper therefore passes it
 with `--append-system-prompt`, and this hook does not repeat it. The hook
-keeps no state, and the sentence stays where the guide measured it.
+keeps no state, and the sentence stays where the guide puts it ("add one
+sentence to the system prompt").
 `claude --help` on 2.1.282 lists `--append-system-prompt` with no "only works
-with --print" note, while `--max-budget-usd` carries that note.
+with --print" note, while `--max-budget-usd` carries that note. The
+2026-09-26 print-mode canary (above) saw the sentence reach the model; the
+interactive launch is still unmeasured.
 
 ## Cost for sessions without the env var
 
 The hook is POSIX `sh`, not Python, because it is registered on every tool
 call of every Claude Code session. Its first test is
 `[ -n "${PRAXIS_TIME_START_EPOCH:-}" ] || exit 0`, which runs before stdin is
-read and before any subprocess starts. Measured on the development container
-(N=200, wrapper plus impl, env unset): about 5.5 ms per call. For comparison,
-the Python sibling `response-language-nudge` takes about 74 ms per call on the
-same env-unset path. Almost all of the remaining cost is the host's own
-process spawn.
+read and before any subprocess starts; the test file pins both (a stdin that
+never closes, and spy shims that must stay unused).
+
+Measured 2026-09-26 on the development container, N=200 per run, three runs,
+stdin from `/dev/null`:
+
+| Command | Per call |
+| --- | --- |
+| `sh -c exit` (baseline: one shell start) | 1.33–1.45 ms |
+| `impl.sh PostToolUse`, env unset | 1.42–1.50 ms |
+| `hooks/elapsed-time-signal.sh PostToolUse` (wrapper + impl), env unset | 3.47–3.67 ms |
+| wrapper + impl, opted in | 9.3–9.8 ms |
+
+The impl itself costs about one shell start. The generated wrapper
+(`scripts/build-plugin-manifests.py`) adds a second shell, a
+`$(dirname "$0")` fork and an `exec`, about 2 ms or roughly 60% of the
+env-unset total. That shape is shared by every generated `.sh` wrapper and
+is not specific to this hook. A reviewer's independent run gave the same
+picture (1.36–1.55 / 1.38–2.24 / 3.42–3.79 / 9.2–10.0 ms). For comparison,
+the Python sibling `response-language-nudge` measured about 74 ms per call on
+the same env-unset path on 2026-09-25.
 
 ## Validation — silent on anything malformed
 
@@ -172,8 +214,11 @@ bash tests/hooks/advisory-nudge/test_elapsed_time_signal.sh
 
 A `date` shim on `PATH` pins `+%s` and passes every other call through, so
 the hook needs no clock-override variable. The cases: env absent (silent, no
-ledger record), budget mode (`elapsed 340s / 1200s`), a later clock and
-start == now, elapsed-only via `0` and via unset, all three event args plus an
+ledger record), env absent with a stdin that never closes (exits under a 1 s
+`timeout`; control: the opted-in path blocks on the same stdin), env absent
+with spy shims for `cat` / `jq` / `date` / `sleep` / `dirname` on `PATH`
+(none runs; control: the opted-in path runs `date` and `jq`), budget mode
+(`elapsed 340s / 1200s`), a later clock and start == now, elapsed-only via `0` and via unset, all three event args plus an
 unregistered one, the malformed start/budget table above, a start in the
 future, an unparseable payload (still emits, no ledger record), the ledger
 record's `advise` / `session_id`, and the generated wrapper forwarding argv.
