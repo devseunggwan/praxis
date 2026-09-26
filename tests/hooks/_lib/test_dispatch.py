@@ -65,16 +65,16 @@ def test_group_members_count_and_roles():
     # `Bash|Edit|Write` trio forms its own dispatch group. Hooks that ALSO
     # fire on other tools (fan-out-scope-gate, memory-hint,
     # approval-premise-reread-gate, cross-tool-reroute-gate,
-    # question-turn-mutation-gate, cited-rule-gate) register their Bash leg as its own
+    # question-turn-mutation-gate, cited-rule-gate, rejected-call-probe-gate) register their Bash leg as its own
     # exact-`Bash` entry (#1239), so they are members here and standalone on
     # their remaining matcher.
     members = _dispatch.group_members("PreToolUse", "Bash")
-    assert len(members) == 60, f"expected 60 exact-Bash members, got {len(members)}"
+    assert len(members) == 61, f"expected 61 exact-Bash members, got {len(members)}"
     # every impl path must exist on disk
     for role, name, impl in members:
         assert impl.exists(), f"missing impl for {role}/{name}: {impl}"
     roles = [role for role, _name, _impl in members]
-    assert roles.count("preflight-gate") == 31
+    assert roles.count("preflight-gate") == 32
     assert roles.count("advisory-nudge") == 29
 
 
@@ -89,8 +89,8 @@ def test_group_members_host_filter():
     claude = _dispatch.group_members("PreToolUse", "Bash", host="claude")
     codex = _dispatch.group_members("PreToolUse", "Bash", host="codex")
 
-    assert len(unfiltered) == 60  # host=None -> canonical, unfiltered view
-    # the only host-restricted Bash members are the 8 claude-only guards
+    assert len(unfiltered) == 61  # host=None -> canonical, unfiltered view
+    # the only host-restricted Bash members are the 9 claude-only guards
     assert names(claude) == names(unfiltered)
     assert "block-commit-without-codex-review" not in names(codex)
     assert "pre-commit-staged-file-enumeration" not in names(codex)
@@ -100,6 +100,7 @@ def test_group_members_host_filter():
     assert "unenforced-step-advisory" not in names(codex)
     assert "question-turn-mutation-gate" not in names(codex)
     assert "cited-rule-gate" not in names(codex)
+    assert "rejected-call-probe-gate" not in names(codex)
     assert len(codex) == 52
 
 
@@ -142,6 +143,7 @@ EDIT_NOTEBOOK_WRITE_MEMBERS = {
     "cross-tool-reroute-gate",
     "question-turn-mutation-gate",
     "cited-rule-gate",
+    "rejected-call-probe-gate",
 }
 
 
