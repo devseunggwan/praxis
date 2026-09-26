@@ -124,7 +124,7 @@ in [`../SECURITY.md`](../SECURITY.md).
 | `PRAXIS_COMPOSED_COMMAND_STRICT` | `composed-command-gate` | |
 | `PRAXIS_CALLER_PROBE_STRICT` | `caller-probe-gate` | |
 | `PRAXIS_UNENFORCED_STEP_STRICT` | `unenforced-step-advisory` | |
-| `PRAXIS_UNATTENDED` | `early-stop-advisory` | Unattended-run marker, exact value `1` only, unstripped. Turns the user notice into a Stop block whose reason reaches the model, capped at 2 automatic continuations per human turn; the notice keeps firing in every session. Nothing sets it yet — opt-in by hand (#1498) |
+| `PRAXIS_UNATTENDED` | `early-stop-advisory` | Unattended-run marker, exact value `1` only, unstripped. Turns the user notice into a Stop block whose reason reaches the model, capped at 2 automatic continuations per human turn; the notice keeps firing in every session. Nothing sets it yet — opt-in by hand (#1498); `cmux-delegate` workers are to set it (#1512). Naming exception: the only strict variable not spelled `*_STRICT`, because it marks the run as unattended rather than tightening one hook, and #1512 plans it as a run-wide marker |
 
 ## Rewrite (correct the input instead of blocking)
 
