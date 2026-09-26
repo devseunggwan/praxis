@@ -116,6 +116,74 @@ else
   fail "emission records an advise fire with the session id" "$(cat "$LEDGER" 2>/dev/null)"
 fi
 
+# --- 1b. The no-op path reads no stdin and spawns nothing -------------------
+# The cost claim in spec.md (exit before stdin is read, before any process is
+# spawned) is what every session without a budget pays on every tool call, so
+# it is pinned here, not left to the prose.
+#
+# stdin that never closes: a hook that reads stdin before the env check blocks
+# until `timeout` kills it (rc 124). Process substitution keeps the writer end
+# open without the shell waiting for `sleep` to finish.
+stdin_never_closes() {
+  local target="$1"
+  shift
+  local fd holder
+  exec {fd}< <(sleep 30)
+  holder=$!
+  env -u PRAXIS_TIME_START_EPOCH -u PRAXIS_TIME_BUDGET_S \
+    PATH="$WORK_DIR/bin:$PATH" PRAXIS_FIRE_TELEMETRY_FILE="$LEDGER" "$@" \
+    timeout 1 "$target" PostToolUse <&"$fd" >"$WORK_DIR/stdout" 2>"$WORK_DIR/stderr"
+  RC=$?
+  exec {fd}<&-
+  kill "$holder" 2>/dev/null
+  OUT=$(<"$WORK_DIR/stdout")
+  ERR=$(<"$WORK_DIR/stderr")
+}
+
+rm -f "$LEDGER"
+stdin_never_closes "$HOOK"
+expect_silent "env absent + stdin never closes -> exits without reading stdin"
+# Control: the opted-in path does read stdin, so the same harness must time
+# out there, or the case above would pass on a harness that closes stdin.
+stdin_never_closes "$HOOK" PRAXIS_TIME_START_EPOCH=$START PRAXIS_TIME_BUDGET_S=1200
+if [ "$RC" -eq 124 ]; then
+  pass "control: opted-in path blocks on the same never-closing stdin"
+else
+  fail "control: opted-in path blocks on the same never-closing stdin" "rc=$RC"
+fi
+
+# Spy shims: each external the opted-in path uses records its own name before
+# handing over to the real binary. On the no-op path the spy log stays empty.
+SPY_DIR="$WORK_DIR/spy"
+SPY_LOG="$WORK_DIR/spy.log"
+mkdir -p "$SPY_DIR"
+for tool in cat jq date sleep dirname; do
+  real=$(PATH="$WORK_DIR/bin:$PATH" command -v "$tool") || continue
+  cat >"$SPY_DIR/$tool" <<EOF
+#!/bin/sh
+echo $tool >>"$SPY_LOG"
+exec "$real" "\$@"
+EOF
+  chmod +x "$SPY_DIR/$tool"
+done
+
+rm -f "$SPY_LOG"
+run_hook "$HOOK" PostToolUse PATH="$SPY_DIR:$WORK_DIR/bin:$PATH"
+if [ "$RC" -eq 0 ] && [ -z "$OUT" ] && [ ! -e "$SPY_LOG" ]; then
+  pass "env absent -> no external command spawned"
+else
+  fail "env absent -> no external command spawned" "rc=$RC spawned=$(tr '\n' ' ' <"$SPY_LOG" 2>/dev/null)"
+fi
+# Control: the opted-in path does reach the shims.
+rm -f "$SPY_LOG"
+run_hook "$HOOK" PostToolUse PATH="$SPY_DIR:$WORK_DIR/bin:$PATH" \
+  PRAXIS_TIME_START_EPOCH=$START PRAXIS_TIME_BUDGET_S=1200
+if grep -qx date "$SPY_LOG" 2>/dev/null && grep -qx jq "$SPY_LOG" 2>/dev/null; then
+  pass "control: opted-in path spawns date and jq through the spies"
+else
+  fail "control: opted-in path spawns date and jq through the spies" "spawned=$(tr '\n' ' ' <"$SPY_LOG" 2>/dev/null)"
+fi
+
 # --- 2. The elapsed value follows the clock, not a constant -----------------
 run_hook "$HOOK" PostToolUse PRAXIS_TIME_START_EPOCH=$START PRAXIS_TIME_BUDGET_S=1200 FAKE_NOW=1700002500
 expect_line "later clock -> larger elapsed (past the budget, still advisory)" "elapsed 1500s / 1200s" PostToolUse
