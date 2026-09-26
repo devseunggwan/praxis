@@ -3,14 +3,18 @@
 Supported hosts: all
 
 `hooks/completion-verify/early-stop-advisory/impl.py` fires on the Stop event
-and advises when the turn's last assistant message ends the turn while the
-requested work still looks open.
+and shows the user a notice when the turn's last assistant message ends the
+turn while the requested work still looks open. The model does not receive
+the notice (see [Output](#output)).
 
 ## Why this exists
 
-The Opus 5.5 prompting guide
-([§ Unattended agentic runs](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-opus-5-5#unattended-agentic-runs))
-names four ways a model ends its turn with requested work still owed:
+The Opus 5.5 prompting guide's
+[§ Unattended agentic runs](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-opus-5-5#unattended-agentic-runs)
+gives an example system-prompt addition, "written for agents that run fully
+unattended, where you want the model to keep working rather than stop to
+report". That addition names four ways a turn ends "while work they asked for
+was still owed":
 
 1. a summary that closes by announcing the next step, with no tool call;
 2. an offer to carry on unless the user would prefer otherwise;
@@ -18,95 +22,149 @@ names four ways a model ends its turn with requested work still owed:
    work;
 4. stopping to report because the turn was long or a milestone is done.
 
+The guide scopes that addition to unattended runs: "leave the addition out of
+human-in-the-loop applications, where someone is there to answer." **This
+hook does not make that distinction: it fires in every session, attended or
+not.** Gating it to unattended harnesses (for example `cmux-delegate`
+workers) is an open decision on PR #1504.
+
 Before this hook, praxis reacted to type 2 only when it went through
 `AskUserQuestion` (`block-manufactured-action-menu`, `block-ask-end-option`)
-and to type 3 only as a prose menu (`prose-option-menu-advisory`). Types 1, 4,
-and 2-as-prose reached Stop with no hook reacting: issue #1498 ran all 18
-Stop hooks on synthetic turns of each type (2026-09-25) and none produced
-output for them.
+and to type 3 only as a prose menu (`prose-option-menu-advisory`). Issue #1498
+ran the 18 Stop hooks on synthetic turns (2026-09-25): none reacted to T1
+(type 1), T2 (type 2 in prose) or T4b (type 4). T4, the same milestone report
+with the word `완료`, drew a `completion-verify` block only incidentally — it
+read `완료` as a completion claim with the `28 passed` token unquoted, not
+the milestone stop.
 
 ## Decision predicate
 
 The text graded is the payload's `last_assistant_message` (falling back to the
-transcript's last main-chain assistant message) with fenced code blocks and
-`>` quote lines removed. The **closing lines** are its last three non-empty
-lines, split into sentences.
+transcript's last main-chain assistant message) with fenced code blocks, `>`
+quote lines, and inline quoted spans (`"…"`, `“…”`, `‘…’`, `'…'`, `「…」`,
+`『…』`) removed: a quoted plan step or user phrase is not the model's own
+announcement. A straight `'` between two word characters (`I'll`) is an
+apostrophe, not a quote mark.
+
+The **closing lines** are the last three prose lines, plus up to ten short
+`Key: value` status lines after them (`Tests: 28 passed`), split into
+sentences. Only they are read for types 1 and 2: the guide's type 1 is a
+summary that *closes* on an announcement, and the same verb mid-report usually
+narrates the order work was done in.
 
 Advise when one of these holds, checked in this order:
 
 | Type | Condition | Examples that match |
 | ---- | --------- | ------------------- |
-| 2 (prose) | A closing sentence makes continuing conditional on the user's preference **and** names continuing the requested work | `원하시면 남은 /payments도 이어서 진행하겠습니다`, `나머지도 계속 진행할까요?`, `If you'd like, I can continue with the remaining …`, `Want me to keep going with the rest?` |
-| 1 | A closing sentence is a first-person future **and** carries a next-step cue | `다음 단계로 남은 /payments를 마이그레이션하겠습니다`, `이제 /payments를 옮길게요`, `Next, I'll migrate the remaining …` |
-| 4 | The message frames itself as an interim or milestone report **and** some line lists an unfinished item that is not negated | `## 중간 보고` … `- payments: 미착수`, `## Progress update` … `- payments: not started` |
+| 2 (prose) | A closing sentence makes continuing conditional on the user's preference **and** names continuing the requested work, with no out-of-turn deferral | `원하시면 남은 /payments도 이어서 진행하겠습니다`, `남은 payments도 진행하면 될까요?`, `If you'd like, I can continue with the remaining …`, `I can continue with /payments if that works for you` |
+| 1 | A closing sentence binds a next-step cue to a first-person future | `다음 단계로 /payments를 마이그레이션하겠습니다`, `이제 /payments를 옮길게요`, `/payments 마이그레이션 진행할게요`, `Next, I'll migrate /payments`, `I'll now migrate …`, `I'll tackle /payments after this`, `Next up: migrating /payments` |
+| 4 | A sentence frames the message as an interim or milestone report **and** a different sentence lists an unfinished item that it does not negate | `## 중간 보고` … `- payments: 미착수`, `## Progress update` … `- payments: not started` |
 
-Vocabulary, Korean and English:
+How the cue binds in type 1:
 
-- Preference condition: `원하시면`, `필요하시면`, `괜찮으시면`, `…할까요`
-  (`진행할까요`, `드릴까요`, …), `if you'd like/want/prefer`,
-  `unless you'd prefer`, `want me to`, `shall I`, `should I`,
-  `would you like me to`, `let me know if you'd like`.
-- Continuation cue: `이어서`, `이어가`, `계속`, `남은`, `나머지`, `마저`,
-  `continue`, `proceed`, `carry on`, `keep going`, `remaining`, `rest of`,
-  `finish`. An offer of something *new* after the work is done
-  (`원하시면 PR 설명도 작성해 드릴게요`) carries none of these and stays silent.
+- Korean: the cue precedes the future verb in the same sentence (`이제 …겠습니다`,
+  `다음 단계로 …ㄹ게요`), or the verb is itself the next step (`진행하겠습니다`,
+  `진행할게요`, `착수하겠습니다`).
+- English: the cue sits right before the verb (`Next, I'll`, `now let me`),
+  right after it (`I'll now`, `I'll next`), is the verb (`I'll continue`,
+  `I'll proceed`), names the object within a few words (`I'll migrate the
+  remaining …`, `I'll … after this`), or opens the sentence (`Next up:`,
+  `Moving on to`).
+- A reporting verb after `I'll` is not a next step: `summarize`, `recap`,
+  `note`, `report`, `mention`, `point out`, `let you know`, `wait`. (`wait`:
+  the guide gives that wait to the harness — "If something the model started
+  is still running, such as a background command or a subagent, don't treat
+  the task as done yet: wait for it to finish and return its output to the
+  model as the next user message." — so "I'll wait for CI" is not read as an
+  announced next step.)
+
+Vocabulary examples, Korean and English. **These are examples; the regexes
+in `impl.py` are the authority.**
+
+- Preference condition: `원하시면`, `괜찮으시면`, `…할까요`, `…면 될까요`,
+  `if you'd like`, `unless you'd prefer`, `want me to`, `shall I`,
+  `if that works for you`.
+- Continuation of the requested work: `이어서`, `계속`, `남은`, `나머지`,
+  `마저`, `continue`, `proceed`, `keep going`, `remaining`, `the rest`,
+  `finish the rest`. An offer of something *new* (`원하시면 PR 설명도 작성해
+  드릴게요`, `I can also finish the changelog entry`) carries none and stays
+  silent.
 - First-person future: `…겠습니다`, `…겠어요`, `…ㄹ게요` (any syllable with a
-  ㄹ final before `게요`), `I'll`, `I will`, `I'm going to`, `let me now`.
+  ㄹ final before `게요`), `I'll`, `I will`, `I'm going to`, `let me`.
 - Next-step cue: `다음 단계`, `다음으로`, `이제`, `이어서`, `계속`, `남은`,
-  `나머지`, `next`, `now`, `then`, `continue`, `remaining`, `rest of`.
-- Not a next step: `다음에는`, `다음번`, `다음 세션`, `다음 PR`, `후속`,
-  `next time`, `next session`, `follow-up`, and closings (`마치겠습니다`,
-  `않겠습니다`, `wrap up`, `won't`).
-- Interim framing: `중간 보고`, `진행 상황`, `현재까지`, `지금까지`,
-  `여기까지`, `이 시점에서`, `작업이 길어`, `마일스톤`, `progress update`,
-  `status update`, `interim`, `checkpoint`, `so far`, `at this point`,
-  `long run`.
-- Unfinished item: `미착수`, `미완료`, `미반영`, `진행 중`, `남은 작업`,
-  `남아 있`, `TODO`, `[ ]`, `not started`, `not yet`, `pending`,
-  `remaining`, `in progress` — unless the same line negates it (`없습니다`,
-  `nothing remaining`, `0 pending`).
-
-Only the closing lines are read for types 1 and 2: the guide's type 1 is a
-summary that *closes* on an announcement, and the same verb mid-report usually
-narrates the order work was done in.
+  `나머지`, `곧바로`, `next`, `now`, `then`, `remaining`, `after this`.
+- Out of this turn (types 1 and 2): `다음에는`, `다음 PR`, `후속`, `앞으로`,
+  `나중에`, `내일`, `next time`, `follow-up`, `from now on`, `later`,
+  `tomorrow`. Closings (type 1): `마치겠습니다`, `않겠습니다`, `wrap up`,
+  `won't`.
+- Interim framing: `중간 보고`, `진행 상황`, `지금까지`, `이 시점에서`,
+  `작업이 길어`, `마일스톤`, `progress update`, `status update`, `so far`,
+  `at this point`, `long run`.
+- Unfinished item: `미착수`, `미완료`, `진행 중`, `남은 작업`, `TODO`, `[ ]`,
+  `not started`, `not yet`, `pending`, `still to do` — unless the same
+  sentence negates it (`없습니다`, `nothing remaining`, `0 pending`), and not
+  in the framing sentence itself (`So far the pipeline has not yet …` is one
+  sentence and stays silent).
 
 ## Stops that stay silent
 
-The guide keeps the stops the user wants — nothing can move without them, or a
-blocker is deliberately protected. The hook is silent when:
+**The guide's wanted stops.** The addition names two: "the ones where nothing
+can move without them, or where the thing blocking you is deliberately
+protected from you." The hook approximates both with a blocker stated as a
+need or a lack, anywhere in the text:
 
-- **A blocker is named** anywhere in the text: missing credentials, access or
-  a token (`자격 증명`, `권한이 없`, `credentials`, `no access`), an approval
-  or decision only the user can give (`승인이 필요`, `결정이 필요`,
-  `needs your approval`, `once you provide`), or `blocked` / `waiting on` /
-  `진행할 수 없`.
+- a missing or needed credential, secret or access: `자격 증명이 필요`,
+  `권한이 없`, `needs a staging DB password`, `no staging DB credentials`,
+  `don't have access` (the English trigger and noun must share a clause,
+  within 50 characters);
+- a handover only the user can make: `비밀번호를 알려주시면`, `승인해 주시면`,
+  `승인이 필요`, `결정이 필요`, `waiting on your approval`,
+  `once you share/send/give/provide`;
+- `blocked on/by`, `can't proceed`, `진행할 수 없`.
+
+A bare word (`credentials table`, `waiting for the lock`) is not a blocker.
+
+**praxis additions** (not from the guide):
+
 - **The user asked for the stop**: the human message that opened the turn
-  (`read_last_user_message(human_only=True)`) asks for a report, a plan, or a
-  pause (`진행 상황`, `현황`, `보고해`, `계획만`, `status`, `progress`,
-  `make a plan`, `one at a time`, `step by step`), or is a question — an
-  interrogative word (`왜`, `어떻게`, `why`, `how`, …) on a line with a
-  question ending. A request phrased with `?` but no interrogative word
-  (`마이그레이션 해줄 수 있어?`) is still a request.
+  (`read_last_user_message(human_only=True)`) requests a report, a plan, or a
+  pause (`진행 상황 알려`, `현황 알려`, `계획만`, `status of`,
+  `give me a status`, `progress report`, `make a plan`, `one at a time`), or is
+  a question — a word-initial interrogative (`왜`, `어떻게`, `why`, `how`, …)
+  on a line with a question ending, or an English auxiliary-inversion question
+  (`Are the endpoints done?`). Indefinites are not interrogatives
+  (`어떻게든`, `언제나`), and `Can/Could/Will/Would you …?` is a request.
+  A word inside a request (`fix the status field`, `결제 현황 API`) is not a
+  status request.
 - **The text is a type-3 menu**: `prose-option-menu-advisory`'s own
   `is_prose_menu` predicate, loaded from its `impl.py` by file location, holds.
   That hook owns decision menus; reusing its predicate rather than a copy keeps
   the two disjoint even when its vocabulary changes. A menu that also closes on
   a next-step announcement goes to the menu hook alone.
-- **`stop_hook_active` is set** — the host's cap on automatic continuations.
+- **`stop_hook_active` is set** — the host's re-entry flag, true when this Stop
+  follows a continuation that a Stop hook's block forced.
 - `PRAXIS_EARLY_STOP_BYPASS` is set to any non-empty value.
 
 ## Output
 
 Advisory only: `{"systemMessage": ...}` on stdout, exit 0. It never blocks.
-The message follows the guide's continuation pattern — it names the type
-detected and quotes the line, then asks to continue with the open items or
-state in one line what blocks them:
+
+Per `hooks/_lib/_hook_io.py` (Stop-event emitters), a Stop `systemMessage` is
+"Shown to the user in the transcript; does NOT block the stop and is NOT fed
+to the model." So this is a notice to the user, not the guide's continuation
+message: the guide sends the open items to the model as "a short user message
+naming them", and nothing here reaches the model or continues the run. The
+notice names the type, quotes the line, and tells the user they can reply
+"continue":
 
 ```text
-[early-stop-advisory] This turn ended while requested work still looks open — a next step announced but not taken:
+[early-stop-advisory] The turn ended with requested work apparently still open — a next step announced but not taken:
   "다음 단계로 남은 `/payments` 엔드포인트를 마이그레이션하고 테스트를 갱신하겠습니다."
-  If nothing blocks the open items, continue with them instead of stopping. If something does (missing credentials or access, an approval or a decision only the user can make), state that blocker in one line. Bypass: PRAXIS_EARLY_STOP_BYPASS=1
+  Claude does not see this notice. If nothing blocks the open work, reply "continue". Bypass: PRAXIS_EARLY_STOP_BYPASS=1
 ```
+
+Whether the notice should instead reach the model (a `decision: block` whose
+`reason` is fed back) is an open decision on PR #1504.
 
 A fire records one `advise` row in the fire ledger.
 
@@ -114,17 +172,17 @@ A fire records one `advise` row in the fire ledger.
 
 Every marker is also written by a turn that finished correctly, and a blocker
 the model did not name reads the same as no blocker. A block forces a
-continuation, which would override exactly the stops the guide says to keep. So
-the hook names what looks open and leaves the decision to continue with the
-reader.
+continuation, which would override exactly the stops the guide says to keep.
+So the hook names what looks open and leaves the decision to continue with the
+user.
 
 ## Measured corpus
 
 None yet. No local transcript corpus was available when the hook was written,
 so there is no fire rate or sampled precision; the fixture suite in
 `tests/hooks/completion-verify/test_early_stop_advisory.sh` is the only
-evidence. Replay it over `~/.claude*/projects/*/*.jsonl` before the
-`review_by` audit.
+evidence. Issue #1498's corpus fire-rate item is therefore still open. Replay
+the hook over `~/.claude*/projects/*/*.jsonl` before the `review_by` audit.
 
 ## Relationship to the sibling hooks
 

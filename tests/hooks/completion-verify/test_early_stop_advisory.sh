@@ -256,6 +256,174 @@ PR 본문도 갱신했습니다.
 run_case silent "a future verb mid-report, outside the closing lines" '{}'
 
 # =====================================================================
+# Review fixtures (PR #1504) — quoted spans, cue binding, new offers
+# =====================================================================
+
+build_transcript '세 개 모두 끝냈습니다. 계획대로 "이제 payments를 옮기겠습니다" 단계까지 포함해 완료했습니다.'
+run_case silent "a quoted plan step is not an announcement" '{}'
+
+build_transcript '말씀하신 "이제 나머지는 제가 할게요"에 맞춰 users와 orders만 옮겼고 payments는 손대지 않았습니다.'
+run_case silent "a quoted user phrase is not an announcement" '{}'
+
+build_transcript '세 개 모두 끝냈습니다. 「이제 payments를 옮기겠습니다」라고 적었던 단계도 완료했습니다.'
+run_case silent "a 「」-quoted step is not an announcement" '{}'
+
+build_transcript "All three are migrated, following the plan 'Next, I'll migrate /payments' to the letter." "$USER_EN"
+run_case silent "a single-quoted step with an inner apostrophe" '{}'
+
+build_transcript '> 이제 나머지는 제가 할게요
+
+알겠습니다. users와 orders만 옮겨 두었습니다.'
+run_case silent "a > quote line is not an announcement" '{}'
+
+build_transcript "All three endpoints are migrated. I will now summarize: 42 passed, 0 failed." "$USER_EN"
+run_case silent "I will now summarize is a report" '{}'
+
+build_transcript "I migrated /users, then /orders, then /payments. I'll note that all 42 tests pass now." "$USER_EN"
+run_case silent "I'll note, with a then-narrative in another sentence" '{}'
+
+build_transcript "Pushed the fix. CI is now running; I'll report back when it finishes." "$USER_EN"
+run_case silent "I'll report back is a report" '{}'
+
+build_transcript "Everything is migrated and green. If you'd like, I can also finish the changelog entry." "$USER_EN"
+run_case silent "an offer to finish a new item" '{}'
+
+build_transcript '모두 끝냈습니다. 원하시면 앞으로도 계속 이런 식으로 정리해 드릴게요.'
+run_case silent "an offer about how to work from now on" '{}'
+
+build_transcript "All three endpoints are migrated and tests pass. So far the deploy pipeline has not yet picked it up, which is expected." "$USER_EN"
+run_case silent "interim framing and open item in the same sentence" '{}'
+
+build_transcript '3개 엔드포인트 마이그레이션을 모두 끝냈고 42 passed입니다.
+
+다음에는 곧바로 스키마 검사부터 돌리겠습니다.'
+run_case silent "다음에는 defers even with a cue in the sentence" '{}'
+
+build_transcript '알겠습니다, 이제 세 엔드포인트 모두 옮겼고 42 passed입니다.'
+run_case silent "a cue after the future form is not bound to it" '{}'
+
+build_transcript '세 엔드포인트 모두 옮겼고 42 passed입니다. 이제 작업을 마치겠습니다.'
+run_case silent "a closing (마치겠습니다) is not a next step" '{}'
+
+build_transcript "All three endpoints are migrated. Next time, I'll continue with the schema check first." "$USER_EN"
+run_case silent "next time defers even with a continuation verb" '{}'
+
+build_transcript '`/users`, `/orders`는 끝냈습니다. `/payments` 스키마 변경은 운영 DB라 승인이 필요합니다. 승인 후 이어서 진행하겠습니다.'
+run_case silent "승인이 필요 alone silences" '{}'
+
+build_transcript '`/users`, `/orders`는 끝냈습니다. 다음 단계로 `/payments`를 옮기겠습니다.'
+run_case advisory "다음 단계로 is a next-step cue" '{}'
+
+build_transcript '`/users`, `/orders`는 끝냈습니다.
+
+이제 `/payments`를 옮기겠습니다.
+
+테스트는 28 passed입니다.'
+run_case advisory "an announcement two prose lines from the end" '{}'
+
+build_transcript "Next, I'll migrate /payments.
+
+Tests: 28 passed.
+Lint: clean.
+Typecheck: clean." "$USER_EN"
+run_case advisory "status lines after the announcement do not push it out" '{}'
+
+build_transcript '## 중간 보고
+- users: 완료
+- payments: 미착수'
+run_case advisory "중간 보고 heading with an unstarted item" '{}'
+
+build_transcript "## Progress update
+- users: done
+- payments: not started" "$USER_EN"
+run_case advisory "Progress update heading with an unstarted item" '{}'
+
+build_transcript "Milestone 1 is done (users, orders). Payments is still to do; stopping here to report." "$USER_EN"
+run_case advisory "milestone and open item in separate sentences" '{}'
+
+build_transcript '`/users`, `/orders` 마이그레이션 끝났습니다. 남은 `/payments`도 진행하면 될까요?'
+run_case advisory "…면 될까요 offer to continue" '{}'
+
+build_transcript "Migrated /users and /orders; tests pass.
+
+Next up: migrating /payments." "$USER_EN"
+run_case advisory "Next up: opens the closing sentence" '{}'
+
+build_transcript "/users and /orders done. Moving on to /payments next." "$USER_EN"
+run_case advisory "Moving on to … next" '{}'
+
+build_transcript "/users and /orders are migrated. I can continue with /payments if that works for you." "$USER_EN"
+run_case advisory "I can continue … if that works for you" '{}'
+
+build_transcript "Done with /users and /orders. I'll tackle /payments after this." "$USER_EN"
+run_case advisory "I'll … after this" '{}'
+
+build_transcript '`/users`, `/orders` 끝냈습니다. `/payments` 마이그레이션 진행할게요.'
+run_case advisory "진행할게요 is a next step without a cue word" '{}'
+
+build_transcript '세 개 모두 끝냈습니다. 배포는 내일 진행하겠습니다.'
+run_case silent "진행하겠습니다 deferred to tomorrow" '{}'
+
+# --- blockers: a need or a lack, not a bare word --------------------
+
+build_transcript "Migrated /users and /orders (the credentials table is untouched). Next, I'll migrate /payments." "$USER_EN"
+run_case advisory "credentials as a table name is not a blocker" '{}'
+
+build_transcript "Migrated /users and /orders; no longer waiting for the lock. Next, I'll migrate /payments." "$USER_EN"
+run_case advisory "waiting for the lock is not a blocker" '{}'
+
+build_transcript "I migrated /users and /orders. /payments needs a staging DB password I don't have. Next I'll migrate /payments once you share it." "$USER_EN"
+run_case silent "needs a password I don't have" '{}'
+
+build_transcript "/users and /orders are done. /payments needs a staging DB password I don't have; next I'll migrate it." "$USER_EN"
+run_case silent "a need bound to what is missing, with no handover phrase" '{}'
+
+build_transcript 'users, orders는 끝냈습니다. payments는 스테이징 DB 비밀번호를 알려주시면 이어서 진행하겠습니다.'
+run_case silent "비밀번호를 알려주시면" '{}'
+
+build_transcript '`/users`, `/orders`는 끝냈습니다. `/payments`에는 스테이징 DB 자격 증명이 필요합니다. 준비되면 이어서 진행하겠습니다.'
+run_case silent "자격 증명이 필요 alone silences" '{}'
+
+build_transcript "Migrated /users and /orders. /payments is waiting on your credentials for staging. Next I'll migrate it." "$USER_EN"
+run_case silent "waiting on your credentials (issue #1498 fixture)" '{}'
+
+# --- the user asked for the stop, or did not ------------------------
+
+EN_NEXT="Done /users and /orders. Next, I'll migrate /payments."
+KO_NEXT='users, orders 끝냈습니다. 이제 payments를 옮기겠습니다.'
+
+build_transcript "$EN_NEXT" "Are the endpoints done?"
+run_case silent "auxiliary-inversion question" '{}'
+
+build_transcript "$EN_NEXT" "Status of the migration, please."
+run_case silent "status of — a status request" '{}'
+
+build_transcript "$KO_NEXT" '마이그레이션 현황 알려줘'
+run_case silent "현황 알려줘 — a status request" '{}'
+
+build_transcript "$EN_NEXT" "Migrate the endpoints; fix the status field in payments too."
+run_case advisory "status as a field name is not a status request" '{}'
+
+build_transcript "$EN_NEXT" "Migrate the progress-bar endpoints too."
+run_case advisory "progress as a noun is not a progress request" '{}'
+
+build_transcript "$KO_NEXT" '결제 현황 API까지 포함해서 3개 엔드포인트 마이그레이션 해줘'
+run_case advisory "현황 as part of an API name" '{}'
+
+build_transcript "$KO_NEXT" '어떻게든 3개 엔드포인트 다 옮겨줄 수 있지?'
+run_case advisory "어떻게든 …있지? is a request, not a question" '{}'
+
+build_transcript "$EN_NEXT" "Can you migrate all three endpoints?"
+run_case advisory "Can you …? is a request" '{}'
+
+# --- the notice is addressed to the user ----------------------------
+
+build_transcript "$T1"
+run_hook "$HOOK" '{}'
+assert_kind 'reply \"continue\"' "the notice tells the user they can reply continue"
+assert_kind "Claude does not see this notice" "the notice says the model does not receive it"
+
+# =====================================================================
 # Guards and fail-open
 # =====================================================================
 
