@@ -106,6 +106,23 @@ run_case "haiku for search" "silent" 'claude -p "search the logs" --model haiku'
 run_case "opus for security" "silent" 'claude -p "security audit of auth" --model opus'
 run_case "claude:opus prefix inspected + matches" "silent" \
   'claude -p "design the schema" --model claude:opus'
+run_case "opus:low effort suffix still matches security" "silent" \
+  'claude -p "security audit of auth" --model opus:low'
+
+# --- effort suffix (#1499) is ignored for ranking ----------------------------
+# `<tier>:<effort>` and `claude:<tier>:<effort>` rank as the bare tier; the
+# value is lower-cased first so `opus:LOW` ranks too. A non-Claude provider
+# carrying an effort stays silent as before.
+run_case "opus:low for find (over-powered)" "surface:over-powered" \
+  'cmux-delegate --model opus:low "find all callers of X"'
+run_case "claude:opus:low for find (over-powered)" "surface:over-powered" \
+  'cmux-delegate --model claude:opus:low "find all callers of X"'
+run_case "opus:LOW upper-case effort for find (over-powered)" "surface:over-powered" \
+  'cmux-delegate --model opus:LOW "find all callers of X"'
+run_case "haiku:high for architect (under-powered)" "surface:under-powered" \
+  'cmux-delegate --model haiku:high "architect the new system"'
+run_case "codex:gpt-5:high stays silent" "silent" \
+  'cmux-delegate --model codex:gpt-5:high "architect X"'
 
 # --- No comparable tier / no signal → silent --------------------------------
 run_case "no --model" "silent" 'claude -p "implement feature Y"'

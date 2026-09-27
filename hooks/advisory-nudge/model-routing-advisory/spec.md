@@ -53,6 +53,7 @@ blocked.
 | No `--model` in the command | silent |
 | `--model` value not a bare Claude tier (`codex:gpt-5`, `gemini:…`, `claude-opus-4-8`) | silent (no comparable tier) |
 | `--model claude:opus` (explicit Claude provider prefix) | inspected (`claude:` resolves to the bare tier) |
+| `--model opus:low` / `--model claude:opus:low` (effort suffix, #1499) | inspected (the `:<effort>` tail is ignored; ranks as `opus`) |
 | Command has a `--model` tier but no task-signal keyword | silent (no implied tier) |
 | Opt-out marker `# [model-routing-ack]` in the command | silent |
 | `PRAXIS_SKIP_MODEL_ROUTING=1` in the environment | silent |
@@ -62,8 +63,13 @@ blocked.
 
 **Chosen tier** — the value of the first `--model <val>` / `--model=<val>`.
 A `provider:model` value keeps only the model when the provider is `claude`;
-any other provider prefix, or a value not in `{haiku, sonnet, opus}`, yields no
-comparable tier and the hook stays silent.
+any other provider prefix (`codex:gpt-5:high` included), or a value not in
+`{haiku, sonnet, opus}`, yields no comparable tier and the hook stays silent.
+A trailing `:<effort>` on a bare tier (`opus:low`, `claude:opus:low`, the
+cmux-delegate effort notation from #1499) is ignored for ranking: the value is
+lower-cased first, so `opus:LOW` ranks as `opus` too. Only an alphabetic tail
+after a bare tier (`opus|sonnet|haiku|fable`) is treated as an effort; `fable`
+has no rank and stays silent either way.
 
 **Implied tier** — the highest-precedence task signal present in the command
 text, matched on ASCII word boundaries (`(?<![a-z])kw(?![a-z])`, lower-cased):
@@ -261,7 +267,9 @@ bash tests/hooks/advisory-nudge/test_model_routing_advisory.sh
 Covers: over-powered mismatch (`--model opus` + `find`) surfaced; under-powered
 mismatch (`--model haiku` + `architect`) surfaced; matching tier silent;
 non-Claude provider / full model id / no `--model` / no signal keyword silent;
-`claude:opus` prefix inspected; nested `cmux --command "… --model …"` detected;
+`claude:opus` prefix inspected; `opus:low` / `claude:opus:low` / `opus:LOW`
+effort suffix ignored for ranking and `codex:gpt-5:high` still silent; nested
+`cmux --command "… --model …"` detected;
 word-boundary collisions (`remove` / `research` / `address` / `prefix`) silent;
 opt-out marker and env bypass silent; fail-open (non-Bash, malformed JSON, empty
 command).
