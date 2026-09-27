@@ -85,6 +85,21 @@ def test_fenced_command_with_korean_run_phrase():
     assert gate.relays(msg, _sigs())
 
 
+def test_tilde_fence_is_code():
+    msg = "다음 명령이면 됩니다:\n~~~\n! git push origin main\n~~~"
+    assert gate.relays(msg, _sigs())
+
+
+def test_shorter_inner_fence_does_not_close_a_longer_one():
+    msg = "다음 명령이면 됩니다:\n````\n```\n! git push origin main\n````"
+    assert gate.relays(msg, _sigs())
+
+
+def test_blank_line_inside_a_longer_fence_splits_no_paragraph():
+    msg = "직접 실행해 주세요.\n````md\n```\n\ngit push origin main\n````"
+    assert gate.relays(msg, _sigs())
+
+
 def test_inline_code_with_english_run_phrase():
     msg = "You can run `git push origin main` from your terminal to finish."
     assert gate.relays(msg, _sigs())

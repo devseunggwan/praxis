@@ -76,7 +76,7 @@ _USER_RUN = re.compile(
 )
 _NEGATED_AFTER = re.compile(r"^.{0,8}?(?:지\s*않|지\s*말|하지\s*않|not\b|n't\b)")
 
-_FENCE = re.compile(r"^\s*```")
+_FENCE = re.compile(r"^\s*(`{3,}|~{3,})(.*)$")
 _INLINE_CODE = re.compile(r"`([^`\n]+)`")
 _LINE_PREFIX = re.compile(r"^\s*(?:[-*+]\s+|\d+[.)]\s+|>\s+|\$\s+)*")
 
@@ -121,18 +121,38 @@ def is_subsequence(needle: list[str], hay: list[str]) -> bool:
     return all(any(tok == h for h in it) for tok in needle)
 
 
+def fence_marks(lines: list[str]) -> list[bool | None]:
+    """True inside a fenced block, None on a fence delimiter, False elsewhere.
+
+    A fence closes only on the opener's character, at least as long, with
+    nothing after it, so an inner ``` line stays content of a ```` block.
+    """
+    marks: list[bool | None] = []
+    fence: str | None = None
+    for line in lines:
+        m = _FENCE.match(line)
+        if fence is None:
+            if m:
+                fence = m.group(1)
+            marks.append(None if m else False)
+            continue
+        if m and m.group(1)[0] == fence[0] and len(m.group(1)) >= len(fence) and not m.group(2).strip():
+            fence = None
+            marks.append(None)
+            continue
+        marks.append(True)
+    return marks
+
+
 def code_lines(message: str) -> list[tuple[int, str]]:
     """(line index, code text) for every fenced line and inline code span."""
     out: list[tuple[int, str]] = []
-    in_fence = False
-    for i, line in enumerate(message.splitlines()):
-        if _FENCE.match(line):
-            in_fence = not in_fence
-            continue
-        if in_fence:
+    lines = message.splitlines()
+    for i, (line, mark) in enumerate(zip(lines, fence_marks(lines))):
+        if mark:
             out.append((i, line))
-            continue
-        out.extend((i, span) for span in _INLINE_CODE.findall(line))
+        elif mark is False:
+            out.extend((i, span) for span in _INLINE_CODE.findall(line))
     return out
 
 
@@ -146,11 +166,10 @@ def _has_user_run_frame(text: str) -> bool:
 def paragraphs(message: str) -> list[int]:
     """Paragraph number of each line; a blank line inside a fence splits nothing."""
     out: list[int] = []
-    number, in_fence = 0, False
-    for line in message.splitlines():
-        if _FENCE.match(line):
-            in_fence = not in_fence
-        elif not in_fence and not line.strip():
+    number = 0
+    lines = message.splitlines()
+    for line, mark in zip(lines, fence_marks(lines)):
+        if mark is False and not line.strip():
             number += 1
         out.append(number)
     return out
