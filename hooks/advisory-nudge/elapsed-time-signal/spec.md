@@ -164,6 +164,25 @@ picture (1.36–1.55 / 1.38–2.24 / 3.42–3.79 / 9.2–10.0 ms). For compariso
 the Python sibling `response-language-nudge` measured about 74 ms per call on
 the same env-unset path on 2026-09-25.
 
+### Alternative considered: per-worker registration with `--settings`
+
+The registration is global: `PostToolUse` (matcher `.*`), `PostToolUseFailure`
+and `UserPromptSubmit` in every Claude Code session, while only a worker
+launched with `--time-budget` opts in through the environment. Every other
+session pays the env-unset cost measured above on each tool result and each
+prompt: about 3.5 ms through the generated wrapper (about 1.5 ms of it in the
+impl itself). The canaries show the other option works: `claude --settings
+<file>` accepted a settings file that registered this hook, so `cmux-delegate`
+could write such a file per worker and register the hook only there, leaving
+the plugin manifest without it. The env switch was kept for two reasons.
+First, the on/off state is a variable the wrapper can `unset` before a
+nested launch, which is what keeps a child `claude` started from a worker's
+Bash tool clean (see *Known limitations*); a settings-file registration has
+no equivalent that the wrapper controls. Second, there is no extra file to
+generate, resolve against the plugin's install path, ship next to the prompt
+file, and clean up, and the prompt file already has a no-delete rule in the
+wrapper's trap. The per-session cost above is what that choice buys.
+
 ## Validation — silent on anything malformed
 
 | Input | Result |
@@ -228,4 +247,5 @@ with spy shims for `cat` / `jq` / `date` / `sleep` / `dirname` on `PATH`
 (`elapsed 340s / 1200s`), a later clock and start == now, elapsed-only via `0` and via unset, all three event args plus an
 unregistered one, the malformed start/budget table above, a start in the
 future, an unparseable payload (still emits, no ledger record), the ledger
-record's `advise` / `session_id`, and the generated wrapper forwarding argv.
+record's `advise` / `session_id` / `tool` (`Bash` on `PostToolUse`, empty on
+`UserPromptSubmit`), and the generated wrapper forwarding argv.

@@ -665,7 +665,11 @@ only when `time_budget` is `0`, and is empty otherwise. That sentence is the
 Opus 5.5 prompting guide's wording for runs with no sensible budget, and the
 guide places it in the system prompt. `claude --help` (2.1.282) lists
 `--append-system-prompt` without the "only works with --print" note that
-`--max-budget-usd` carries. The per-message `elapsed …` line itself comes from
+`--max-budget-usd` carries. Both canaries that saw the line and the sentence
+arrive ran in print mode (`-p --settings`); the interactive launch this step
+performs, including whether `UserPromptSubmit` fires for the argv prompt and
+whether `--append-system-prompt` reaches the model there, is unmeasured. The
+per-message `elapsed …` line itself comes from
 the `elapsed-time-signal` hook
 ([spec](../../hooks/advisory-nudge/elapsed-time-signal/spec.md)), which reads
 those two variables in the worker. The hook stops nothing: the budget is
