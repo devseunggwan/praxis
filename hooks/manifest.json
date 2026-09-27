@@ -1635,6 +1635,19 @@
       }
     },
     {
+      "name": "early-stop-advisory",
+      "role": "completion-verify",
+      "event": "Stop",
+      "timeout": 10,
+      "review_by": "2026-12-25",
+      "mode": {
+        "strict_env": "PRAXIS_UNATTENDED",
+        "bypass_env": [
+          "PRAXIS_EARLY_STOP_BYPASS"
+        ]
+      }
+    },
+    {
       "name": "retraction-probe-advisory",
       "role": "completion-verify",
       "event": "Stop",
