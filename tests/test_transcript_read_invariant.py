@@ -11,7 +11,7 @@ its sibling for transcript reads.
 The invariant: a hook that takes `transcript_path` from its payload may hand
 the file only to the bounded readers in `hooks/_lib/_transcript.py`
 (`tail_lines`, `load_current_turn`, `load_recent_events`,
-`read_last_user_message`, `scan_user_rejections`,
+`read_last_user_message`, `read_last_user_record`, `scan_user_rejections`,
 `reduce_transcript_resumable`, a streaming `iter_transcript`) or stream it
 itself a line at a time. What it must never do is load the whole file into
 memory — `read_text()`, `readlines()`, an unbounded `.read()`, `list(fh)`,
@@ -52,7 +52,7 @@ _STREAM_FUNCS = {"open", "iter_transcript", "iter_transcript_bounded"}
 _CONTENT_READERS = {
     "tail_lines", "load_current_turn", "load_recent_events", "load_transcript",
     "iter_transcript", "iter_transcript_bounded", "read_last_user_message",
-    "scan_user_rejections", "reduce_transcript_resumable",
+    "read_last_user_record", "scan_user_rejections", "reduce_transcript_resumable",
 }
 
 # Offenders known at the time the guard landed, each with the PR that removes

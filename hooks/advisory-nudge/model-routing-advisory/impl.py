@@ -18,8 +18,10 @@ Scope (v1): Bash delegation commands only (`cmux ... claude -p ... --model`,
 explicit chosen tier to compare — a follow-up may add it (see spec.md).
 
 Precision: only bare Claude tier names (`haiku` / `sonnet` / `opus`, optionally
-`claude:<tier>`) are classified. A non-Claude provider (`codex:` / `gemini:`) or
-a full model id (`claude-opus-4-8`) yields no comparable tier → SILENT. A command
+`claude:<tier>`, optionally with a `:<effort>` suffix — `opus:low`,
+`claude:opus:low` — which is ignored for ranking, #1499) are classified. A
+non-Claude provider (`codex:` / `gemini:`) or a full model id
+(`claude-opus-4-8`) yields no comparable tier → SILENT. A command
 with no task-signal keyword yields no implied tier → SILENT. Advisory only
 (stderr, exit 0 always) — a deliberate tier choice is legitimate, so this nudges
 rather than blocks.
@@ -75,14 +77,20 @@ _SIGNALS: tuple[tuple[str, tuple[str, ...]], ...] = (
 # (`--model opus; echo x` → `opus`) does not defeat classification.
 _MODEL_RE = re.compile(r"--model[=\s]+(\S+)")
 _TIER_TOKEN_RE = re.compile(r"[a-z0-9:_-]+")
+# `<tier>:<effort>` (#1499): the alphabetic tail is an effort level and does not
+# change the tier's rank, so it is stripped before the `_TIER_RANK` lookup.
+# `fable` has no rank yet — stripping still applies so it stays uniformly silent.
+_TIER_EFFORT_RE = re.compile(r"^(opus|sonnet|haiku|fable):[a-z]+$")
 
 
 def _chosen_tier(command: str) -> str | None:
     """Bare Claude tier named by the first `--model`, or None if not comparable.
 
-    `opus` / `sonnet` / `haiku` and `claude:<tier>` classify. A non-Claude
-    provider prefix or an unrecognized value (full model id, provider model)
-    returns None — the hook cannot compare it, so it stays silent.
+    `opus` / `sonnet` / `haiku` and `claude:<tier>` classify, with or without a
+    trailing `:<effort>` (`opus:low`, `claude:opus:low`) — the effort suffix is
+    ignored for ranking. A non-Claude provider prefix (`codex:…`, `gemini:…`) or
+    an unrecognized value (full model id, provider model) returns None — the hook
+    cannot compare it, so it stays silent.
 
     Only the FIRST `--model` is considered — the documented delegation forms carry
     a single flag. A prompt that itself contains a literal `--model <tier>` before
@@ -101,9 +109,14 @@ def _chosen_tier(command: str) -> str | None:
     raw = tok.group(0)
     if ":" in raw:
         provider, _, model = raw.partition(":")
-        if provider != "claude":
+        if provider == "claude":
+            raw = model
+        elif not _TIER_EFFORT_RE.match(raw):
+            # `codex:…` / `gemini:…` / anything that is not `<tier>:<effort>`.
             return None
-        raw = model
+    effort = _TIER_EFFORT_RE.match(raw)
+    if effort:
+        raw = effort.group(1)
     return raw if raw in _TIER_RANK else None
 
 

@@ -1195,9 +1195,11 @@ def main() -> int:
                      "pr-anchor-existence-gate",
                      "proposal-premise-gate",
                      "prose-option-menu-advisory",
+                     "early-stop-advisory",
                      "retraction-probe-advisory",
                      "joint-liability-attribution-gate",
                      "denied-action-report-gate",
+                     "relayed-blocked-command-gate",
                      "strike-counter"]
     actual_stop: list[str] = []
     for entry in manifest["hooks"]:

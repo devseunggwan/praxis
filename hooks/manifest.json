@@ -1664,6 +1664,19 @@
       }
     },
     {
+      "name": "early-stop-advisory",
+      "role": "completion-verify",
+      "event": "Stop",
+      "timeout": 10,
+      "review_by": "2026-12-25",
+      "mode": {
+        "strict_env": "PRAXIS_UNATTENDED",
+        "bypass_env": [
+          "PRAXIS_EARLY_STOP_BYPASS"
+        ]
+      }
+    },
+    {
       "name": "retraction-probe-advisory",
       "role": "completion-verify",
       "event": "Stop",
@@ -1713,6 +1726,18 @@
         "strict_env": "PRAXIS_DENIED_ACTION_STRICT",
         "bypass_env": [
           "PRAXIS_DENIED_ACTION_BYPASS"
+        ]
+      }
+    },
+    {
+      "name": "relayed-blocked-command-gate",
+      "role": "completion-verify",
+      "event": "Stop",
+      "timeout": 10,
+      "review_by": "2026-12-25",
+      "mode": {
+        "bypass_env": [
+          "PRAXIS_RELAYED_BLOCK_BYPASS"
         ]
       }
     },
