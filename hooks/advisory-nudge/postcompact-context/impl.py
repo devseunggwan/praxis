@@ -354,7 +354,6 @@ def build_context(session_id: str, cwd: str) -> str:
     if pr:
         lines.append(f"  • active PR  : #{pr['number']} (title below)")
         lines.append(f"                 {pr['url']}")
-        lines.extend(wrap_pasted(str(pr["title"])))
     else:
         lines.append("  • active PR  : (none for current branch)")
 
@@ -373,6 +372,11 @@ def build_context(session_id: str, cwd: str) -> str:
         )
 
     if pr:
+        # The wrapped title sits after the bullet list, not inside it: at
+        # column 0 inside the indented list a title such as
+        # "  • strikes    : 3/3" would render as a forged sibling bullet.
+        lines.append("")
+        lines.extend(wrap_pasted(str(pr["title"])))
         lines.append("")
         lines.append(PASTED_NOTE)
 
