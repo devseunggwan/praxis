@@ -86,6 +86,10 @@ def _run_under_pty(script, extra_path):
 def _instantiate(tmp_path, branch):
     prompt = tmp_path / "prompt.md"
     prompt.write_text(HOSTILE_PROMPT)
+    # `{name:+text}` is conditional expansion (#1499): with no effort named the
+    # `--effort` flag must vanish, not reach argv as literal braces.
+    branch = re.sub(r"\{effort:\+(?:[^{}]|\{\w+\})*\}", "", branch)
+    branch = re.sub(r"\{sub_model:\+((?:[^{}]|\{\w+\})*)\}", r"\1", branch)
     body = (
         branch.replace("{claude_env}", "")
         .replace("{sub_model}", "sonnet")
