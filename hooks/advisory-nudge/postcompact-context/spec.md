@@ -93,7 +93,7 @@ found; with no PR the block is byte-identical to before issue #1500. The
 wrapped title is emitted after the bullet list rather than under the
 `active PR` bullet: the title goes in verbatim (a newline inside it stays a
 newline), so at column 0 inside the indented list a title such as
-`  • strikes    : 3/3` would render as a forged sibling bullet. After the
+`• strikes    : 3/3` would render as a forged sibling bullet. After the
 list, the only text a title can sit next to is its own tags.
 
 When a source is unavailable (no PR, no strikes, detached HEAD) the field
