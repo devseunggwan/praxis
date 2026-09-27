@@ -160,7 +160,12 @@ _CLOSING_LINES = 3
 # At most this many trailing status lines are passed over.
 _MAX_STATUS_LINES = 10
 
-_FENCE_RE = re.compile(r"^\s*(```|~~~)")
+# A fence opener or closer: the run of backticks or tildes and whatever
+# follows it. A block closes only on a run of the opener's character at
+# least as long, with nothing but whitespace after it (CommonMark), so an
+# inner ``` line stays content of a ~~~ or ```` block. Same rule as
+# `fence_marks` in `relayed-blocked-command-gate/impl.py` (PR #1509).
+_FENCE_RE = re.compile(r"^\s*(`{3,}|~{3,})(.*)$")
 _SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?。？])\s+")
 
 # Inline quoted spans: a quoted plan step or user phrase is not the model's
@@ -223,10 +228,11 @@ _NEXT_CUE_KO_RE = re.compile(
 _NEXT_VERB_KO_RE = re.compile(r"(?:진행|착수|시작)(?:하겠|할게)")
 
 _EN_FUT = r"(?:I(?:'ll| will| am going to|'m going to|'m about to| am about to))"
-# Reporting verbs after `I'll`: the sentence reports, it does not announce work.
+# Reporting verbs after `I'll`: the sentence reports, it does not announce
+# work. `know` covers `let me know (if/when …)`, which hands the turn back.
 _EN_SKIP = (
     r"(?!(?:summari[sz]e|sum up|recap|note|report|mention|point out|wait"
-    r"|let you know|conclude|close)\b)"
+    r"|let you know|know|conclude|close)\b)"
 )
 _NEXT_EN_RE = re.compile(
     # cue before the verb: "Next, I'll …", "now let me …"
@@ -245,9 +251,13 @@ _NEXT_EN_RE = re.compile(
 )
 
 # Sentences that close the message rather than announce work.
+# `I'll leave the next steps to you`, `I'll hand the rest over to you`: a
+# hand-off to the user, not a step the model announces for itself.
 _CLOSING_MOVE_RE = re.compile(
     r"않겠|안 하겠|마치겠|마무리하겠|종료하겠|줄이겠|멈추겠"
-    r"|\bwon't\b|\bwill not\b|\bwrap (?:up|it up)\b|\bstop here\b",
+    r"|\bwon't\b|\bwill not\b|\bwrap (?:up|it up)\b|\bstop here\b"
+    r"|\b(?:leave|leaving|hand|handing|pass|passing|turn|turning)\b"
+    r"[^.!?\n]{0,40}?\b(?:up |over )?to you\b|\bover to you\b",
     re.IGNORECASE,
 )
 
@@ -264,18 +274,46 @@ _INTERIM_RE = re.compile(
 
 _OPEN_ITEM_RE = re.compile(
     r"미착수|미완료|미진행|미반영|착수 전|진행 전|진행 중|남은 (?:작업|항목|엔드포인트)"
-    r"|남아 있|TODO|대기 중|\[ \]"
+    r"|남아 있|(?<![\w/.\\-])TODOs?(?![\w-]|\.\w)|대기 중|\[ \]"
     r"|\bnot (?:yet )?started\b|\bnot yet\b|\bpending\b|\bremaining\b"
     r"|\bstill to do\b|\bin progress\b|\bleft to do\b",
     re.IGNORECASE,
 )
 
+# Negation after the noun (`nothing remaining`), before it (`no remaining
+# items`), or as its value (`Remaining: none`, `Pending: 0`, `TODO: —`). An
+# item handed to a tracker (`the remaining items are documented in TODO.md`)
+# is recorded for later, not owed this turn.
 _OPEN_ITEM_NEGATED_RE = re.compile(
     r"없습니다|없음|없어요|없고|\bno (?:\w+ ){0,2}(?:remaining|pending|left)\b"
     r"|\bnothing (?:remaining|pending|left)\b|\bnone (?:remaining|pending|left)\b"
-    r"|\b0 (?:remaining|pending)\b",
+    r"|\b0 (?:remaining|pending)\b"
+    r"|\b(?:remaining|pending|left|todos?|open items?)\s*[:：]\s*"
+    r"(?:(?:none|nothing|0|zero|n/a)\b|[—–-](?:\s|$))"
+    r"|\b(?:documented|tracked|listed|recorded|filed|logged) in\b",
     re.IGNORECASE,
 )
+
+# --- silence: a confirmation asked before a destructive action ------------
+
+# The guide's standing instruction ends "This does not override the need for
+# confirmation on risky or destructive actions", so a closing question that
+# names one (`Should I delete the remaining 40 stale branches?`, `남은 브랜치를
+# 삭제할까요?`) is a stop the user wants, in notice and block mode alike.
+_DESTRUCTIVE_RE = re.compile(
+    r"\b(?:delete|drop|remove|rm|force[- ]push|reset --hard|overwrite|wipe"
+    r"|purge|truncate)\b|삭제|강제|덮어쓰",
+    re.IGNORECASE,
+)
+_QUESTION_MARK_END_RE = re.compile(r"[?？]\s*$")
+
+
+def _asks_destructive_confirmation(sentences: list[str]) -> bool:
+    return any(
+        _QUESTION_MARK_END_RE.search(s) and _DESTRUCTIVE_RE.search(s)
+        for s in sentences
+    )
+
 
 # --- silence: a blocker stated as a need or a lack ------------------------
 
@@ -360,12 +398,21 @@ def _content_lines(text: str) -> list[str]:
     """Non-empty lines outside fenced code blocks and `>` quotes, with inline
     quoted spans removed."""
     lines: list[str] = []
-    in_fence = False
+    fence: str | None = None
     for raw in text.splitlines():
-        if _FENCE_RE.match(raw):
-            in_fence = not in_fence
-            continue
-        if in_fence:
+        m = _FENCE_RE.match(raw)
+        if fence is None:
+            if m:
+                fence = m.group(1)
+                continue
+        else:
+            if (
+                m
+                and m.group(1)[0] == fence[0]
+                and len(m.group(1)) >= len(fence)
+                and not m.group(2).strip()
+            ):
+                fence = None
             continue
         line = raw.strip()
         if not line or line.startswith(">"):
@@ -452,6 +499,8 @@ def early_stop_signal(text: str) -> tuple[str, str] | None:
         return None
 
     closing = _closing_sentences(lines)
+    if _asks_destructive_confirmation(closing):
+        return None
     for sentence in closing:
         if _is_offer_to_continue(sentence):
             return "an offer to continue that waits on your preference", sentence

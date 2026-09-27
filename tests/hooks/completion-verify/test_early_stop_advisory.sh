@@ -416,6 +416,96 @@ run_case advisory "어떻게든 …있지? is a request, not a question" '{}'
 build_transcript "$EN_NEXT" "Can you migrate all three endpoints?"
 run_case advisory "Can you …? is a request" '{}'
 
+# =====================================================================
+# Review fixtures (PR #1504, round 2) — hand-backs, confirmations, fences
+# =====================================================================
+
+build_transcript "All three files are updated and tests pass. Now let me know if you want any changes." "$USER_EN"
+run_case silent "let me know if … hands the turn back" '{}'
+
+build_transcript "Migration complete. I'll leave the next steps to you." "$USER_EN"
+run_case silent "I'll leave the next steps to you is a hand-off" '{}'
+
+build_transcript "Migration complete. I'll hand the rest over to you." "$USER_EN"
+run_case silent "I'll hand the rest over to you is a hand-off" '{}'
+
+# --- a confirmation asked before a destructive action is a wanted stop ---
+
+DESTRUCTIVE_EN="Should I delete the remaining 40 stale branches? That is destructive, so I stopped."
+DESTRUCTIVE_KO='users, orders 마이그레이션은 끝났습니다. 남은 브랜치 40개를 삭제할까요? 되돌릴 수 없어서 멈췄습니다.'
+
+build_transcript "$DESTRUCTIVE_EN" "$USER_EN"
+run_case silent "destructive confirmation question (EN)" '{}'
+
+build_transcript "$DESTRUCTIVE_KO"
+run_case silent "destructive confirmation question (KO, 삭제할까요)" '{}'
+
+build_transcript "Migrated /users and /orders. Should I force-push the rewritten history to the remaining branches?" "$USER_EN"
+run_case silent "force-push confirmation question" '{}'
+
+build_transcript "Should I continue with the remaining endpoints?" "$USER_EN"
+run_case advisory "a plain continue question still fires" '{}'
+
+# --- negated open items and TODO as a file name --------------------
+
+build_transcript "Summary so far: A done, B done. Remaining: none." "$USER_EN"
+run_case silent "Remaining: none negates the open item" '{}'
+
+build_transcript "Progress update: users and orders migrated. No remaining items." "$USER_EN"
+run_case silent "no remaining items negates the open item" '{}'
+
+build_transcript "The remaining items are documented in TODO.md. So far everything requested is done." "$USER_EN"
+run_case silent "items documented in TODO.md are not open here" '{}'
+
+build_transcript "So far /users and /orders are done. See TODO.md for the details." "$USER_EN"
+run_case silent "TODO.md is a file name, not an open item" '{}'
+
+build_transcript "Progress update: /users and /orders are migrated.
+- payments: TODO" "$USER_EN"
+run_case advisory "TODO as a word is still an open item" '{}'
+assert_kind "an interim report that lists unfinished items" "TODO as a word is reported as type 4"
+
+# --- fences close on the opener's character and length (CommonMark) ---
+
+build_transcript "Done with /users and /orders; tests pass.
+
+~~~
+# next I'll deploy
+~~~
+
+All tests pass." "$USER_EN"
+run_case silent "announcement inside a tilde fence" '{}'
+
+build_transcript "Done with /users and /orders; tests pass.
+
+\`\`\`\`
+\`\`\`
+# next I'll deploy
+\`\`\`
+\`\`\`\`
+
+All tests pass." "$USER_EN"
+run_case silent "inner three-backtick line does not close a four-backtick fence" '{}'
+
+build_transcript "Done with /users and /orders.
+
+~~~
+\`\`\`
+Next, I'll migrate /payments
+~~~
+
+All tests pass." "$USER_EN"
+run_case silent "a backtick line does not close a tilde fence" '{}'
+
+build_transcript "Migrated /users and /orders.
+
+\`\`\`
+pytest tests/api -q
+\`\`\`
+
+Next, I'll migrate /payments." "$USER_EN"
+run_case advisory "an announcement after a closed fence still fires" '{}'
+
 # --- the notice is addressed to the user ----------------------------
 
 build_transcript "$T1"

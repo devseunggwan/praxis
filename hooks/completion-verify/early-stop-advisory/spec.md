@@ -52,7 +52,11 @@ transcript's last main-chain assistant message) with fenced code blocks, `>`
 quote lines, and inline quoted spans (`"…"`, `“…”`, `‘…’`, `'…'`, `「…」`,
 `『…』`) removed: a quoted plan step or user phrase is not the model's own
 announcement. A straight `'` between two word characters (`I'll`) is an
-apostrophe, not a quote mark.
+apostrophe, not a quote mark. A fence (three or more backticks or tildes)
+closes only on a run of the same character at least as long as the opener
+with nothing but whitespace after it, as in CommonMark, so a `~~~` block or a
+four-backtick block that contains a three-backtick line is one block — the
+same rule as `fence_marks` in `relayed-blocked-command-gate` (PR #1509).
 
 The **closing lines** are the last three prose lines, plus up to ten short
 `Key: value` status lines after them (`Tests: 28 passed`), split into
@@ -79,7 +83,10 @@ How the cue binds in type 1:
   remaining …`, `I'll … after this`), or opens the sentence (`Next up:`,
   `Moving on to`).
 - A reporting verb after `I'll` is not a next step: `summarize`, `recap`,
-  `note`, `report`, `mention`, `point out`, `let you know`, `wait`. (`wait`:
+  `note`, `report`, `mention`, `point out`, `let you know`, `wait`; nor is
+  `let me know (if/when …)`, which hands the turn back. A hand-off to the
+  user (`I'll leave the next steps to you`, `I'll hand the rest over to you`)
+  is a closing move, like `wrap up`. (`wait`:
   the guide gives that wait to the harness — "If something the model started
   is still running, such as a background command or a subagent, don't treat
   the task as done yet: wait for it to finish and return its output to the
@@ -110,9 +117,13 @@ in `impl.py` are the authority.**
   `at this point`, `long run`.
 - Unfinished item: `미착수`, `미완료`, `진행 중`, `남은 작업`, `TODO`, `[ ]`,
   `not started`, `not yet`, `pending`, `still to do` — unless the same
-  sentence negates it (`없습니다`, `nothing remaining`, `0 pending`), and not
-  in the framing sentence itself (`So far the pipeline has not yet …` is one
-  sentence and stays silent).
+  sentence negates it, after the noun (`없습니다`, `nothing remaining`,
+  `0 pending`), before it (`no remaining items`), or as its value
+  (`Remaining: none`, `Pending: 0`, `TODO: —`), or hands the item to a
+  tracker (`documented in TODO.md`, `tracked in`); and not in the framing
+  sentence itself (`So far the pipeline has not yet …` is one sentence and
+  stays silent). `TODO` counts as a word, not as a file name or path segment
+  (`TODO.md`, `docs/TODO`).
 
 ## Stops that stay silent
 
@@ -132,10 +143,22 @@ need or a lack, anywhere in the text:
 
 A bare word (`credentials table`, `waiting for the lock`) is not a blocker.
 
+**A confirmation asked before a destructive action.** The guide's standing
+instruction ends "This does not override the need for confirmation on risky
+or destructive actions", so a closing sentence that ends in `?` and names one
+— `delete`, `drop`, `remove`, `rm`, `force-push`, `reset --hard`,
+`overwrite`, `wipe`, `purge`, `truncate`, `삭제`, `강제`, `덮어쓰` — is a stop
+the user wants (`Should I delete the remaining 40 stale branches?`, `남은
+브랜치 40개를 삭제할까요?`). It silences the hook in notice and block mode
+alike: a forced continuation there would be exactly the skipped confirmation
+the guide warns against.
+
 **praxis additions** (not from the guide):
 
 - **The user asked for the stop**: the human message that opened the turn
-  (`read_last_user_message(human_only=True)`) requests a report, a plan, or a
+  (`read_last_user_record(human_only=True, skip_hook_feedback=True)`, the
+  same read the [continuation cap](#continuation-cap) keys on) requests a
+  report, a plan, or a
   pause (`진행 상황 알려`, `현황 알려`, `계획만`, `status of`,
   `give me a status`, `progress report`, `make a plan`, `one at a time`), or is
   a question — a word-initial interrogative (`왜`, `어떻게`, `why`, `how`, …)
@@ -265,8 +288,8 @@ gets the capped notice, and so does any later stop in that turn.
 
 ### Unattended-run marker
 
-`PRAXIS_UNATTENDED`, exact value `1`, unstripped: `true`, `yes`, ` 1` and every
-other value leave the hook in notice mode. No unattended marker existed in the
+`PRAXIS_UNATTENDED`, exact value `1`, unstripped: `true`, `yes`, a `1` with a
+leading space, and every other value leave the hook in notice mode. No unattended marker existed in the
 repo before this hook, so the name is new. It is declared as the hook's
 `strict_env` in `hooks/manifest.json` and listed in
 [`docs/bypass-vars.md`](../../../docs/bypass-vars.md) → Strict, because it is
@@ -319,7 +342,9 @@ No bypass or fail-open path blocks. In block mode, a count that cannot be kept
 degrades to notice mode (a notice, or silence when `stop_hook_active` is set):
 
 - no `session_id` in the payload, or no human message found in the
-  transcript;
+  transcript — including when the backward scan exhausts
+  `CURRENT_TURN_SCAN_MAX_BYTES` (8 MiB) before reaching one, so
+  `opening_human_message` returns None and that stop gets the notice;
 - a state file that cannot be read, is not JSON, is not an object, or holds a
   non-integer count for this turn. The hook replaces it with a spent count for
   the current turn, so this turn gets the notice and the next human turn
