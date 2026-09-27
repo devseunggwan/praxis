@@ -59,16 +59,28 @@ ELAPSED=$((NOW - START))
 # session_id is known, so a session without the env var writes no record and
 # spawns nothing. jq missing -> no session id -> no record; the signal itself
 # does not depend on it.
+#
+# One jq call yields both session_id and tool_name, joined by a unit
+# separator (0x1F) so an empty session_id cannot shift tool_name into its
+# place the way IFS splitting on a blank would. A UserPromptSubmit payload
+# has no tool_name, so the ledger's tool field is empty there, matching what
+# _fire_ledger.record_session_fire writes for a Python hook on that event.
 INPUT=$(cat 2>/dev/null)
 SID=""
+TOOL=""
 if command -v jq >/dev/null 2>&1; then
-  SID=$(printf '%s' "$INPUT" | jq -r '.session_id // empty' 2>/dev/null)
+  US=$(printf '\037')
+  FIELDS=$(printf '%s' "$INPUT" | jq -r --arg us "$US" \
+    '((.session_id // "") | tostring) + $us + ((.tool_name // "") | tostring)' \
+    2>/dev/null)
+  SID=${FIELDS%%"$US"*}
+  TOOL=${FIELDS#*"$US"}
 fi
 if [ -n "$SID" ]; then
   # shellcheck source=../../_lib/record_fire.sh
   . "$(dirname "$0")/../../_lib/record_fire.sh" 2>/dev/null || true
   command -v praxis_fire_arm >/dev/null 2>&1 && \
-praxis_fire_arm elapsed-time-signal advisory-nudge "$SID" ""
+praxis_fire_arm elapsed-time-signal advisory-nudge "$SID" "$TOOL"
 fi
 
 if [ "$BUDGET" -gt 0 ]; then

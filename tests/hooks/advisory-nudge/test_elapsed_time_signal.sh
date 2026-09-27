@@ -109,11 +109,11 @@ fi
 
 run_hook "$HOOK" PostToolUse PRAXIS_TIME_START_EPOCH=$START PRAXIS_TIME_BUDGET_S=1200
 expect_line "budget mode -> elapsed from stored start" "elapsed 340s / 1200s" PostToolUse
-if [ "$(jq -r 'select(.hook == "elapsed-time-signal") | "\(.decision) \(.session_id)"' "$LEDGER" 2>/dev/null)" \
-  = "advise sess-1501" ]; then
-  pass "emission records an advise fire with the session id"
+if [ "$(jq -r 'select(.hook == "elapsed-time-signal") | "\(.decision) \(.session_id) \(.tool)"' "$LEDGER" 2>/dev/null)" \
+  = "advise sess-1501 Bash" ]; then
+  pass "emission records an advise fire with the session id and tool name"
 else
-  fail "emission records an advise fire with the session id" "$(cat "$LEDGER" 2>/dev/null)"
+  fail "emission records an advise fire with the session id and tool name" "$(cat "$LEDGER" 2>/dev/null)"
 fi
 
 # --- 1b. The no-op path reads no stdin and spawns nothing -------------------
@@ -122,20 +122,28 @@ fi
 # it is pinned here, not left to the prose.
 #
 # stdin that never closes: a hook that reads stdin before the env check blocks
-# until `timeout` kills it (rc 124). Process substitution keeps the writer end
-# open without the shell waiting for `sleep` to finish.
+# until `timeout` kills it (rc 124). A FIFO with a background writer that
+# never writes and never closes keeps the read end open for the hook's
+# lifetime (plain `&` + `mkfifo`, so no bash >= 4.4 process-substitution
+# pid is needed).
 stdin_never_closes() {
   local target="$1"
   shift
-  local fd holder
-  exec {fd}< <(sleep 30)
+  local fifo="$WORK_DIR/stdin.fifo" holder
+  rm -f "$fifo"
+  mkfifo "$fifo" || {
+    RC=1; OUT=""; ERR="mkfifo failed: $fifo"
+    return
+  }
+  sleep 30 >"$fifo" &
   holder=$!
   env -u PRAXIS_TIME_START_EPOCH -u PRAXIS_TIME_BUDGET_S \
     PATH="$WORK_DIR/bin:$PATH" PRAXIS_FIRE_TELEMETRY_FILE="$LEDGER" "$@" \
-    timeout 1 "$target" PostToolUse <&"$fd" >"$WORK_DIR/stdout" 2>"$WORK_DIR/stderr"
+    timeout 1 "$target" PostToolUse <"$fifo" >"$WORK_DIR/stdout" 2>"$WORK_DIR/stderr"
   RC=$?
-  exec {fd}<&-
   kill "$holder" 2>/dev/null
+  wait "$holder" 2>/dev/null
+  rm -f "$fifo"
   OUT=$(<"$WORK_DIR/stdout")
   ERR=$(<"$WORK_DIR/stderr")
 }
@@ -199,8 +207,19 @@ run_hook "$HOOK" PostToolUse PRAXIS_TIME_START_EPOCH=$START
 expect_line "budget unset -> elapsed only" "elapsed 340s" PostToolUse
 
 # --- 4. hookEventName echoes the registration's argv -------------------------
+PAYLOAD_SAVED="$PAYLOAD"
+PAYLOAD='{"session_id":"sess-1501","hook_event_name":"UserPromptSubmit","prompt":"hi"}'
 run_hook "$HOOK" UserPromptSubmit PRAXIS_TIME_START_EPOCH=$START PRAXIS_TIME_BUDGET_S=1200
 expect_line "UserPromptSubmit registration" "elapsed 340s / 1200s" UserPromptSubmit
+# A prompt payload carries no tool_name, so the ledger's tool field is empty
+# rather than a stale or invented name.
+if [ "$(jq -r 'select(.hook == "elapsed-time-signal") | "\(.session_id) [\(.tool)]"' "$LEDGER" 2>/dev/null)" \
+  = "sess-1501 []" ]; then
+  pass "UserPromptSubmit ledger record carries an empty tool"
+else
+  fail "UserPromptSubmit ledger record carries an empty tool" "$(cat "$LEDGER" 2>/dev/null)"
+fi
+PAYLOAD="$PAYLOAD_SAVED"
 
 run_hook "$HOOK" PostToolUseFailure PRAXIS_TIME_START_EPOCH=$START PRAXIS_TIME_BUDGET_S=1200
 expect_line "PostToolUseFailure registration" "elapsed 340s / 1200s" PostToolUseFailure
