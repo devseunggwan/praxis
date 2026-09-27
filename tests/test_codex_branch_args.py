@@ -150,6 +150,8 @@ def _resolve_claude(model: str) -> tuple[str, str]:
     else:
         sub_model = model
     effort = ""
+    if sub_model.startswith(":"):
+        raise Abort(f"invalid claude model {sub_model!r}")
     if m := re.fullmatch(r"(.*):([A-Za-z]+)", sub_model):
         sub_model, effort = m.group(1), m.group(2)
     if sub_model.endswith(":") or re.match(r"(fable|opus|sonnet|haiku):", sub_model):
@@ -178,7 +180,6 @@ def test_claude_effort_set_is_exactly_the_cli_list() -> None:
         ("fable", ["--model", "fable", "task"]),
         # Bare `claude` is the CLI default model: no --model either.
         ("claude", ["task"]),
-        ("claude::high", ["--effort", "high", "task"]),
         # A model ID that holds a colon is not mistaken for an effort.
         ("claude:us.anthropic.claude-opus-4-v1:0", ["--model", "us.anthropic.claude-opus-4-v1:0", "task"]),
         ("claude:us.anthropic.claude-opus-4-v1:0:low", ["--model", "us.anthropic.claude-opus-4-v1:0", "--effort", "low", "task"]),
@@ -232,7 +233,19 @@ def test_claude_shell_metacharacters_abort(model: str) -> None:
 
 @pytest.mark.parametrize(
     "model",
-    ["opus:", "opus::low", "opus:low:high", "claude:opus:", "claude:opus::low", "claude:opus:low:high", "claude::"],
+    [
+        "opus:",
+        "opus::low",
+        "opus:low:high",
+        "claude:opus:",
+        "claude:opus::low",
+        "claude:opus:low:high",
+        "claude::",
+        # `claude::high` is a likely typo of `claude:opus:high`, not "the
+        # default model at high": it aborts like `opus::low` does.
+        "claude::high",
+        "claude::low",
+    ],
 )
 def test_claude_malformed_tail_aborts(model: str) -> None:
     """A stray or doubled colon must not reach the CLI as part of a model name."""
@@ -275,6 +288,9 @@ def test_claude_invalid_effort_rule_is_in_step1() -> None:
         'if sub_model ends with ":" or sub_model matches /^(fable|opus|sonnet|haiku):/: abort "invalid claude model"'
         in step1
     )
+    # `claude::high` must abort before the effort split can read it as the
+    # default model at high (a doubled colon is a likely `claude:opus:high` typo).
+    assert 'if sub_model starts with ":": abort "invalid claude model"' in step1
     assert "elif model matches /^(fable|opus|sonnet|haiku)(?::[A-Za-z]+)?$/:" in step1
     assert "{sub_model:+--model '{sub_model}'}" in _branch("claude")
 

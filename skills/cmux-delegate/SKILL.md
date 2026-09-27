@@ -4,7 +4,7 @@ description: Hand off an existing independent issue that surfaced mid-task to it
 when_to_use: Triggers on "cmux delegate", "delegate issue", "delegate to new session", "별도 세션", "세션에 위임", "별건으로 빼서".
 verified-against-runtime: true
 runtime-verified-at: 2026-09-26
-runtime-verified-note: "cmux 0.64.22 (2026-09-04) — the selected workspace's `list-workspaces` row is prefixed `* `, so field 1 without the strip is `*` and `cmux send --workspace '*'` fails with `Invalid workspace handle`; stripped, `--session` resolves and `send` returns `OK`. The legacy-alias notice goes to stderr, so it cannot reach the grep. AskUserQuestion (2026-09-09) — a single 4-option question round-tripped and came back as the user's own sentence rather than any listed label, so Step 2.6's escalation reads the answer as text instead of branching on an option label. claude 2.1.282 (2026-09-25) — `--effort low` accepted. claude 2.1.283 (2026-09-26) — `claude -p --effort bogus` prints `Warning: Unknown --effort value 'bogus' — ignoring it and using the default effort.` to stderr, still answers, and exits 0; `--effort LOW` is accepted without any warning. So the CLI stops no typo and Step 1 validates the effort itself, case-sensitively."
+runtime-verified-note: "cmux 0.64.22 (2026-09-04) — the selected workspace's `list-workspaces` row is prefixed `* `, so field 1 without the strip is `*` and `cmux send --workspace '*'` fails with `Invalid workspace handle`; stripped, `--session` resolves and `send` returns `OK`. The legacy-alias notice goes to stderr, so it cannot reach the grep. AskUserQuestion (2026-09-09) — a single 4-option question round-tripped and came back as the user's own sentence rather than any listed label, so Step 2.6's escalation reads the answer as text instead of branching on an option label. claude 2.1.282 (2026-09-25) — `--effort low` accepted. claude 2.1.283 (2026-09-26) — `claude -p --effort bogus` prints `Warning: Unknown --effort value 'bogus' — ignoring it and using the default effort. Valid values: low, medium, high, xhigh, max.` to stderr, still answers, and exits 0; `--effort LOW` is accepted without any warning. So the CLI stops no typo and Step 1 validates the effort itself, case-sensitively."
 ---
 
 # cmux-delegate
@@ -164,6 +164,11 @@ if provider == "claude":
   # Only an alphabetic tail after the last colon is an effort, so a model ID
   # that itself holds a colon (Bedrock `…-v1:0`, an ARN ending
   # `…:application-inference-profile/<id>`) passes through untouched.
+  # A doubled colon right after the provider (`claude::high`, `claude::`) is
+  # most likely a typo of `claude:opus:high`; it is checked before the effort
+  # split, which would otherwise read `claude::high` as the default model at
+  # high. Every doubled-colon form aborts the same way (`opus::low` below).
+  if sub_model starts with ":": abort "invalid claude model"
   if sub_model matches /^(.*):([A-Za-z]+)$/:
     sub_model, effort = match[1], match[2]
   # A malformed tail (`opus:`, `opus::low`, `opus:low:high`) must not reach

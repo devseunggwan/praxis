@@ -87,6 +87,7 @@ Unified `--model` flag across all skills: `<provider>:<model>` or bare model nam
 | `claude` | Claude default model | `claude` |
 | `claude:opus` | Claude Opus | `claude --model opus` |
 | `claude:opus:low`, `opus:low` | Claude Opus at an explicit effort | `claude --model opus --effort low` |
+| `claude::high`, `opus::low`, `opus:` | Malformed (doubled or stray colon) | abort `invalid claude model` — there is no "default model at an effort" form |
 | `codex` | Codex, terra at medium effort | `codex exec -m gpt-5.6-terra -c model_reasoning_effort=medium` |
 | `codex:gpt-5.6-sol` | A listed Codex model at its table effort | `codex exec -m gpt-5.6-sol -c model_reasoning_effort=high` |
 | `codex:gpt-5.6-sol:xhigh` | A Codex model at an explicit effort | `codex exec -m gpt-5.6-sol -c model_reasoning_effort=xhigh` |
@@ -186,6 +187,9 @@ if provider == "codex":
   # both are interpolated into a shell command, so anything outside
   # /^[A-Za-z0-9._-]+$/ is rejected rather than quoted
 elif provider == "claude":
+  # a doubled colon after the provider (`claude::high`, `claude::`) is a
+  # likely typo of `claude:opus:high`: abort before the effort split
+  if sub_model starts with ":": abort "invalid claude model"
   # only an alphabetic tail after the last colon is an effort
   # (Bedrock `…-v1:0` and ARNs ending `…/<id>` pass through)
   if sub_model matches /^(.*):([A-Za-z]+)$/: sub_model, effort = match[1], match[2]
