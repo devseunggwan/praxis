@@ -115,6 +115,31 @@ def test_dollar_prompt_and_list_marker_are_stripped():
     assert gate.relays(msg, _sigs())
 
 
+def test_glued_run_prefix_tokenizes_like_a_spaced_one():
+    msg = "직접 실행해 주세요:\n```\n!git push origin main\n```"
+    assert gate.relays(msg, _sigs()) == "!git push origin main"
+
+
+@pytest.mark.parametrize("msg", [
+    "Run this in your terminal:\n\n```\ngit push origin main\n```",
+    "터미널에서 직접 실행해 주세요:\n\n```bash\ngit push origin main\n```",
+    "Run this in your terminal:\n\n`git push origin main`",
+])
+def test_colon_paragraph_above_a_blank_line_frames_the_code(msg):
+    assert gate.relays(msg, _sigs()) == "git push origin main"
+
+
+def test_report_sentence_then_relay_in_one_paragraph_names_the_relayed_line():
+    msg = ("`git push origin main` 이 차단됐습니다. 아래 명령을 터미널에서 실행해 주세요.\n"
+           "```\ngit push origin main\n```")
+    assert gate.relays(msg, _sigs()) == "git push origin main"
+
+
+def test_place_noun_with_a_request_form_is_a_frame():
+    msg = "터미널에서 아래 명령을 입력해 주세요:\n```\ngit push origin main\n```"
+    assert gate.relays(msg, _sigs())
+
+
 # --------------------------------------------------------------------------
 # relays: must not block
 # --------------------------------------------------------------------------
@@ -127,6 +152,27 @@ def test_reporting_the_block_is_not_a_relay():
 
 def test_negated_run_phrase_is_not_a_frame():
     msg = "`git push origin main` 은 직접 실행하지 않고 PR 로 올리겠습니다."
+    assert gate.relays(msg, _sigs()) is None
+
+
+def test_prohibitive_negation_is_not_a_frame():
+    msg = "`git push origin main` 은 입력하시지 마세요."
+    assert gate.relays(msg, _sigs()) is None
+
+
+def test_place_noun_alone_is_not_a_frame():
+    msg = "제가 터미널에서 확인했더니 `git push origin main` 이 차단됐습니다. PR 로 올리겠습니다."
+    assert gate.relays(msg, _sigs()) is None
+
+
+def test_frame_in_the_next_sentence_does_not_reach_a_reported_span():
+    msg = ("`git push origin main` was blocked by branch-push-guard. "
+           "Please run `gh pr create --fill` instead from your terminal.")
+    assert gate.relays(msg, _sigs()) is None
+
+
+def test_paragraph_above_without_a_colon_is_not_carried():
+    msg = "Run this in your terminal.\n\n```\ngit push origin main\n```"
     assert gate.relays(msg, _sigs()) is None
 
 

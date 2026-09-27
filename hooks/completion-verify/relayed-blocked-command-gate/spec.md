@@ -1,9 +1,9 @@
 # Stop Relayed-Blocked-Command Gate
 
 `hooks/completion-verify/relayed-blocked-command-gate/impl.py` runs on `Stop`.
-It blocks when a `PreToolUse` hook or permission rule **blocked a Bash command
-during this turn** and the final assistant message proposes that the user run
-that same command.
+It blocks when a `PreToolUse` hook **blocked a Bash command during this turn**
+and the final assistant message proposes that the user run that same command.
+A settings permission rule's refusal is not a hook block (§1 below).
 
 Supported hosts: all
 
@@ -54,11 +54,29 @@ Three conditions, all required.
    code span) matches when the signature is an ordered subsequence of its
    tokens. The relayed line in the incident is not a substring of the blocked
    one, because it adds `-C <path>`; the subsequence test is what catches it.
-3. **The line is framed as the user's to run.** Either it starts with `!`, or
-   its paragraph (blank lines outside a fence separate paragraphs) carries a
-   user-run phrase such as `직접 실행해 주세요`, `입력하시`, `run it yourself` or
-   `from your terminal` that is not followed by a negation (`지 않`, `not`). A
-   bare `직접 실행` is not a frame: agents use it to narrate their own runs.
+3. **The line is framed as the user's to run.** Either it starts with `!`
+   (`! git ...` or the glued `!git ...`), or a user-run phrase such as
+   `직접 실행해 주세요`, `입력하시`, `run it yourself` or `from your terminal`
+   sits in the line's *scope* and is not followed by a negation (`지 않`,
+   `지 마`, `not`). The scope depends on what the code line is:
+   - A **command line** (a fenced line, or a line that is nothing but the code
+     span, after any list marker, quote or `$` prompt) takes its paragraph
+     (blank lines outside a fence separate paragraphs). When that paragraph
+     carries no frame, the nearest non-empty paragraph above is read too, but
+     only when it ends with a colon (`:` or `：`): `Run this in your
+     terminal:`, a blank line, then the fence is one utterance, and the colon
+     is what says so.
+   - A **code span inside prose** takes only the sentence around it
+     (sentences end at `.`, `!`, `?` or their CJK forms followed by
+     whitespace; punctuation inside code spans does not count). So in
+     `` `git push origin main` was blocked. Please run `gh pr create` instead
+     from your terminal. `` the frame in the second sentence does not reach the
+     span in the first, which reports rather than relays.
+
+   A bare `직접 실행` is not a frame: agents use it to narrate their own runs.
+   Likewise `터미널에서` / `프롬프트에` alone only name a place (`제가
+   터미널에서 확인했더니 ...`); they frame a relay only with a request form
+   (`실행/입력/치/넣/돌려` + `해 주세요`, `하시`, `하세요`) within two words.
 
 Exempt: a code line carrying an env assignment whose name appears as `NAME=` in
 the refusal text of a hook that blocked this turn. That is the blocking hook's
@@ -99,9 +117,16 @@ permission rule, which the first exclusion now drops.
 ## Known limits
 
 - Turn scope. A block in one turn relayed in a later turn is not seen.
-- A report of the block and the relaying option in one paragraph with a
-  user-run phrase reads as a relay, even if the reported line is the one
-  matched. The incident kept them in separate paragraphs.
+- A fenced relay whose introduction ends without a colon and sits above a
+  blank line (`Run this in your terminal.`, blank, fence) is not seen: the
+  paragraph above is carried only on a colon. Without the blank line, or with
+  a `!` prefix, it is.
+- A report of the block and a user-run phrase in one *sentence* (`\`git push
+  origin main\` was blocked, so run it from your terminal`) reads as a relay.
+  It is one: the sentence hands the command over.
+- Sentence splitting is by terminator, so a user-run phrase after an
+  abbreviation's period (`e.g.`) in the same sentence is read as the next
+  sentence.
 - Signatures drop the argument after every flag, so a blocked
   `git push -f origin main` and a relayed `git push origin main` match. That is
   the intended direction: the relay is still the blocked mutation.
@@ -117,5 +142,7 @@ permission rule, which the first exclusion now drops.
 ## Tests
 
 `tests/hooks/completion-verify/test_relayed_blocked_command_gate.py`: signature
-extraction, the incident shape, framed and unframed variants, the sanctioned
-bypass line, turn and kind scoping, and end-to-end runs through the binary.
+extraction, the incident shape, framed and unframed variants (colon carry,
+sentence scope, place nouns, prohibitive negation, the glued `!git`), the
+sanctioned bypass line, turn and kind scoping, and end-to-end runs through the
+binary.

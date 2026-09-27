@@ -15,8 +15,12 @@ the blocked one, so matching is on the blocked segment's positional tokens as
 an ordered subsequence of the relayed line's tokens.
 
 Nothing here judges meaning beyond two lexical tests: the command appears in a
-code line of the final message, and that line either starts with the host's `!`
-run prefix or shares a paragraph with a user-run phrase that is not negated.
+code line of the final message, and that line is framed as the user's to run:
+it starts with the host's `!` run prefix, or a user-run phrase that is not
+negated sits in its scope. The scope is the paragraph for a command line (a
+fenced line, or a line that is only the code span), widened to the
+paragraph above when that one ends with a colon and so introduces the code; for
+a code span inside prose it is only the sentence around the span.
 
 Scope is the current turn, as in `denied-action-report-gate`. Fail-open; bypass
 with `PRAXIS_RELAYED_BLOCK_BYPASS=1`.
@@ -66,19 +70,29 @@ _OFFERED_ENV = re.compile(r"(?<![A-Za-z0-9_])([A-Z][A-Z0-9_]{2,})=")
 # the hook's own prose and never starts with it.
 _SETTINGS_RULE_DENIAL = "Permission to use "
 
+# `터미널에서` / `프롬프트에` alone only name a place (an agent says where it
+# looked); they frame a relay only with a request form within two words.
 _USER_RUN = re.compile(
     r"직접\s*\S{0,6}?(?:해\s*주|하시)|입력하시|실행해\s*주|실행하시|"
-    r"터미널에서|프롬프트에|"
+    r"(?:터미널에서|프롬프트에)(?:\s*\S{1,12}){0,2}?\s*(?:실행|입력|치|쳐|넣|돌려)"
+    r"\S{0,4}?(?:해\s*주|하시|하세요|주세요)|"
     r"(?<![a-z])(?:run\s+(?:it|this|that|the\s+command)\s+yourself|"
     r"(?:in|from)\s+your\s+(?:terminal|shell)|you\s+(?:can|could)\s+run|"
     r"please\s+run)(?![a-z])",
     re.IGNORECASE,
 )
-_NEGATED_AFTER = re.compile(r"^.{0,8}?(?:지\s*않|지\s*말|하지\s*않|not\b|n't\b)")
+_NEGATED_AFTER = re.compile(
+    r"^.{0,8}?(?:지\s*않|지\s*말|지\s*마|하지\s*않|not\b|n't\b)"
+)
 
 _FENCE = re.compile(r"^\s*(`{3,}|~{3,})(.*)$")
 _INLINE_CODE = re.compile(r"`([^`\n]+)`")
 _LINE_PREFIX = re.compile(r"^\s*(?:[-*+]\s+|\d+[.)]\s+|>\s+|\$\s+)*")
+# The host accepts `!git` as well as `! git`; tokenizing needs the space.
+_GLUED_RUN_PREFIX = re.compile(r"^!(?=\S)")
+# A sentence ends at a terminator followed by whitespace or the end of text.
+_SENTENCE_END = re.compile(r"[.!?。！？](?=\s|$)")
+_INTRODUCES = (":", "：")
 
 
 def signature(segment: list[str]) -> list[str]:
@@ -175,17 +189,67 @@ def paragraphs(message: str) -> list[int]:
     return out
 
 
-def is_framed(lines: list[str], para: list[int], index: int, code: str) -> bool:
-    """A `!` run prefix, or a user-run phrase in the same paragraph.
+def _mask_code(text: str) -> str:
+    """Inline code spans replaced by same-length filler, so their punctuation
+    never ends a sentence."""
+    return _INLINE_CODE.sub(lambda m: "`" + "x" * (len(m.group(0)) - 2) + "`", text)
 
-    A paragraph rather than a line window: a sentence reporting the block often
-    sits a few lines above the option that relays it, and a window reads the
-    report as part of the relay.
+
+def sentence_around(text: str, start: int, end: int) -> str:
+    """The sentence of `text` that contains the span `text[start:end]`."""
+    begin = 0
+    for m in _SENTENCE_END.finditer(_mask_code(text)):
+        if m.end() <= start:
+            begin = m.end()
+        elif m.start() >= end:
+            return text[begin:m.end()]
+    return text[begin:]
+
+
+def is_command_line(line: str, code: str) -> bool:
+    """A fenced line, or a line that is nothing but the code span (a list
+    marker, quote or `$` prompt before it allowed)."""
+    return _LINE_PREFIX.sub("", line).strip() in (f"`{code}`", code.strip())
+
+
+def preceding_paragraph(lines: list[str], para: list[int], number: int) -> str:
+    """Text of the nearest non-empty paragraph above paragraph `number`."""
+    for p in range(number - 1, -1, -1):
+        text = "\n".join(line for line, q in zip(lines, para) if q == p)
+        if text.strip():
+            return text
+    return ""
+
+
+def is_framed(lines: list[str], para: list[int], index: int, code: str) -> bool:
+    """A `!` run prefix, or a user-run phrase in the code's scope.
+
+    A command line (fenced, or a line that is only the code span) takes
+    its paragraph as scope: a sentence reporting the block often sits a few
+    lines above the option that relays it, and a line window reads the report
+    as part of the relay. When that paragraph carries no frame, the paragraph
+    above is read too, but only when it ends with a colon: `Run this in your
+    terminal:` followed by a blank line and a fence is one utterance. A code
+    span inside prose takes only its own sentence, so a report of the block
+    (`` `git push` was blocked. Please run `gh pr create` instead. ``) is
+    not framed by the sentence that follows it.
     """
     if code.lstrip().startswith("!"):
         return True
-    same = [line for line, p in zip(lines, para) if p == para[index]]
-    return _has_user_run_frame("\n".join(same))
+    number = para[index]
+    own = [line for line, p in zip(lines, para) if p == number]
+    text = "\n".join(own)
+    if not is_command_line(lines[index], code):
+        offset = sum(len(line) + 1 for line in own[: index - para.index(number)])
+        start = lines[index].find(f"`{code}`")
+        if start < 0:
+            return False
+        start += offset
+        return _has_user_run_frame(sentence_around(text, start, start + len(code) + 2))
+    if _has_user_run_frame(text):
+        return True
+    above = preceding_paragraph(lines, para, number)
+    return above.rstrip().endswith(_INTRODUCES) and _has_user_run_frame(above)
 
 
 def offered_env_names(block_texts: list[str]) -> set[str]:
@@ -200,7 +264,7 @@ def relays(
         return None
     lines, para = message.splitlines(), paragraphs(message)
     for index, code in code_lines(message):
-        tokens = safe_tokenize(_LINE_PREFIX.sub("", code)) or []
+        tokens = safe_tokenize(_GLUED_RUN_PREFIX.sub("! ", _LINE_PREFIX.sub("", code))) or []
         if any(_ENV_ASSIGN.match(t) and t.split("=", 1)[0] in offered for t in tokens):
             continue
         if any(is_subsequence(s, tokens) for s in sigs) and is_framed(lines, para, index, code):
