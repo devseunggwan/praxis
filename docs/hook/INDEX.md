@@ -205,7 +205,7 @@ finalized. Run sequentially: `completion-verify` → `retrospect-mix-check` →
 `pr-anchor-existence-gate` → `proposal-premise-gate` →
 `prose-option-menu-advisory` → `retraction-probe-advisory` →
 `joint-liability-attribution-gate` → `denied-action-report-gate` →
-`strike-counter stop`.
+`relayed-blocked-command-gate` → `strike-counter stop`.
 Also includes session-lifecycle enforcement.
 
 Signal convention (issue #647 H3): every hook in this role emits stdout JSON —
@@ -238,4 +238,5 @@ One documented exception: `bypass-route-signal` is observe-only and emits
 | [retraction-probe-advisory](../../hooks/completion-verify/retraction-probe-advisory/spec.md) | Stop | Advisory when the last assistant text retracts an earlier verdict (`틀렸습니다` / `철회합니다` / `I was wrong`, outside `>` quotes and questions) in a turn that ran tools but quotes none of their output — a retraction is a claim too; bypass `PRAXIS_RETRACTION_PROBE_BYPASS` (#1442) |
 | [joint-liability-attribution-gate](../../hooks/completion-verify/joint-liability-attribution-gate/spec.md) | Stop + SubagentStop | Advisory when the **first paragraph** of the final message both names a sibling session/worktree/agent and disowns it — attribution as the report's opening move; cleared only when the most recent user message asked for routing; `PRAXIS_JOINT_LIABILITY_STRICT=1` blocks (#1391) |
 | [denied-action-report-gate](../../hooks/completion-verify/denied-action-report-gate/spec.md) | Stop + SubagentStop | Advisory when a tool call was structurally denied during the turn — refused by the user, or blocked by a `PreToolUse` hook or permission rule (#1422) — and the final report never says so; a denial leaves no error, no correction and no confession, so recall never reaches it, and `retrospect-mix-check` Gate-12 covers only the retrospect surface (#1392) |
+| [relayed-blocked-command-gate](../../hooks/completion-verify/relayed-blocked-command-gate/spec.md) | Stop | Block when a `PreToolUse` hook blocked a Bash call this turn and the final message hands that same command to the user to run (a `!`-prefixed code line, or a code line sharing a paragraph with a user-run request); settings permission rules and the blocking hook's own offered bypass variable are exempt; bypass `PRAXIS_RELAYED_BLOCK_BYPASS` (#1508) |
 | [strike-counter](../../hooks/completion-verify/strike-counter/spec.md) | SessionStart + UserPromptSubmit + Stop | Session-scoped three-strike discipline — hard-blocks at strike 3, requires reflection before reset |

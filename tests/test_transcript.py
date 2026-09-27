@@ -616,6 +616,9 @@ _CONSUMERS = {
     # A refusal anywhere earlier in the session arms the gate (#1488).
     HOOKS / "preflight-gate" / "rejected-call-probe-gate" / "impl.py":
         ["scan_transcript_resumable", "scan_cursor_path", "TranscriptReadError"],
+    # Only this turn's blocks matter, so the turn is read, not the session (#1508).
+    HOOKS / "completion-verify" / "relayed-blocked-command-gate" / "impl.py":
+        ["load_stop_turn", "resolve_stop_transcript", "stop_last_assistant_text"],
 }
 
 # Constants are values, not bindings, so the function map above cannot pin them:
@@ -642,6 +645,8 @@ _CONSTANT_CONSUMERS = {
         ["HOOK_BLOCK_DENIAL_KIND"],
     HOOKS / "preflight-gate" / "rejected-call-probe-gate" / "impl.py":
         ["REJECTION_DENIAL_KIND", "REJECTION_PHRASE"],
+    HOOKS / "completion-verify" / "relayed-blocked-command-gate" / "impl.py":
+        ["HOOK_BLOCK_DENIAL_KIND"],
 }
 
 
