@@ -30,8 +30,8 @@ def _load():
 census_mod = _load()
 
 
-def _a(mid: str, stop: str, block: dict) -> str:
-    return json.dumps({"type": "assistant",
+def _a(mid: str, stop: str | None, block: dict, **extra) -> str:
+    return json.dumps({"type": "assistant", **extra,
                        "message": {"id": mid, "role": "assistant",
                                    "stop_reason": stop, "content": [block]}})
 
@@ -54,6 +54,10 @@ FIXTURE = [
     # string content counts as one text block
     json.dumps({"type": "assistant", "message": {"id": "m5", "stop_reason": "end_turn",
                                                  "content": "plain"}}),
+    # missing / null stop_reason folds into the "none" key
+    _a("m6", None, {"type": "text", "text": "no stop"}),
+    # subagent line: skipped by default, counted under sidechain_lines
+    _a("sc1", "tool_use", {"type": "text", "text": "subagent note"}, isSidechain=True),
     "{not json",
     "",
     json.dumps({"type": "system", "subtype": "x"}),
@@ -62,12 +66,36 @@ FIXTURE = [
 
 def test_census_counts_every_shape():
     r = census_mod.census(FIXTURE)
-    assert r["assistant_lines"] == 9
+    assert r["assistant_lines"] == 10
+    assert r["sidechain_lines"] == 1
     assert r["skipped_lines"] == 1
-    assert r["blocks_by_type"] == {"text": 3, "thinking": 4, "tool_use": 2}
+    assert r["blocks_by_type"] == {"text": 4, "thinking": 4, "tool_use": 2}
     assert r["thinking_nonempty"] == 1
     assert r["thinking_nonempty_by_stop_reason"] == {"tool_use": 1}
-    assert r["text_by_stop_reason"] == {"end_turn": 2, "tool_use": 1}
+    # a null stop_reason is keyed "none"
+    assert r["text_by_stop_reason"] == {"end_turn": 2, "none": 1, "tool_use": 1}
+
+
+def test_census_skips_sidechain_by_default_and_includes_on_request():
+    lines = [
+        _a("main1", "tool_use", {"type": "text", "text": "main"}),
+        _a("sub1", "tool_use", {"type": "text", "text": "sub"}, isSidechain=True),
+        _a("sub2", "end_turn", {"type": "thinking", "thinking": "sub note", "signature": "s"},
+           isSidechain=True),
+        # isSidechain: false is a main-thread line
+        _a("main2", "end_turn", {"type": "text", "text": "main"}, isSidechain=False),
+    ]
+    default = census_mod.census(lines)
+    assert default["assistant_lines"] == 2
+    assert default["sidechain_lines"] == 2
+    assert default["blocks_by_type"] == {"text": 2}
+    assert default["thinking_nonempty"] == 0
+
+    included = census_mod.census(lines, include_sidechain=True)
+    assert included["assistant_lines"] == 4
+    assert included["sidechain_lines"] == 0
+    assert included["blocks_by_type"] == {"text": 3, "thinking": 1}
+    assert included["thinking_nonempty_by_stop_reason"] == {"end_turn": 1}
 
 
 def test_cli_prints_census_and_exits_zero(tmp_path):
@@ -76,9 +104,22 @@ def test_cli_prints_census_and_exits_zero(tmp_path):
     out = subprocess.run([sys.executable, str(_SCRIPT), str(p)],
                          capture_output=True, text=True, check=False)
     assert out.returncode == 0
-    assert "blocks by type: text=3, thinking=4, tool_use=2" in out.stdout
+    assert "assistant lines: 10" in out.stdout
+    assert "sidechain lines skipped: 1" in out.stdout
+    assert "blocks by type: text=4, thinking=4, tool_use=2" in out.stdout
     assert "thinking with non-empty text: 1 of 4" in out.stdout
-    assert "text blocks by stop_reason: end_turn=2, tool_use=1" in out.stdout
+    assert "text blocks by stop_reason: end_turn=2, none=1, tool_use=1" in out.stdout
+
+
+def test_cli_include_sidechain_flag(tmp_path):
+    p = tmp_path / "t.jsonl"
+    p.write_text("\n".join(FIXTURE) + "\n", encoding="utf-8")
+    out = _run("--include-sidechain", str(p))
+    assert out.returncode == 0
+    assert "assistant lines: 11" in out.stdout
+    assert "sidechain lines skipped: 0" in out.stdout
+    assert "blocks by type: text=5, thinking=4, tool_use=2" in out.stdout
+    assert "text blocks by stop_reason: end_turn=2, none=1, tool_use=2" in out.stdout
 
 
 def test_cli_missing_file_exits_two(tmp_path):
@@ -91,6 +132,7 @@ def test_cli_missing_file_exits_two(tmp_path):
 def test_empty_transcript_reports_none():
     text = census_mod.render(census_mod.census([]))
     assert "assistant lines: 0" in text
+    assert "sidechain lines skipped: 0" in text
     assert "thinking with non-empty text: 0 of 0" in text
 
 
@@ -149,5 +191,12 @@ def test_cli_survives_invalid_utf8(tmp_path):
 
 def test_cli_without_argument_exits_two():
     out = _run()
+    assert out.returncode == 2
+    assert "usage:" in out.stdout
+    assert "--include-sidechain" in out.stdout
+
+
+def test_cli_flag_without_path_exits_two():
+    out = _run("--include-sidechain")
     assert out.returncode == 2
     assert "usage:" in out.stdout

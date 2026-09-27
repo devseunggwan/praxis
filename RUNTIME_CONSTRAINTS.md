@@ -442,7 +442,7 @@ same dump file is the positive control.
 
 ---
 
-## 11. Mid-turn assistant notes can land in a `text` block or a `thinking` block
+## 11. Mid-turn assistant notes can land in a `text` block or a `thinking` block (measured shape, not a stability guarantee)
 
 > **Scope of this entry.** "Adding a new entry" asks for a constraint that is
 > fixed by the runtime. What is fixed here is the *variability*: on one host
@@ -533,8 +533,14 @@ scripts/transcript-block-census.py ~/.claude/projects/<proj>/<session>.jsonl
 
 It counts the assistant content blocks by type, the `thinking` blocks with a
 non-empty `thinking` field (and their `stop_reason`), and the `text` blocks by
-`stop_reason`. A per-line inspection command (no aggregation; whitespace-only
-thinking counts as non-empty; string content yields no blocks):
+`stop_reason`. By default it skips assistant lines with `isSidechain: true`
+(subagent output) and reports the count as `sidechain lines skipped`, matching
+the `isSidechain` filter seven of the eight readers above apply
+(`pr-report-destination-gate` does not); pass `--include-sidechain` to count
+them too. A missing or `null` `stop_reason` is folded into a `none` key in
+both `stop_reason` breakdowns. A per-line inspection command (no aggregation;
+whitespace-only thinking counts as non-empty; string content yields no blocks;
+sidechain lines are not filtered):
 
 ```bash
 jq -c 'select(.type=="assistant") | {stop:.message.stop_reason,
