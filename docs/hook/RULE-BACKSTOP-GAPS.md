@@ -125,10 +125,10 @@ carries the ranking: #4 is a HIGH-cost row sitting after the LOW-MED #3.
   the case where the route is the blocked command itself, handed to the user
   to run. This slice needs none of the textual separation the `#1009` bullet
   calls impossible: the target is the exact command a hook blocked this turn,
-  and the permitted relay is recognised structurally, as an env assignment
-  whose name the blocking hook's own refusal printed. It blocks. The row stays
-  open for every other route (permission rules, settings edits, moving the
-  file), which this gate does not read.
+  and other framed relays are blocked. An env assignment whose name the
+  blocking hook's own refusal printed is the permitted bypass line, so this
+  gate exempts it. The row stays open for every other route (permission rules,
+  settings edits, moving the file), which this gate does not read.
 - Gaps **#2** and **#3** are surfaced here but **not yet issue-tracked** — open
   them if/when the cost is judged worth a dedicated hook.
 - Gap **#5** is deliberately unhooked. `#1009` measured this same axis and chose a
