@@ -743,13 +743,14 @@ run_merge_escalation_case "merge_escalation_prior_turn_wrong_pr_denies" \
 
 # Interrupt between the briefing and the approval (issue #1459). The marker is
 # not typed content, so it does not cut the window — but only when it is the
-# whole message. These four fixtures differ in that one respect, so they are
+# whole message. These five fixtures differ in that one respect, so they are
 # what separates "the user was interrupted" from "the user said something".
 #
 #   interrupt-ok            briefing → interrupt → `ok`              → allow
 #   interrupt-continue      briefing → interrupt → `continue`        → deny
 #   interrupt-then-other    briefing → interrupt → content → `ok`    → deny
 #   interrupt-quoted        briefing → marker inside a sentence → ok → deny
+#   interrupt-with-image    briefing → marker + an image → `ok`      → deny
 run_merge_escalation_case "merge_escalation_interrupt_then_ok_passes" \
   "no" "" "momentum-merge-interrupt-ok.jsonl" "gh pr merge 833 --squash --delete-branch"
 run_merge_escalation_case "merge_escalation_interrupt_then_continue_denies" \
@@ -758,6 +759,8 @@ run_merge_escalation_case "merge_escalation_interrupt_then_other_content_denies"
   "yes" "" "momentum-merge-interrupt-then-other.jsonl" "gh pr merge 833 --squash --delete-branch"
 run_merge_escalation_case "merge_escalation_interrupt_marker_quoted_denies" \
   "yes" "" "momentum-merge-interrupt-quoted.jsonl" "gh pr merge 833 --squash --delete-branch"
+run_merge_escalation_case "merge_escalation_interrupt_with_image_denies" \
+  "yes" "" "momentum-merge-interrupt-with-image.jsonl" "gh pr merge 833 --squash --delete-branch"
 
 # --- serial-merge window cut (issue #1214) -----------------------------------
 #

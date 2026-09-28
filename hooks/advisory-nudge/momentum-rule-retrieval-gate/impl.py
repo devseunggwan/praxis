@@ -662,7 +662,7 @@ def _human_user_indices(entries: list[dict]) -> list[int]:
         if isinstance(origin, dict) and origin.get("kind") not in (None, "human"):
             continue
         content = msg.get("content", [])
-        if _INTERRUPT_ONLY_RE.match(_user_message_text(content).strip()):
+        if _is_interrupt_only(content):
             continue
         if isinstance(content, str):
             if content.strip():
@@ -690,6 +690,20 @@ def _assistant_text(entries: list[dict], lo: int, hi: int) -> str:
                     if isinstance(t, str):
                         texts.append(t)
     return "\n".join(texts)
+
+
+def _is_interrupt_only(content: object) -> bool:
+    """True when a user message is the interrupt marker and nothing else.
+
+    `_user_message_text` keeps text blocks only, so a marker sent with an image
+    would flatten to the bare marker; the image is content of the user's own
+    and must still close the window.
+    """
+    if isinstance(content, list) and not all(
+        isinstance(b, dict) and b.get("type") == "text" for b in content
+    ):
+        return False
+    return bool(_INTERRUPT_ONLY_RE.match(_user_message_text(content).strip()))
 
 
 def _user_message_text(content: object) -> str:
