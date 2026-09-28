@@ -672,7 +672,8 @@ _CONSTANT_CONSUMERS = {
     HOOKS / "preflight-gate" / "block-gh-issue-create-without-dup-search" / "impl.py":
         ["TRANSCRIPT_SCAN_LINES"],
     HOOKS / "completion-verify" / "denied-action-report-gate" / "impl.py":
-        ["DENIAL_KINDS", "HOOK_BLOCK_DENIAL_KIND", "REJECTION_DENIAL_KIND"],
+        ["AUTOMODE_BLOCK_DENIAL_KIND", "DENIAL_KINDS", "HOOK_BLOCK_DENIAL_KIND",
+         "REJECTION_DENIAL_KIND"],
     HOOKS / "preflight-gate" / "cross-tool-reroute-gate" / "impl.py":
         ["HOOK_BLOCK_DENIAL_KIND"],
     HOOKS / "preflight-gate" / "rejected-call-probe-gate" / "impl.py":
@@ -1927,4 +1928,43 @@ class TestDenialKinds:
             _rejection("toolu_1", "A1", denial_kind="something-else"),
         ])
         assert T.scan_user_rejections(path) == []
+        assert T.scan_user_rejections(path, kinds=T.DENIAL_KINDS) == []
+
+    # Transcribed from a live record, cut at the end of its second sentence.
+    AUTOMODE_PROSE = (
+        "Permission for this action was denied by the Claude Code auto mode "
+        "classifier. Reason: Blocked by classifier."
+    )
+
+    def test_classifier_block_is_a_denial_kind(self, tmp_path):
+        """#1475: the classifier refuses a call before it runs, in the same
+        shape as a hook block — so the same two markers, and no sentence."""
+        path = _write_jsonl(tmp_path, [
+            _asst_tool_use("A1", "toolu_1", "Bash", {"command": "git push"}),
+            _rejection("toolu_1", "A1", denial_kind="automode-blocked",
+                       sentence=self.AUTOMODE_PROSE),
+        ])
+        assert T.scan_user_rejections(path) == []
+        recs = T.scan_user_rejections(path, kinds=T.DENIAL_KINDS)
+        assert [r["kind"] for r in recs] == ["automode-blocked"]
+
+    def test_classifier_block_still_needs_is_error(self, tmp_path):
+        path = _write_jsonl(tmp_path, [
+            _asst_tool_use("A1", "toolu_1", "Bash", {"command": "git push"}),
+            _rejection("toolu_1", "A1", is_error=None, denial_kind="automode-blocked",
+                       sentence=self.AUTOMODE_PROSE),
+        ])
+        assert T.scan_user_rejections(path, kinds=T.DENIAL_KINDS) == []
+
+    def test_classifier_unavailable_and_interrupt_are_not_denials(self, tmp_path):
+        """Recorded with a `toolDenialKind`, but neither is a refusal: one asks
+        for a retry, the other is the user stopping the call themselves."""
+        path = _write_jsonl(tmp_path, [
+            _asst_tool_use("A1", "toolu_1", "Bash", {"command": "git push"}),
+            _rejection("toolu_1", "A1", denial_kind="automode-unavailable",
+                       sentence="auto mode cannot determine the safety of Bash right now."),
+            _asst_tool_use("A2", "toolu_2", "Bash", {"command": "git push"}),
+            _rejection("toolu_2", "A2", denial_kind="interrupted",
+                       sentence="[Request interrupted by user for tool use]"),
+        ])
         assert T.scan_user_rejections(path, kinds=T.DENIAL_KINDS) == []

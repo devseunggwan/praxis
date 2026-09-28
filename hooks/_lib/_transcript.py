@@ -912,7 +912,13 @@ REJECTION_DENIAL_KIND = "user-rejected"
 # has one; for this kind the `toolDenialKind` field plus `is_error: true` are
 # the two co-agreeing markers, and both are still structural.
 HOOK_BLOCK_DENIAL_KIND = "permission-rule"
-DENIAL_KINDS = (REJECTION_DENIAL_KIND, HOOK_BLOCK_DENIAL_KIND)
+# The third (issue #1475): the auto mode classifier refused the call before it
+# ran. Same shape as `permission-rule` — `is_error: true`, the blocker's own
+# prose — so it agrees on the same two markers. `automode-unavailable` (the
+# classifier could not answer and asks for a retry) and `interrupted` (the user
+# stopped the call) are recorded too but are not refusals, and stay out.
+AUTOMODE_BLOCK_DENIAL_KIND = "automode-blocked"
+DENIAL_KINDS = (REJECTION_DENIAL_KIND, HOOK_BLOCK_DENIAL_KIND, AUTOMODE_BLOCK_DENIAL_KIND)
 # Fixed runtime string, copied from a live record. Its apostrophe is ASCII.
 REJECTION_PHRASE = "doesn't want to proceed"
 _DENIAL_KIND_MARKER = '"toolDenialKind"'
