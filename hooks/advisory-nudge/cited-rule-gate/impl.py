@@ -53,6 +53,7 @@ from _payload import read_payload  # type: ignore[import-not-found]  # noqa: E40
 from _transcript import (  # type: ignore[import-not-found]  # noqa: E402
     TRANSCRIPT_SCAN_LINES,
     TranscriptReadError,
+    block_prose,
     tail_lines,
 )
 
@@ -238,8 +239,9 @@ def window_text(events: list[dict], tool_use_id: str) -> str | None:
         blocks = _content_blocks(ev)
         if role == "assistant":
             for b in reversed(blocks):
-                if b.get("type") == "text" and isinstance(b.get("text"), str):
-                    texts.append(b["text"])
+                prose = block_prose(b)
+                if prose is not None:
+                    texts.append(prose)
                 elif (b.get("type") == "tool_use"
                       and str(b.get("id") or "") not in batch_ids):
                     return "\n".join(reversed(texts))

@@ -520,12 +520,13 @@ The grep's other hits read user messages or `tool_result` content.
 (`_has_slash_command`) was listed in issue #1502 but reads **user** events,
 not assistant text, so it is not affected.
 
-**Workaround**: none applied yet — no hook behavior changed with this entry.
-Do not assume a mid-turn note is a `text` block. A reader that needs every
-note in the turn should also take `thinking` blocks whose `thinking` field is
-non-empty (under `display: "updates"`; under `"summarized"` this would also
-pick up reasoning summaries). Re-measure on a host upgrade with the census
-helper:
+**Workaround**: do not assume a mid-turn note is a `text` block. The five
+readers in (a) take each block through `block_prose` in
+`hooks/_lib/_transcript.py` (issue #1502), which returns the text of a `text`
+block or of a `thinking` block whose `thinking` field is not blank, so a note
+counts in either shape. Under `display: "summarized"` this would also pick up
+reasoning summaries; that display was not observed. The readers in (b) are
+unchanged. Re-measure on a host upgrade with the census helper:
 
 ```bash
 scripts/transcript-block-census.py ~/.claude/projects/<proj>/<session>.jsonl
@@ -562,6 +563,13 @@ measured twice.
   A separate check, grouping the lines on `message.id` (the helper does not
   group), found each of the 5 was the second `thinking` block of its message,
   after an empty one.
+- Third census (2026-09-28, Claude Code 2.1.283, same model and effort, a
+  different session): 508 assistant lines; blocks `text=69, thinking=209,
+  tool_use=230`. 78 of the 209 `thinking` blocks carried non-empty text
+  (66–254 characters), all in `stop_reason: "tool_use"` messages; grouped on
+  `message.id`, 76 followed an empty `thinking` block and 2 did not. The four
+  sampled were user-facing progress notes. `text` blocks: `tool_use=68`,
+  `end_turn=1`.
 
 What the first census alone would have recorded — "`thinking` blocks carry no
 text" — did not survive the same session, so the shape is not fixed per host

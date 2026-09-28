@@ -81,7 +81,10 @@ from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
     safe_tokenize,
 )
 from _payload import read_payload  # type: ignore[import-not-found]  # noqa: E402
-from _transcript import load_recent_events  # type: ignore[import-not-found]  # noqa: E402
+from _transcript import (  # type: ignore[import-not-found]  # noqa: E402
+    block_prose,
+    load_recent_events,
+)
 
 _HOOK_NAME = "negation-answer-quote-advisory"
 BYPASS_ENV = "PRAXIS_NEGATION_ANSWER_BYPASS"
@@ -256,9 +259,9 @@ def pending_negation_answer(events: list[dict]) -> str | None:
                         quotes(text, armed) for text in _strings(block.get("input"))
                     ):
                         armed = None
-            elif kind == "text":
-                body = block.get("text")
-                if armed and isinstance(body, str) and quotes(body, armed):
+            elif kind in ("text", "thinking"):
+                body = block_prose(block)
+                if armed and body is not None and quotes(body, armed):
                     armed = None
             elif kind == "tool_result" and str(block.get("tool_use_id")) in ask_labels:
                 labels = ask_labels.pop(str(block.get("tool_use_id")))

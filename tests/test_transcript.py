@@ -524,7 +524,7 @@ _CONSUMERS = {
     # Scans a tail past the turn boundary (min_events=150): the answer, the
     # re-ask and the write can share one turn, which is the incident shape.
     HOOKS / "advisory-nudge" / "negation-answer-quote-advisory" / "impl.py":
-        ["load_recent_events"],
+        ["load_recent_events", "block_prose"],
     HOOKS / "completion-verify" / "readonly-verify-deferral-gate" / "impl.py":
         ["load_current_turn", "extract_last_assistant_text"],
     # Registered on SubagentStop as well (#1337), so it takes the turn through
@@ -573,14 +573,14 @@ _CONSUMERS = {
     # Also streams the turns BEFORE the current one, reusing the shared boundary
     # predicate so the backward and forward directions cannot disagree (#1076).
     HOOKS / "completion-verify" / "runtime-state-claim-gate" / "impl.py":
-        ["load_current_turn", "extract_last_assistant_text",
+        ["load_current_turn", "extract_last_assistant_text", "block_prose",
          "is_turn_boundary", "reduce_transcript_resumable", "stop_scan_cursor_path"],
     HOOKS / "completion-verify" / "artifact-verdict-evidence-gate" / "impl.py":
         ["load_current_turn", "extract_last_assistant_text"],
     # The one scan that genuinely needs the whole session; it streams instead
     # of materializing it (#1076).
     HOOKS / "completion-verify" / "pr-report-destination-gate" / "impl.py":
-        ["reduce_transcript_resumable", "stop_scan_cursor_path"],
+        ["reduce_transcript_resumable", "stop_scan_cursor_path", "block_prose"],
     # Same whole-session rationale as pr-report-destination-gate above (#1113).
     HOOKS / "completion-verify" / "pr-anchor-existence-gate" / "impl.py":
         ["reduce_transcript_resumable", "stop_scan_cursor_path"],
@@ -641,7 +641,10 @@ _CONSUMERS = {
         ["read_last_user_message"],
     # The window is the text since the previous tool call, at the very end.
     HOOKS / "advisory-nudge" / "cited-rule-gate" / "impl.py":
-        ["tail_lines", "TranscriptReadError"],
+        ["tail_lines", "TranscriptReadError", "block_prose"],
+    # Counts briefing items across an index range of assistant prose (#1502).
+    HOOKS / "advisory-nudge" / "momentum-rule-retrieval-gate" / "impl.py":
+        ["block_prose"],
     # A refusal anywhere earlier in the session arms the gate (#1488).
     HOOKS / "preflight-gate" / "rejected-call-probe-gate" / "impl.py":
         ["scan_transcript_resumable", "scan_cursor_path", "TranscriptReadError"],

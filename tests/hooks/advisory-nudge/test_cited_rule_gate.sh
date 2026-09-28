@@ -164,8 +164,12 @@ run_case "citation before the previous tool call is stale" advisory Bash "$PUSH"
   '[["user","go"],["text","Rule: Scope Discipline","m1"],["tool","p1","Bash","m1"],["result","p1"],["text","Now pushing.","m2"],["tool","cur","Bash","m2"]]'
 run_case "citation in an earlier human turn" advisory Bash "$PUSH" \
   '[["text","Rule: Scope Discipline","m0"],["user","push"],["tool","cur","Bash","m1"]]'
-run_case "citation only in thinking" advisory Bash "$PUSH" \
-  '[["user","go"],["think","Rule: Scope Discipline","m1"],["tool","cur","Bash","m1"]]'
+# A mid-turn note can be recorded as a thinking block that carries its text
+# (RUNTIME_CONSTRAINTS.md entry 11); a blank one is recorded reasoning.
+run_case "citation in a note recorded as thinking" silent Bash "$PUSH" \
+  '[["user","go"],["think","","m1"],["think","Rule: Scope Discipline","m1"],["tool","cur","Bash","m1"]]'
+run_case "blank thinking only" advisory Bash "$PUSH" \
+  '[["user","go"],["think","","m1"],["tool","cur","Bash","m1"]]'
 run_case "citation only in a sidechain" advisory Bash "$PUSH" \
   '[["user","go"],["side","Rule: Scope Discipline"],["tool","cur","Bash","m1"]]'
 run_case "heading inside a code fence is not a heading" advisory Bash "$PUSH" \

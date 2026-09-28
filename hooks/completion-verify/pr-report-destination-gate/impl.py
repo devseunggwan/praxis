@@ -83,6 +83,7 @@ from _hook_io import emit_stop_advisory  # type: ignore[import-not-found]  # noq
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
 from _payload import read_payload  # type: ignore[import-not-found]  # noqa: E402
 from _transcript import (  # type: ignore[import-not-found]  # noqa: E402
+    block_prose,
     reduce_transcript_resumable,
     stop_scan_cursor_path,
 )
@@ -244,9 +245,9 @@ def _reduce_event(state: dict, ev: dict) -> None:
         if not isinstance(block, dict):
             continue
         kind = block.get("type")
-        if kind == "text":
-            text = block.get("text")
-            if isinstance(text, str):
+        if kind in ("text", "thinking"):
+            text = block_prose(block)
+            if text is not None:
                 _add_narrative_prs(context_prs, text)
         elif kind == "tool_use":
             before = len(pending)

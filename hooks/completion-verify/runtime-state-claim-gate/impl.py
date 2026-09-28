@@ -57,6 +57,7 @@ import _fire_ledger  # type: ignore[import-not-found]  # noqa: E402
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
 from _payload import read_payload  # type: ignore[import-not-found]  # noqa: E402
 from _transcript import (  # type: ignore[import-not-found]  # noqa: E402
+    block_prose,
     extract_last_assistant_text,
     is_turn_boundary,
     load_current_turn,
@@ -326,8 +327,7 @@ def _event_verdict_mentions(ev: dict) -> dict[str, str | None]:
         text = content
     elif isinstance(content, list):
         text = "\n".join(
-            b.get("text", "") for b in content
-            if isinstance(b, dict) and b.get("type") == "text"
+            prose for prose in map(block_prose, content) if prose is not None
         )
     if not text:
         return {}

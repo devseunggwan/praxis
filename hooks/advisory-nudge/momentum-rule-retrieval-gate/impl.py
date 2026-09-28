@@ -55,7 +55,10 @@ from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
 )
 from _memory_dir import resolve_memory_dir  # type: ignore[import-not-found]  # noqa: E402
 from _payload import read_bash_payload  # type: ignore[import-not-found]  # noqa: E402
-from _transcript import TRANSCRIPT_SCAN_LINES  # type: ignore[import-not-found]  # noqa: E402
+from _transcript import (  # type: ignore[import-not-found]  # noqa: E402
+    TRANSCRIPT_SCAN_LINES,
+    block_prose,
+)
 from block_message import (  # type: ignore[import-not-found]  # noqa: E402
     format_block,
     verb_gate_checklist,
@@ -658,7 +661,7 @@ def _human_user_indices(entries: list[dict]) -> list[int]:
 
 
 def _assistant_text(entries: list[dict], lo: int, hi: int) -> str:
-    """Concatenate assistant text blocks in entries[lo:hi]."""
+    """Concatenate assistant prose blocks in entries[lo:hi]."""
     texts: list[str] = []
     for ev in entries[lo:hi]:
         msg = ev.get("message")
@@ -669,10 +672,9 @@ def _assistant_text(entries: list[dict], lo: int, hi: int) -> str:
             texts.append(content)
         elif isinstance(content, list):
             for b in content:
-                if isinstance(b, dict) and b.get("type") == "text":
-                    t = b.get("text", "")
-                    if isinstance(t, str):
-                        texts.append(t)
+                prose = block_prose(b)
+                if prose is not None:
+                    texts.append(prose)
     return "\n".join(texts)
 
 
