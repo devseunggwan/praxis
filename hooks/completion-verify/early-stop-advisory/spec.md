@@ -172,7 +172,10 @@ or asks permission for something other than continuing (`정리해도 될까요?
 `Should I go ahead and merge?`). These are choices the user owns, the stop
 the guide's type 3 describes when the decision does block the rest. Asking
 to continue with no alternative (`남은 것도 진행해도 될까요?`, `Should I
-continue with the remaining endpoint?`) is type 2 and still fires.
+continue with the remaining endpoint?`) is type 2 and still fires. A bare
+`or` / `또는` / `혹은` counts as an alternative only outside an offer to
+continue, since it also joins the objects of one offer (`Should I continue
+with the remaining tests or docs?` fires).
 
 **A launched background task is still running.** Stopping while a launched
 task runs is a wait that has a wake-up: the task's notification re-invokes

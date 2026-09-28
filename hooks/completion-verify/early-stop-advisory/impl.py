@@ -335,11 +335,15 @@ def _asks_destructive_confirmation(sentences: list[str]) -> bool:
 # (`남은 것도 진행해도 될까요?`) is type 2 and still fires.
 _QUESTION_END_KO_RE = re.compile(r"(?:까요|습니까|나요)[.!]?\s*$")
 _ALTERNATIVE_RE = re.compile(
-    r"아니면|또는|혹은|어느 ?쪽|어느 (?:것|걸|방향|안)|어떤 (?:것|걸|쪽|방식|방향)"
+    r"아니면|어느 ?쪽|어느 (?:것|걸|방향|안)|어떤 (?:것|걸|쪽|방식|방향)"
     r"|어떻게 (?:할|진행할|처리할)"
-    r"|\bor\b|\bwhich (?:one|option|way|approach|of)\b|\bhow (?:would|do) you want\b",
+    r"|\bor (?:would|should|do|shall|can|rather)\b|\bor (?:just |instead )?(?:stop|wait|leave|hold)\b"
+    r"|\bwhich (?:one|option|way|approach|of)\b|\bhow (?:would|do) you want\b",
     re.IGNORECASE,
 )
+# A bare conjunction also joins the objects of one offer (`the tests or docs`),
+# so it marks a choice only when the question is not an offer to continue.
+_CONJUNCTION_RE = re.compile(r"또는|혹은|\bor\b", re.IGNORECASE)
 _PERMISSION_RE = re.compile(
     r"[가-힣]도 (?:될까요|괜찮을까요|되겠습니까|되나요)"
     # a gated act, a direction to take, or the proposal as it stands
@@ -357,7 +361,9 @@ def _asks_user_decision(sentences: list[str]) -> bool:
             continue
         if _ALTERNATIVE_RE.search(s):
             return True
-        if _PERMISSION_RE.search(s) and not _CONTINUE_RE.search(s):
+        if _CONTINUE_RE.search(s):
+            continue
+        if _CONJUNCTION_RE.search(s) or _PERMISSION_RE.search(s):
             return True
     return False
 

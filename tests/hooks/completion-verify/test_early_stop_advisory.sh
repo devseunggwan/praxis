@@ -749,7 +749,9 @@ for text in \
   "${DONE_KO}머지를 원하시면 머지 전 확인 절차부터 진행하겠습니다." \
   "${DONE_KO}스레드에 현황 답글을 달지는 알려주세요." \
   "${DONE_KO}PR 을 생성할까요?" \
-  "${DONE_KO}B-2 로 갈까요? 가면 3번부터 읽고 시작하겠습니다."; do
+  "${DONE_KO}B-2 로 갈까요? 가면 3번부터 읽고 시작하겠습니다." \
+  "${DONE_KO}A 안 또는 B 안 중에 무엇으로 갈까요?" \
+  "${DONE_EN}Should I merge now or wait for your review?"; do
   build_transcript "$text"
   run_case silent "approval/decision stop: ${text##*$'\n'}" '{}'
 done
@@ -761,6 +763,8 @@ for text in \
   "${DONE_KO}남은 \`/payments\`도 이어서 진행해도 될까요?" \
   "${DONE_KO}어느 쪽이든 결과는 같으니 다음 단계로 남은 \`/payments\`를 진행하겠습니다." \
   "${DONE_EN}Should I continue with the remaining endpoint?" \
+  "${DONE_EN}Should I continue with the remaining tests or docs?" \
+  "${DONE_KO}남은 테스트 또는 문서 작업을 이어서 진행할까요?" \
   "${DONE_KO}필요하시면 남은 \`/payments\`도 이어서 진행하겠습니다." \
   "${DONE_KO}원하시면 실패한 실행의 로그도 이어서 보겠습니다." \
   "${DONE_KO}커밋이 두 번 막힌 원인을 확정했습니다. 다음 단계로 남은 \`/payments\`를 진행하겠습니다."; do
