@@ -20,7 +20,8 @@ SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "rule-ab-eval.py"
 SUITE = Path(__file__).resolve().parent / "fixtures" / "rule-ab-eval" / "elapsed-time-signal"
 
 FAKE_CLAUDE = r'''#!/usr/bin/env python3
-import json, os, sys
+import json, os, sys, time
+time.sleep(float(os.environ.get("FAKE_SLEEP", "0")))
 args = sys.argv[1:]
 answer = "hello budget=%s settings=%s" % (os.environ.get("BUDGET", "unset"), "--settings" in args)
 with open(os.environ["PRAXIS_FIRE_TELEMETRY_FILE"], "a") as f:
@@ -135,6 +136,25 @@ def test_run_keeps_isolation_paths_over_arm_env(tmp_path):
     assert proc.returncode == 0, proc.stderr
     assert not shared.exists()
     assert (results / "runs" / "graded-on-1" / "fires.jsonl").exists()
+
+
+def test_run_kills_a_job_past_its_timeout_and_scores_it_failed(tmp_path):
+    env = dict(fake_path(tmp_path), FAKE_SLEEP="5")
+    results = tmp_path / "results"
+    proc = cli("run", str(write_suite(tmp_path / "s")), str(results), "--reps", "1", "--timeout", "1", env=env)
+    assert proc.returncode == 0, proc.stderr
+    assert proc.stdout.count("(timed out)") == 4
+    meta = json.loads((results / "runs" / "graded-on-1" / "meta.json").read_text())
+    assert meta["timed_out"] is True and meta["rc"] == -1
+    score = cli("score", str(results))
+    assert score.returncode == 1 and "ALL on: runs=2 failed=2" in score.stdout
+
+
+def test_run_refuses_an_oracle_past_its_timeout(tmp_path):
+    proc = cli("run", str(write_suite(tmp_path / "s", "sleep 5")), str(tmp_path / "r"),
+               "--oracle-timeout", "1", env=fake_path(tmp_path))
+    assert proc.returncode != 0 and "ran past 1s" in proc.stderr
+    assert not list((tmp_path / "r").glob("runs/*"))
 
 
 def test_run_refuses_without_claude_on_path(tmp_path):

@@ -15,8 +15,10 @@ scope for this tool.
   plan  <suite-dir> [--reps N] [--seed S]
       Print the shuffled job order. No model call.
   run   <suite-dir> <results-dir> [--reps N] [--seed S] [--parallel P] [--model M]
+        [--timeout S] [--oracle-timeout S]
       Archive HEAD into <results-dir>/repo (uncommitted changes are NOT
-      included), run the oracles there, then run every job.
+      included), run the oracles there, then run every job. A job past its
+      timeout is killed and scored as failed.
   score <results-dir>
       Per task x arm: runs, failed runs, medians (wall s, tool calls, turns,
       cost USD), oracle passes, signal-hook fires, blocking Stop-gate fires.
@@ -80,12 +82,16 @@ def archive_head(dest: Path) -> str:
     return sha
 
 
-def run_oracles(suite: dict, repo: Path, out: Path) -> None:
+def run_oracles(suite: dict, repo: Path, out: Path, timeout: int) -> None:
     out.mkdir()
     for name, task in suite["tasks"].items():
         if "oracle" not in task:
             continue
-        proc = subprocess.run(["sh", "-c", task["oracle"]], cwd=repo, capture_output=True, text=True)
+        try:
+            proc = subprocess.run(["sh", "-c", task["oracle"]], cwd=repo, capture_output=True,
+                                  text=True, timeout=timeout)
+        except subprocess.TimeoutExpired:
+            sys.exit(f"FATAL: oracle for '{name}' ran past {timeout}s")
         lines = [ln for ln in proc.stdout.splitlines() if ln.strip()]
         # An oracle that fails or prints nothing would grade every reply as a pass.
         if proc.returncode != 0 or not lines:
@@ -94,7 +100,7 @@ def run_oracles(suite: dict, repo: Path, out: Path) -> None:
         (out / f"{name}.txt").write_text("\n".join(lines) + "\n")
 
 
-def run_job(results: Path, suite: dict, model: str, job: tuple[str, str, int]) -> str:
+def run_job(results: Path, suite: dict, model: str, timeout: int, job: tuple[str, str, int]) -> str:
     task, arm, rep = job
     run_id = f"{task}-{arm}-{rep}"
     out = results / "runs" / run_id
@@ -113,12 +119,18 @@ def run_job(results: Path, suite: dict, model: str, job: tuple[str, str, int]) -
            "--allowedTools", *ALLOWED_TOOLS, "--output-format", "stream-json", "--verbose"]
     if suite["arms"][arm].get("hooks", True):
         cmd[3:3] = ["--settings", str(results / "settings.json")]
+    timed_out = False
     with open(out / "stream.jsonl", "w") as stdout, open(out / "stderr.txt", "w") as stderr:
-        rc = subprocess.run(cmd, cwd=results / "repo", env=env, stdout=stdout, stderr=stderr).returncode
+        try:
+            rc = subprocess.run(cmd, cwd=results / "repo", env=env, stdout=stdout, stderr=stderr,
+                                timeout=timeout).returncode
+        except subprocess.TimeoutExpired:
+            rc, timed_out = -1, True
     wall = int(time.time()) - start
     (out / "meta.json").write_text(json.dumps(
-        {"id": run_id, "task": task, "arm": arm, "rep": rep, "rc": rc, "wall_s": wall}))
-    return f"{run_id} rc={rc} wall={wall}s"
+        {"id": run_id, "task": task, "arm": arm, "rep": rep, "rc": rc, "timed_out": timed_out,
+         "wall_s": wall}))
+    return f"{run_id} rc={rc}{' (timed out)' if timed_out else ''} wall={wall}s"
 
 
 def cmd_plan(args) -> int:
@@ -136,7 +148,7 @@ def cmd_run(args) -> int:
         sys.exit(f"FATAL: {results} is not empty")
     results.mkdir(parents=True, exist_ok=True)
     sha = archive_head(results / "repo")
-    run_oracles(suite, results / "repo", results / "oracle")
+    run_oracles(suite, results / "repo", results / "oracle", args.oracle_timeout)
     (results / "settings.json").write_text(json.dumps({"hooks": suite["hooks"]}, indent=1))
     (results / "suite.json").write_text(json.dumps(suite, indent=1))
     jobs = job_order(suite, args.reps, args.seed)
@@ -145,7 +157,7 @@ def cmd_run(args) -> int:
          "parallel": args.parallel, "jobs": len(jobs)}))
     print(f"head {sha[:8]}, {len(jobs)} jobs, {args.parallel} at a time", flush=True)
     with concurrent.futures.ThreadPoolExecutor(args.parallel) as pool:
-        futures = [pool.submit(run_job, results, suite, args.model, j) for j in jobs]
+        futures = [pool.submit(run_job, results, suite, args.model, args.timeout, j) for j in jobs]
         for done in concurrent.futures.as_completed(futures):
             print(done.result(), flush=True)
     return 0
@@ -238,6 +250,8 @@ def main() -> int:
             p.add_argument("results", type=Path)
             p.add_argument("--parallel", type=int, default=3)
             p.add_argument("--model", default="sonnet")
+            p.add_argument("--timeout", type=int, default=900, help="seconds per claude run")
+            p.add_argument("--oracle-timeout", type=int, default=300, help="seconds per oracle")
         p.add_argument("--reps", type=int, default=3)
         p.add_argument("--seed", type=int, default=1415)
     sub.add_parser("score").add_argument("results", type=Path)
