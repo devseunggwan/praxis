@@ -20,7 +20,8 @@ no outcome, so there is no error to explain and no correction to narrate. In the
 turn #1422 observed, a label gate blocked `gh pr create`, the input was rewritten
 and re-run successfully, and the closing report listed two *other* skipped steps
 while never mentioning the block. The gate stayed silent because its oracle read
-only `user-rejected`.
+only `user-rejected`. An auto mode classifier block (`automode-blocked`, #1475)
+is the third kind, for the same reason.
 
 Scope is the **current turn**, by intersecting the session-wide scan with the
 tool_use ids this turn produced results for. The cursor cannot do that job: it
@@ -49,6 +50,7 @@ from _hook_io import (  # type: ignore[import-not-found]  # noqa: E402
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
 from _payload import read_payload  # type: ignore[import-not-found]  # noqa: E402
 from _transcript import (  # type: ignore[import-not-found]  # noqa: E402
+    AUTOMODE_BLOCK_DENIAL_KIND,
     DENIAL_KINDS,
     HOOK_BLOCK_DENIAL_KIND,
     REJECTION_DENIAL_KIND,
@@ -161,6 +163,7 @@ def unreported(rejections: list[dict], turn_ids: set[str], message: str) -> list
 # English, as `tests/test_emit_english_lead.py` requires of every hook.
 _KIND_WORDS = (
     (HOOK_BLOCK_DENIAL_KIND, "blocked by a hook or permission rule", "훅·권한 차단"),
+    (AUTOMODE_BLOCK_DENIAL_KIND, "blocked by the auto mode classifier", "분류기 차단"),
     (REJECTION_DENIAL_KIND, "refused by the user", "사용자 거부"),
 )
 
