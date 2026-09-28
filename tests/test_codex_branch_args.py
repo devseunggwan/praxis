@@ -94,7 +94,11 @@ def _run_claude(tmp_path: pathlib.Path, sub_model: str, effort: str, cwd: pathli
     stub.chmod(0o755)
     prompt = tmp_path / "prompt.md"
     prompt.write_text("task")
-    body = _render(_branch("claude"), {"sub_model": sub_model, "effort": effort, "claude_env": "", "budget_flag": ""})
+    body = _render(
+        _branch("claude"),
+        # {time_env} / {time_sysprompt} carry --time-budget (#1501); empty is the default.
+        {"sub_model": sub_model, "effort": effort, "claude_env": "", "budget_flag": "", "time_env": "", "time_sysprompt": ""},
+    )
     script = tmp_path / "wrapper.sh"
     script.write_text("#!/bin/bash\n" + body.replace("$PROMPT_FILE", str(prompt)))
     env = dict(os.environ, PATH=f"{bin_dir}:{os.environ['PATH']}")

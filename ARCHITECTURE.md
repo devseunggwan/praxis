@@ -77,6 +77,14 @@ precondition above is moot for that caller, because a human can answer the dialo
 The stdin column stays correct for genuinely non-interactive callers, which must
 still supply one of the two exemptions.
 
+**Time signal (`--time-budget`, #1501) is claude-only.** The flag reaches a worker as
+two env vars on the `claude` launch (`PRAXIS_TIME_START_EPOCH`,
+`PRAXIS_TIME_BUDGET_S`). The worker's
+[`elapsed-time-signal`](hooks/advisory-nudge/elapsed-time-signal/spec.md) hook turns
+them into an `elapsed <n>s / <budget>s` line on each returned message. The `codex` and
+`gemini` rows have no such channel, so the skill reports the flag as not applied for
+them. The signal is advisory: no row in this table has a hard timeout.
+
 ### Model Notation
 
 Unified `--model` flag across all skills: `<provider>:<model>` or bare model name.
