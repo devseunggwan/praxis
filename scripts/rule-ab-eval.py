@@ -99,14 +99,16 @@ def run_job(results: Path, suite: dict, model: str, job: tuple[str, str, int]) -
     run_id = f"{task}-{arm}-{rep}"
     out = results / "runs" / run_id
     (out / "praxis").mkdir(parents=True)
-    env = dict(os.environ,
-               PRAXIS_EVAL_REPO=str(results / "repo"),
-               PRAXIS_HOME=str(out / "praxis"),
-               PRAXIS_STATE_DIR=str(out / "praxis" / "state"),
-               PRAXIS_FIRE_TELEMETRY_FILE=str(out / "fires.jsonl"))
+    env = dict(os.environ)
     start = int(time.time())
     for key, value in suite["arms"][arm].get("env", {}).items():
         env[key] = str(start) if value == "@now" else str(value)
+    # Applied after the arm so no arm can point a run at shared state or the
+    # operator's ledger.
+    env.update(PRAXIS_EVAL_REPO=str(results / "repo"),
+               PRAXIS_HOME=str(out / "praxis"),
+               PRAXIS_STATE_DIR=str(out / "praxis" / "state"),
+               PRAXIS_FIRE_TELEMETRY_FILE=str(out / "fires.jsonl"))
     cmd = ["claude", "-p", suite["tasks"][task]["prompt"], "--model", model,
            "--allowedTools", *ALLOWED_TOOLS, "--output-format", "stream-json", "--verbose"]
     if suite["arms"][arm].get("hooks", True):

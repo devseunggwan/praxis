@@ -124,6 +124,19 @@ def test_run_then_score_applies_arm_env_hooks_and_isolation(tmp_path):
     assert "ALL on: runs=4 failed=0" in score.stdout and "signal=4" in score.stdout
 
 
+def test_run_keeps_isolation_paths_over_arm_env(tmp_path):
+    suite = write_suite(tmp_path / "s")
+    data = json.loads((suite / "suite.json").read_text())
+    shared = tmp_path / "operator-ledger.jsonl"
+    data["arms"]["on"]["env"]["PRAXIS_FIRE_TELEMETRY_FILE"] = str(shared)
+    (suite / "suite.json").write_text(json.dumps(data))
+    results = tmp_path / "results"
+    proc = cli("run", str(suite), str(results), "--reps", "1", env=fake_path(tmp_path))
+    assert proc.returncode == 0, proc.stderr
+    assert not shared.exists()
+    assert (results / "runs" / "graded-on-1" / "fires.jsonl").exists()
+
+
 def test_run_refuses_without_claude_on_path(tmp_path):
     empty = tmp_path / "empty"
     empty.mkdir()
