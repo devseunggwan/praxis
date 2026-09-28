@@ -379,13 +379,19 @@ bounds the cost of a false positive to two extra continuations per turn.
 ## Measured corpus
 
 Replayed in notice mode over one maintainer's local corpus (875 main-chain
-transcripts, 12,288 recorded stops; replay error count 0), each stop replayed
-with the transcript cut at the last assistant record before it:
+transcripts; replay error count 0), each stop replayed with the transcript cut
+at the last assistant record before it. The two runs finished 19 minutes apart
+and the corpus holds live sessions, so they saw slightly different stop counts:
 
-| Hook | Fires | Sessions |
-| --- | --- | --- |
-| Before the wait and decision silences | 1,240 | 325 |
-| With them | 307 | 170 |
+| Hook | Stops replayed | Fires | Sessions |
+| --- | --- | --- | --- |
+| Before the wait and decision silences | 12,259 | 1,240 | 325 |
+| With them | 12,288 | 307 | 170 |
+
+The first run started each cut at the turn's opening human message; the second
+started it 8 MiB before the stop when that is earlier, since this hook reads
+the transcript tail. The earlier hook reads only the current turn and the last
+human message, which both cuts contain.
 
 Precision, graded by one person against the guide's definition (work the
 model could have continued without the user; a gated write — merge, push,
