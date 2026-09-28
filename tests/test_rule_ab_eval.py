@@ -123,6 +123,8 @@ def test_run_then_score_applies_arm_env_hooks_and_isolation(tmp_path):
     free_off = next(ln for ln in lines if ln.startswith("free       off"))
     assert free_off.split()[8] == "-"  # no oracle -> ungraded
     assert "ALL on: runs=4 failed=0" in score.stdout and "signal=4" in score.stdout
+    all_on = next(ln for ln in lines if ln.startswith("ALL on:"))
+    assert "wall_median=" in all_on and "tools_median=1.0 " in all_on
 
 
 def test_run_keeps_isolation_paths_over_arm_env(tmp_path):

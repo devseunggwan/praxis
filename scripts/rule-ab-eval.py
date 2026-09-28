@@ -252,6 +252,7 @@ def cmd_score(args) -> int:
         rs = [r for r in rows if r["arm"] == arm]
         ok = [r for r in rs if r["ok"]]
         print(f"ALL {arm}: runs={len(rs)} failed={len(rs) - len(ok)} "
+              f"wall_median={show(med(ok, 'wall_s'))} tools_median={show(med(ok, 'tools'))} "
               f"wall_sum={sum(r['wall_s'] for r in ok)} tools_sum={sum(r['tools'] for r in ok)} "
               f"signal={sum(r['signals'] for r in rs)} gate={sum(r['gates'] for r in rs)}")
     return 1 if any(not r["ok"] for r in rows) else 0
