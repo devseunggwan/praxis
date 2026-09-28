@@ -77,6 +77,7 @@ def _stub_bin(tmp_path):
         'if [ -t 1 ]; then echo "stdout-is-tty=YES"; else echo "stdout-is-tty=NO"; fi\n'
         'echo "prompt=[${!#}]"\n'
         'echo "time-env=[${PRAXIS_TIME_START_EPOCH:-unset}/${PRAXIS_TIME_BUDGET_S:-unset}]"\n'
+        'echo "unattended=[${PRAXIS_UNATTENDED:-unset}]"\n'
         'n=0; prev=""\n'
         'for a in "$@"; do\n'
         '  [ "$prev" = "--append-system-prompt" ] && echo "sysprompt=[$a]"\n'
@@ -90,12 +91,14 @@ def _stub_bin(tmp_path):
 
 
 TIME_VARS = ("PRAXIS_TIME_START_EPOCH", "PRAXIS_TIME_BUDGET_S")
+# Cleared by the Step 4 preamble; dropped from the caller's env like TIME_VARS.
+WRAPPER_VARS = (*TIME_VARS, "PRAXIS_UNATTENDED")
 
 
 def _run_under_pty(script, extra_path, inherit=None):
     """Run `script` with a real TTY on both fds, as a cmux workspace would.
 
-    The caller's own PRAXIS_TIME_* are dropped, so a developer shell (or a
+    The caller's own WRAPPER_VARS are dropped, so a developer shell (or a
     timed worker running this suite) cannot decide the outcome. `inherit` sets
     them on purpose for the test that checks the wrapper clears them.
     """
@@ -106,7 +109,7 @@ def _run_under_pty(script, extra_path, inherit=None):
         chunks.append(data)
         return data
 
-    overrides = dict.fromkeys(TIME_VARS)
+    overrides = dict.fromkeys(WRAPPER_VARS)
     overrides.update(inherit or {})
     overrides["PATH"] = f"{extra_path}:{os.environ['PATH']}"
     saved = {name: os.environ.get(name) for name in overrides}
@@ -282,3 +285,47 @@ def test_inherited_time_env_leaks_without_the_unset(tmp_path):
     script = _instantiate(tmp_path, _extract_branch("claude"), preamble="")
     out = _run_under_pty(script, _stub_bin(tmp_path), inherit=INHERITED_TIME_ENV)
     assert "time-env=[1700000000/1200]" in out.replace("\r\n", "\n")
+
+
+# PRAXIS_UNATTENDED (#1512): the marker that puts early-stop-advisory in block
+# mode. A new-session claude worker is an unattended run; nothing else is.
+
+
+def test_claude_worker_is_marked_unattended(wrapper_output):
+    assert "unattended=[1]" in wrapper_output.replace("\r\n", "\n")
+
+
+def test_inherited_unattended_marker_is_replaced_not_passed(tmp_path):
+    """A value the delegating session carried (here a non-`1` one) must not
+    reach the worker; the launch line sets its own."""
+    script = _instantiate(tmp_path, _extract_branch("claude"))
+    out = _run_under_pty(script, _stub_bin(tmp_path), inherit={"PRAXIS_UNATTENDED": "0"})
+    assert "unattended=[1]" in out.replace("\r\n", "\n"), out
+
+
+def _env_stub_bin(tmp_path, name):
+    d = tmp_path / "bin"
+    d.mkdir()
+    stub = d / name
+    stub.write_text('#!/bin/bash\necho "unattended=[${PRAXIS_UNATTENDED:-unset}]"\n')
+    stub.chmod(0o755)
+    return d
+
+
+@pytest.mark.parametrize("provider", ["codex", "gemini"])
+@pytest.mark.parametrize("preamble, expected", [(None, "unset"), ("", "1")])
+def test_other_providers_are_not_marked_unattended(tmp_path, provider, preamble, expected):
+    """codex and gemini workers are not marked, and an inherited marker is
+    cleared. The empty-preamble case is the control: without the `unset` the
+    same inheritance reaches the stub."""
+    script = _instantiate(tmp_path, _extract_branch(provider), preamble=preamble)
+    env = dict(os.environ, PATH=f"{_env_stub_bin(tmp_path, provider)}:{os.environ['PATH']}")
+    env["PRAXIS_UNATTENDED"] = "1"
+    out = subprocess.run(
+        ["/bin/bash", str(script)],
+        capture_output=True,
+        text=True,
+        env=env,
+        stdin=subprocess.DEVNULL,
+    ).stdout
+    assert f"unattended=[{expected}]" in out, out

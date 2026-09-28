@@ -694,7 +694,10 @@ trap 'rm -f "$SCRIPT_FILE"' EXIT
 # The elapsed-time signal is switched on by env alone (#1501). A delegation
 # started from inside a worker that had it would otherwise pass it on, so
 # clear it here, and let only `{time_env}` below set it again.
-unset PRAXIS_TIME_START_EPOCH PRAXIS_TIME_BUDGET_S
+# `PRAXIS_UNATTENDED` is cleared for the same reason (#1512): only the claude
+# launch line below sets it, so a session this wrapper does not start never
+# carries it.
+unset PRAXIS_TIME_START_EPOCH PRAXIS_TIME_BUDGET_S PRAXIS_UNATTENDED
 
 # The claude branch passes this with `--append-system-prompt`, so the note
 # reaches the system prompt, where a note forged inside the pasted text
@@ -794,9 +797,14 @@ case "{provider}" in
     # is absent. The clock starts here, when the worker actually launches, so
     # every --distribute worker counts from its own start.
     #
+    # `PRAXIS_UNATTENDED=1` marks the worker as an unattended run, which
+    # turns `early-stop-advisory`'s notice into a capped Stop block (#1512).
+    # Step 5b's `--session` delivery does not come through here, so an
+    # existing, possibly attended session never gets it.
+    #
     # `$SYS_PROMPT` is the pasted-content note, plus the time sentence when
     # `{time_sysprompt}` above added it; the flag appears once (see above).
-    {claude_env} {time_env} claude \
+    {claude_env} {time_env} PRAXIS_UNATTENDED=1 claude \
       {sub_model:+--model '{sub_model}'} \
       {effort:+--effort {effort}} \
       --append-system-prompt "$SYS_PROMPT" \
