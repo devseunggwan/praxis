@@ -716,6 +716,177 @@ else
   echo "FAIL  [failed count write grants no continuation]"; FAIL=$((FAIL + 1))
 fi
 
+# =====================================================================
+# Stops that wait on the user's approval or decision — silent (#1498 replay)
+# =====================================================================
+
+DONE_KO='`/users`, `/orders` 마이그레이션을 끝냈습니다.
+
+'
+DONE_EN='Two endpoints are migrated. '
+
+for text in \
+  "${DONE_KO}머지는 다른 세션에 영향을 주는 변경이라 승인받고 진행하겠습니다." \
+  "${DONE_KO}공개 저장소 코멘트를 고치는 일이라 승인을 받고 진행하겠습니다." \
+  "${DONE_KO}승인받아 진행하겠습니다." \
+  "${DONE_KO}두 가지만 정해 주시면 바로 진행하겠습니다." \
+  "${DONE_KO}preview 를 띄울지는 말씀 주시면 그대로 진행하겠습니다." \
+  "${DONE_KO}그대로 둬도 무해합니다. 판단만 주시면 됩니다." \
+  "${DONE_KO}어떻게 할지 지시 주십시오." \
+  "${DONE_KO}머지하시려면 별도로 브리핑 올리고 진행하겠습니다." \
+  "${DONE_KO}이 프레이밍이면 진행하겠습니다." \
+  "${DONE_KO}(가)와 (나) 중 어느 쪽으로 갈까요?" \
+  "${DONE_KO}계속 진행할까요, 아니면 이 분류 자체를 먼저 정할까요?" \
+  "${DONE_KO}작업 목록을 정리해도 될까요?" \
+  "${DONE_EN}I'll merge it with your approval." \
+  "${DONE_EN}Once approved, I'll proceed with the merge." \
+  "${DONE_EN}Should I go ahead and merge?" \
+  "${DONE_EN}Should I continue, or would you rather review first?" \
+  "${DONE_KO}1번과 3번 결과를 붙여 주시면 이어서 판단하겠습니다." \
+  "${DONE_KO}로그인 마치시면 알려주세요. 바로 2번부터 진행하겠습니다." \
+  "${DONE_KO}창을 재시작하시면 이어서 두 가지를 재드리겠습니다." \
+  "${DONE_KO}머지는 확인받고 진행하겠습니다." \
+  "${DONE_KO}머지를 원하시면 머지 전 확인 절차부터 진행하겠습니다." \
+  "${DONE_KO}스레드에 현황 답글을 달지는 알려주세요." \
+  "${DONE_KO}PR 을 생성할까요?" \
+  "${DONE_KO}B-2 로 갈까요? 가면 3번부터 읽고 시작하겠습니다."; do
+  build_transcript "$text"
+  run_case silent "approval/decision stop: ${text##*$'\n'}" '{}'
+done
+
+# Controls: the same families without the user's decision still fire.
+for text in \
+  "${DONE_KO}승인받았으니 다음 단계로 남은 \`/payments\`를 진행하겠습니다." \
+  "${DONE_KO}그러면 남은 \`/payments\`를 진행하겠습니다." \
+  "${DONE_KO}남은 \`/payments\`도 이어서 진행해도 될까요?" \
+  "${DONE_KO}어느 쪽이든 결과는 같으니 다음 단계로 남은 \`/payments\`를 진행하겠습니다." \
+  "${DONE_EN}Should I continue with the remaining endpoint?" \
+  "${DONE_KO}필요하시면 남은 \`/payments\`도 이어서 진행하겠습니다." \
+  "${DONE_KO}원하시면 실패한 실행의 로그도 이어서 보겠습니다." \
+  "${DONE_KO}커밋이 두 번 막힌 원인을 확정했습니다. 다음 단계로 남은 \`/payments\`를 진행하겠습니다."; do
+  build_transcript "$text"
+  run_case advisory "control still fires: ${text##*$'\n'}" '{}'
+done
+
+# =====================================================================
+# A launched background task is still running
+# =====================================================================
+
+# build_bg_transcript <final_text> <record ...> — a human message, then each
+# record, then the final assistant text, one second apart. Records:
+#   L:<id> Bash run_in_background launch   M:<id> Monitor launch, timeout 300000ms
+#   V:<id> Monitor launch, expires in 2m   P:<id> Monitor launch, persistent
+#   A:<id> background Agent launch         N:<id> task-notification, completed
+#   E:<id> Monitor event (no <status>)     Q:<id> queue-operation, completed
+#   C:<id> queued_command attachment       S:<id>/R:<id> task_status done/running
+#   K:<id> TaskStop by the model           h   a later human message
+#   X:<id> tool result quoting a finished notification for <id>
+#   G:<id> tool result mentioning a launch line mid-output
+#   W:<seconds> the clock moves on by that much before the next record
+build_bg_transcript() {
+  local final_text="$1"
+  shift
+  TRANSCRIPT="$(mktemp)"
+  TMP_FILES+=("$TRANSCRIPT")
+  python3 - "$TRANSCRIPT" "$final_text" "$USER_KO" "$@" <<'PY'
+import json, sys
+from datetime import datetime, timedelta, timezone
+path, final_text, user_text, *records = sys.argv[1:]
+
+def human():
+    return {"type": "user", "uuid": f"h{len(events)}", "origin": {"kind": "human"},
+            "message": {"role": "user", "content": user_text}}
+
+def result(text):
+    return [{"type": "assistant", "message": {"role": "assistant", "content": [
+                {"type": "tool_use", "id": f"t{len(events)}", "name": "Bash", "input": {}}]}},
+            {"type": "user", "message": {"role": "user", "content": [
+                {"type": "tool_result", "tool_use_id": f"t{len(events)}", "content": text}]}}]
+
+def note(tid, status=True):
+    body = f"<task-notification>\n<task-id>{tid}</task-id>\n"
+    body += "<status>completed</status>\n" if status else "<event>tick</event>\n"
+    return body + "</task-notification>"
+
+events = []
+events.append(human())
+for rec in records:
+    kind, _, tid = rec.partition(":")
+    if kind == "h":
+        events.append(human())
+    elif kind == "L":
+        events += result(f"Command running in background with ID: {tid}. Output is being written to: /tmp/{tid}.output")
+    elif kind == "M":
+        events += result(f"Monitor started (task {tid}, timeout 300000ms). You will be notified on each event.")
+    elif kind == "V":
+        events += result(f"Monitor started (task {tid}, expires in 2m unless the source ends first; you get one notice at expiry).")
+    elif kind == "P":
+        events += result(f"Monitor started (task {tid}, persistent — runs until TaskStop or session end).")
+    elif kind == "W":
+        events.append({"advance": int(tid)})
+    elif kind == "A":
+        events += result(f"Async agent launched successfully.\nagentId: {tid} (internal ID)")
+    elif kind in ("N", "E"):
+        events.append({"type": "user", "origin": {"kind": "task-notification"},
+                       "message": {"role": "user", "content": note(tid, kind == "N")}})
+    elif kind == "Q":
+        events.append({"type": "queue-operation", "operation": "enqueue", "content": note(tid)})
+    elif kind == "C":
+        events.append({"type": "attachment", "attachment": {"type": "queued_command", "prompt": note(tid)}})
+    elif kind in ("S", "R"):
+        events.append({"type": "attachment", "attachment": {
+            "type": "task_status", "taskId": tid, "status": "completed" if kind == "S" else "running"}})
+    elif kind == "K":
+        events.append({"type": "assistant", "message": {"role": "assistant", "content": [
+            {"type": "tool_use", "id": "stop", "name": "TaskStop", "input": {"task_id": tid}}]}})
+    elif kind == "X":
+        events += result("earlier output:\n" + note(tid))
+    elif kind == "G":
+        events += result(f"grep hits:\nCommand running in background with ID: {tid}")
+events.append({"type": "assistant", "message": {"role": "assistant",
+               "content": [{"type": "text", "text": final_text}]}})
+clock = datetime(2026, 9, 28, tzinfo=timezone.utc)
+with open(path, "w", encoding="utf-8") as f:
+    for e in events:
+        if "advance" in e:
+            clock += timedelta(seconds=e["advance"])
+            continue
+        clock += timedelta(seconds=1)
+        e["timestamp"] = clock.isoformat().replace("+00:00", "Z")
+        f.write(json.dumps(e, ensure_ascii=False) + "\n")
+PY
+}
+
+bg_case() {
+  local expected="$1" name="$2"
+  shift 2
+  build_bg_transcript "$T1" "$@"
+  run_case "$expected" "background: $name" '{}'
+}
+
+bg_case silent   "Bash launch still running"                         L:b1
+bg_case silent   "Monitor launch still watching"                     M:m1
+bg_case silent   "background Agent still running"                    A:a1
+bg_case silent   "Monitor event is not the end of the watch"         M:m1 E:m1
+bg_case silent   "task_status running is not the end"                L:b1 R:b1
+bg_case silent   "one of two launches still running, across a notification" L:b1 L:b2 N:b1
+bg_case silent   "a quoted notification in a tool result ends nothing" L:b1 X:b1
+bg_case advisory "Bash launch finished (notification record)"        L:b1 N:b1
+bg_case advisory "finished via queue-operation"                      L:b1 Q:b1
+bg_case advisory "finished via queued_command attachment"            L:b1 C:b1
+bg_case advisory "finished via task_status"                          L:b1 S:b1
+bg_case advisory "stopped by TaskStop"                               M:m1 K:m1
+bg_case advisory "a launch line mid-output is not a launch"          G:b1
+bg_case silent   "a launch before a question asked mid-wait still counts" L:b1 h
+bg_case advisory "a launch before the human message, since finished" L:b1 h N:b1
+bg_case silent   "Monitor inside its timeout"                        M:m1 W:200
+bg_case advisory "Monitor past its timeout has ended"                M:m1 W:400
+bg_case silent   "Monitor inside its expires-in"                     V:m1 W:60
+bg_case advisory "Monitor past its expires-in has ended"             V:m1 W:200
+bg_case silent   "persistent Monitor has no deadline"                P:m1 W:100000
+bg_case silent   "a Bash launch has no deadline"                     L:b1 W:100000
+bg_case advisory "no background task at all"
+
 echo ""
 echo "== $PASS passed, $FAIL failed =="
 [ "$FAIL" -eq 0 ] && exit 0 || exit 1
