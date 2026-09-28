@@ -29,8 +29,8 @@ No judgement about meaning is made at any point.
 
 | Step | Oracle |
 | ---- | ------ |
-| Was something denied? | `_transcript.scan_user_rejections(kinds=DENIAL_KINDS)` — `toolDenialKind` is `user-rejected` or `permission-rule`, and `is_error: true` |
-| Is the record a real refusal? | for `user-rejected`, the runtime's fixed refusal sentence as well — three co-agreeing markers. `permission-rule` has no fixed sentence, so it agrees on two (below) |
+| Was something denied? | `_transcript.scan_user_rejections(kinds=DENIAL_KINDS)` — `toolDenialKind` is `user-rejected`, `permission-rule` or `automode-blocked`, and `is_error: true` |
+| Is the record a real refusal? | for `user-rejected`, the runtime's fixed refusal sentence as well — three co-agreeing markers. `permission-rule` and `automode-blocked` have no fixed sentence, so they agree on two (below) |
 | Was it refused *this turn*? | the rejection's `tool_use_id` appears among the `tool_result` ids in `load_stop_turn(payload)` |
 | Is it in scope? | `tool_name` is not `AskUserQuestion` |
 | Did the report own it? | the final message names the refused tool — or carries acknowledgement vocabulary, when this is the turn's only in-scope refusal |
@@ -112,6 +112,49 @@ population (2436 of 2721), which is why the gate could be right about its rule
 and silent in practice. And 37.4% of sessions would carry at least one fire —
 close enough to the 59.5% that forced `negative-existence-verdict-gate` to
 narrow that the default tier stays advisory here rather than block.
+
+### The third denial kind (issue #1475)
+
+The auto mode classifier refuses a call before it runs, and the runtime records
+that as `toolDenialKind: "automode-blocked"`. The record has the
+`permission-rule` shape — a `tool_result` with `is_error: true` whose content is
+the blocker's own prose (`Permission for this action was denied by the Claude
+Code auto mode classifier. …`) — so it agrees on the same two markers. The call
+had no outcome, which is this gate's whole premise, so the kind is read here and
+named on its own in the advisory ("blocked by the auto mode classifier" /
+"분류기 차단"), for the same reason #1422 kept the first two apart.
+
+Two other kinds are recorded and deliberately left out:
+
+- `automode-unavailable` — the classifier could not answer ("temporarily
+  unavailable (rate-limited) … Wait a moment and then try this action again").
+  Nothing judged the call unsafe, and the retry it asks for is the recovery.
+- `interrupted` — the user stopped the call. The user already knows, and the
+  report that follows is typically empty.
+
+Measured before the change, with the same proxy as the #1422 measurement above,
+over 1,286 local transcripts (`~/.claude/projects/**/*.jsonl`, realpath-deduped)
+on 2026-09-28:
+
+```text
+user-rejected          considered=  306 unacknowledged=  274
+permission-rule        considered= 2480 unacknowledged= 1648
+automode-blocked       considered=  300 unacknowledged=  160  (100 turns, 75 sessions)
+automode-unavailable   considered=    5 unacknowledged=    4
+interrupted            considered=    4 unacknowledged=    4
+```
+
+Turns that would fire, of 2,107 turns holding a denial: 1,047 with two kinds,
+1,119 with the classifier kind added. The 72 new turns include 20 more
+unacknowledged `permission-rule` rows, because a turn holding both kinds is no
+longer `sole` and a bare acknowledgement word then clears neither — the existing
+rule reaching a case it could not reach before, as it did for #1422.
+
+**Why `classifier` / `분류기` is not added to the vocabulary.** A report such as
+"분류기 오류라 재시도합니다" owns a classifier block without any word from the
+list. Adding the two words cleared 7 of those 1,119 turns, and every kind would
+inherit them. Too small a gain for a list every kind shares; naming the refused
+tool already clears.
 
 ### Turn scoping, and why the cursor cannot supply it
 

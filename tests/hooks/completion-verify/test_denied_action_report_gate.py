@@ -606,6 +606,40 @@ def test_askuserquestion_exclusion_applies_to_the_new_kind_too():
     assert gate.unreported([b], {"t1"}, "그렇게 진행하겠습니다.") == []
 
 
+def _classified(tool_use_id="toolu_1", tool_name="Bash", text="git push origin main"):
+    """An auto mode classifier block — the third kind (#1475)."""
+    return _rej(tool_use_id, tool_name, text, kind="automode-blocked")
+
+
+def test_classifier_block_from_this_turn_is_reported():
+    c = _classified(tool_use_id="toolu_now")
+    assert gate.unreported([c], {"toolu_now"}, "푸시를 마쳤습니다.") == [c]
+
+
+def test_acknowledged_classifier_block_is_not_reported():
+    c = _classified(tool_use_id="toolu_now")
+    assert gate.unreported([c], {"toolu_now"}, "분류기에 한 번 차단되어 명령을 나눠 다시 실행했습니다.") == []
+
+
+def test_advisory_names_the_classifier_kind_on_its_own():
+    text = gate._advisory([_classified(tool_use_id="t1"), _blocked(tool_use_id="t2")])
+    assert "1 blocked by the auto mode classifier" in text
+    assert "1 blocked by a hook or permission rule" in text
+    assert "분류기 차단 1건" in text
+
+
+def test_a_classifier_block_and_a_hook_block_together_are_not_sole():
+    c = _classified(tool_use_id="t1", tool_name="Bash")
+    b = _blocked(tool_use_id="t2", tool_name="Write", text="/etc/hosts")
+    out = gate.unreported([c, b], {"t1", "t2"}, "한 번 차단되었습니다.")
+    assert sorted(x["tool_name"] for x in out) == ["Bash", "Write"]
+
+
+def test_cursor_part_names_the_classifier_kind():
+    """A cursor advanced by the two-kind build must not be resumed by this one."""
+    assert "automode-blocked" in gate._CURSOR_PART
+
+
 def _transcript_with_hook_block(tmp_path, tool_use_id="toolu_b"):
     """A hook block as the runtime records it: `permission-rule`, `is_error`,
     and the blocking hook's OWN prose — no fixed refusal sentence anywhere."""
@@ -770,3 +804,78 @@ def test_cursor_identity_carries_the_kinds(tmp_path):
     # the block is provably dropped — this is the defect, pinned.
     dropped = tr.scan_user_rejections(str(t), cursor_path=str(narrow), kinds=tr.DENIAL_KINDS)
     assert [r["kind"] for r in dropped] == ["user-rejected"]
+
+
+def _transcript_with_classifier_block(tmp_path, tool_use_id="toolu_c"):
+    """A classifier block as the runtime records it (#1475)."""
+    path = tmp_path / "classified.jsonl"
+    lines = [
+        {
+            "type": "assistant",
+            "message": {
+                "role": "assistant",
+                "content": [
+                    {
+                        "type": "tool_use",
+                        "id": tool_use_id,
+                        "name": "Bash",
+                        "input": {"command": "git push origin main"},
+                    }
+                ],
+            },
+        },
+        {
+            "type": "user",
+            "toolDenialKind": "automode-blocked",
+            "message": {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": tool_use_id,
+                        "is_error": True,
+                        # Transcribed from a live record, cut after its second
+                        # sentence.
+                        "content": (
+                            "Permission for this action was denied by the Claude "
+                            "Code auto mode classifier. Reason: Blocked by classifier."
+                        ),
+                    }
+                ],
+            },
+        },
+    ]
+    path.write_text("\n".join(json.dumps(x) for x in lines) + "\n")
+    return path
+
+
+def test_e2e_classifier_block_fires_on_a_silent_report(tmp_path):
+    t = _transcript_with_classifier_block(tmp_path)
+    proc = _run(
+        {
+            "session_id": "c1",
+            "stop_hook_active": False,
+            "transcript_path": str(t),
+            "last_assistant_message": "푸시를 마치고 PR 을 갱신했습니다.",
+        },
+        tmp_path=tmp_path,
+    )
+    assert proc.returncode == 0
+    out = json.loads(proc.stdout)
+    assert "blocked by the auto mode classifier" in out["systemMessage"]
+    assert "Bash" in out["systemMessage"]
+
+
+def test_e2e_classifier_block_acknowledged_is_silent(tmp_path):
+    t = _transcript_with_classifier_block(tmp_path)
+    proc = _run(
+        {
+            "session_id": "c2",
+            "stop_hook_active": False,
+            "transcript_path": str(t),
+            "last_assistant_message": "분류기에 한 번 차단되어 명령을 나눠 다시 실행했습니다.",
+        },
+        tmp_path=tmp_path,
+    )
+    assert proc.returncode == 0
+    assert proc.stdout.strip() == ""
