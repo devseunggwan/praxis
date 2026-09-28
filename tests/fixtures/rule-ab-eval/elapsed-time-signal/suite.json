@@ -1,0 +1,36 @@
+{
+  "description": "elapsed-time-signal (#1501): does a visible time budget change wall-clock, tool use or answer quality on short read-only tasks?",
+  "hooks": {
+    "UserPromptSubmit": [
+      {"hooks": [{"type": "command", "command": "sh \"$PRAXIS_EVAL_REPO/hooks/advisory-nudge/elapsed-time-signal/impl.sh\" UserPromptSubmit"}]}
+    ],
+    "PostToolUse": [
+      {"matcher": ".*", "hooks": [{"type": "command", "command": "sh \"$PRAXIS_EVAL_REPO/hooks/advisory-nudge/elapsed-time-signal/impl.sh\" PostToolUse"}]}
+    ],
+    "PostToolUseFailure": [
+      {"matcher": ".*", "hooks": [{"type": "command", "command": "sh \"$PRAXIS_EVAL_REPO/hooks/advisory-nudge/elapsed-time-signal/impl.sh\" PostToolUseFailure"}]}
+    ]
+  },
+  "signal_hook": "elapsed-time-signal",
+  "arms": {
+    "budget": {"env": {"PRAXIS_TIME_START_EPOCH": "@now", "PRAXIS_TIME_BUDGET_S": "600"}},
+    "none": {"env": {}}
+  },
+  "tasks": {
+    "consumers": {
+      "prompt": "In this repository, find every place outside hooks/_lib that imports or uses CURRENT_TURN_SCAN_MAX_BYTES. List each as file:line and say what it is used for. State the search scope you used.",
+      "oracle": "grep -rln CURRENT_TURN_SCAN_MAX_BYTES --include='*.py' --include='*.sh' . | sed 's|^\\./||' | grep -v '^hooks/_lib/' | sort"
+    },
+    "tests": {
+      "prompt": "Run tests/hooks/completion-verify/test_early_stop_advisory.sh and report the pass and fail counts from its final line. If anything fails, name the failing cases.",
+      "oracle": "bash tests/hooks/completion-verify/test_early_stop_advisory.sh 2>&1 | tail -1 | grep -oE '[0-9]+ passed'"
+    },
+    "specdrift": {
+      "prompt": "Compare hooks/advisory-nudge/elapsed-time-signal/spec.md with hooks/advisory-nudge/elapsed-time-signal/impl.sh. Report every place where the spec describes behaviour the implementation does not have, or the reverse, with the lines on each side. If they agree, say so and say what you compared."
+    },
+    "stophooks": {
+      "prompt": "List every hook this repository registers on the Stop event (read the generated manifests under hooks/), and for each say whether it can block the stop or only advise, citing the line that decides it.",
+      "oracle": "python3 -c 'import json; print(\"\\n\".join(sorted({h[\"name\"] for h in json.load(open(\"hooks/manifest.json\"))[\"hooks\"] if h.get(\"event\") == \"Stop\"})))'"
+    }
+  }
+}
