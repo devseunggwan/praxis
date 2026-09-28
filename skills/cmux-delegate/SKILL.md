@@ -690,7 +690,10 @@ trap 'rm -f "$SCRIPT_FILE"' EXIT
 # The elapsed-time signal is switched on by env alone (#1501). A delegation
 # started from inside a worker that had it would otherwise pass it on, so
 # clear it here, and let only `{time_env}` below set it again.
-unset PRAXIS_TIME_START_EPOCH PRAXIS_TIME_BUDGET_S
+# `PRAXIS_UNATTENDED` is cleared for the same reason (#1512): only the claude
+# launch line below sets it, so a session this wrapper does not start never
+# carries it.
+unset PRAXIS_TIME_START_EPOCH PRAXIS_TIME_BUDGET_S PRAXIS_UNATTENDED
 
 # If the prompt file cannot be read, stop here. There is no `set -e`, so if
 # `wc` fails the script keeps going, and then `[ "" -gt N ]` errors out as
@@ -763,7 +766,12 @@ case "{provider}" in
     # are empty when the flag is absent. The clock starts here, when the
     # worker actually launches, so every --distribute worker counts from its
     # own start.
-    {claude_env} {time_env} claude \
+    #
+    # `PRAXIS_UNATTENDED=1` marks the worker as an unattended run, which
+    # turns `early-stop-advisory`'s notice into a capped Stop block (#1512).
+    # Step 5b's `--session` delivery does not come through here, so an
+    # existing, possibly attended session never gets it.
+    {claude_env} {time_env} PRAXIS_UNATTENDED=1 claude \
       {sub_model:+--model '{sub_model}'} \
       {effort:+--effort {effort}} \
       {time_sysprompt} \

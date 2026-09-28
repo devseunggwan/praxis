@@ -295,10 +295,13 @@ repo before this hook, so the name is new. It is declared as the hook's
 [`docs/bypass-vars.md`](../../../docs/bypass-vars.md) → Strict, because it is
 what promotes this hook's notice to a block.
 
-**Nothing sets it yet.** `cmux-delegate` workers are the intended setter, but
-changing `skills/cmux-delegate/SKILL.md` is left to a follow-up (other open
-PRs edit that file). Until something sets the marker, block mode is opt-in by
-hand: export `PRAXIS_UNATTENDED=1` in the environment of an unattended run.
+**Who sets it.** The `cmux-delegate` wrapper sets it on the launch line of a
+new-session claude worker, and clears any inherited value first (#1512).
+codex and gemini workers are not marked: whether a Stop block continues a
+`codex exec` run is unmeasured. A `--session` delivery types into an existing
+session that may be attended, so it is not marked either.
+Anywhere else, block mode is opt-in by hand: export `PRAXIS_UNATTENDED=1` in
+the environment of an unattended run.
 
 ## Why a notice by default
 
