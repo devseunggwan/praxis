@@ -36,6 +36,7 @@ import concurrent.futures
 import json
 import os
 import random
+import re
 import shutil
 import statistics
 import subprocess
@@ -45,6 +46,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 ALLOWED_TOOLS = ["Read", "Grep", "Glob", "Bash"]
+NAME_RE = re.compile(r"[A-Za-z0-9_]+")
 
 
 def load_suite(suite_dir: Path) -> dict:
@@ -54,6 +56,11 @@ def load_suite(suite_dir: Path) -> dict:
             sys.exit(f"FATAL: {suite_dir}/suite.json has no '{key}'")
     if len(suite["arms"]) < 2:
         sys.exit(f"FATAL: {suite_dir}/suite.json needs at least two arms")
+    # Names join into the `task-arm-rep` run directory; a '-' inside one would
+    # let two different jobs share a directory.
+    for name in [*suite["tasks"], *suite["arms"]]:
+        if not NAME_RE.fullmatch(name):
+            sys.exit(f"FATAL: {suite_dir}/suite.json name '{name}' must match {NAME_RE.pattern}")
     return suite
 
 

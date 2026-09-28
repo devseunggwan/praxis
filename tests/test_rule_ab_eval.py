@@ -79,6 +79,18 @@ def test_plan_rejects_a_suite_with_one_arm(tmp_path):
     assert proc.returncode != 0 and "at least two arms" in proc.stderr
 
 
+@pytest.mark.parametrize("where", ["tasks", "arms"])
+def test_plan_rejects_a_name_that_could_collide_in_run_ids(tmp_path, where):
+    # ("a-b", "c") and ("a", "b-c") would both become run directory a-b-c-1.
+    suite = write_suite(tmp_path / "s")
+    data = json.loads((suite / "suite.json").read_text())
+    first = next(iter(data[where]))
+    data[where]["a-b"] = data[where].pop(first)
+    (suite / "suite.json").write_text(json.dumps(data))
+    proc = cli("plan", str(suite))
+    assert proc.returncode != 0 and "name 'a-b'" in proc.stderr
+
+
 # --- run (stand-in claude) ----------------------------------------------------
 
 def test_run_then_score_applies_arm_env_hooks_and_isolation(tmp_path):
