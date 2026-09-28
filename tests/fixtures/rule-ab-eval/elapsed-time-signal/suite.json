@@ -23,7 +23,7 @@
     },
     "tests": {
       "prompt": "Run tests/hooks/completion-verify/test_early_stop_advisory.sh and report the pass and fail counts from its final line. If anything fails, name the failing cases.",
-      "oracle": "bash tests/hooks/completion-verify/test_early_stop_advisory.sh 2>&1 | tail -1 | grep -oE '[0-9]+ passed'"
+      "oracle": "bash tests/hooks/completion-verify/test_early_stop_advisory.sh 2>&1 | tail -1 | grep -oE '[0-9]+ passed, [0-9]+ failed'"
     },
     "specdrift": {
       "prompt": "Compare hooks/advisory-nudge/elapsed-time-signal/spec.md with hooks/advisory-nudge/elapsed-time-signal/impl.sh. Report every place where the spec describes behaviour the implementation does not have, or the reverse, with the lines on each side. If they agree, say so and say what you compared."
