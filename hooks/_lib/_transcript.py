@@ -47,6 +47,7 @@ Public API:
   resolve_stop_transcript(payload)                       -> (path, is_agent)
   load_stop_turn(payload, max_bytes)                     -> list[dict]
   stop_last_assistant_text(payload, turn)                -> str
+  block_prose(block)                                     -> str | None
   extract_last_assistant_text(turn)                      -> str
   has_tool_in_turn(turn, tool_name)                      -> bool
   read_last_user_message(transcript_path)                -> str | None
@@ -549,6 +550,28 @@ def get_current_turn(events: list[dict]) -> list[dict]:
             last_user_idx = i
     start = 0 if last_user_idx is None else last_user_idx + 1
     return events[start:]
+
+
+def block_prose(block: object) -> str | None:
+    """The prose an assistant content block carries, or None.
+
+    A mid-turn note is recorded either as a `text` block or as a `thinking`
+    block whose `thinking` field holds the note (RUNTIME_CONSTRAINTS.md
+    entry 11). A reasoning `thinking` block is recorded empty, so a blank one
+    carries no prose.
+    """
+    if not isinstance(block, dict):
+        return None
+    kind = block.get("type")
+    if kind == "text":
+        text = block.get("text")
+    elif kind == "thinking":
+        text = block.get("thinking")
+        if isinstance(text, str) and not text.strip():
+            return None
+    else:
+        return None
+    return text if isinstance(text, str) else None
 
 
 def extract_last_assistant_text(turn: list[dict]) -> str:

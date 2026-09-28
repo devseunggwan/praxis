@@ -32,9 +32,12 @@ All three:
 | 2 | The current tool_use is found in the last 400 transcript lines | `tool_use_id` in the payload |
 | 3 | The window text holds no citation line naming a known heading | below |
 
-**Window.** The assistant text blocks between the last user record before the
-current assistant message and the current tool_use. Thinking blocks and
-sidechain records are not part of it. A tool result of the current message's
+**Window.** The assistant prose blocks between the last user record before the
+current assistant message and the current tool_use: `text` blocks, and
+`thinking` blocks whose text is not blank, because a mid-turn note can be
+recorded in either shape ([`RUNTIME_CONSTRAINTS.md` entry 11](../../../RUNTIME_CONSTRAINTS.md)).
+A blank `thinking` block is recorded reasoning and adds nothing. Sidechain
+records are not part of the window. A tool result of the current message's
 own tool_uses does not close the window, so one citation written before a
 parallel batch covers every call in the batch.
 

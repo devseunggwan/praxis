@@ -19,7 +19,8 @@ Ask when **all** of these hold:
 2. Within the scanned tail, an `AskUserQuestion` returned a **free-text** answer
    whose first token is a negation marker and which is not phrased as a
    question.
-3. No assistant text block and no later `AskUserQuestion` question contains the
+3. No assistant prose block (`text`, or a `thinking` block carrying a note,
+   per `RUNTIME_CONSTRAINTS.md` entry 11) and no later `AskUserQuestion` question contains the
    answer's first 20 characters verbatim.
 
 `ask`, never deny. Whether the chosen reading was right is the user's call and
