@@ -154,3 +154,21 @@ def test_distribute_mode_draws_its_own_id_per_file() -> None:
     body = " ".join(_section("Step 3.5: Distribute Mode (--distribute)").split())
     assert "pasted_content" in body
     assert "draws its **own** `PASTE_ID`" in body
+
+
+def _note_paragraph(text: str) -> str:
+    m = re.search(r"^(%s.*?)\n(?:\n|NOTE$)" % re.escape(NOTE_START), text, re.S | re.M)
+    assert m, "could not locate the pasted-content note"
+    return m.group(1)
+
+
+def test_system_prompt_note_is_the_template_note() -> None:
+    """Step 4 hands the note to claude workers as a system prompt (#1510).
+
+    Two copies drift apart silently: a worker would then read one wording in
+    its prompt and another in its system prompt.
+    """
+    step4 = _section("Step 4: Generate Wrapper Script")
+    m = re.search(r"<<'NOTE'\n(.*?)^NOTE$", step4, re.S | re.M)
+    assert m, "Step 4 no longer holds the note in a NOTE heredoc"
+    assert m.group(1).rstrip("\n") == _note_paragraph(_template())

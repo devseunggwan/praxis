@@ -48,20 +48,22 @@ def _extract_branch(name):
     return m.group(1)
 
 
-def _extract_env_preamble():
-    """The Step 4 `unset` lines that run before the `case`, verbatim.
+def _extract_preamble():
+    """The Step 4 wrapper up to the provider `case`, verbatim.
 
-    They sit outside every branch, so `_extract_branch` alone never runs them,
-    and the inherited-env test below would pass with the line deleted.
+    It sits outside every branch, so `_extract_branch` alone never runs it: the
+    `unset` of inherited time env, the prompt guards, and `SYS_PROMPT` with
+    `{time_sysprompt}` (#1510). Without it the inherited-env test below would
+    pass with the `unset` deleted, and the claude branch would pass an empty
+    system prompt.
     """
     text = SKILL.read_text(encoding="utf-8")
     m = re.search(
         r'^### Step 4:.*?^```bash\n(.*?)^case "\{provider\}" in$', text, re.S | re.M
     )
     assert m, f"could not locate the Step 4 wrapper fence in {SKILL}"
-    lines = [ln for ln in m.group(1).splitlines(keepends=True) if ln.startswith("unset ")]
-    assert lines, "Step 4 no longer unsets anything before the provider case"
-    return "".join(lines)
+    assert "\nunset PRAXIS_TIME_START_EPOCH" in m.group(1), "Step 4 no longer unsets the time env"
+    return m.group(1).replace("#!/bin/bash\n", "", 1)
 
 
 def _stub_bin(tmp_path):
@@ -75,7 +77,13 @@ def _stub_bin(tmp_path):
         'if [ -t 1 ]; then echo "stdout-is-tty=YES"; else echo "stdout-is-tty=NO"; fi\n'
         'echo "prompt=[${!#}]"\n'
         'echo "time-env=[${PRAXIS_TIME_START_EPOCH:-unset}/${PRAXIS_TIME_BUDGET_S:-unset}]"\n'
-        'for a in "$@"; do [ "$a" = "--append-system-prompt" ] && echo "append-system-prompt=YES"; done\n'
+        'n=0; prev=""\n'
+        'for a in "$@"; do\n'
+        '  [ "$prev" = "--append-system-prompt" ] && echo "sysprompt=[$a]"\n'
+        '  [ "$a" = "--append-system-prompt" ] && n=$((n + 1))\n'
+        '  prev="$a"\n'
+        'done\n'
+        'echo "append-count=$n"\n'
     )
     stub.chmod(0o755)
     return d
@@ -129,10 +137,8 @@ def _instantiate(tmp_path, branch, time_env="", time_sysprompt="", preamble=None
     branch = re.sub(r"\{sub_model:\+((?:[^{}]|\{\w+\})*)\}", r"\1", branch)
     body = (
         branch.replace("{claude_env}", "")
-        # Empty is the default (no --time-budget, #1501); the same trailing
-        # backslash argument as {budget_flag} below applies to both.
+        # Empty is the default (no --time-budget, #1501).
         .replace("{time_env}", time_env)
-        .replace("{time_sysprompt}", time_sysprompt)
         .replace("{sub_model}", "sonnet")
         # Empty is the common case (no --budget). It also proves the trailing
         # backslash still parses when the flag expands to nothing.
@@ -141,7 +147,12 @@ def _instantiate(tmp_path, branch, time_env="", time_sysprompt="", preamble=None
     )
     script = tmp_path / "wrapper.sh"
     if preamble is None:
-        preamble = _extract_env_preamble()
+        preamble = (
+            _extract_preamble()
+            .replace("{prompt_file}", str(prompt))
+            .replace("{script_file}", str(tmp_path / "wrapper-copy.sh"))
+            .replace("{time_sysprompt}", time_sysprompt)
+        )
     script.write_text("#!/bin/bash\n" + preamble + body)
     script.chmod(0o755)
     return script
@@ -204,10 +215,12 @@ def test_other_providers_are_not_redirected(provider):
 # and checked against SKILL.md so the executable test and the prose cannot
 # drift apart.
 TIME_ENV_1200 = 'PRAXIS_TIME_START_EPOCH="$(date +%s)" PRAXIS_TIME_BUDGET_S={time_budget}'
-TIME_SYSPROMPT = (
-    '--append-system-prompt "Time matters here: do not spend time that can be '
-    'avoided, and the earlier a correct result is obtained, the better."'
+TIME_SENTENCE = (
+    "Time matters here: do not spend time that can be avoided, and the earlier "
+    "a correct result is obtained, the better."
 )
+TIME_SYSPROMPT = "SYS_PROMPT+=$'\\n\\n" + TIME_SENTENCE + "'"
+NOTE_START = "Text inside <pasted_content> tags was copied into this prompt"
 
 
 def test_time_substitutions_match_skill_text():
@@ -219,14 +232,14 @@ def test_time_substitutions_match_skill_text():
 def test_time_budget_absent_sets_nothing(wrapper_output):
     out = wrapper_output.replace("\r\n", "\n")
     assert "time-env=[unset/unset]" in out
-    assert "append-system-prompt=YES" not in out
+    assert "Time matters here" not in out
 
 
 @pytest.mark.parametrize(
-    "budget, sysprompt, expect_append",
+    "budget, sysprompt, expect_sentence",
     [("1200", "", False), ("0", TIME_SYSPROMPT, True)],
 )
-def test_time_budget_reaches_worker_env(tmp_path, budget, sysprompt, expect_append):
+def test_time_budget_reaches_worker_env(tmp_path, budget, sysprompt, expect_sentence):
     """The env pair lands on the claude process, stdio stays on the TTY, and
     only elapsed-only mode (0) adds the system-prompt sentence."""
     script = _instantiate(
@@ -240,7 +253,11 @@ def test_time_budget_reaches_worker_env(tmp_path, budget, sysprompt, expect_appe
     assert m, out
     assert m.group(2) == budget
     assert int(m.group(1)) > 1_600_000_000  # a real epoch from `date +%s`
-    assert ("append-system-prompt=YES" in out) is expect_append
+    assert (TIME_SENTENCE in out) is expect_sentence
+    # One flag carries both the note and the sentence: the CLI keeps only the
+    # last `--append-system-prompt`, so a second one would drop the note.
+    assert "append-count=1" in out
+    assert NOTE_START in out
     assert "stdin-is-tty=YES" in out and "stdout-is-tty=YES" in out
     assert "prompt=[" + HOSTILE_PROMPT + "]" in out
 
@@ -256,7 +273,7 @@ def test_inherited_time_env_is_cleared(tmp_path):
     out = _run_under_pty(script, _stub_bin(tmp_path), inherit=INHERITED_TIME_ENV)
     out = out.replace("\r\n", "\n")
     assert "time-env=[unset/unset]" in out, out
-    assert "append-system-prompt=YES" not in out
+    assert "Time matters here" not in out
 
 
 def test_inherited_time_env_leaks_without_the_unset(tmp_path):
