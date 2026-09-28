@@ -63,7 +63,10 @@ PREFIXES_ENV = "PRAXIS_CITED_RULE_PREFIXES"
 RULE_FILES_ENV = "PRAXIS_CITED_RULE_FILES"
 DEFAULT_PREFIXES = ("Rule:",)
 
-_HEADING_RE = re.compile(r"^\s{0,3}#{1,6}\s+(.+?)\s*#*\s*$")
+# Only the opening is a regex: a lazy name group followed by an optional
+# closing run backtracks super-linearly on long whitespace or `#` runs, and
+# this parse runs on every mutating call.
+_HEADING_OPEN_RE = re.compile(r"\s{0,3}#{1,6}\s+")
 _FENCE_RE = re.compile(r"^\s{0,3}(```|~~~)")
 _TRAILING_CODE_RE = re.compile(r"\s*`[^`]*`\s*$")
 # Markdown a citation line may be wrapped in: list bullets, quotes, emphasis.
@@ -72,7 +75,7 @@ _EMPHASIS = " \t*_"
 _QUOTES = " \t`'\""
 # A line may cite several sections; a heading can itself hold a comma, so the
 # whole remainder is tried before any split.
-_NAME_SPLIT_RE = re.compile(r"\s*[·;|]\s*")
+_NAME_SEPARATORS = "·;|"
 
 
 def _prefixes() -> tuple[str, ...]:
@@ -103,6 +106,20 @@ def _strip_trailing_code(name: str) -> str:
         name = stripped
 
 
+def _heading_text(line: str) -> str | None:
+    """A heading's text without its closing `#` run, or None for a non-heading."""
+    m = _HEADING_OPEN_RE.match(line)
+    if not m:
+        return None
+    rest = line[m.end():]
+    if not rest:
+        # The text needs one character, which a separator of two or more
+        # whitespace characters gives up.
+        return line[-1] if len(line) - len(line.rstrip()) >= 2 else None
+    # An all-`#` heading keeps its first character as its text.
+    return rest.rstrip().rstrip("#").rstrip() or rest[:1]
+
+
 def heading_names(text: str) -> set[str]:
     """Every heading of a markdown file, with and without trailing code spans."""
     names: set[str] = set()
@@ -113,10 +130,10 @@ def heading_names(text: str) -> set[str]:
             continue
         if in_fence:
             continue
-        m = _HEADING_RE.match(line)
-        if not m:
+        heading = _heading_text(line)
+        if heading is None:
             continue
-        full = _normalize(m.group(1))
+        full = _normalize(heading)
         names.add(full)
         bare = _strip_trailing_code(full)
         if bare:
@@ -152,7 +169,10 @@ def cited_names(text: str, prefixes: tuple[str, ...]) -> list[str]:
 
 
 def _candidates(name: str) -> list[str]:
-    parts = [name, *_NAME_SPLIT_RE.split(name), *name.split(",")]
+    unified = name
+    for sep in _NAME_SEPARATORS[1:]:
+        unified = unified.replace(sep, _NAME_SEPARATORS[0])
+    parts = [name, *unified.split(_NAME_SEPARATORS[0]), *name.split(",")]
     out: list[str] = []
     for part in parts:
         part = _normalize(part)
