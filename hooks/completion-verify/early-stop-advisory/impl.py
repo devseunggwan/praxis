@@ -128,6 +128,7 @@ import json
 import os
 import re
 import sys
+import time
 from datetime import datetime
 from pathlib import Path as _Path
 
@@ -503,9 +504,9 @@ def pending_background_tasks(
     return [task for task in launched if task not in ended]
 
 
-def background_events(path: str) -> tuple[list[dict], float | None]:
-    """(records that can launch or end a background task, the latest timestamp)
-    from the last `CURRENT_TURN_SCAN_MAX_BYTES` of the transcript.
+def background_events(path: str) -> list[dict]:
+    """Records that can launch or end a background task, from the last
+    `CURRENT_TURN_SCAN_MAX_BYTES` of the transcript.
 
     A tail rather than the turn: a launch can sit before the human message
     that opened this turn (a question asked mid-wait), and a notification
@@ -514,21 +515,16 @@ def background_events(path: str) -> tuple[list[dict], float | None]:
     """
     lines = tail_lines(path, sys.maxsize, CURRENT_TURN_SCAN_MAX_BYTES) if path else []
     events: list[dict] = []
-    now: float | None = None
-    for line in reversed(lines):
-        if now is None or any(n in line for n in _BACKGROUND_NEEDLES):
-            try:
-                ev = json.loads(line)
-            except ValueError:
-                continue
-            if not isinstance(ev, dict):
-                continue
-            if now is None:
-                now = _timestamp(ev)
-            if any(n in line for n in _BACKGROUND_NEEDLES):
-                events.append(ev)
-    events.reverse()
-    return events, now
+    for line in lines:
+        if not any(n in line for n in _BACKGROUND_NEEDLES):
+            continue
+        try:
+            ev = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(ev, dict):
+            events.append(ev)
+    return events
 
 
 # --- silence: a blocker stated as a need or a lack ------------------------
@@ -975,7 +971,10 @@ def main() -> int:
         return 0
 
     # Unreadable → no evidence of a wait, and the fire goes ahead.
-    if pending_background_tasks(*background_events(resolve_stop_transcript(payload)[0])):
+    # The Stop's own clock: the transcript is written asynchronously and can
+    # trail the stop, so its newest timestamp would hold an expired Monitor open.
+    events = background_events(resolve_stop_transcript(payload)[0])
+    if pending_background_tasks(events, time.time()):
         return 0
 
     session_id = payload.get("session_id")

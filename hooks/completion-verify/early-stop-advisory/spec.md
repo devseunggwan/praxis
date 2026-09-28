@@ -198,7 +198,9 @@ that error is a fire, not a silence.
   event notification has no `<status>`: the watch is still live;
 - a Monitor has also ended once the stop is past the deadline its launch
   stated (`timeout 300000ms`, `expires in 2m 30s`), measured from the launch
-  record's `timestamp` to the latest `timestamp` in the tail. An expiry can
+  record's `timestamp` to the hook's clock at the Stop. Not the newest
+  `timestamp` in the transcript: the transcript is written asynchronously
+  and can trail the stop, which would hold an expired Monitor open. An expiry can
   leave no record: in the replay corpus 50 of 255 Monitor launches had no
   terminal record in their file. A `persistent` Monitor states no deadline.
 
@@ -394,7 +396,10 @@ and the corpus holds live sessions, so they saw slightly different stop counts:
 The first run started each cut at the turn's opening human message; the second
 started it 8 MiB before the stop when that is earlier, since this hook reads
 the transcript tail. The earlier hook reads only the current turn and the last
-human message, which both cuts contain.
+human message, which both cuts contain. The second run measured Monitor
+deadlines against the newest transcript timestamp; the hook now uses the
+Stop's clock, under which an offline replay counts every Monitor with a
+deadline as expired, so these figures are not re-runnable as they stand.
 
 Precision, graded by one person against the guide's definition (work the
 model could have continued without the user; a gated write — merge, push,

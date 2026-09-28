@@ -787,6 +787,10 @@ done
 #   X:<id> tool result quoting a finished notification for <id>
 #   G:<id> tool result mentioning a launch line mid-output
 #   W:<seconds> the clock moves on by that much before the next record
+#   -           the final assistant record is not written yet (the Stop is
+#               graded from the payload's last_assistant_message)
+# The last record written lands on the current time: the hook reads the Stop's
+# own clock.
 build_bg_transcript() {
   local final_text="$1"
   shift
@@ -847,9 +851,11 @@ for rec in records:
         events += result("earlier output:\n" + note(tid))
     elif kind == "G":
         events += result(f"grep hits:\nCommand running in background with ID: {tid}")
-events.append({"type": "assistant", "message": {"role": "assistant",
-               "content": [{"type": "text", "text": final_text}]}})
-clock = datetime(2026, 9, 28, tzinfo=timezone.utc)
+if "-" not in records:
+    events.append({"type": "assistant", "message": {"role": "assistant",
+                   "content": [{"type": "text", "text": final_text}]}})
+elapsed = sum(e["advance"] if "advance" in e else 1 for e in events)
+clock = datetime.now(timezone.utc) - timedelta(seconds=elapsed)
 with open(path, "w", encoding="utf-8") as f:
     for e in events:
         if "advance" in e:
@@ -890,6 +896,23 @@ bg_case advisory "Monitor past its expires-in has ended"             V:m1 W:200
 bg_case silent   "persistent Monitor has no deadline"                P:m1 W:100000
 bg_case silent   "a Bash launch has no deadline"                     L:b1 W:100000
 bg_case advisory "no background task at all"
+
+# The transcript trails the Stop: the Monitor's launch is its newest record,
+# 400s before the Stop, and the final text arrives only in the payload.
+build_bg_transcript "$T1" M:m1 -
+python3 - "$TRANSCRIPT" <<'PY'
+import json, sys
+from datetime import datetime, timedelta, timezone
+path = sys.argv[1]
+lines = [json.loads(line) for line in open(path, encoding="utf-8")]
+back = datetime.now(timezone.utc) - timedelta(seconds=400)
+for i, e in enumerate(lines):
+    e["timestamp"] = (back - timedelta(seconds=len(lines) - 1 - i)).isoformat().replace("+00:00", "Z")
+with open(path, "w", encoding="utf-8") as f:
+    f.writelines(json.dumps(e, ensure_ascii=False) + "\n" for e in lines)
+PY
+run_case advisory "background: Monitor expired between the last written record and the Stop" \
+  "$(python3 -c 'import json,sys; print(json.dumps({"last_assistant_message": sys.argv[1]}, ensure_ascii=False))' "$T1")"
 
 echo ""
 echo "== $PASS passed, $FAIL failed =="
