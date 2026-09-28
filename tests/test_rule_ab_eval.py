@@ -183,16 +183,19 @@ def test_run_refuses_a_non_empty_results_dir(tmp_path):
 
 # --- score ------------------------------------------------------------------
 
-def make_results(tmp_path: Path, runs: list[dict]) -> Path:
+def make_results(tmp_path: Path, runs: list[dict], unrun: tuple[str, ...] = ()) -> Path:
+    """Runs are written as rep 1; `unrun` ids are planned in run.json but left no directory."""
     results = tmp_path / "results"
     (results / "oracle").mkdir(parents=True)
     (results / "oracle" / "graded.txt").write_text("alpha\nbeta\n")
     (results / "suite.json").write_text(json.dumps({"signal_hook": "sig", "arms": {"on": {}, "off": {}}}))
-    for r in runs:
-        run = results / "runs" / r["id"]
+    ids = [f"{r['task']}-{r['arm']}-1" for r in runs]
+    (results / "run.json").write_text(json.dumps({"planned": [*ids, *unrun]}))
+    for r, run_id in zip(runs, ids):
+        run = results / "runs" / run_id
         run.mkdir(parents=True)
         (run / "meta.json").write_text(json.dumps(
-            {"id": r["id"], "task": r["task"], "arm": r["arm"], "rep": 1, "rc": r.get("rc", 0), "wall_s": 10}))
+            {"id": run_id, "task": r["task"], "arm": r["arm"], "rep": 1, "rc": r.get("rc", 0), "wall_s": 10}))
         records = [{"type": "system", "subtype": "init", "session_id": "s"}]
         if "answer" in r:
             records.append({"type": "result", "num_turns": 1, "total_cost_usd": 0.5, "result": r["answer"]})
@@ -235,6 +238,15 @@ def test_score_counts_signal_and_only_blocking_gate_rows(tmp_path):
 ])
 def test_score_reports_failed_runs_and_exits_nonzero(tmp_path, run):
     results = make_results(tmp_path, [run, {"id": "b", "task": "graded", "arm": "off", "answer": "alpha beta"}])
+    proc = cli("score", str(results))
+    assert proc.returncode == 1
+    assert row_for(proc.stdout, "graded     on")[2:4] == ["1", "1"]
+    assert "ALL on: runs=1 failed=1" in proc.stdout
+
+
+def test_score_counts_a_planned_job_without_results_as_failed(tmp_path):
+    results = make_results(tmp_path, [{"id": "b", "task": "graded", "arm": "off", "answer": "alpha beta"}],
+                           unrun=("graded-on-1",))
     proc = cli("score", str(results))
     assert proc.returncode == 1
     assert row_for(proc.stdout, "graded     on")[2:4] == ["1", "1"]

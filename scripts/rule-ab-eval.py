@@ -22,6 +22,7 @@ scope for this tool.
   score <results-dir>
       Per task x arm: runs, failed runs, medians (wall s, tool calls, turns,
       cost USD), oracle passes, signal-hook fires, blocking Stop-gate fires.
+      A planned job that left no meta.json counts as a failed run.
 
 Isolation: each run gets its own PRAXIS_HOME / PRAXIS_STATE_DIR /
 PRAXIS_FIRE_TELEMETRY_FILE, so installed praxis hooks still fire (the user's
@@ -72,6 +73,10 @@ def job_order(suite: dict, reps: int, seed: int) -> list[tuple[str, str, int]]:
     return jobs
 
 
+def job_id(job: tuple[str, str, int]) -> str:
+    return "-".join(map(str, job))
+
+
 def archive_head(dest: Path) -> str:
     sha = subprocess.run(["git", "-C", str(REPO_ROOT), "rev-parse", "HEAD"],
                          check=True, capture_output=True, text=True).stdout.strip()
@@ -102,7 +107,7 @@ def run_oracles(suite: dict, repo: Path, out: Path, timeout: int) -> None:
 
 def run_job(results: Path, suite: dict, model: str, timeout: int, job: tuple[str, str, int]) -> str:
     task, arm, rep = job
-    run_id = f"{task}-{arm}-{rep}"
+    run_id = job_id(job)
     out = results / "runs" / run_id
     (out / "praxis").mkdir(parents=True)
     env = dict(os.environ)
@@ -154,7 +159,7 @@ def cmd_run(args) -> int:
     jobs = job_order(suite, args.reps, args.seed)
     (results / "run.json").write_text(json.dumps(
         {"head": sha, "model": args.model, "reps": args.reps, "seed": args.seed,
-         "parallel": args.parallel, "jobs": len(jobs)}))
+         "parallel": args.parallel, "planned": [job_id(j) for j in jobs]}))
     print(f"head {sha[:8]}, {len(jobs)} jobs, {args.parallel} at a time", flush=True)
     with concurrent.futures.ThreadPoolExecutor(args.parallel) as pool:
         futures = [pool.submit(run_job, results, suite, args.model, args.timeout, j) for j in jobs]
@@ -198,6 +203,7 @@ def grade(answer: str, oracle: Path) -> bool | None:
 def cmd_score(args) -> int:
     results = args.results.resolve()
     suite = json.loads((results / "suite.json").read_text())
+    planned = json.loads((results / "run.json").read_text())["planned"]
     rows = []
     for meta_path in sorted(results.glob("runs/*/meta.json")):
         meta = json.loads(meta_path.read_text())
@@ -209,6 +215,13 @@ def cmd_score(args) -> int:
             row.update(tools=metrics["tools"], turns=metrics["turns"], cost=metrics["cost"],
                        graded=grade(metrics["answer"], results / "oracle" / f"{meta['task']}.txt"))
         rows.append(row)
+    # A job that died before writing meta.json would otherwise vanish from the score.
+    found = {r["id"] for r in rows}
+    for run_id in planned:
+        if run_id not in found:
+            task, arm, rep = run_id.split("-")
+            rows.append({"id": run_id, "task": task, "arm": arm, "rep": int(rep), "rc": None,
+                         "missing": True, "wall_s": 0, "ok": False, "signals": 0, "gates": 0})
     if not rows:
         print(f"FATAL: no runs under {results}/runs", file=sys.stderr)
         return 1
