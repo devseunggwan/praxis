@@ -100,7 +100,8 @@ def _run_claude(tmp_path: pathlib.Path, sub_model: str, effort: str, cwd: pathli
         {"sub_model": sub_model, "effort": effort, "claude_env": "", "budget_flag": "", "time_env": "", "time_sysprompt": ""},
     )
     script = tmp_path / "wrapper.sh"
-    script.write_text("#!/bin/bash\n" + body.replace("$PROMPT_FILE", str(prompt)))
+    # `$SYS_PROMPT` is set in the Step 4 preamble, outside this branch (#1510).
+    script.write_text("#!/bin/bash\nSYS_PROMPT=sys\n" + body.replace("$PROMPT_FILE", str(prompt)))
     env = dict(os.environ, PATH=f"{bin_dir}:{os.environ['PATH']}")
     result = subprocess.run(
         ["/bin/bash", str(script)],
@@ -175,34 +176,34 @@ def test_claude_effort_set_is_exactly_the_cli_list() -> None:
 @pytest.mark.parametrize(
     ("model", "expected_argv"),
     [
-        ("claude:opus:low", ["--model", "opus", "--effort", "low", "task"]),
-        ("opus:low", ["--model", "opus", "--effort", "low", "task"]),
-        ("claude:sonnet:max", ["--model", "sonnet", "--effort", "max", "task"]),
+        ("claude:opus:low", ["--model", "opus", "--effort", "low", "--append-system-prompt", "sys", "task"]),
+        ("opus:low", ["--model", "opus", "--effort", "low", "--append-system-prompt", "sys", "task"]),
+        ("claude:sonnet:max", ["--model", "sonnet", "--effort", "max", "--append-system-prompt", "sys", "task"]),
         # No effort named -> no --effort; the model's own default applies.
-        ("claude:opus", ["--model", "opus", "task"]),
-        ("opus", ["--model", "opus", "task"]),
-        ("fable", ["--model", "fable", "task"]),
+        ("claude:opus", ["--model", "opus", "--append-system-prompt", "sys", "task"]),
+        ("opus", ["--model", "opus", "--append-system-prompt", "sys", "task"]),
+        ("fable", ["--model", "fable", "--append-system-prompt", "sys", "task"]),
         # Bare `claude` is the CLI default model: no --model either.
-        ("claude", ["task"]),
+        ("claude", ["--append-system-prompt", "sys", "task"]),
         # A model ID that holds a colon is not mistaken for an effort.
-        ("claude:us.anthropic.claude-opus-4-v1:0", ["--model", "us.anthropic.claude-opus-4-v1:0", "task"]),
-        ("claude:us.anthropic.claude-opus-4-v1:0:low", ["--model", "us.anthropic.claude-opus-4-v1:0", "--effort", "low", "task"]),
+        ("claude:us.anthropic.claude-opus-4-v1:0", ["--model", "us.anthropic.claude-opus-4-v1:0", "--append-system-prompt", "sys", "task"]),
+        ("claude:us.anthropic.claude-opus-4-v1:0:low", ["--model", "us.anthropic.claude-opus-4-v1:0", "--effort", "low", "--append-system-prompt", "sys", "task"]),
         # Vertex IDs carry `@<date>`; they worked on main and must still pass.
-        ("claude:claude-sonnet-4-5@20250929", ["--model", "claude-sonnet-4-5@20250929", "task"]),
-        ("claude:claude-sonnet-4-5@20250929:low", ["--model", "claude-sonnet-4-5@20250929", "--effort", "low", "task"]),
+        ("claude:claude-sonnet-4-5@20250929", ["--model", "claude-sonnet-4-5@20250929", "--append-system-prompt", "sys", "task"]),
+        ("claude:claude-sonnet-4-5@20250929:low", ["--model", "claude-sonnet-4-5@20250929", "--effort", "low", "--append-system-prompt", "sys", "task"]),
         # A Bedrock ARN: `/` is admitted, and the tail after its last colon is
         # not alphabetic-only, so no ARN segment is taken for an effort.
         (
             "claude:arn:aws:bedrock:us-east-1:123456789012:application-inference-profile/abc",
-            ["--model", "arn:aws:bedrock:us-east-1:123456789012:application-inference-profile/abc", "task"],
+            ["--model", "arn:aws:bedrock:us-east-1:123456789012:application-inference-profile/abc", "--append-system-prompt", "sys", "task"],
         ),
         (
             "claude:arn:aws:bedrock:us-east-1:123456789012:application-inference-profile/abc:high",
-            ["--model", "arn:aws:bedrock:us-east-1:123456789012:application-inference-profile/abc", "--effort", "high", "task"],
+            ["--model", "arn:aws:bedrock:us-east-1:123456789012:application-inference-profile/abc", "--effort", "high", "--append-system-prompt", "sys", "task"],
         ),
         # The `[1m]` context suffix reaches the CLI literally.
-        ("claude:opus[1m]", ["--model", "opus[1m]", "task"]),
-        ("claude:opus[1m]:low", ["--model", "opus[1m]", "--effort", "low", "task"]),
+        ("claude:opus[1m]", ["--model", "opus[1m]", "--append-system-prompt", "sys", "task"]),
+        ("claude:opus[1m]:low", ["--model", "opus[1m]", "--effort", "low", "--append-system-prompt", "sys", "task"]),
     ],
 )
 def test_claude_branch_argv(tmp_path: pathlib.Path, model: str, expected_argv: list[str]) -> None:
@@ -217,7 +218,7 @@ def test_claude_model_does_not_glob(tmp_path: pathlib.Path) -> None:
     wd.mkdir()
     (wd / "opus1").touch()
     sub_model, effort = _resolve_claude("claude:opus[1m]:low")
-    assert _run_claude(tmp_path, sub_model, effort, cwd=wd) == ["--model", "opus[1m]", "--effort", "low", "task"]
+    assert _run_claude(tmp_path, sub_model, effort, cwd=wd) == ["--model", "opus[1m]", "--effort", "low", "--append-system-prompt", "sys", "task"]
 
 
 @pytest.mark.parametrize("model", ["claude:opus:bogus", "opus:HIGH", "claude:opus:xHigh"])
@@ -302,3 +303,22 @@ def test_claude_invalid_effort_rule_is_in_step1() -> None:
 def test_claude_stub_sees_a_changed_argv(tmp_path: pathlib.Path) -> None:
     """Control: a dropped --effort would show."""
     assert _run_claude(tmp_path, "opus", "") != _run_claude(tmp_path / "b", "opus", "low")
+
+
+# --- system prompt scope (#1510) --------------------------------------------
+
+
+@pytest.mark.parametrize("provider", ["codex", "gemini"])
+def test_only_claude_gets_a_system_prompt(provider: str) -> None:
+    """codex and gemini have no such flag; they read the note in the prompt file."""
+    assert "--append-system-prompt" in _branch("claude")
+    assert "--append-system-prompt" not in _branch(provider)
+
+
+def test_session_delivery_passes_no_system_prompt() -> None:
+    """Step 5b types into a running session, whose system prompt is fixed."""
+    text = SKILL.read_text(encoding="utf-8")
+    m = re.search(r"^### Step 5b:.*?(?=^### Step 6:)", text, re.S | re.M)
+    assert m, "could not locate Step 5b"
+    assert "cmux send" in m.group(0)
+    assert "append-system-prompt" not in m.group(0)
