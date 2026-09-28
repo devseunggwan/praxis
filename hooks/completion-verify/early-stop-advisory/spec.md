@@ -136,12 +136,83 @@ need or a lack, anywhere in the text:
   `권한이 없`, `needs a staging DB password`, `no staging DB credentials`,
   `don't have access` (the English trigger and noun must share a clause,
   within 50 characters);
-- a handover only the user can make: `비밀번호를 알려주시면`, `승인해 주시면`,
+- a handover only the user can make: any `…주시면` (`비밀번호를 알려주시면`,
+  `정해 주시면`, `로그인해 주시면`, `커밋해 주시면`), an honorific conditional
+  (`재시작하시면`, `로그인 마치시면`; `원하시면` and `필요하시면` are type 2's
+  offer markers and are not one), `지시 주십시오`, an embedded question put to
+  the user (`답글을 달지는 알려주세요`, `그런 뜻이라면 말씀해 주세요`),
   `승인이 필요`, `결정이 필요`, `waiting on your approval`,
-  `once you share/send/give/provide`;
-- `blocked on/by`, `can't proceed`, `진행할 수 없`.
+  `once you share/send/give/provide/decide`;
+- a next step conditioned on approval or on the user's own act:
+  `승인받고 진행하겠습니다`, `머지는 확인받고 진행하겠습니다`, `머지하시려면`,
+  an offer whose content is a gated act (`머지를 원하시면`, `원하시면 머지
+  브리핑을`),
+  `이 프레이밍이면 진행하겠습니다` (a demonstrative, a space, then `…면
+  진행하겠`; `그러면 진행하겠습니다` has no space and still fires),
+  `with your approval`, `once approved`, `if you approve`;
+- `blocked on/by`, `can't proceed`, `진행할 수 없`, `막혀`. Not `막힌` or
+  `막혔`: in the replay those narrated a past or hypothetical block
+  (`커밋이 두 번 막힌 원인을 확정했습니다`, `IP 가 막혔다면`) and silenced three
+  sampled early stops.
+
+These read the whole text, so a stop that mixes a handover with work that
+needed none (`1번은 바로 하고, 2번은 승인 주시면 진행하겠습니다`) stays silent.
+The replay's sampled early stops included such mixes; they are the price of
+not firing on the handover.
 
 A bare word (`credentials table`, `waiting for the lock`) is not a blocker.
+The imperative `말씀해 주세요` is not one either: after an offer to continue it
+is the guide's own "unless you would prefer otherwise", and type 2 fires.
+
+**A closing question that hands the user a decision.** A closing sentence
+ending in `?`, `까요`, `습니까` or `나요` that offers alternatives (`어느 쪽으로
+갈까요?`, `계속할까요, 아니면 …?`, `…, or would you rather …?`, `which one`)
+or asks permission for something other than continuing (`정리해도 될까요?`,
+`PR 을 생성할까요?`, `B-2 로 갈까요?`, `이대로 진행할까요?`,
+`Should I go ahead and merge?`). These are choices the user owns, the stop
+the guide's type 3 describes when the decision does block the rest. Asking
+to continue with no alternative (`남은 것도 진행해도 될까요?`, `Should I
+continue with the remaining endpoint?`) is type 2 and still fires. A bare
+`or` / `또는` / `혹은` counts as an alternative only outside an offer to
+continue, since it also joins the objects of one offer (`Should I continue
+with the remaining tests or docs?` fires).
+
+**A launched background task is still running.** Stopping while a launched
+task runs is a wait that has a wake-up: the task's notification re-invokes
+the model when it ends. The hook reads the last `CURRENT_TURN_SCAN_MAX_BYTES`
+(8 MiB) of the transcript with `tail_lines` — not the Stop turn, because a
+task notification opens a turn of its own and a launch can sit before a
+question the user asked mid-wait — and looks for a launch with no sign that
+it ended. A tail that cuts a launch off loses the launch, never its end, so
+that error is a fire, not a silence.
+
+- launches are the tool results the host writes: `Command running in
+  background with ID: <id>` (Bash `run_in_background`), `Monitor started
+  (task <id>`, `Async agent launched … agentId: <id>` — at the start of the
+  result, so a result that prints such a line mid-output launches nothing;
+- a task has ended when a record that is neither an assistant message nor a
+  tool result carries its `<task-notification>` with a `<status>` (the host
+  writes it as a `task-notification` user record, a `queue-operation`, or a
+  `queued_command` attachment), when a `task_status` attachment reports it
+  other than `running`, or when the model called `TaskStop` on it. A Monitor
+  event notification has no `<status>`: the watch is still live;
+- a Monitor has also ended once the stop is past the deadline its launch
+  stated (`timeout 300000ms`, `expires in 2m 30s`), measured from the launch
+  record's `timestamp` to the hook's clock at the Stop. Not the newest
+  `timestamp` in the transcript: the transcript is written asynchronously
+  and can trail the stop, which would hold an expired Monitor open. An expiry can
+  leave no record: in the replay corpus 50 of 255 Monitor launches had no
+  terminal record in their file. A `persistent` Monitor states no deadline.
+
+A turn that ends saying it will report when CI finishes, with nothing
+launched to wake it, still fires: in an unattended run that stop is the stall
+the guide describes. A stop in the middle of a wait is judged again when the
+notification wakes the model and it stops a second time.
+
+Limitation: a Bash or Agent task that ends with no record of it (17 of 4,314
+Bash and 2 of 287 Agent launches in the replay corpus, 15 of them within 200
+lines of their file's end) keeps the hook silent while its launch stays in
+the tail.
 
 **A confirmation asked before a destructive action.** The guide's standing
 instruction ends "This does not override the need for confirmation on risky
@@ -312,11 +383,39 @@ bounds the cost of a false positive to two extra continuations per turn.
 
 ## Measured corpus
 
-None yet. No local transcript corpus was available when the hook was written,
-so there is no fire rate or sampled precision; the fixture suite in
-`tests/hooks/completion-verify/test_early_stop_advisory.sh` is the only
-evidence. Issue #1498's corpus fire-rate item is therefore still open. Replay
-the hook over `~/.claude*/projects/*/*.jsonl` before the `review_by` audit.
+Replayed in notice mode over one maintainer's local corpus (875 main-chain
+transcripts; replay error count 0), each stop replayed with the transcript cut
+at the last assistant record before it. The two runs finished 19 minutes apart
+and the corpus holds live sessions, so they saw slightly different stop counts:
+
+| Hook | Stops replayed | Fires | Sessions |
+| --- | --- | --- | --- |
+| Before the wait and decision silences | 12,259 | 1,240 | 325 |
+| With them | 12,288 | 307 | 170 |
+
+The first run started each cut at the turn's opening human message; the second
+started it 8 MiB before the stop when that is earlier, since this hook reads
+the transcript tail. The earlier hook reads only the current turn and the last
+human message, which both cuts contain. The second run measured Monitor
+deadlines against the newest transcript timestamp; the hook now uses the
+Stop's clock, under which an offline replay counts every Monitor with a
+deadline as expired, so these figures are not re-runnable as they stand.
+
+Precision, graded by one person against the guide's definition (work the
+model could have continued without the user; a gated write — merge, push,
+public comment — counts as needing the user):
+
+- a random sample of 40 fires of the earlier hook: 11 early stops (27.5%).
+  15 of the 40 still fire, 7 of them early stops (~47%). The 4 early stops it
+  no longer fires on are closing choices (3) and a stop that mixed a handover
+  with work that needed none (1);
+- a random sample of 40 fires of an intermediate revision: 9 early stops,
+  8 of which still fire, out of 15 that still fire (~53%).
+
+Both precision figures rest on 15 fires, so their error is wide. The false
+positives left are mostly an offer to continue whose next step is a gated
+write (`앵커를 rev 5 로 갱신해야 합니다. 이어서 진행할까요?`), which the text
+alone does not separate from an ungated one.
 
 ## Relationship to the sibling hooks
 
