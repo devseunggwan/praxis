@@ -220,6 +220,12 @@ def test_score_grades_every_oracle_line_in_both_polarities(tmp_path):
     assert row_for(proc.stdout, "graded     off")[8] == "0/1"
 
 
+def test_score_prints_a_zero_median_as_zero(tmp_path):
+    # make_results writes no tool_use records, so the tools median is 0.
+    results = make_results(tmp_path, [{"id": "a", "task": "graded", "arm": "on", "answer": "alpha beta"}])
+    assert row_for(cli("score", str(results)).stdout, "graded     on")[5] == "0"
+
+
 def test_score_counts_signal_and_only_blocking_gate_rows(tmp_path):
     fires = [
         {"hook": "sig", "role": "advisory-nudge", "decision": "advise"},

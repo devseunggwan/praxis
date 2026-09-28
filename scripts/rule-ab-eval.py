@@ -231,6 +231,10 @@ def cmd_score(args) -> int:
         values = [r[key] for r in rs if r.get(key) is not None]
         return statistics.median(values) if values else None
 
+    def show(value):
+        # 0 is a real median (a run with no tool calls); only a missing one is '-'.
+        return "-" if value is None else value
+
     print("task       arm      runs failed wall_s tools turns cost_usd oracle signal gate")
     groups: dict[tuple[str, str], list] = {}
     for r in rows:
@@ -240,8 +244,8 @@ def cmd_score(args) -> int:
         graded = [r["graded"] for r in ok if r["graded"] is not None]
         oracle = f"{sum(graded)}/{len(graded)}" if graded else "-"
         cost = med(ok, "cost")
-        print(f"{task:10} {arm:8} {len(rs):4} {len(rs) - len(ok):6} {med(ok, 'wall_s') or '-':>6} "
-              f"{med(ok, 'tools') or '-':>5} {med(ok, 'turns') or '-':>5} "
+        print(f"{task:10} {arm:8} {len(rs):4} {len(rs) - len(ok):6} {show(med(ok, 'wall_s')):>6} "
+              f"{show(med(ok, 'tools')):>5} {show(med(ok, 'turns')):>5} "
               f"{f'{cost:.3f}' if cost is not None else '-':>8} {oracle:>6} "
               f"{sum(r['signals'] for r in rs):6} {sum(r['gates'] for r in rs):4}")
     for arm in suite["arms"]:
