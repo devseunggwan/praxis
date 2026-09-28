@@ -5,6 +5,46 @@ All notable changes to praxis are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.19.0](https://github.com/devseunggwan/praxis/compare/v7.18.0...v7.19.0) (2026-09-28)
+
+
+### Added
+
+* **delegate:** add opt-in elapsed-time signal ([#1506](https://github.com/devseunggwan/praxis/issues/1506)) ([fdbf474](https://github.com/devseunggwan/praxis/commit/fdbf474cb937ffe01d9a3e2fba561e923886a78a))
+* **delegate:** default codex model and effort ([#1484](https://github.com/devseunggwan/praxis/issues/1484)) ([b44a2e7](https://github.com/devseunggwan/praxis/commit/b44a2e7ac4048d40af74dcf3642df67d4c9994fc))
+* **delegate:** mark third-party text in prompts ([#1505](https://github.com/devseunggwan/praxis/issues/1505)) ([301c273](https://github.com/devseunggwan/praxis/commit/301c273c081e959e787e9e95263ec61c005c0929))
+* **delegate:** pass --effort to claude workers ([#1507](https://github.com/devseunggwan/praxis/issues/1507)) ([b58dea2](https://github.com/devseunggwan/praxis/commit/b58dea2ab2259502c0590f3ac966c9aa0de5a88d))
+* **delegate:** pass paste note via system prompt ([#1520](https://github.com/devseunggwan/praxis/issues/1520)) ([7d8088f](https://github.com/devseunggwan/praxis/commit/7d8088f04a0b611e746200a880429f5e25aaa344))
+* **delegate:** route tiers with jev decisions ([#1482](https://github.com/devseunggwan/praxis/issues/1482)) ([3c7948d](https://github.com/devseunggwan/praxis/commit/3c7948dbf2754938ce5a8fc82b2129ea59ab4b6f)), closes [#1481](https://github.com/devseunggwan/praxis/issues/1481)
+* **delegate:** wrap changed files and diff stat as third-party text ([#1518](https://github.com/devseunggwan/praxis/issues/1518)) ([f39cce4](https://github.com/devseunggwan/praxis/commit/f39cce4a63948b4b31e68ec446ddec61e29624de)), closes [#1511](https://github.com/devseunggwan/praxis/issues/1511)
+* **eval:** add hook-rule a/b runner ([#1523](https://github.com/devseunggwan/praxis/issues/1523)) ([3e6b3cd](https://github.com/devseunggwan/praxis/commit/3e6b3cd30ebff36ba67c2ad59f32ef6462c99648))
+* **hooks:** add cited-rule-gate ([#1493](https://github.com/devseunggwan/praxis/issues/1493)) ([66dc690](https://github.com/devseunggwan/praxis/commit/66dc6901d6a00c83164100cb323d5765447d7839))
+* **hooks:** add cross-tool-reroute-gate ([#1489](https://github.com/devseunggwan/praxis/issues/1489)) ([4bb0991](https://github.com/devseunggwan/praxis/commit/4bb0991fc8ffcf2cb852e258b16e9f88b43a4462))
+* **hooks:** add early-stop-advisory ([#1504](https://github.com/devseunggwan/praxis/issues/1504)) ([12cbc7c](https://github.com/devseunggwan/praxis/commit/12cbc7c876b65a2baa13bd976c326fa1b46149fb))
+* **hooks:** add rejected-call-probe-gate ([#1494](https://github.com/devseunggwan/praxis/issues/1494)) ([d2ba6a0](https://github.com/devseunggwan/praxis/commit/d2ba6a0d949c67964dab5dd80dee906c4e2bc955))
+* **hooks:** add relayed-blocked-command-gate ([#1509](https://github.com/devseunggwan/praxis/issues/1509)) ([0ea5531](https://github.com/devseunggwan/praxis/commit/0ea5531aba607345fd488c069fbc247d51767138))
+* **hooks:** count auto mode classifier blocks as denials ([#1517](https://github.com/devseunggwan/praxis/issues/1517)) ([e4d02c7](https://github.com/devseunggwan/praxis/commit/e4d02c73df0b445cf23067b4136b0f2085e54079)), closes [#1475](https://github.com/devseunggwan/praxis/issues/1475)
+* **hooks:** gate mutation in a turn opened by a user question ([#1492](https://github.com/devseunggwan/praxis/issues/1492)) ([5a4b679](https://github.com/devseunggwan/praxis/commit/5a4b679322a39da32d2b647914d43c64fe25ff24))
+* **hooks:** language rule survives compaction ([#1479](https://github.com/devseunggwan/praxis/issues/1479)) ([23a30cb](https://github.com/devseunggwan/praxis/commit/23a30cb18c3b869dbc15b0d769b1242a4c93d931))
+
+
+### Fixed
+
+* **hooks:** an interrupt no longer cuts the window ([#1515](https://github.com/devseunggwan/praxis/issues/1515)) ([90bcfb1](https://github.com/devseunggwan/praxis/commit/90bcfb1ac5d414d210db9f4f8197fb556e78bf01))
+* **hooks:** ask decision keeps sibling advisories ([#1478](https://github.com/devseunggwan/praxis/issues/1478)) ([3e01113](https://github.com/devseunggwan/praxis/commit/3e011130ee0ce5b3c31548cb24cd5feadc22cba9))
+* **hooks:** parse cited-rule headings in linear time ([#1516](https://github.com/devseunggwan/praxis/issues/1516)) ([fb98e09](https://github.com/devseunggwan/praxis/commit/fb98e0975d7b188c0df3807fd0cce7d6d591a352)), closes [#1496](https://github.com/devseunggwan/praxis/issues/1496)
+* **hooks:** read mid-turn notes recorded as thinking blocks ([#1519](https://github.com/devseunggwan/praxis/issues/1519)) ([43a01a1](https://github.com/devseunggwan/praxis/commit/43a01a18e065aed5f4966ea11bd32a8785468367)), closes [#1502](https://github.com/devseunggwan/praxis/issues/1502)
+* **hooks:** recognize read-only shell forms ([#1497](https://github.com/devseunggwan/praxis/issues/1497)) ([f72d56e](https://github.com/devseunggwan/praxis/commit/f72d56e438f0be62a6a287196343ab61b3234175))
+* **hooks:** silence early-stop on waits and handovers ([#1522](https://github.com/devseunggwan/praxis/issues/1522)) ([426d6dc](https://github.com/devseunggwan/praxis/commit/426d6dce0b87c4eff5049f09a5895c946116ee1f))
+
+
+### Changed
+
+* bump reviewdog/action-actionlint from 1.75.0 to 1.77.0 ([#1514](https://github.com/devseunggwan/praxis/issues/1514)) ([1cdbb4b](https://github.com/devseunggwan/praxis/commit/1cdbb4b771a00d1f40edd2f46f927ec6564e189b))
+* bump the codeql-action group with 2 updates ([#1513](https://github.com/devseunggwan/praxis/issues/1513)) ([c629350](https://github.com/devseunggwan/praxis/commit/c629350adf4b97401ef58185fe9bba4512982526))
+* **hooks:** extract mutating-call classifier to _lib ([#1491](https://github.com/devseunggwan/praxis/issues/1491)) ([5b2535a](https://github.com/devseunggwan/praxis/commit/5b2535a8aca0920ef993bad1a6a9d66a7b8361b3))
+* **runtime:** record transcript block shape ([#1503](https://github.com/devseunggwan/praxis/issues/1503)) ([ba1dcd6](https://github.com/devseunggwan/praxis/commit/ba1dcd680c7c6ea5f4664ccef1f85922d1a28581))
+
 ## [7.18.0](https://github.com/devseunggwan/praxis/compare/v7.17.0...v7.18.0) (2026-09-21)
 
 

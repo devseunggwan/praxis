@@ -565,9 +565,11 @@ _CONSUMERS = {
         ["load_current_turn", "extract_last_assistant_text"],
     # Grades the Stop text, and reads the human message that opened the turn
     # to stay silent when that message asked for the report or plan (#1498),
-    # and to key its block-mode continuation count on that record.
+    # and to key its block-mode continuation count on that record. Reads the
+    # transcript tail to find a background task still running.
     HOOKS / "completion-verify" / "early-stop-advisory" / "impl.py":
-        ["load_stop_turn", "stop_last_assistant_text", "read_last_user_record"],
+        ["load_stop_turn", "stop_last_assistant_text", "read_last_user_record",
+         "resolve_stop_transcript", "tail_lines"],
     HOOKS / "completion-verify" / "pr-claim-mutation-gate" / "impl.py":
         ["load_current_turn", "extract_last_assistant_text"],
     # Also streams the turns BEFORE the current one, reusing the shared boundary
@@ -680,6 +682,8 @@ _CONSTANT_CONSUMERS = {
         ["REJECTION_DENIAL_KIND", "REJECTION_PHRASE"],
     HOOKS / "completion-verify" / "relayed-blocked-command-gate" / "impl.py":
         ["HOOK_BLOCK_DENIAL_KIND"],
+    HOOKS / "completion-verify" / "early-stop-advisory" / "impl.py":
+        ["CURRENT_TURN_SCAN_MAX_BYTES"],
 }
 
 

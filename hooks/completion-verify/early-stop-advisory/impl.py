@@ -60,7 +60,14 @@ It stays silent — a stop the user wants — when any of these holds:
   `비밀번호를 알려주시면`, `needs a password I don't have`,
   `waiting on your approval`, `blocked on`, `once you share`). This is the
   guide's own pair of wanted stops: "where nothing can move without them, or
-  where the thing blocking you is deliberately protected from you";
+  where the thing blocking you is deliberately protected from you". That
+  includes a next step conditioned on approval or on the user's input
+  (`승인받고 진행하겠습니다`, `정해 주시면`, `with your approval`);
+- a closing question hands the user a decision: alternatives (`어느 쪽으로
+  갈까요?`, `…, or would you rather …?`) or permission for something other
+  than continuing (`정리해도 될까요?`, `Should I go ahead and merge?`);
+- a background task launched in the transcript tail has not ended: its
+  notification will wake the model (#1498 replay);
 - praxis additions: the human message that opened the turn asked for a
   report, a plan, or a pause, or asked a question (a word-initial
   interrogative plus a question ending, or an English auxiliary-inversion
@@ -121,6 +128,8 @@ import json
 import os
 import re
 import sys
+import time
+from datetime import datetime
 from pathlib import Path as _Path
 
 sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
@@ -131,9 +140,12 @@ from _paths import resolve_cache_file  # type: ignore[import-not-found]  # noqa:
 from _payload import read_payload  # type: ignore[import-not-found]  # noqa: E402
 from _state_lock import state_lock  # type: ignore[import-not-found]  # noqa: E402
 from _transcript import (  # type: ignore[import-not-found]  # noqa: E402
+    CURRENT_TURN_SCAN_MAX_BYTES,
     load_stop_turn,
     read_last_user_record,
+    resolve_stop_transcript,
     stop_last_assistant_text,
+    tail_lines,
 )
 
 _PREFIX = "[early-stop-advisory]"
@@ -315,14 +327,232 @@ def _asks_destructive_confirmation(sentences: list[str]) -> bool:
     )
 
 
+# --- silence: a closing question that hands the user a decision -----------
+
+# A question the user owns the answer to: a choice between alternatives
+# (`어느 쪽으로 갈까요?`, `계속할까요, 아니면 …?`, `… or would you rather …?`) or
+# permission for an action that is not continuing the work (`정리해도 될까요?`,
+# `Should I go ahead and merge?`). Asking to continue with no alternative
+# (`남은 것도 진행해도 될까요?`) is type 2 and still fires.
+_QUESTION_END_KO_RE = re.compile(r"(?:까요|습니까|나요)[.!]?\s*$")
+_ALTERNATIVE_RE = re.compile(
+    r"아니면|어느 ?쪽|어느 (?:것|걸|방향|안)|어떤 (?:것|걸|쪽|방식|방향)"
+    r"|어떻게 (?:할|진행할|처리할)"
+    r"|\bor (?:would|should|do|shall|can|rather)\b|\bor (?:just |instead )?(?:stop|wait|leave|hold)\b"
+    r"|\bwhich (?:one|option|way|approach|of)\b|\bhow (?:would|do) you want\b",
+    re.IGNORECASE,
+)
+# A bare conjunction also joins the objects of one offer (`the tests or docs`),
+# so it marks a choice only when the question is not an offer to continue.
+_CONJUNCTION_RE = re.compile(r"또는|혹은|\bor\b", re.IGNORECASE)
+_PERMISSION_RE = re.compile(
+    r"[가-힣]도 (?:될까요|괜찮을까요|되겠습니까|되나요)"
+    # a gated act, a direction to take, or the proposal as it stands
+    r"|(?:생성|게시|머지|병합|배포|커밋|푸시|덧붙|남길|올릴|달)[가-힣]{0,3}까요"
+    r"|(?:로|으로) 갈까요|(?:이대로|그대로|이 방향으로|이렇게)[^?？\n]{0,20}까요"
+    r"|검토해 ?볼까요"
+    r"|\b(?:ok|okay|alright|fine) (?:to|if I)\b|\bmay I\b|\bshall I\b|\bshould I\b",
+    re.IGNORECASE,
+)
+
+
+def _asks_user_decision(sentences: list[str]) -> bool:
+    for s in sentences:
+        if not (_QUESTION_MARK_END_RE.search(s) or _QUESTION_END_KO_RE.search(s)):
+            continue
+        if _ALTERNATIVE_RE.search(s):
+            return True
+        if _CONTINUE_RE.search(s):
+            continue
+        if _CONJUNCTION_RE.search(s) or _PERMISSION_RE.search(s):
+            return True
+    return False
+
+
+# --- silence: a launched background task has not finished ----------------
+
+# A stop while a launched task runs is a wait with a wake-up: the task's
+# notification re-invokes the model when it ends. Launch markers are the
+# tool results the host writes (Bash `run_in_background`, Monitor, a
+# background Agent). A task has ended when a record other than an assistant
+# message or a tool result carries its `<task-notification>` with a
+# `<status>` — the host writes that one as a user record, a queue-operation,
+# or a `queued_command` attachment — or a non-running `task_status`
+# attachment, or the model stopped it with `TaskStop`, or it is a Monitor
+# past the deadline its launch stated (an expiry can leave no record). A
+# Monitor event notification carries no `<status>`: the watch is still live.
+_TASK_LAUNCH_RES = (
+    re.compile(r"Command running in background with ID: ([A-Za-z0-9_-]+)"),
+    re.compile(r"Monitor started \(task ([A-Za-z0-9_-]+)"),
+    re.compile(r"Async agent launched\b[\s\S]{0,400}?\bagentId: ([A-Za-z0-9_-]+)"),
+)
+# `Monitor started (task X, timeout 300000ms)` or `(task X, expires in 2m 30s
+# unless …)`; `persistent` states none.
+_MONITOR_TIMEOUT_MS_RE = re.compile(r"^Monitor started \(task [^,)]+, timeout (\d+)ms")
+_MONITOR_EXPIRES_RE = re.compile(
+    r"^Monitor started \(task [^,)]+, expires in (?:(\d+)h\s*)?(?:(\d+)m\s*)?(?:(\d+)s)?"
+)
+_NOTIFICATION_RE = re.compile(r"<task-notification>([\s\S]*?)</task-notification>")
+_TASK_ID_RE = re.compile(r"<task-id>([^<]+)</task-id>")
+_TASK_STATUS_RE = re.compile(r"<status>[^<]*</status>")
+# Only lines carrying one of these are parsed; the rest of the tail is not.
+_BACKGROUND_NEEDLES = (
+    "Command running in background", "Monitor started", "Async agent launched",
+    "<task-notification>", '"task_status"', '"TaskStop"',
+)
+
+
+def _timestamp(ev: dict) -> float | None:
+    value = ev.get("timestamp")
+    if not isinstance(value, str):
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return None
+
+
+def _monitor_deadline_s(launch_text: str) -> float | None:
+    m = _MONITOR_TIMEOUT_MS_RE.match(launch_text)
+    if m:
+        return int(m.group(1)) / 1000
+    m = _MONITOR_EXPIRES_RE.match(launch_text)
+    if m and any(m.groups()):
+        h, mins, s = (int(g or 0) for g in m.groups())
+        return h * 3600 + mins * 60 + s
+    return None
+
+
+def _strings(value: object):
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, list):
+        for item in value:
+            yield from _strings(item)
+    elif isinstance(value, dict):
+        for item in value.values():
+            yield from _strings(item)
+
+
+def _tool_stops(content: object) -> set[str]:
+    stopped: set[str] = set()
+    for block in content if isinstance(content, list) else []:
+        if (
+            isinstance(block, dict)
+            and block.get("type") == "tool_use"
+            and block.get("name") == "TaskStop"
+        ):
+            task_id = (block.get("input") or {}).get("task_id")
+            if isinstance(task_id, str):
+                stopped.add(task_id)
+    return stopped
+
+
+def pending_background_tasks(
+    events: list[dict], now: float | None = None
+) -> list[str]:
+    """Ids of background tasks launched in `events` with no sign they ended.
+
+    `now` is the stop's time (epoch seconds) for Monitor deadlines; without
+    it, or without a launch timestamp, a Monitor counts as running.
+    """
+    launched: list[str] = []
+    ended: set[str] = set()
+    for ev in events:
+        if not isinstance(ev, dict) or ev.get("isSidechain"):
+            continue
+        message = ev.get("message")
+        content = message.get("content") if isinstance(message, dict) else None
+        if ev.get("type") == "assistant" or (
+            isinstance(message, dict) and message.get("role") == "assistant"
+        ):
+            ended |= _tool_stops(content)
+            continue
+        attachment = ev.get("attachment")
+        if (
+            isinstance(attachment, dict)
+            and attachment.get("type") == "task_status"
+            and attachment.get("status") not in (None, "running")
+            and isinstance(attachment.get("taskId"), str)
+        ):
+            ended.add(attachment["taskId"])
+        rest: object = content
+        if isinstance(content, list):
+            rest = []
+            for block in content:
+                if isinstance(block, dict) and block.get("type") == "tool_result":
+                    for text in _strings(block.get("content")):
+                        text = text.lstrip()
+                        for launch in _TASK_LAUNCH_RES:
+                            m = launch.match(text)
+                            if not m:
+                                continue
+                            launched.append(m.group(1))
+                            deadline = _monitor_deadline_s(text)
+                            at = _timestamp(ev)
+                            if (
+                                deadline is not None and at is not None
+                                and now is not None and now > at + deadline
+                            ):
+                                ended.add(m.group(1))
+                else:
+                    rest.append(block)
+        for text in _strings([rest, ev.get("content"), attachment]):
+            for note in _NOTIFICATION_RE.findall(text):
+                if _TASK_STATUS_RE.search(note):
+                    ended.update(_TASK_ID_RE.findall(note))
+    return [task for task in launched if task not in ended]
+
+
+def background_events(path: str) -> list[dict]:
+    """Records that can launch or end a background task, from the last
+    `CURRENT_TURN_SCAN_MAX_BYTES` of the transcript.
+
+    A tail rather than the turn: a launch can sit before the human message
+    that opened this turn (a question asked mid-wait), and a notification
+    starts a new turn of its own. A tail that cuts a launch off loses the
+    launch, never its end, so the error is a fire, not a silence.
+    """
+    lines = tail_lines(path, sys.maxsize, CURRENT_TURN_SCAN_MAX_BYTES) if path else []
+    events: list[dict] = []
+    for line in lines:
+        if not any(n in line for n in _BACKGROUND_NEEDLES):
+            continue
+        try:
+            ev = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(ev, dict):
+            events.append(ev)
+    return events
+
+
 # --- silence: a blocker stated as a need or a lack ------------------------
 
 _BLOCKER_RE = re.compile(
     # Korean: a missing or needed credential/access, or a handover the user owns
     r"(?:자격 ?증명|크리덴셜|비밀번호|패스워드|토큰|권한|접근 ?권한|API ?키|액세스)"
     r"(?:이|가|을|를)? ?(?:없|필요|주셔야|주시면)"
-    r"|(?:알려|공유해|보내|전달해|승인해|제공해|부여해|넣어|설정해|발급해) ?주시면"
+    # something only the user can do or give comes first: 알려주시면, 정해 주시면,
+    # 로그인해 주시면, 커밋해 주시면 — every `…주시면` hands the next move over
+    r"|주시면"
+    # the same as an honorific conditional: 재시작하시면, 로그인 마치시면.
+    # 원하시면 / 필요하시면 are type 2's offer markers, not a handover.
+    r"|(?<!원)(?<!필요)하시면|마치시면|끝내시면"
+    # an offer whose content is a gated act (머지를 원하시면, 원하시면 머지 브리핑)
+    r"|(?:머지|병합|배포|게시|푸시|push)[^.?!\n]{0,8}원하시면"
+    r"|원하시면[^.?!\n]{0,8}(?:머지|병합|배포|게시|푸시|push)"
+    # the user's answer to an embedded question: 스레드에 답글을 달지는 알려주세요,
+    # 그런 뜻이라면 말씀해 주세요. A bare 말씀해 주세요 after an offer stays type 2.
+    r"|[가-힣]지(?:는|를|도)?\s?(?:알려|말씀해) ?주세요|라면\s(?:알려|말씀해) ?주세요"
     r"|승인(?:이|을)? (?:필요|기다|대기|받아야|받은 ?후|받은 ?뒤|해 주셔야)|승인 대기"
+    # the next step is conditioned on an approval the user has not given:
+    # 승인받고 진행하겠습니다, 머지는 확인받고 진행하겠습니다
+    r"|(?:승인|확인)(?:을)? ?받(?:고|아 |아서|은 ?(?:후|뒤|다음))"
+    r"|(?:지시|결정|판단)(?:을|를)? ?(?:해 ?)?(?:주십시오|부탁)"
+    # an action the user owns (머지하시려면), or a proposal awaiting acceptance
+    # (이 프레이밍이면 진행하겠습니다); `그러면` has no space and is not one
+    r"|하시려면|(?<![가-힣])(?:이|그|위)\s[가-힣]{1,8}면\s(?:바로\s|그대로\s)?진행하겠"
     r"|(?:진행|계속|작업)할 수 없|진행이 불가|불가능합니다|막혀|블로커|차단되"
     r"|결정(?:이|을)? (?:필요|기다)|주셔야|대기하고 있"
     # English (the lack-or-need construction is `_has_en_lack_blocker`)
@@ -330,7 +560,10 @@ _BLOCKER_RE = re.compile(
     r"|sign-?off)\b"
     r"|\bblocked (?:on|by)\b|\bcan(?:no|')t (?:proceed|continue)\b"
     r"|\bunable to (?:proceed|continue)\b|\bpermission denied\b"
-    r"|\bonce you (?:provide|approve|confirm|grant|share|send|give)\b",
+    r"|\bonce you (?:provide|approve|confirm|grant|share|send|give|decide|pick)\b"
+    r"|\b(?:with|after|pending|upon) your (?:approval|sign-?off|go-?ahead"
+    r"|confirmation|decision)\b|\bonce (?:it is |it's )?approved\b"
+    r"|\bif you approve\b",
     re.IGNORECASE,
 )
 
@@ -499,7 +732,7 @@ def early_stop_signal(text: str) -> tuple[str, str] | None:
         return None
 
     closing = _closing_sentences(lines)
-    if _asks_destructive_confirmation(closing):
+    if _asks_destructive_confirmation(closing) or _asks_user_decision(closing):
         return None
     for sentence in closing:
         if _is_offer_to_continue(sentence):
@@ -735,6 +968,13 @@ def main() -> int:
 
     opening = opening_human_message(payload.get("transcript_path"))
     if opening is not None and user_wants_the_stop(opening[1]):
+        return 0
+
+    # Unreadable → no evidence of a wait, and the fire goes ahead.
+    # The Stop's own clock: the transcript is written asynchronously and can
+    # trail the stop, so its newest timestamp would hold an expired Monitor open.
+    events = background_events(resolve_stop_transcript(payload)[0])
+    if pending_background_tasks(events, time.time()):
         return 0
 
     session_id = payload.get("session_id")
