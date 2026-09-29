@@ -90,7 +90,7 @@ fires are pinned, scrubbed to aliases, under
 Cost: the scan runs only for a `gh` external write whose body carries a
 citation. On the largest local transcript (133 MB) one full pass took about
 0.3 s against the hook's 5 s timeout; the slowest of the 16 replayed calls
-took 0.38 s end to end.
+took about 0.4 s end to end (0.38 s and 0.40 s on two runs).
 
 ## Response
 
