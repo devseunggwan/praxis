@@ -274,7 +274,7 @@ def main() -> int:
     if phrase is None:
         return 0
 
-    strict = os.environ.get(STRICT_ENV, "") not in ("", "0", "false", "False")
+    strict = os.environ.get(STRICT_ENV, "").strip() == "1"
     if strict:
         emit_block(*_render(phrase))
         return 2

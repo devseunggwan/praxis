@@ -98,6 +98,8 @@ run_case() {
   err_file=$(mktemp); out_file=$(mktemp)
   if [ "$mode" = strict ]; then
     printf '%s' "$payload" | PRAXIS_GUARD_REMOVAL_MENU_STRICT=1 "$HOOK" >"$out_file" 2>"$err_file"
+  elif [ "${mode#strict=}" != "$mode" ]; then
+    printf '%s' "$payload" | PRAXIS_GUARD_REMOVAL_MENU_STRICT="${mode#strict=}" "$HOOK" >"$out_file" 2>"$err_file"
   else
     printf '%s' "$payload" | env -u PRAXIS_GUARD_REMOVAL_MENU_STRICT "$HOOK" >"$out_file" 2>"$err_file"
   fi
@@ -146,6 +148,8 @@ run_case "KO 가드 우회" advisory default "$(build_payload "$T_BLOCKED" '[["�
 run_case "KO 예외 추가 in description only" advisory default "$(build_payload "$T_BLOCKED" '[["설정 변경", "보호 브랜치 예외 추가"], ["중단", ""]]')"
 run_case "KO 가드 우회하고 진행 (verb suffix is not negation)" advisory default "$(build_payload "$T_BLOCKED" '[["이 편집만 가드 우회하고 진행 (권장)", ""], ["중단", ""]]')"
 run_case "KO negated marker earlier, plain marker later" advisory default "$(build_payload "$T_BLOCKED" '[["훅 우회 없음이 아니라 훅 우회 후 진행", ""], ["중단", ""]]')"
+run_case "STRICT=no stays advisory" advisory strict=no "$(build_payload "$T_BLOCKED" "$EN_EXEMPTION")"
+run_case "STRICT=off stays advisory" advisory strict=off "$(build_payload "$T_BLOCKED" "$EN_EXEMPTION")"
 run_case "relay + origination: gate env relayed but another var originated" advisory default "$(build_payload "$T_BLOCKED_ENV" '[["Set OTHER_SKIP=1", ""], ["Stop", ""]]')"
 
 echo "--- negatives ---"

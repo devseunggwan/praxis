@@ -100,6 +100,7 @@ route beside it.
 | --- | --- | --- |
 | unset (default) | **Advisory** | exit 0; message on stderr (fire-ledger `advise`) and as `hookSpecificOutput.additionalContext` on stdout |
 | `PRAXIS_GUARD_REMOVAL_MENU_STRICT=1` | Strict | exit 2 + message on stderr |
+| any other value (`0`, `no`, `off`, …) | **Advisory** | same as unset |
 
 Default is advisory, following `block-manufactured-action-menu`: the vocabulary
 is new and its false-positive floor is unmeasured. The advisory also writes
@@ -146,4 +147,5 @@ originated env switch beside a relayed one; negatives for no block, a
 successful tool result, a user rejection, a block in an earlier turn, a normal
 satisfying-path menu (English and Korean), the gate's own relayed `VAR=1`,
 `add an exception handler`, `skip the slow tests`, a non-AskUserQuestion tool,
-a missing transcript, and a malformed payload.
+a missing transcript, and a malformed payload; plus `STRICT=no` /
+`STRICT=off` staying advisory.
