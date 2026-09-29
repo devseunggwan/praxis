@@ -17,6 +17,7 @@ Skills are orchestrators with pluggable steps; external integrations (issue trac
 | [`docs/spec-store.md`](docs/spec-store.md) | Feature-spec convention |
 | [`docs/hook-prune-audit.md`](docs/hook-prune-audit.md) | Keep/merge/drop verdict per hook |
 | [`docs/retrospect-prune-audit.md`](docs/retrospect-prune-audit.md) | Same lens on retrospect |
+| [`docs/rule-noop-audit.md`](docs/rule-noop-audit.md) | Whether each advisory hook's rule reaches the model and changes the reply |
 
 ## Prerequisites
 
