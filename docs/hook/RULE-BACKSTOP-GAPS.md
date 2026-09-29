@@ -107,6 +107,14 @@ carries the ranking: #4 is a HIGH-cost row sitting after the LOW-MED #3.
   route that merely quotes similar words, and the two are textually
   indistinguishable in prose. Recorded here as an open backstop gap so the
   prose clause is not mistaken for enforcement.
+- **Gap #4, menu lane → `block-guard-removal-menu`, advisory by default**:
+  reopens the `#1009` decision for the menu lane only. An `AskUserQuestion`
+  option is a structured field rather than prose, and the permitted relay is
+  separated by the `VAR=1` tokens the same turn's denial printed. It fires only
+  when a `permission-rule` denial precedes the menu in the same turn. A 30-day
+  scan (943 transcripts, 1,953 `AskUserQuestion` calls) found 7 matches in 5
+  sessions, 6 true and 1 negated phrase since excluded. The prose lane keeps
+  the `#1009` decision.
 - **Gap #4, prose lane → `bypass-route-signal`, a meter rather than a backstop** ([#1338](https://github.com/devseunggwan/praxis/issues/1338)):
   the row above and the `#1009` bullet both stand. This Stop hook does **not**
   attempt the separation they call textually indistinguishable — it strips the

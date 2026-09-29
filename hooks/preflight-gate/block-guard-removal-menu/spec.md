@@ -19,9 +19,16 @@ This is the **menu lane** of
 [`docs/hook/RULE-BACKSTOP-GAPS.md`](../../../docs/hook/RULE-BACKSTOP-GAPS.md)
 gap #4 ([`ETHOS.md`](../../../ETHOS.md#key-principles) principle 5, "Delegating
 a workaround is inventing one"). Gap #4 measured all `AskUserQuestion` hooks
-silent on such a menu. `bypass-route-signal` meters the prose lane on `Stop`
-and leaves this lane open by design; `settings-path-advisory` covers the
-follow-up write to a settings file.
+silent on such a menu, and #1009 decided on prose containment with no hook for
+both the prose and menu lanes, because a relayed `Bypass (if truly needed):`
+line and an originated route are textually indistinguishable in prose. This
+hook reopens that decision for the menu lane only: an `AskUserQuestion` option
+is a structured field, and the relay is separated by collecting the `VAR=1`
+tokens the blocking message printed (see *Relay carve-out*). A 30-day scan of
+943 transcripts found 7 matches in 5 sessions, 6 of them true, against the
+single occurrence #1338 had to price. The prose lane is unchanged:
+`bypass-route-signal` still meters it on `Stop`, and `settings-path-advisory`
+covers the follow-up write to a settings file.
 
 ### When it fires
 
