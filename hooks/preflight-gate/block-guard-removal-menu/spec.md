@@ -36,7 +36,7 @@ Both conditions must hold:
 
 | # | Condition | Source |
 | --- | --- | --- |
-| a | An option label **or description** carries guard-removal vocabulary | `tool_input.questions[].options[]` via `_lib/ask_option_text.collect_option_texts` |
+| a | A question text, option label **or description** carries guard-removal vocabulary (`Disable the protection hook?` with `Yes`/`No` options fires) | `tool_input.questions[].question` + `tool_input.questions[].options[]` via `_lib/ask_option_text.collect_option_texts` |
 | b | The current turn (events since the last real user message) holds a denial with `toolDenialKind: "permission-rule"` and `is_error: true` on its `tool_result` | `_transcript.load_current_turn` + `HOOK_BLOCK_DENIAL_KIND` |
 
 Condition (b) keeps unrelated menus quiet: a menu about hook configuration in a

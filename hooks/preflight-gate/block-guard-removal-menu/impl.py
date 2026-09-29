@@ -14,7 +14,8 @@ the user as a choice. `bypass-route-signal` meters the prose lane on Stop and
 leaves this lane open by design.
 
 Fires only when BOTH hold:
-  (a) an option label or description carries guard-removal vocabulary;
+  (a) a question text, option label or description carries guard-removal
+      vocabulary;
   (b) the current turn (since the last real user message) holds a PreToolUse
       hook or permission-rule denial — `toolDenialKind: "permission-rule"`
       with `is_error: true` on the tool_result, the same two structural
@@ -168,7 +169,11 @@ _OFFERED_ENV_RE = re.compile(r"(?<![A-Za-z0-9_])([A-Z][A-Z0-9_]{2,})=1(?![A-Za-z
 
 
 def collect_texts(tool_input: dict) -> list[str]:
-    """Every option label and description across all questions."""
+    """Every question text, option label and description across all questions.
+
+    The question text counts: `Disable the protection hook?` with `Yes`/`No`
+    options proposes the removal in the question, not in the options.
+    """
     texts: list[str] = []
     questions = tool_input.get("questions")
     if not isinstance(questions, list):
@@ -176,6 +181,9 @@ def collect_texts(tool_input: dict) -> list[str]:
     for q in questions:
         if not isinstance(q, dict):
             continue
+        question = q.get("question")
+        if isinstance(question, str):
+            texts.append(question)
         options = q.get("options")
         if isinstance(options, list):
             texts.extend(collect_option_texts(options))

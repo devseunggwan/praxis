@@ -76,15 +76,15 @@ PY
 
 # $1 = transcript_path, $2 = options JSON array of [label, description] pairs
 build_payload() {
-  python3 - "$1" "$2" <<'PY'
+  python3 - "$1" "$2" "${3:-How should we continue?}" <<'PY'
 import json, sys
-transcript, options = sys.argv[1], json.loads(sys.argv[2])
+transcript, options, question = sys.argv[1], json.loads(sys.argv[2]), sys.argv[3]
 print(json.dumps({
     "session_id": "test-session",
     "transcript_path": transcript,
     "tool_name": "AskUserQuestion",
     "tool_input": {"questions": [{
-        "question": "How should we continue?", "header": "Next", "multiSelect": False,
+        "question": question, "header": "Next", "multiSelect": False,
         "options": [{"label": lab, "description": desc} for lab, desc in options],
     }]},
     "cwd": "/tmp",
@@ -151,6 +151,7 @@ run_case "KO negated marker earlier, plain marker later" advisory default "$(bui
 run_case "EN negated phrase earlier, plain phrase later" advisory default "$(build_payload "$T_BLOCKED" '[["Do not disable the hook; instead, disable the gate", ""], ["Stop", ""]]')"
 run_case "EN punctuation ends negation reach (No, disable the hook)" advisory default "$(build_payload "$T_BLOCKED" '[["No, disable the hook", ""], ["Stop", ""]]')"
 run_case "EN add an exception to the hook (guard, not code)" advisory default "$(build_payload "$T_BLOCKED" '[["Add an exception to the hook", ""], ["Stop", ""]]')"
+run_case "removal in the question text, Yes/No options" advisory default "$(build_payload "$T_BLOCKED" '[["Yes", ""], ["No", ""]]' 'Disable the protection hook?')"
 run_case "STRICT=no stays advisory" advisory strict=no "$(build_payload "$T_BLOCKED" "$EN_EXEMPTION")"
 run_case "STRICT=off stays advisory" advisory strict=off "$(build_payload "$T_BLOCKED" "$EN_EXEMPTION")"
 run_case "relay + origination: gate env relayed but another var originated" advisory default "$(build_payload "$T_BLOCKED_ENV" '[["Set OTHER_SKIP=1", ""], ["Stop", ""]]')"
@@ -167,6 +168,7 @@ run_case "prior block, relay of the gate's own GATE_BYPASS=1" pass strict "$(bui
 run_case "prior block, KO negated 훅 우회 없음" pass strict "$(build_payload "$T_BLOCKED" '[["직전 배치와 동일한 전례, 훅 우회 없음", ""], ["중단", ""]]')"
 run_case "prior block, KO negated 가드 우회하지 않고" pass strict "$(build_payload "$T_BLOCKED" '[["가드 우회하지 않고 워크트리로 진행", ""], ["중단", ""]]')"
 run_case "prior block, KO negated 훅 예외를 추가하지 않고 (verb between)" pass strict "$(build_payload "$T_BLOCKED" '[["훅 예외를 추가하지 않고 워크트리 사용", ""], ["중단", ""]]')"
+run_case "prior block, question only reports the block" pass strict "$(build_payload "$T_BLOCKED" "$NORMAL_MENU" 'The hook blocked the write. How should we continue?')"
 run_case "prior block, add an exception handler (code)" pass strict "$(build_payload "$T_BLOCKED" '[["Add an exception handler", ""], ["Refactor", ""]]')"
 run_case "prior block, add an exception to the error handler (code)" pass strict "$(build_payload "$T_BLOCKED" '[["Add an exception to the error handler", ""], ["Refactor", ""]]')"
 run_case "prior block, EN negated do not disable the hook" pass strict "$(build_payload "$T_BLOCKED" '[["Do not disable the hook; fix the path", ""], ["Stop", ""]]')"
