@@ -1,0 +1,2 @@
+- see src/file1.go:81
+- calls `func2(arg.attr)`
