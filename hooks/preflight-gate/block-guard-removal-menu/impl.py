@@ -139,8 +139,10 @@ GUARD_REMOVAL_MARKERS_KO = (
     "허용 목록에 추가",
 )
 _MARKERS_KO_RE = re.compile("|".join(map(re.escape, GUARD_REMOVAL_MARKERS_KO)))
-# `훅 우회 없음` / `가드 우회 없이` state the route is NOT taken.
-_NEGATION_KO_RE = re.compile(r"\S{0,2}\s*(?:없|안\s*함|안\s*하|하지\s*않|않)")
+# `훅 우회 없음` / `가드 우회 없이` / `훅 예외를 추가하지 않고` state the route
+# is NOT taken. One Hangul verb chunk may sit between the particle and the
+# negation (`를 추가하지 않고`).
+_NEGATION_KO_RE = re.compile(r"\S{0,2}\s*(?:[가-힣]{1,4}\s*)?(?:없|안\s*함|안\s*하|하지\s*않|않)")
 # English negation precedes the phrase: `do not disable the hook`,
 # `never bypass this guard`, `without a hook exception`. One word may sit
 # between (`do not simply disable`); punctuation ends the reach, so

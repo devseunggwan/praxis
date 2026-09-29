@@ -78,9 +78,10 @@ removal act so ordinary labels such as `훅 설정 확인` do not match:
 `보호 해제`, `브랜치 보호 우회`, `직접 쓰기 허용`, `직접 커밋 허용`,
 `직접 푸시 허용`, `우회 설정`, `권한 규칙 추가`, `허용 목록에 추가`
 (plus the `을`/`를` and no-space variants listed in `impl.py`). A marker followed
-within two characters by a negation (`없`, `안 함`, `안 하`, `하지 않`, `않`) is
-skipped, so `훅 우회 없음` and `가드 우회하지 않고` pass; this was the one false
-positive a 30-day transcript scan found.
+within two characters, plus at most one Hangul verb chunk, by a negation (`없`,
+`안 함`, `안 하`, `하지 않`, `않`) is skipped, so `훅 우회 없음`,
+`가드 우회하지 않고` and `훅 예외를 추가하지 않고` pass; the first two were the
+false positives a 30-day transcript scan found. `가드 우회하고 진행` still fires.
 
 An English match preceded by a negation (`not`, `n't`, `never`, `no`,
 `without`, with at most one word between and an optional article) is skipped,
