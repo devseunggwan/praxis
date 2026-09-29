@@ -24,10 +24,13 @@ scope for this tool.
       cost USD), oracle passes, signal-hook fires, blocking Stop-gate fires.
       A planned job that left no meta.json counts as a failed run.
 
-Isolation: each run gets its own PRAXIS_HOME / PRAXIS_STATE_DIR /
-PRAXIS_FIRE_TELEMETRY_FILE, so installed praxis hooks still fire (the user's
-settings are loaded as usual) but never write the operator's ledgers. HOME is
-left alone because `claude` needs its login there.
+Isolation: every run passes `--setting-sources project`, so the operator's
+user settings, installed plugins (their hooks and skills) and user CLAUDE.md
+are not loaded; the suite's `--settings` file is the only hook source, and an
+arm with `hooks: false` runs with none. Each run also gets its own
+PRAXIS_HOME / PRAXIS_STATE_DIR / PRAXIS_FIRE_TELEMETRY_FILE, so the suite's
+hooks never write the operator's ledgers. HOME is left alone because `claude`
+needs its login there.
 
 Arm fields: `env` (value "@now" becomes the job's start epoch) and `hooks`
 (false = run without the suite's hook registration).
@@ -50,6 +53,9 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 ALLOWED_TOOLS = ["Read", "Grep", "Glob", "Bash"]
 NAME_RE = re.compile(r"[A-Za-z0-9_]+")
+# User settings would load the operator's plugins into every arm, so a "hooks
+# off" arm would still run any hook the operator has installed.
+SETTING_SOURCES = "project"
 
 
 def load_suite(suite_dir: Path) -> dict:
@@ -121,6 +127,7 @@ def run_job(results: Path, suite: dict, model: str, timeout: int, job: tuple[str
                PRAXIS_STATE_DIR=str(out / "praxis" / "state"),
                PRAXIS_FIRE_TELEMETRY_FILE=str(out / "fires.jsonl"))
     cmd = ["claude", "-p", suite["tasks"][task]["prompt"], "--model", model,
+           "--setting-sources", SETTING_SOURCES,
            "--allowedTools", *ALLOWED_TOOLS, "--output-format", "stream-json", "--verbose"]
     if suite["arms"][arm].get("hooks", True):
         cmd[3:3] = ["--settings", str(results / "settings.json")]
@@ -159,7 +166,8 @@ def cmd_run(args) -> int:
     jobs = job_order(suite, args.reps, args.seed)
     (results / "run.json").write_text(json.dumps(
         {"head": sha, "model": args.model, "reps": args.reps, "seed": args.seed,
-         "parallel": args.parallel, "planned": [job_id(j) for j in jobs]}))
+         "parallel": args.parallel, "setting_sources": SETTING_SOURCES,
+         "planned": [job_id(j) for j in jobs]}))
     print(f"head {sha[:8]}, {len(jobs)} jobs, {args.parallel} at a time", flush=True)
     with concurrent.futures.ThreadPoolExecutor(args.parallel) as pool:
         futures = [pool.submit(run_job, results, suite, args.model, args.timeout, j) for j in jobs]

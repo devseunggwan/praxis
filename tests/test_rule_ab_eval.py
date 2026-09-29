@@ -23,7 +23,9 @@ FAKE_CLAUDE = r'''#!/usr/bin/env python3
 import json, os, sys, time
 time.sleep(float(os.environ.get("FAKE_SLEEP", "0")))
 args = sys.argv[1:]
-answer = "hello budget=%s settings=%s" % (os.environ.get("BUDGET", "unset"), "--settings" in args)
+sources = args[args.index("--setting-sources") + 1] if "--setting-sources" in args else "unset"
+answer = "hello budget=%s settings=%s sources=%s" % (
+    os.environ.get("BUDGET", "unset"), "--settings" in args, sources)
 with open(os.environ["PRAXIS_FIRE_TELEMETRY_FILE"], "a") as f:
     f.write(json.dumps({"hook": "sig", "role": "advisory-nudge", "decision": "advise"}) + "\n")
 for rec in (
@@ -112,7 +114,10 @@ def test_run_then_score_applies_arm_env_hooks_and_isolation(tmp_path):
     on, off = answers["graded-on-1"], answers["graded-off-1"]
     assert on.startswith("hello budget=") and on.split("=")[1].split()[0].isdigit()
     assert "settings=True" in on
-    assert off == "hello budget=unset settings=False"
+    assert off == "hello budget=unset settings=False sources=project"
+    # both arms, or the operator's plugins would still run in the "off" arm
+    assert all(a.endswith(" sources=project") for a in answers.values())
+    assert json.loads((results / "run.json").read_text())["setting_sources"] == "project"
 
     score = cli("score", str(results))
     assert score.returncode == 0, score.stderr
