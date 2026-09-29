@@ -86,7 +86,8 @@ false positives a 30-day transcript scan found. `가드 우회하고 진행` sti
 
 An English match preceded by a negation (`not`, `n't`, `never`, `no`,
 `without`, with at most one word between and an optional article) is skipped,
-so `Do not disable the hook` and `Proceed without a hook exception` pass. Each
+so `Do not disable the hook`, `Proceed without a hook exception` and
+`Do not set OTHER_SKIP=1` pass; env switches get the same check. Each
 match is checked on its own, so a later non-negated phrase in the same option
 still fires. Punctuation ends the reach: `No, disable the hook` fires.
 
@@ -159,7 +160,8 @@ originated env switch beside a relayed one; negatives for no block, a
 successful tool result, a user rejection, a block in an earlier turn, a normal
 satisfying-path menu (English and Korean), the gate's own relayed `VAR=1`,
 `add an exception handler`, `add an exception to the error handler`, negated
-English phrases (`do not`, `don't`, `without`), `skip the slow tests`, a
+English phrases (`do not`, `don't`, `without`) and a negated env switch,
+`skip the slow tests`, a
 non-AskUserQuestion tool, a missing transcript, and a malformed payload; plus
 a negated phrase beside a plain one, punctuation ending the negation reach,
 and `STRICT=no` / `STRICT=off` staying advisory.

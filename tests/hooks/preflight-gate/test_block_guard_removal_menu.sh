@@ -155,6 +155,7 @@ run_case "removal in the question text, Yes/No options" advisory default "$(buil
 run_case "switching this gate's own strict mode off" block strict "$(build_payload "$T_BLOCKED" '[["Set PRAXIS_GUARD_REMOVAL_MENU_STRICT=0 and retry", ""], ["Stop", ""]]')"
 run_case "STRICT=no stays advisory" advisory strict=no "$(build_payload "$T_BLOCKED" "$EN_EXEMPTION")"
 run_case "STRICT=off stays advisory" advisory strict=off "$(build_payload "$T_BLOCKED" "$EN_EXEMPTION")"
+run_case "EN negated env assignment earlier, plain one later" advisory default "$(build_payload "$T_BLOCKED" '[["Do not set OTHER_SKIP=1; set NEXT_BYPASS=1", ""], ["Stop", ""]]')"
 run_case "relay + origination: gate env relayed but another var originated" advisory default "$(build_payload "$T_BLOCKED_ENV" '[["Set OTHER_SKIP=1", ""], ["Stop", ""]]')"
 
 echo "--- negatives ---"
@@ -175,6 +176,7 @@ run_case "prior block, add an exception to the error handler (code)" pass strict
 run_case "prior block, EN negated do not disable the hook" pass strict "$(build_payload "$T_BLOCKED" '[["Do not disable the hook; fix the path", ""], ["Stop", ""]]')"
 run_case "prior block, EN negated dont bypass this guard" pass strict "$(build_payload "$T_BLOCKED" "[[\"Don't bypass this guard, use the worktree\", \"\"], [\"Stop\", \"\"]]")"
 run_case "prior block, EN negated without a hook exception" pass strict "$(build_payload "$T_BLOCKED" '[["Proceed without a hook exception", ""], ["Stop", ""]]')"
+run_case "prior block, EN negated env assignment" pass strict "$(build_payload "$T_BLOCKED" '[["Do not set OTHER_SKIP=1; use the worktree", ""], ["Stop", ""]]')"
 run_case "prior block, skip tests (no guard noun)" pass strict "$(build_payload "$T_BLOCKED" '[["Skip the slow tests", ""], ["Run all", ""]]')"
 run_case "non-AskUserQuestion tool" pass strict '{"tool_name":"Bash","tool_input":{"command":"ls"}}'
 run_case "missing transcript" pass strict "$(build_payload "$WORK/nope.jsonl" "$EN_EXEMPTION")"

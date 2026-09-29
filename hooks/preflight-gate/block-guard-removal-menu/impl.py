@@ -208,7 +208,9 @@ def find_removal_phrase(texts: list[str], relayed_envs: set[str]) -> str | None:
                 if not _NEGATION_EN_BEFORE_RE.search(text[: m.start()]):
                     return m.group(0)
         for m in _ENV_ASSIGN_RE.finditer(text):
-            if m.group(1).upper() not in relayed_envs:
+            if m.group(1).upper() in relayed_envs:
+                continue
+            if not _NEGATION_EN_BEFORE_RE.search(text[: m.start()]):
                 return m.group(0)
         own = _OWN_STRICT_OFF_RE.search(text)
         if own:
