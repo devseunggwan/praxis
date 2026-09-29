@@ -7,7 +7,8 @@ PreToolUse(Bash) advisory
 that fires when an external-write body (PR/issue bodies and comments) cites
 **source facts** — `file:line` references,
 exact call syntax, or test-semantics claims — with **no read-probe** found in
-the recent transcript or in the body itself.
+the session's transcript (the whole session, not a tail window) or in the
+body itself.
 
 It enforces the *Information Accuracy* rule's "checkmark = citation" clause
 ([`ETHOS.md` → Rules praxis carries](../../../ETHOS.md#rules-praxis-carries)) at the external-write surface: a source-fact
