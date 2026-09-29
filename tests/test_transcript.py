@@ -653,6 +653,9 @@ _CONSUMERS = {
     # Only this turn's blocks matter, so the turn is read, not the session (#1508).
     HOOKS / "completion-verify" / "relayed-blocked-command-gate" / "impl.py":
         ["load_stop_turn", "resolve_stop_transcript", "stop_last_assistant_text"],
+    # A block earlier in this turn arms it; an older one does not.
+    HOOKS / "preflight-gate" / "block-guard-removal-menu" / "impl.py":
+        ["load_current_turn"],
 }
 
 # Constants are values, not bindings, so the function map above cannot pin them:
@@ -677,6 +680,8 @@ _CONSTANT_CONSUMERS = {
         ["AUTOMODE_BLOCK_DENIAL_KIND", "DENIAL_KINDS", "HOOK_BLOCK_DENIAL_KIND",
          "REJECTION_DENIAL_KIND"],
     HOOKS / "preflight-gate" / "cross-tool-reroute-gate" / "impl.py":
+        ["HOOK_BLOCK_DENIAL_KIND"],
+    HOOKS / "preflight-gate" / "block-guard-removal-menu" / "impl.py":
         ["HOOK_BLOCK_DENIAL_KIND"],
     HOOKS / "preflight-gate" / "rejected-call-probe-gate" / "impl.py":
         ["REJECTION_DENIAL_KIND", "REJECTION_PHRASE"],

@@ -1314,6 +1314,17 @@
       }
     },
     {
+      "name": "block-guard-removal-menu",
+      "role": "preflight-gate",
+      "event": "PreToolUse",
+      "matcher": "AskUserQuestion",
+      "timeout": 5,
+      "review_by": "2026-12-28",
+      "mode": {
+        "strict_env": "PRAXIS_GUARD_REMOVAL_MENU_STRICT"
+      }
+    },
+    {
       "name": "approval-premise-reread-gate",
       "role": "preflight-gate",
       "event": "PreToolUse",

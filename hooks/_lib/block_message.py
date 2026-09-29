@@ -181,7 +181,11 @@ Conditional — fire only in the stated situation:
   No manufactured action menu               ← block-manufactured-action-menu
     Do not re-ask a question the user's own prior message already answered.
     Advisory by default; blocks under PRAXIS_BLOCK_MANUFACTURED_MENU_STRICT=1.
-  Live PR state re-fetched                  ← pr-state-refetch-gate
+  No guard-removal option after a block     ← block-guard-removal-menu
+    A hook or permission rule blocked a call this turn: offer the path that
+    satisfies it, not an exception / disable / bypass of the guard.
+    Advisory by default; blocks under PRAXIS_GUARD_REMOVAL_MENU_STRICT=1.
+  Live PR state re-fetched                 ← pr-state-refetch-gate
     A merge-intent question naming a PR number: warns when that PR is already
     MERGED/CLOSED, blocks under PRAXIS_PR_STATE_REFETCH_STRICT=1.
   Merge menu offers a review option         ← merge-menu-review-options-advisory

@@ -115,6 +115,7 @@ in [`../SECURITY.md`](../SECURITY.md).
 | `PRAXIS_PR_EVIDENCE_STRICT` | `block-pr-without-caller-evidence`, `block-pr-without-precommit-evidence` | Shared by both PR-marker gates (#1186); truthy = deny, unset/empty/`0` = advisory |
 | `PRAXIS_ASK_END_STRICT` | `block-ask-end-option` | |
 | `PRAXIS_BLOCK_MANUFACTURED_MENU_STRICT` | `block-manufactured-action-menu` | |
+| `PRAXIS_GUARD_REMOVAL_MENU_STRICT` | `block-guard-removal-menu` | |
 | `PRAXIS_MENU_MUTATION_TIER_STRICT` | `menu-mutation-tier-advisory` | Exact value `1` only — `true` / `yes` / `no` / `0` stay advisory |
 | `PRAXIS_MERGE_MENU_REVIEW_STRICT` | `merge-menu-review-options-advisory` | Exact value `1` after stripping — `true` / `yes` / `0` stay advisory |
 | `PRAXIS_PR_STATE_REFETCH_STRICT` | `pr-state-refetch-gate` | |
