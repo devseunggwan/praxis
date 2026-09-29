@@ -136,6 +136,8 @@ GUARD_REMOVAL_MARKERS_KO = (
     "허용 목록에 추가",
 )
 _MARKERS_KO_RE = re.compile("|".join(map(re.escape, GUARD_REMOVAL_MARKERS_KO)))
+# `훅 우회 없음` / `가드 우회 없이` state the route is NOT taken.
+_NEGATION_KO_RE = re.compile(r"\S{0,2}\s*(?:없|안\s*함|안\s*하|하지\s*않|않)")
 
 # `SOME_BYPASS=1` / `SKIP_X=true`: an env assignment proposing to switch a
 # guard off. Group 1 is the variable name, compared against the relay set.
@@ -170,9 +172,9 @@ def collect_texts(tool_input: dict) -> list[str]:
 def find_removal_phrase(texts: list[str], relayed_envs: set[str]) -> str | None:
     """The first guard-removal phrase found in the option texts, or None."""
     for text in texts:
-        ko = _MARKERS_KO_RE.search(text)
-        if ko:
-            return ko.group(0)
+        for ko in _MARKERS_KO_RE.finditer(text):
+            if not _NEGATION_KO_RE.match(text, ko.end()):
+                return ko.group(0)
         for pattern in GUARD_REMOVAL_PATTERNS_EN:
             m = pattern.search(text)
             if m:

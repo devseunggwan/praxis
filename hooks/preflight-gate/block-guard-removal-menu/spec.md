@@ -70,7 +70,10 @@ removal act so ordinary labels such as `훅 설정 확인` do not match:
 `게이트 비활성`, `게이트 예외`, `예외 추가`, `예외 설정`, `예외 등록`,
 `보호 해제`, `브랜치 보호 우회`, `직접 쓰기 허용`, `직접 커밋 허용`,
 `직접 푸시 허용`, `우회 설정`, `권한 규칙 추가`, `허용 목록에 추가`
-(plus the `을`/`를` and no-space variants listed in `impl.py`).
+(plus the `을`/`를` and no-space variants listed in `impl.py`). A marker followed
+within two characters by a negation (`없`, `안 함`, `안 하`, `하지 않`, `않`) is
+skipped, so `훅 우회 없음` and `가드 우회하지 않고` pass; this was the one false
+positive a 30-day transcript scan found.
 
 A bare guard noun (`hook`) or a bare verb (`skip the slow tests`) does not
 match: the shape is the conjunction.
