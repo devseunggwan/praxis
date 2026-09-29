@@ -614,7 +614,6 @@ _CONSUMERS = {
     # Match only against the last N lines, so they read the tail instead of
     # `readlines()` over the whole transcript (#1240).
     HOOKS / "advisory-nudge" / "caller-probe-gate" / "impl.py": ["tail_lines"],
-    HOOKS / "advisory-nudge" / "source-citation-probe-gate" / "impl.py": ["tail_lines"],
     HOOKS / "advisory-nudge" / "pre-output-falsification-gate" / "impl.py": ["tail_lines"],
     HOOKS / "advisory-nudge" / "external-write-falsify-check" / "impl.py": ["tail_lines"],
     # Needs the whole session (a dispatch or enumeration anywhere in it clears
@@ -623,6 +622,10 @@ _CONSUMERS = {
     # from a per-trigger cursor on the next commit (#1278).
     HOOKS / "advisory-nudge" / "unenforced-step-advisory" / "impl.py":
         ["scan_transcript_resumable", "scan_cursor_path", "TranscriptReadError"],
+    # A body cites reads made long before the write, so it streams the whole
+    # session and stops once every citation has cleared (#1541).
+    HOOKS / "advisory-nudge" / "source-citation-probe-gate" / "impl.py":
+        ["iter_transcript"],
     # Also correlates each Bash tool_use with its result, so it binds the
     # refusal sentence the never-ran markers are keyed on (#1117).
     HOOKS / "advisory-nudge" / "composed-command-gate" / "impl.py":
@@ -669,8 +672,6 @@ _CONSTANT_CONSUMERS = {
     HOOKS / "advisory-nudge" / "momentum-rule-retrieval-gate" / "impl.py":
         ["TRANSCRIPT_SCAN_LINES"],
     HOOKS / "advisory-nudge" / "cited-rule-gate" / "impl.py":
-        ["TRANSCRIPT_SCAN_LINES"],
-    HOOKS / "advisory-nudge" / "source-citation-probe-gate" / "impl.py":
         ["TRANSCRIPT_SCAN_LINES"],
     HOOKS / "advisory-nudge" / "composed-command-gate" / "impl.py":
         ["TRANSCRIPT_SCAN_LINES", "REJECTION_PHRASE"],

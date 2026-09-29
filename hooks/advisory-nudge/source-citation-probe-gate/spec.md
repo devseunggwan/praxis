@@ -64,21 +64,39 @@ convention, issue #907):
   `<observed>`, `<...>`, `<output>`) or with empty evidence after the
   arrow (`→` / `->`) does NOT clear.
 
-**Arm B (transcript, last 400 JSONL lines):**
+**Arm B (transcript, whole session):**
 
 - T1 clears when a `Read` tool_use file_path basename equals the cited
-  basename, or a read-tool Bash command (`grep` / `rg` / `sed` / `cat` /
-  `head` / `tail` / `awk` / `nl`) contains it.
+  basename, a read-tool Bash command (`grep` / `rg` / `sed` / `cat` /
+  `head` / `tail` / `awk` / `nl`) contains it, or that command's output
+  names `<basename>:<line>` or `<basename>-<line>` for the cited line — the
+  output arm covers a directory grep (`grep -rn foo hooks/`) whose command
+  never names the file.
 - T2 clears when the called function name appears in any transcript Bash
-  command or Read file_path.
+  command, a Read file_path, or a read-tool command's output.
 - T3 clears on a `pytest` run or a `test_*` file basename in a transcript
   Bash command / Read.
+
+The scan reads the whole session through `_lib/_transcript.iter_transcript`,
+pre-filtered to lines carrying `"tool_use"` or `"tool_result"`, and stops as
+soon as every citation has cleared. Until #1541 it read the last 400 JSONL
+lines only; a PR body is routinely written long after the reads it rests on,
+and in the 16 fires #1538 sampled that tail missed the read in 13. In the
+other 3 the cited file appeared in no read command line or Read path at all,
+only in a read command's output. The replayed
+fires are pinned, scrubbed to aliases, under
+`tests/fixtures/source-citation-probe-gate/replay-1541/`.
+
+Cost: the scan runs only for a `gh` external write whose body carries a
+citation. On the largest local transcript (133 MB) one full pass took about
+0.3 s against the hook's 5 s timeout; the slowest of the 16 replayed calls
+took 0.38 s end to end.
 
 ## Response
 
 ```text
 REMINDER (External-Surface Write / Source-Citation Probe): body cites
-source facts ({up to 3 samples}) with no read-probe found in the recent
+source facts ({up to 3 samples}) with no read-probe found in this session's
 transcript.
 file:line, exact call syntax, and test-semantics claims are recall-prone —
 re-read the cited site (Read / grep -n) before publishing, then cite inline
@@ -118,6 +136,14 @@ block). Set `PRAXIS_SOURCE_CITATION_STRICT=1` to convert into a hard block
   `internal.corp:8080` has extension `corp` (not in the denylist) and a
   digit run after the colon — it matches T1. The denylist covers the common
   public TLDs only.
+- **A read of the file clears every line of it.** T1 clears on the file
+  having been read, not on the cited line having been seen:
+  `sed -n '50,60p' dag.py` clears `dag.py:14`. Only the output arm checks
+  the line number.
+- **A compound command's output is read as a whole.** When a Bash call
+  pairs a read tool with `echo` (`grep -n x a.py; echo a.py:9`), the whole
+  output counts as read-tool output, so the echoed `a.py:9` clears. A
+  command that is only `echo` does not clear.
 - **T2 is the weakest detector.** Call syntax without a `.` / `[` in the
   argument list (`foo(x)`) is deliberately not matched, and a matching
   function name anywhere in any transcript Bash command clears it — recall

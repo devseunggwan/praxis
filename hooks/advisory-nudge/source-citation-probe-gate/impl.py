@@ -28,11 +28,12 @@ A citation is CLEARED (no advisory) when a probe basis is present:
       Anti-bypass ported from output-block-falsify-advisory (PR #796):
       unfilled scaffold placeholders (`<command>` / `<observed>` / `<...>`
       / `<output>`) or empty evidence after the arrow do NOT count.
-  Arm B (transcript, last 400 JSONL lines): a Read tool_use whose
-      file_path basename matches the cited basename, or a read-tool Bash
-      command (grep/rg/sed/cat/head/tail/awk/nl) containing it. T2 clears
-      on the called function name appearing in a transcript Bash command
-      or Read path; T3 clears on a pytest run / test-file basename.
+  Arm B (transcript, whole session): a Read tool_use whose file_path
+      basename matches the cited basename, a read-tool Bash command
+      (grep/rg/sed/cat/head/tail/awk/nl) containing it, or that command's
+      output naming `<basename>:<line>`. T2 clears on the called function
+      name appearing in a Bash command, a Read path or a read-tool
+      command's output; T3 clears on a pytest run / test-file basename.
 
 Exits 0 by default — advisory, not block. Set
 `PRAXIS_SOURCE_CITATION_STRICT=1` (literal "1" only) to convert into a
@@ -44,7 +45,6 @@ with external-write-falsify-check via `_lib/_external_write_body.py`
 """
 from __future__ import annotations
 
-import json
 import os
 import re
 import sys
@@ -57,7 +57,7 @@ from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
     safe_tokenize,
 )
 from _payload import read_payload  # type: ignore[import-not-found]  # noqa: E402
-from _transcript import TRANSCRIPT_SCAN_LINES, tail_lines  # type: ignore[import-not-found]  # noqa: E402
+from _transcript import iter_transcript  # type: ignore[import-not-found]  # noqa: E402
 
 
 # Shared surface detection + body extraction now lives in
@@ -173,60 +173,113 @@ _READ_TOOL_RE = re.compile(r"\b(?:grep|rg|sed|cat|head|tail|awk|nl)\b")
 _TEST_PROBE_RE = re.compile(r"\bpytest\b|\btest_\w+\.\w+")
 
 
-def _recent_probes(transcript_path: str) -> tuple[list[str], list[str]]:
-    """Return (bash_commands, read_file_paths) from the last N JSONL lines.
+# Only lines carrying a tool call or a tool result can clear a citation, so
+# every other line is rejected before `json.loads` (see `iter_transcript`).
+_PROBE_NEEDLES = ('"tool_use"', '"tool_result"')
 
-    Extends external-write-falsify-check's `_recent_bash_commands` to also
-    collect Read tool_use file_paths — a Read IS a read-probe for Arm B.
+# The line number a T1 sample cites: `impl.py:42` / `impl.py#L42`.
+_CITED_LINE_RE = re.compile(r"(?::|#L)(\d{1,6})$")
+
+
+def _output_line_re(sample: str, basename: str) -> re.Pattern[str] | None:
+    """How a read command's output names the cited line: `grep -n` prints
+    `<path>/<basename>:<line>:`, and a context line `<basename>-<line>-`."""
+    m = _CITED_LINE_RE.search(sample)
+    if not m:
+        return None
+    return re.compile(rf"(?<![\w.-]){re.escape(basename)}[:-]{m.group(1)}\b")
+
+
+def _result_text(content: object) -> str:
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "\n".join(
+            b["text"] for b in content if isinstance(b, dict) and isinstance(b.get("text"), str)
+        )
+    return ""
+
+
+def _clears_by_command(tier: str, clear_key: str, cmd: str) -> bool:
+    if tier == "file:line":
+        return bool(_READ_TOOL_RE.search(cmd)) and clear_key in cmd
+    if tier == "call-syntax":
+        return clear_key in cmd
+    return bool(_TEST_PROBE_RE.search(cmd))
+
+
+def _clears_by_read_path(tier: str, clear_key: str, path: str) -> bool:
+    basename = path.rsplit("/", 1)[-1]
+    if tier == "file:line":
+        return basename == clear_key
+    if tier == "call-syntax":
+        return clear_key in path
+    return basename.startswith("test_")
+
+
+def _clears_by_output(tier: str, clear_key: str, line_re: re.Pattern[str] | None, text: str) -> bool:
+    if tier == "file:line":
+        return line_re is not None and bool(line_re.search(text))
+    if tier == "call-syntax":
+        return clear_key in text
+    return False
+
+
+def _probed_citations(transcript_path: str, citations: list[tuple[str, str, str]]) -> set[int]:
+    """Indices of `citations` that a read-probe anywhere in the session covers.
+
+    The whole session is scanned, not a tail window: a body is routinely
+    written long after the investigation that read what it cites, and a
+    400-line tail missed that read in 13 of 16 sampled fires (issue #1541).
+
+    A read command's output counts too: `grep -rn <symbol> <dir>` reads the
+    cited line although the file name appears only in what it printed. Only
+    the result of a read-tool call is consulted, paired to it by id, so the
+    output of an unrelated command clears nothing.
     """
     if not transcript_path or not os.path.isfile(transcript_path):
-        return [], []
-    cmds: list[str] = []
-    read_paths: list[str] = []
-    for line in tail_lines(transcript_path, TRANSCRIPT_SCAN_LINES):
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            entry = json.loads(line)
-        except (json.JSONDecodeError, ValueError):
-            continue
-        if not isinstance(entry, dict):
-            continue
+        return set()
+    pending = {
+        i: (tier, key, _output_line_re(sample, key) if tier == "file:line" else None)
+        for i, (tier, sample, key) in enumerate(citations)
+    }
+    read_call_ids: set[str] = set()
+
+    for entry in iter_transcript(transcript_path, _PROBE_NEEDLES):
         msg = entry.get("message") or {}
-        if not isinstance(msg, dict) or msg.get("role") != "assistant":
+        if not isinstance(msg, dict):
             continue
         for block in (msg.get("content") or []):
-            if not isinstance(block, dict) or block.get("type") != "tool_use":
+            if not isinstance(block, dict):
                 continue
-            inp = block.get("input") or {}
-            if not isinstance(inp, dict):
-                continue
-            if block.get("name") == "Bash":
-                cmd = inp.get("command", "")
-                if isinstance(cmd, str) and cmd.strip():
-                    cmds.append(cmd)
-            elif block.get("name") == "Read":
-                fp = inp.get("file_path", "")
-                if isinstance(fp, str) and fp.strip():
-                    read_paths.append(fp)
-    return cmds, read_paths
-
-
-def _is_probed(tier: str, clear_key: str, cmds: list[str], read_paths: list[str]) -> bool:
-    """True if the transcript contains a read-probe covering this citation."""
-    if tier == "file:line":
-        basename = clear_key
-        if any(fp.rsplit("/", 1)[-1] == basename for fp in read_paths):
-            return True
-        return any(_READ_TOOL_RE.search(cmd) and basename in cmd for cmd in cmds)
-    if tier == "call-syntax":
-        name = clear_key
-        return any(name in cmd for cmd in cmds) or any(name in fp for fp in read_paths)
-    # test-semantics: clears on any pytest run / test-file probe.
-    if any(_TEST_PROBE_RE.search(cmd) for cmd in cmds):
-        return True
-    return any(fp.rsplit("/", 1)[-1].startswith("test_") for fp in read_paths)
+            if block.get("type") == "tool_use" and msg.get("role") == "assistant":
+                inp = block.get("input") or {}
+                if not isinstance(inp, dict):
+                    continue
+                if block.get("name") == "Bash":
+                    cmd = inp.get("command", "")
+                    if not isinstance(cmd, str) or not cmd.strip():
+                        continue
+                    if _READ_TOOL_RE.search(cmd) and isinstance(block.get("id"), str):
+                        read_call_ids.add(block["id"])
+                    for i, (tier, key, _) in list(pending.items()):
+                        if _clears_by_command(tier, key, cmd):
+                            del pending[i]
+                elif block.get("name") == "Read":
+                    fp = inp.get("file_path", "")
+                    if not isinstance(fp, str) or not fp.strip():
+                        continue
+                    for i, (tier, key, _) in list(pending.items()):
+                        if _clears_by_read_path(tier, key, fp):
+                            del pending[i]
+            elif block.get("type") == "tool_result" and block.get("tool_use_id") in read_call_ids:
+                text = _result_text(block.get("content"))
+                for i, (tier, key, line_re) in list(pending.items()):
+                    if text and _clears_by_output(tier, key, line_re, text):
+                        del pending[i]
+        if not pending:
+            break
+    return set(range(len(citations))) - set(pending)
 
 
 # ---------------------------------------------------------------------------
@@ -235,7 +288,7 @@ def _is_probed(tier: str, clear_key: str, cmds: list[str], read_paths: list[str]
 
 ADVISORY_MESSAGE = (
     "REMINDER (External-Surface Write / Source-Citation Probe): body cites "
-    "source facts ({samples}) with no read-probe found in the recent "
+    "source facts ({samples}) with no read-probe found in this session's "
     "transcript.\n"
     "file:line, exact call syntax, and test-semantics claims are "
     "recall-prone — re-read the cited site (Read / grep -n) before "
@@ -295,11 +348,11 @@ def main() -> int:
         return 0
 
     # Arm B: per-citation transcript probe scan.
-    cmds, read_paths = _recent_probes(transcript_path)
+    probed = _probed_citations(transcript_path, citations)
     unprobed = [
         (tier, sample)
-        for tier, sample, clear_key in citations
-        if not _is_probed(tier, clear_key, cmds, read_paths)
+        for i, (tier, sample, _) in enumerate(citations)
+        if i not in probed
     ]
     if not unprobed:
         return 0

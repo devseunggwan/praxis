@@ -1,0 +1,2 @@
+- calls `func1(arg.attr)`
+- see src/file2.py:25

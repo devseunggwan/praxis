@@ -1,0 +1,1 @@
+- calls `func1(arg.attr)`

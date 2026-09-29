@@ -245,6 +245,53 @@ run_case "T3 cleared by transcript pytest run (silent)" \
 
 rm -f "$TRANSCRIPT"
 
+# --- Whole-session scan and read-tool output (#1541) ---------------------------
+
+# A read followed by more than 400 unrelated lines: the old tail window lost it.
+FAR_TRANSCRIPT=$(mktemp /tmp/scpg-far-XXXXXX.jsonl)
+echo '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"Read","input":{"file_path":"/repo/hooks/foo/impl.py"}}]}}' > "$FAR_TRANSCRIPT"
+for _ in $(seq 500); do echo '{}' >> "$FAR_TRANSCRIPT"; done
+run_case "T1 cleared by a Read more than 400 lines back (silent)" \
+  "silent" "advisory" \
+  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"gh pr comment 5 --body \\\"bug at impl.py:42\\\"\"},\"transcript_path\":\"$FAR_TRANSCRIPT\"}"
+run_case "T1 NOT cleared — cited file never read in the whole session (warn)" \
+  "warn" "advisory" \
+  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"gh pr comment 5 --body \\\"bug at unrelated.py:42\\\"\"},\"transcript_path\":\"$FAR_TRANSCRIPT\"}"
+rm -f "$FAR_TRANSCRIPT"
+
+OUT_TRANSCRIPT=$(mktemp /tmp/scpg-out-XXXXXX.jsonl)
+cat > "$OUT_TRANSCRIPT" <<'EOF'
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"g1","name":"Bash","input":{"command":"grep -rn resolve hooks/"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"g1","content":"hooks/foo/impl.py:42:def resolve(x):\nhooks/foo/walker.py:43:    resolve(y)"}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e1","name":"Bash","input":{"command":"echo 'see pool.py:120'"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e1","content":"see pool.py:120"}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"s1","name":"Bash","input":{"command":"sed -n '50,60p' dag.py"}}]}}
+EOF
+run_case "T1 cleared by basename:line in a directory grep's output (silent)" \
+  "silent" "advisory" \
+  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"gh pr comment 5 --body \\\"bug at impl.py:42\\\"\"},\"transcript_path\":\"$OUT_TRANSCRIPT\"}"
+run_case "T1 NOT cleared — grep output shows another line of the file (warn)" \
+  "warn" "advisory" \
+  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"gh pr comment 5 --body \\\"bug at walker.py:88\\\"\"},\"transcript_path\":\"$OUT_TRANSCRIPT\"}"
+run_case "T1 NOT cleared — citation only in echo output (warn)" \
+  "warn" "advisory" \
+  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"gh pr comment 5 --body \\\"leak at pool.py:120\\\"\"},\"transcript_path\":\"$OUT_TRANSCRIPT\"}"
+# Known limit (spec): a read command naming the file clears any line of it.
+run_case "T1 cleared by sed of another line range of the file (silent — known limit)" \
+  "silent" "advisory" \
+  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"gh pr comment 5 --body \\\"regression at dag.py:14\\\"\"},\"transcript_path\":\"$OUT_TRANSCRIPT\"}"
+rm -f "$OUT_TRANSCRIPT"
+
+# Replayed fires from #1538, scrubbed to aliases: every one warned on the old
+# 400-line tail although the cited sites had been read earlier in the session.
+REPLAY_DIR="$ROOT_DIR/tests/fixtures/source-citation-probe-gate/replay-1541"
+for case_dir in "$REPLAY_DIR"/*/; do
+  case_name=$(basename "$case_dir")
+  run_case "replay-1541 case $case_name — read earlier in session (silent)" \
+    "silent" "advisory" \
+    "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"gh pr comment 5 --body-file ${case_dir}body.md\"},\"transcript_path\":\"${case_dir}transcript.jsonl\"}"
+done
+
 # --- Strict mode / fail-open ------------------------------------------------------
 
 run_case "strict mode converts warn to block (rc 2)" \

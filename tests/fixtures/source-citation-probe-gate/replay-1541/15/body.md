@@ -1,0 +1,3 @@
+- see src/file1.go:678
+- see src/file2.go:206
+- see src/file3.go:418
