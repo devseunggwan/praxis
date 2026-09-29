@@ -141,6 +141,14 @@ GUARD_REMOVAL_MARKERS_KO = (
 _MARKERS_KO_RE = re.compile("|".join(map(re.escape, GUARD_REMOVAL_MARKERS_KO)))
 # `훅 우회 없음` / `가드 우회 없이` state the route is NOT taken.
 _NEGATION_KO_RE = re.compile(r"\S{0,2}\s*(?:없|안\s*함|안\s*하|하지\s*않|않)")
+# English negation precedes the phrase: `do not disable the hook`,
+# `never bypass this guard`, `without a hook exception`. One word may sit
+# between (`do not simply disable`); punctuation ends the reach, so
+# `No, disable the hook` still fires.
+_NEGATION_EN_BEFORE_RE = re.compile(
+    r"(?:(?<![A-Za-z])(?:not|never|no|without)|n't)(?:\s+[A-Za-z]+)?\s+(?:an?\s+|the\s+)?$",
+    re.IGNORECASE,
+)
 
 # `SOME_BYPASS=1` / `SKIP_X=true`: an env assignment proposing to switch a
 # guard off. Group 1 is the variable name, compared against the relay set.
@@ -179,9 +187,9 @@ def find_removal_phrase(texts: list[str], relayed_envs: set[str]) -> str | None:
             if not _NEGATION_KO_RE.match(text, ko.end()):
                 return ko.group(0)
         for pattern in GUARD_REMOVAL_PATTERNS_EN:
-            m = pattern.search(text)
-            if m:
-                return m.group(0)
+            for m in pattern.finditer(text):
+                if not _NEGATION_EN_BEFORE_RE.search(text[: m.start()]):
+                    return m.group(0)
         for m in _ENV_ASSIGN_RE.finditer(text):
             if m.group(1).upper() not in relayed_envs:
                 return m.group(0)

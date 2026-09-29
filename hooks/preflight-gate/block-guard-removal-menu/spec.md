@@ -82,6 +82,12 @@ within two characters by a negation (`없`, `안 함`, `안 하`, `하지 않`, 
 skipped, so `훅 우회 없음` and `가드 우회하지 않고` pass; this was the one false
 positive a 30-day transcript scan found.
 
+An English match preceded by a negation (`not`, `n't`, `never`, `no`,
+`without`, with at most one word between and an optional article) is skipped,
+so `Do not disable the hook` and `Proceed without a hook exception` pass. Each
+match is checked on its own, so a later non-negated phrase in the same option
+still fires. Punctuation ends the reach: `No, disable the hook` fires.
+
 A bare guard noun (`hook`) or a bare verb (`skip the slow tests`) does not
 match: the shape is the conjunction.
 
@@ -134,6 +140,10 @@ or stop and report the block.
 - A guard-removal option offered in a later turn, after the user replied, is
   not caught: condition (b) is scoped to the current turn on purpose.
 - The vocabulary is a closed list; a paraphrase outside it passes.
+- The English negation reach is one word, so `Do not commit with --no-verify`
+  still fires. Widening it would silence `not sure yet, disable the hook`-style
+  options too, and in an advisory gate a missed option costs more than a
+  spurious note.
 
 ### Tests
 
@@ -146,6 +156,8 @@ strict), each English family, a Korean marker in a description only, an
 originated env switch beside a relayed one; negatives for no block, a
 successful tool result, a user rejection, a block in an earlier turn, a normal
 satisfying-path menu (English and Korean), the gate's own relayed `VAR=1`,
-`add an exception handler`, `add an exception to the error handler`,
-`skip the slow tests`, a non-AskUserQuestion tool, a missing transcript, and a
-malformed payload; plus `STRICT=no` / `STRICT=off` staying advisory.
+`add an exception handler`, `add an exception to the error handler`, negated
+English phrases (`do not`, `don't`, `without`), `skip the slow tests`, a
+non-AskUserQuestion tool, a missing transcript, and a malformed payload; plus
+a negated phrase beside a plain one, punctuation ending the negation reach,
+and `STRICT=no` / `STRICT=off` staying advisory.
