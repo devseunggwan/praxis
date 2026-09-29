@@ -20,7 +20,8 @@ than a catalogue, run `/praxis:using-praxis`.
 | Skill | Trigger keywords | When to use | Example invocation |
 | ------- | ----------------- | ------------- | ------------------- |
 | `using-praxis` | `praxis 처음`, `praxis 사용법`, `어떤 skill 부터`, `praxis intro`, `praxis getting started` | To find the right skill when you're new to praxis or unsure which one fits | `/praxis:using-praxis` |
-| `writing-praxis-skill` | `new praxis skill`, `write praxis skill`, `add praxis skill`, `skill template`, `praxis skill spec`, `스킬 작성`, `새 스킬` | To author a new SKILL.md or get a skill-structure guide | `/praxis:writing-praxis-skill` |
+
+To author a new SKILL.md, read [`skill-authoring.md`](skill-authoring.md).
 
 ## Development
 

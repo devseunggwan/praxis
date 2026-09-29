@@ -173,7 +173,7 @@ the drift only surfaces as "the skill didn't fire".
 equally unmeasured figure `CONTRIBUTING.md` used to carry, so a description
 that clears it routes correctly whichever bound is real. Trim prose,
 never triggers. When a body is too rich to summarize under the budget, move
-detail into the body or `references/` (see `writing-praxis-skill` →
+detail into the body or `references/` (see [`docs/skill-authoring.md`](docs/skill-authoring.md) →
 *Progressive disclosure*) — the description is a routing surface, not
 documentation.
 
