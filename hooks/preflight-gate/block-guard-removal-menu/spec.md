@@ -59,7 +59,7 @@ name, not as the verb `bypass`.
 | --- | --- |
 | removal verb, then guard noun within three words | `disable the hook`, `bypass this guard`, `turn off branch protection`, `skip the pre-commit hook` |
 | guard noun, then exception noun | `hook exception`, `guard bypass`, `gate override`, `hook allowlist` |
-| adding an exception | `add an exception`, `add a hook exception` (not `add an exception handler/class/type/clause`) |
+| adding an exception | `add an exception`, `add a hook exception`, `add an exception to the hook` (not `add an exception handler/class/type/clause`, nor `add an exception to the error handler`) |
 | direct write to a protected branch | `allow direct write`, `allow direct push`, `commit directly to main` |
 | verification skip | `--no-verify` |
 | env switch | `SOME_BYPASS=1`, `SKIP_CHECK=true`, `X_DISABLE=on` (name contains `BYPASS`, `SKIP`, `DISABLE`, `ALLOW`, `OVERRIDE`, `EXEMPT`, `NO_VERIFY`, `OFF` or `ADVISORY`) |
@@ -146,6 +146,6 @@ strict), each English family, a Korean marker in a description only, an
 originated env switch beside a relayed one; negatives for no block, a
 successful tool result, a user rejection, a block in an earlier turn, a normal
 satisfying-path menu (English and Korean), the gate's own relayed `VAR=1`,
-`add an exception handler`, `skip the slow tests`, a non-AskUserQuestion tool,
-a missing transcript, and a malformed payload; plus `STRICT=no` /
-`STRICT=off` staying advisory.
+`add an exception handler`, `add an exception to the error handler`,
+`skip the slow tests`, a non-AskUserQuestion tool, a missing transcript, and a
+malformed payload; plus `STRICT=no` / `STRICT=off` staying advisory.

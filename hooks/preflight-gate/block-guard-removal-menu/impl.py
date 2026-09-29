@@ -83,9 +83,12 @@ GUARD_REMOVAL_PATTERNS_EN = tuple(
         # "hook exception", "guard bypass", "gate override", "hook allowlist"
         rf"{_L}{_GUARD_NOUN_EN}\s+(?:exceptions?|exemptions?|bypass|override|"
         rf"allow-?lists?|white-?lists?|carve-?outs?){_R}",
-        # "add an exception" — but not "add an exception handler"
+        # "add an exception" — but not "add an exception handler" or
+        # "add an exception to the error handler"
         rf"{_L}(?:add|adding|create|register|set\s+up)\s+(?:an?\s+|the\s+)?"
-        rf"(?:{_GUARD_NOUN_EN}\s+)?exception{_R}(?!\s*(?:handler|handling|class|type|clause))",
+        rf"(?:{_GUARD_NOUN_EN}\s+)?exception{_R}"
+        rf"(?!(?:\s+(?:to|for|in|into|on)\s+(?:(?:the|an?|this)\s+)?(?:[A-Za-z_]+\s+){{0,2}})?"
+        rf"\s*(?:handler|handling|class|type|clause)s?{_R})",
         # "allow direct write to main", "allow direct push"
         rf"{_L}allow(?:ing)?\s+direct\s+(?:writes?|edits?|commits?|push(?:es)?){_R}",
         # "write directly to main", "commit directly on master"

@@ -148,6 +148,7 @@ run_case "KO 가드 우회" advisory default "$(build_payload "$T_BLOCKED" '[["�
 run_case "KO 예외 추가 in description only" advisory default "$(build_payload "$T_BLOCKED" '[["설정 변경", "보호 브랜치 예외 추가"], ["중단", ""]]')"
 run_case "KO 가드 우회하고 진행 (verb suffix is not negation)" advisory default "$(build_payload "$T_BLOCKED" '[["이 편집만 가드 우회하고 진행 (권장)", ""], ["중단", ""]]')"
 run_case "KO negated marker earlier, plain marker later" advisory default "$(build_payload "$T_BLOCKED" '[["훅 우회 없음이 아니라 훅 우회 후 진행", ""], ["중단", ""]]')"
+run_case "EN add an exception to the hook (guard, not code)" advisory default "$(build_payload "$T_BLOCKED" '[["Add an exception to the hook", ""], ["Stop", ""]]')"
 run_case "STRICT=no stays advisory" advisory strict=no "$(build_payload "$T_BLOCKED" "$EN_EXEMPTION")"
 run_case "STRICT=off stays advisory" advisory strict=off "$(build_payload "$T_BLOCKED" "$EN_EXEMPTION")"
 run_case "relay + origination: gate env relayed but another var originated" advisory default "$(build_payload "$T_BLOCKED_ENV" '[["Set OTHER_SKIP=1", ""], ["Stop", ""]]')"
@@ -164,6 +165,7 @@ run_case "prior block, relay of the gate's own GATE_BYPASS=1" pass strict "$(bui
 run_case "prior block, KO negated 훅 우회 없음" pass strict "$(build_payload "$T_BLOCKED" '[["직전 배치와 동일한 전례, 훅 우회 없음", ""], ["중단", ""]]')"
 run_case "prior block, KO negated 가드 우회하지 않고" pass strict "$(build_payload "$T_BLOCKED" '[["가드 우회하지 않고 워크트리로 진행", ""], ["중단", ""]]')"
 run_case "prior block, add an exception handler (code)" pass strict "$(build_payload "$T_BLOCKED" '[["Add an exception handler", ""], ["Refactor", ""]]')"
+run_case "prior block, add an exception to the error handler (code)" pass strict "$(build_payload "$T_BLOCKED" '[["Add an exception to the error handler", ""], ["Refactor", ""]]')"
 run_case "prior block, skip tests (no guard noun)" pass strict "$(build_payload "$T_BLOCKED" '[["Skip the slow tests", ""], ["Run all", ""]]')"
 run_case "non-AskUserQuestion tool" pass strict '{"tool_name":"Bash","tool_input":{"command":"ls"}}'
 run_case "missing transcript" pass strict "$(build_payload "$WORK/nope.jsonl" "$EN_EXEMPTION")"
