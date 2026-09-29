@@ -163,9 +163,10 @@ An `unreachable` row is not by itself a defect. #1265 decided to route the
 model channel only to hooks that guard a hard-to-reverse mutation, because
 routing every advisory would add about 1114 messages a day to the model's
 context against 19 for that subset (one day of one operator's fire ledger).
-The remaining `unreachable` hooks are stderr-only by that decision. #1538
-checked the six that inspect external-write bodies and so meet the criterion.
-None of the five with fires reached 70% true positives on a replayed sample,
-and `version-bump-evidence-check` had no fires to sample, so all six stay
-stderr-only until their detectors are fixed
+The remaining `unreachable` hooks are stderr-only on the default exit-0 path
+by that decision; a strict-mode block still reaches the model, as stage 1
+notes. #1538 checked the six that inspect external-write bodies and so meet
+the criterion. None of the five with fires reached 70% true positives on a
+replayed sample, and `version-bump-evidence-check` had no fires to sample, so
+all six stay stderr-only on the default path until their detectors are fixed
 ([precision table](https://github.com/devseunggwan/praxis/issues/1538#issuecomment-5888613453)).
