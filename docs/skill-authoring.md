@@ -143,6 +143,24 @@ Add the others when relevant:
 B" in one step — split. Every step should leave the system in a coherent,
 inspectable state.
 
+**Completion criterion:** every step ends on a `Done when:` line — the
+condition that tells the agent the step is finished. A step whose end the
+agent cannot check invites premature completion: the steps still ahead pull
+attention to *being done* before the work is. Grade the line on two properties:
+
+- **Clarity** — can the agent tell done from not-done by looking? "Every
+  changed file listed with its test" is checkable; "the change is understood"
+  is not.
+- **Demand** — does the wording force the whole job? "Every modified caller
+  accounted for" drives the search that "list the callers" leaves optional.
+
+The strongest criterion is both checkable and exhaustive. When a step still
+gets rushed, sharpen its criterion first. Split the sequence so the later
+steps are out of view only when the criterion is irreducibly fuzzy, and only
+across a real context boundary (a subagent dispatch or a hand-off) — an inline
+step leaves the later steps in context. (Adapted from mattpocock/skills
+`writing-for-agents`, MIT.)
+
 #### Progressive disclosure: split large bodies into `references/`
 
 When a skill's body grows past **~15KB**, stop growing the single file and
