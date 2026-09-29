@@ -123,7 +123,7 @@ a spec is skipped.
 A starter template lives at [`skills/SKILL.md.tmpl`](skills/SKILL.md.tmpl).
 Copy it into `skills/<skill-name>/SKILL.md`, fill in the placeholders, and
 follow the step-by-step guide at
-[`skills/writing-praxis-skill/SKILL.md`](skills/writing-praxis-skill/SKILL.md).
+[`docs/skill-authoring.md`](docs/skill-authoring.md).
 
 ### Directory structure
 

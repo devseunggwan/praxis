@@ -21,7 +21,7 @@ Record a single rule violation against the current session's strike counter.
 
    `<reason>` is **not** a placeholder the host fills in. The host substitutes
    `{{ARGUMENTS}}` in this file's text before you read it (see
-   `writing-praxis-skill` → Host Differences), and you then compose the Bash
+   `docs/skill-authoring.md` → Host Differences), and you then compose the Bash
    call — so the quoting is yours to get right. Two rules:
 
    - **Single-quote the reason, and write `'\''` for each `'` inside it.**

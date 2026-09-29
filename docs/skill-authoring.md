@@ -1,18 +1,4 @@
----
-name: writing-praxis-skill
-description: >
-  Guide for authoring a new praxis SKILL.md — template usage, SRP, trigger
-  keyword design, frontmatter conventions, and Claude/Codex host differences.
-when_to_use: >
-  Triggers on "new praxis skill", "write praxis skill", "add praxis skill",
-  "skill template", "praxis skill spec", "스킬 작성", "새 스킬".
-  Do NOT activate on "add skill section", "skill up", "skill set".
-verified-against-runtime: true
-runtime-verified-at: 2026-06-16
-runtime-verified-note: "claude 1.x --help + current praxis verified-skill survey — the guide's `--model`/`--resume` examples and AskUserQuestion/Skill runtime constraints still match the live Claude CLI surface."
----
-
-# writing-praxis-skill
+# Skill authoring guide
 
 ## Overview
 
@@ -67,7 +53,7 @@ when_to_use: >
   `check-plugin-manifests.py` Rule 13e fails on any drift between
   `when_to_use` and the roster row.
 - **Hard budget: the folded `description` must stay ≤ 1,024 characters** (see
-  [`RUNTIME_CONSTRAINTS.md` §5](../../RUNTIME_CONSTRAINTS.md)). The runtime
+  [`RUNTIME_CONSTRAINTS.md` §5](../RUNTIME_CONSTRAINTS.md)). The runtime
   truncates longer descriptions; `when_to_use` shares the listing budget as
   its tail, so trimming description prose is still what protects the
   triggers. Trim prose, never triggers.
@@ -85,7 +71,7 @@ holds):
 - `disable-model-invocation: true` — the skill runs only when the user types
   `/praxis:<name>`: the model never auto-loads it from `when_to_use`, and
   `Skill(...)` cannot reach it
-  ([`RUNTIME_CONSTRAINTS.md` §2](../../RUNTIME_CONSTRAINTS.md)). Use it for
+  ([`RUNTIME_CONSTRAINTS.md` §2](../RUNTIME_CONSTRAINTS.md)). Use it for
   user-only commands — `strike`, `strikes`, and `reset-strikes` declare it.
   Never add it to a skill another skill chains into via `Skill(...)`
   (`worktree-merge-cleanup`, `codex-review-wrap`; issue #163).
@@ -113,7 +99,7 @@ runtime-verified-note: "<cli-name> <version> — one-line observed behavior"
 Trigger keywords are the phrases users type (or say) that route to this skill.
 The runtime matches them against the skill listing — `description` with
 `when_to_use` appended (see
-[`RUNTIME_CONSTRAINTS.md` §5](../../RUNTIME_CONSTRAINTS.md)); a user may
+[`RUNTIME_CONSTRAINTS.md` §5](../RUNTIME_CONSTRAINTS.md)); a user may
 additionally keep a routing table in their own `CLAUDE.md`.
 
 **Principles:**
@@ -213,7 +199,7 @@ Bash call's directory is still active.
 
 ### Step 6: Respect Runtime Constraints
 
-Read [`RUNTIME_CONSTRAINTS.md`](../../RUNTIME_CONSTRAINTS.md) before finishing
+Read [`RUNTIME_CONSTRAINTS.md`](../RUNTIME_CONSTRAINTS.md) before finishing
 the spec. The three constraints that bite most often:
 
 | Constraint | What to do |
@@ -267,7 +253,7 @@ Follow the standard praxis PR workflow:
 
 ### Minimal skill (no external CLI)
 
-Verbatim from [`skills/strikes/SKILL.md`](../strikes/SKILL.md) — the
+Verbatim from [`skills/strikes/SKILL.md`](../skills/strikes/SKILL.md) — the
 canonical short-inline-description instance. If the two drift, that file
 wins; update this excerpt.
 
@@ -288,7 +274,7 @@ disable-model-invocation: true
 The shape below is **schematic** — every `<...>` is a placeholder, and the
 field values are not copied from any real skill. For a real instance of the
 folded description plus the three runtime-verification fields, read
-[`skills/cmux-recover-sessions/SKILL.md`](../cmux-recover-sessions/SKILL.md)
+[`skills/cmux-recover-sessions/SKILL.md`](../skills/cmux-recover-sessions/SKILL.md)
 directly rather than trusting a transcription that can drift.
 
 ```markdown

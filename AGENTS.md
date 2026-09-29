@@ -13,6 +13,7 @@ Skills are orchestrators with pluggable steps; external integrations (issue trac
 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | Skill/hook/manifest graph; provider routing |
 | [`RUNTIME_CONSTRAINTS.md`](RUNTIME_CONSTRAINTS.md) | Claude Code runtime limits |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | Contribution conventions; local setup |
+| [`docs/skill-authoring.md`](docs/skill-authoring.md) | How to write a new SKILL.md |
 | [`docs/spec-store.md`](docs/spec-store.md) | Feature-spec convention |
 | [`docs/hook-prune-audit.md`](docs/hook-prune-audit.md) | Keep/merge/drop verdict per hook |
 | [`docs/retrospect-prune-audit.md`](docs/retrospect-prune-audit.md) | Same lens on retrospect |
@@ -31,7 +32,7 @@ Skills are orchestrators with pluggable steps; external integrations (issue trac
 > [`CONTRIBUTING.md` → Anchor revision without `gh`](CONTRIBUTING.md#anchor-revision-without-gh)
 > (issue #1211).
 
-## Skills (21)
+## Skills (20)
 
 > **Invocation**: praxis entries are *skills*, not subagents. Call them
 > via `Skill(skill="praxis:<name>")` — `Agent(subagent_type="praxis:<name>")`
@@ -42,7 +43,6 @@ Skills are orchestrators with pluggable steps; external integrations (issue trac
 | Skill                  | Purpose                                                                                             |
 | ---------------------- | --------------------------------------------------------------------------------------------------- |
 | `using-praxis`         | Onboarding entry point — maps scenarios to the right skill for new praxis users                     |
-| `writing-praxis-skill` | Guide for authoring a new SKILL.md — template, SRP, trigger keyword design, frontmatter conventions |
 
 ### Development
 

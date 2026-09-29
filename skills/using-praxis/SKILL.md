@@ -61,7 +61,6 @@ Recover, save, and orchestrate Claude Code sessions.
 | Skill                  | When to call                                                          |
 | ---------------------- | --------------------------------------------------------------------- |
 | `using-praxis`         | First-time orientation — you are here                                 |
-| `writing-praxis-skill` | Authoring a new praxis skill — template, SRP, trigger keyword design  |
 
 ## Common Scenarios
 
@@ -78,7 +77,10 @@ Recover, save, and orchestrate Claude Code sessions.
 | "Several ways to build this — what's the tradeoff between them?"       | `tradeoff`                                                  |
 | "Should I act on this review finding, and does it block the merge?"    | `tradeoff`                                                  |
 | "Does this diff leak a handle or add an N+1 query?"                    | `perf-leak-review`                                          |
-| "I want to add a new skill to praxis"                                  | `writing-praxis-skill`                                      |
+
+To add a new skill to praxis, read
+[`docs/skill-authoring.md`](../../docs/skill-authoring.md); it is a guide,
+not a skill.
 
 ## Hook System
 
