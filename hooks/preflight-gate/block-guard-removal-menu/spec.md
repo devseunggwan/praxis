@@ -9,11 +9,11 @@ rule blocked one of the agent's calls in the same turn.
 
 ### Why this exists
 
-Observed case: a protected-branch guard refused three `Write` calls on the
-default branch. The very next `AskUserQuestion` offered "add a hook exception
-(Recommended)" as its first option. The repository documented a sanctioned
-path that satisfies the guard (a project CLI that opens an issue worktree), the
-menu did not offer it, and the user had to point it out.
+Observed case: `protected-branch-guard` refused three `Write` calls on the
+default branch. The very next `AskUserQuestion` ranked "set a hook exception
+(Recommended)" first, asking the user to switch the PR check off through hook
+config or a session env var, and listed the path the guard itself named,
+working in a worktree, last. The user picked the worktree.
 
 This is the **menu lane** of
 [`docs/hook/RULE-BACKSTOP-GAPS.md`](../../../docs/hook/RULE-BACKSTOP-GAPS.md)
