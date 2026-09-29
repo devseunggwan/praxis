@@ -70,8 +70,8 @@ The others are `unmeasured`, for one of these reasons:
 Four read-only tasks against this repository, 3 reps per arm, 24 runs, 0
 failed, about $2.45 in total. The `budget` arm sets
 `PRAXIS_TIME_BUDGET_S=600` and `PRAXIS_TIME_START_EPOCH=@now`; the `none` arm
-sets neither. `signal` counts the hook's `elapsed …` context lines in the run's
-stream.
+sets neither. `Signal` sums, over a task's 3 runs, the hook's `elapsed …`
+context lines in each run's stream; it counts lines, not runs.
 
 | Task | Arm | Oracle | Median wall s | Median tools | Signal |
 | --- | --- | --- | --- | --- | --- |
@@ -84,10 +84,11 @@ stream.
 | `tests` | budget | 3/3 | 35 | 1 | 6 |
 | `tests` | none | 3/3 | 35 | 1 | 0 |
 
-**Verdict: `no-op`.** The signal reached the model on every `budget` run (51
-lines against 0), and on the three graded tasks both arms passed 3/3; across
-all 12 runs per arm the median wall time (32.5 s) and median tool calls (2) are
-equal. `specdrift` has no oracle and is not graded.
+**Verdict: `no-op`.** Each of the 12 `budget` runs carried 2 to 11 signal
+lines, 51 in all; none of the 12 `none` runs carried one. On the three graded
+tasks both arms passed 3/3. Pooled over the 12 runs of each arm, not taken from
+the per-task medians above, the median wall time is 32.5 s and the median tool
+count is 2 in both arms. `specdrift` has no oracle and is not graded.
 
 **Scope of the verdict.** The longest run took 53 s against a 600 s budget, so
 no run came near the limit. The verdict says the signal changes nothing on a
