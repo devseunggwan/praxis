@@ -152,6 +152,7 @@ run_case "EN negated phrase earlier, plain phrase later" advisory default "$(bui
 run_case "EN punctuation ends negation reach (No, disable the hook)" advisory default "$(build_payload "$T_BLOCKED" '[["No, disable the hook", ""], ["Stop", ""]]')"
 run_case "EN add an exception to the hook (guard, not code)" advisory default "$(build_payload "$T_BLOCKED" '[["Add an exception to the hook", ""], ["Stop", ""]]')"
 run_case "removal in the question text, Yes/No options" advisory default "$(build_payload "$T_BLOCKED" '[["Yes", ""], ["No", ""]]' 'Disable the protection hook?')"
+run_case "switching this gate's own strict mode off" block strict "$(build_payload "$T_BLOCKED" '[["Set PRAXIS_GUARD_REMOVAL_MENU_STRICT=0 and retry", ""], ["Stop", ""]]')"
 run_case "STRICT=no stays advisory" advisory strict=no "$(build_payload "$T_BLOCKED" "$EN_EXEMPTION")"
 run_case "STRICT=off stays advisory" advisory strict=off "$(build_payload "$T_BLOCKED" "$EN_EXEMPTION")"
 run_case "relay + origination: gate env relayed but another var originated" advisory default "$(build_payload "$T_BLOCKED_ENV" '[["Set OTHER_SKIP=1", ""], ["Stop", ""]]')"

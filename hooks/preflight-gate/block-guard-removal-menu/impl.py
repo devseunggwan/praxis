@@ -162,6 +162,13 @@ _ENV_ASSIGN_RE = re.compile(
 )
 # Any `VAR=1` printed by the blocking message: the gate's own offered route.
 _OFFERED_ENV_RE = re.compile(r"(?<![A-Za-z0-9_])([A-Z][A-Z0-9_]{2,})=1(?![A-Za-z0-9_])")
+# Switching this gate's own strict mode off. The gate prints no Bypass line,
+# so this can never be a relay: after a strict block it is the agent proposing
+# to turn off the gate that just stopped it.
+_OWN_STRICT_OFF_RE = re.compile(
+    rf"(?<![A-Za-z0-9_]){STRICT_ENV}\s*=\s*(?:0|false|off|no)(?![A-Za-z0-9_])",
+    re.IGNORECASE,
+)
 
 # ---------------------------------------------------------------------------
 # Option-side detection
@@ -203,6 +210,9 @@ def find_removal_phrase(texts: list[str], relayed_envs: set[str]) -> str | None:
         for m in _ENV_ASSIGN_RE.finditer(text):
             if m.group(1).upper() not in relayed_envs:
                 return m.group(0)
+        own = _OWN_STRICT_OFF_RE.search(text)
+        if own:
+            return own.group(0)
     return None
 
 

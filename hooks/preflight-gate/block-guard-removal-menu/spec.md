@@ -63,6 +63,7 @@ name, not as the verb `bypass`.
 | direct write to a protected branch | `allow direct write`, `allow direct push`, `commit directly to main` |
 | verification skip | `--no-verify` |
 | env switch | `SOME_BYPASS=1`, `SKIP_CHECK=true`, `X_DISABLE=on` (name contains `BYPASS`, `SKIP`, `DISABLE`, `ALLOW`, `OVERRIDE`, `EXEMPT`, `NO_VERIFY`, `OFF` or `ADVISORY`) |
+| this gate's own strict switch turned off | `PRAXIS_GUARD_REMOVAL_MENU_STRICT=0` (also `false`, `off`, `no`). Never a relay: this gate prints no Bypass line. Another gate's `*_STRICT=0` is not matched; when that gate blocked, its Bypass line names the variable and the option is a relay anyway |
 
 Guard nouns: `hook`, `guard`, `gate`, `safeguard`, `protection`,
 `branch protection`, `permission rule`, `deny rule`, `pre-commit`.
