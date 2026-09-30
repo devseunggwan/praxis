@@ -89,13 +89,23 @@ status=0
 rc=0
 ```
 
-`status` is zsh's read-only alias of `$?`. Every assignment to it fails: a
-leading `status=` word of a simple command (after `;`, `&&`, `(`, `$(`, a
-backtick, `{`, `if`, `do`, `!`, or other prefix assignments), and a `status=`
-argument of `local`, `typeset`, `declare`, `export`, `readonly`, `integer` or
-`float`. A declaration without a value (`local status`) succeeds and is not
-reported, and neither is the same text as an ordinary argument
-(`echo status=1`, `env status=1 cmd`) or an array element (`arr=(status=1)`).
+`status` is zsh's read-only alias of `$?`. Every assignment to it fails:
+`status=`, `status+=` or `status[i]=` as a leading word of a simple command,
+and a `status=` argument of `local`, `typeset`, `declare`, `export`,
+`readonly`, `integer` or `float`.
+
+A word is leading when it starts a command (the start of the text, or after
+`;`, `&`, `|`, a newline, `(`, `$(`, `<(`, `>(`, `=(`, a backtick, `{`, the end
+of a case pattern, or a `f()` function header) and is preceded only by other
+assignments, redirections (`>out`, `2> err`), the words `if` `then` `else`
+`elif` `do` `while` `until` `!` `time` `nocorrect` `coproc`, or `repeat` and its
+count.
+
+The scan keeps one prefix per nesting level, so `a=$(x) status=1 cmd` is still
+an assignment. A declaration without a value (`local status`) succeeds and is
+not reported, and neither is the same text as an ordinary argument
+(`echo status=1`, `echo $(date) status=1`, `env status=1 cmd`), an array
+element (`arr=(a status=1)`), part of `${…}` or `{a,b}`, or a case pattern.
 
 ## Why four ask and one advisory
 
@@ -111,9 +121,8 @@ Neither path is a block. `ask` surfaces the fork; it does not deny the command.
 
 Measured fire rate across the local corpus (851 transcripts, 147,281 Bash
 calls): **263 ask-grade fires (0.18%)** — 243 `=word`, 1 pattern, 19 heredoc —
-and 486 advisory-grade word-split fires (0.33%). Shape 5, replayed later over
-the same kind of corpus, fired on 8 distinct commands, each a real `status=`
-assignment.
+and 486 advisory-grade word-split fires (0.33%). Shape 5 came later and has no
+measured fire rate.
 
 ## Detected shapes
 
@@ -122,7 +131,7 @@ assignment.
 | `echo ======`, `echo =foo`, `[ "$x" == y ]`, `V==foo` | `ask` |
 | `${w#[[}`, `"${w#[[}"`, `${w/[[/Z}` | `ask` |
 | An opener inside an open body reusing the outer delimiter, with its own terminator | `ask` |
-| `status=$?`, `true; status=1`, `$(status=1)`, `a=1 status=2 cmd`, `status+=1`, `local status=1`, `export status=1` | `ask` |
+| `status=$?`, `true; status=1`, `$(status=1)`, `a=$(x) status=2 cmd`, `status+=1`, `status[1]=x`, `>out status=1 cmd`, `f() { status=1; }`, `local status=1`, `export status=1` | `ask` |
 | `set -- $var`, `set - ${var}`, `for x in $var` | Advisory (`additionalContext` + stderr) |
 | `[[ $x == y ]]`, `test 1 = 1`, `print a=b`, `--stat=2` | Silent — not the shape |
 | `(( x == y ))`, `$(( 1 == 1 ))`, `print hi # a==b` | Silent — arithmetic and comments are not expanded words |
@@ -130,7 +139,7 @@ assignment.
 | `${w#[]}`, `${w#[!]}` | Silent — an open class led by `]` is a no-match in zsh 5.9, not a bad pattern |
 | A nested heredoc with a different delimiter, or a body that mentions one | Silent |
 | `"$var"`, `${=var}`, `$=var`, `${(s: :)var}`, `$@`, `$1` | Silent |
-| `local status`, `STATUS=1`, `exit_status=1`, `echo status=1`, `env status=1 cmd`, `--status=x`, `arr=(status=1)` | Silent — no assignment to `status` |
+| `local status`, `STATUS=1`, `exit_status=1`, `echo status=1`, `echo $(date) status=1`, `env status=1 cmd`, `--status=x`, `arr=(a status=1)`, `echo ${status=1}`, `case $x in status=1) …` | Silent — no assignment to `status` |
 | Inside a heredoc body | Silent for shapes 1, 2, 4 and 5 — data, not words |
 | `$SHELL` is not zsh, or unset | Silent for shapes 1, 2, 4 and 5; shape 3 still fires |
 | `# zsh-dialect:ok` or `# word-split:ok` on the command | Silent — opt-out |
@@ -146,7 +155,8 @@ same mechanism as shape 4, but it is also the overwhelmingly common *correct*
 usage, so warning there would bury the two shapes where the intent is legible
 from the syntax itself.
 
-The detectors are regex scans over quote-masked text, not a shell parser, and
+The detectors scan quote-masked text and are not a shell parser; shape 5 adds
+only a nesting stack, enough to tell a command's words from a value's. They
 stay that way on purpose: an `ask` is only worth its interruption on a shape
 that is cheap to recognise and certain to fail. Known gaps, each measured
 against zsh 5.9 and left in place:
@@ -164,8 +174,12 @@ against zsh 5.9 and left in place:
   rather than tab-only removal.
 - **`status` bound by something other than an assignment** —
   `for status in a b`, `read status` and `(( status = 1 ))` fail the same way,
-  but none is an assignment word, so none is scanned. A `status=` inside a
-  double-quoted `"$(…)"` is masked with the quotes and is missed too.
+  but none is an assignment word, so none is scanned. `$((status=1))` fails
+  too, but arithmetic is masked before the scan. A `status=` inside a
+  double-quoted `"$(…)"` is masked with the quotes and is missed as well.
+- **`time status=1` with no command asks** — zsh performs no assignment there
+  and succeeds, but `time status=1 cmd` fails, and the scan treats `time` as a
+  prefix word for both.
 
 Closing any of them needs a real tokenizer (quotes, comments, control
 operators, arithmetic and conditional contexts in one pass). That is a

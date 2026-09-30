@@ -295,19 +295,99 @@ def shadowed_heredocs(command: str) -> list[str]:
     return found
 
 
-# Where a new simple command starts. `(` right after `=` opens an array
-# (`arr=(status=1)`), whose elements are values, not assignments.
-_COMMAND_BREAK_RE = re.compile(r"[;&|){}\n`]|(?<!=)\(")
+# Words after which the next word is again in command position.
 _LEADING_KEYWORDS = frozenset(
-    {"if", "then", "else", "elif", "do", "while", "until", "!", "time"}
+    {"if", "then", "else", "elif", "do", "while", "until", "!", "time",
+     "nocorrect", "coproc"}
 )
 _ASSIGNMENT_WORD_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*(?:\[[^\]]*\])?\+?=")
-_STATUS_ASSIGNMENT_RE = re.compile(r"status\+?=")
+_STATUS_ASSIGNMENT_RE = re.compile(r"status(?:\[[^\]]*\])?\+?=")
+# A redirection word. Operator-only (`>`, `2>&`) takes the next word as its
+# target; `>out` carries it. Neither ends the assignment prefix.
+_REDIRECT_RE = re.compile(r"\d*[<>]")
+_REDIRECT_OPERATOR_RE = re.compile(r"\d*[<>]+[&|]?")
 # Builtins whose `NAME=value` arguments are assignments. `local status` with no
 # value is a declaration and succeeds (measured), so only `status=` counts.
 _DECLARATION_BUILTINS = frozenset(
     {"local", "typeset", "declare", "export", "readonly", "integer", "float"}
 )
+# Stands in for an expansion inside a word, so `$(x)status=1` is not read as
+# starting with `status=`.
+_EXPANSION_PLACEHOLDER = "x"
+
+
+class _Frame:
+    """One nesting level of the scan.
+
+    `cmd` holds commands (the top level, `( … )`, `$( … )`, `` ` … ` ``,
+    `<( … )`, `=( … )`). `array`, `param` and `pattern` hold values, whose words
+    are never assignments.
+    """
+
+    def __init__(self, kind: str, closer: str, opened_mid_word: bool = False):
+        self.kind = kind
+        self.closer = closer
+        self.opened_mid_word = opened_mid_word
+        self.has_content = False
+        self.word: list[str] = []
+        self.prefix = True  # the next word may be an assignment or the command
+        self.declaration = False  # arguments are assignments (`local x=1`)
+        self.skip_next = False  # the next word is a redirect target or a count
+
+    def reset(self) -> None:
+        self.prefix = True
+        self.declaration = False
+        self.skip_next = False
+
+
+def _finish_word(frame: _Frame, found: list[str]) -> None:
+    word = "".join(frame.word)
+    frame.word.clear()
+    if not word or frame.kind != "cmd":
+        return
+    if frame.skip_next:
+        frame.skip_next = False
+        return
+    status = _STATUS_ASSIGNMENT_RE.match(word)
+    if frame.declaration:
+        if status and status.group(0) not in found:
+            found.append(status.group(0))
+        return
+    if not frame.prefix:
+        return
+    if _REDIRECT_RE.match(word):
+        frame.skip_next = bool(_REDIRECT_OPERATOR_RE.fullmatch(word))
+        return
+    if word in _LEADING_KEYWORDS:
+        return
+    if word == "repeat":
+        frame.skip_next = True
+        return
+    if _ASSIGNMENT_WORD_RE.match(word):
+        if status and status.group(0) not in found:
+            found.append(status.group(0))
+        return
+    frame.prefix = False
+    frame.declaration = word in _DECLARATION_BUILTINS
+
+
+def _close_frame(stack: list[_Frame], found: list[str]) -> None:
+    closed = stack.pop()
+    _finish_word(closed, found)
+    outer = stack[-1]
+    if closed.kind != "pattern":
+        outer.word.append(_EXPANSION_PLACEHOLDER)
+        return
+    if not closed.opened_mid_word:
+        # `(pat)` of a case branch: the branch body follows.
+        outer.reset()
+    elif not closed.has_content and outer.prefix:
+        # `f()`: a function definition, whose body follows.
+        outer.word.clear()
+        outer.reset()
+    else:
+        # A glob qualifier (`*(N)`): the word goes on.
+        outer.word.append(_EXPANSION_PLACEHOLDER)
 
 
 def status_assignments(command: str) -> list[str]:
@@ -316,27 +396,87 @@ def status_assignments(command: str) -> list[str]:
     `status` is read-only in zsh, so any assignment to it fails with
     `read-only variable: status`. An assignment is a leading `NAME=` word of a
     simple command, or a `NAME=` argument of a declaration builtin; the same
-    text as an ordinary argument (`echo status=1`) is not one.
+    text as an ordinary argument (`echo status=1`) is not one. The scan keeps a
+    stack of nesting levels so a command inside `$( … )` has its own prefix,
+    and the words of an array, a `${ … }` or a pattern are skipped.
     """
     text = _mask_quoted(strip_heredoc_bodies(command))
     text = _mask_arithmetic(_mask_double_bracket(_mask_comments(text)))
     found: list[str] = []
-    for segment in _COMMAND_BREAK_RE.split(text):
-        words = segment.split()
-        while words and words[0] in _LEADING_KEYWORDS:
-            words.pop(0)
-        hits: list[str] = []
-        for index, word in enumerate(words):
-            if _ASSIGNMENT_WORD_RE.match(word):
-                hits.append(word)
-                continue
-            if word in _DECLARATION_BUILTINS:
-                hits.extend(words[index + 1:])
-            break
-        for word in hits:
-            match = _STATUS_ASSIGNMENT_RE.match(word)
-            if match and match.group(0) not in found:
-                found.append(match.group(0))
+    stack = [_Frame("cmd", closer="")]
+    i = 0
+    while i < len(text):
+        ch = text[i]
+        pair = text[i:i + 2]
+        frame = stack[-1]
+        if ch == frame.closer and len(stack) > 1:
+            _close_frame(stack, found)
+            i += 1
+            continue
+        if frame.kind != "cmd" and not ch.isspace():
+            frame.has_content = True
+        if ch == "`":
+            stack.append(_Frame("cmd", closer="`"))
+            i += 1
+            continue
+        if pair in ("$(", "<(", ">("):
+            stack.append(_Frame("cmd", closer=")"))
+            i += 2
+            continue
+        if pair == "${":
+            stack.append(_Frame("param", closer="}"))
+            i += 2
+            continue
+        if frame.kind != "cmd":
+            if ch == "(":
+                stack.append(_Frame("pattern", closer=")", opened_mid_word=True))
+            i += 1
+            continue
+        word = "".join(frame.word)
+        if ch == "(":
+            if word == "=":
+                frame.word.clear()
+                stack.append(_Frame("cmd", closer=")"))
+            elif word.endswith("="):
+                stack.append(_Frame("array", closer=")"))
+            elif not word and frame.prefix:
+                stack.append(_Frame("cmd", closer=")"))
+            else:
+                stack.append(
+                    _Frame("pattern", closer=")", opened_mid_word=bool(word))
+                )
+            i += 1
+            continue
+        if ch == ")":
+            # Unmatched: the end of a case pattern, and the branch body follows.
+            frame.word.clear()
+            frame.reset()
+            i += 1
+            continue
+        if ch in "&|" and word and word[-1] in "<>":
+            frame.word.append(ch)
+            i += 1
+            continue
+        if ch in ";&|\n":
+            _finish_word(frame, found)
+            frame.reset()
+            i += 1
+            continue
+        if ch.isspace():
+            _finish_word(frame, found)
+            i += 1
+            continue
+        if ch == "{" and not word and frame.prefix and text[i + 1:i + 2].isspace():
+            i += 1  # a `{ … }` group: the next word is still in command position
+            continue
+        if ch == "}" and not word:
+            frame.prefix = False
+            i += 1
+            continue
+        frame.word.append(ch)
+        i += 1
+    while stack:
+        _finish_word(stack.pop(), found)
     return found
 
 
@@ -377,13 +517,6 @@ def deterministic_text(
     statuses: list[str],
 ) -> str:
     lines = ["⚠️ 이 명령은 zsh 에서 쓴 대로 실행되지 않습니다", ""]
-    if statuses:
-        listed = ", ".join(f"`{word}`" for word in statuses)
-        lines += [
-            f"- {listed} — zsh 에서 `status` 는 `$?` 와 같은 읽기 전용 "
-            "변수라 할당하면 `read-only variable: status` 로 실패합니다.",
-            "  고치기: 다른 이름을 쓰세요 — `rc=$?`.",
-        ]
     if equals:
         listed = ", ".join(f"`{word}`" for word in equals)
         lines += [
@@ -409,7 +542,14 @@ def deterministic_text(
             "  고치기: 안쪽 구분자를 다른 이름으로 바꾸거나, 파일을 먼저 쓰고 "
             "호출을 나누세요.",
         ]
-    lines += ["", f"의도한 대로라면 이 표지로 끕니다: {OPT_OUT_MARKERS[0]}"]
+    if statuses:
+        listed = ", ".join(f"`{word}`" for word in statuses)
+        lines += [
+            f"- {listed} — zsh 에서 `status` 는 `$?` 와 같은 읽기 전용 "
+            "변수라 할당하면 `read-only variable: status` 로 실패합니다.",
+            "  고치기: 다른 이름을 쓰세요 — `rc=$?`.",
+        ]
+    lines +=["", f"의도한 대로라면 이 표지로 끕니다: {OPT_OUT_MARKERS[0]}"]
     return "\n".join(lines)
 
 

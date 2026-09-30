@@ -235,6 +235,30 @@ for builtin in typeset declare export readonly integer float; do
   run_case "$builtin with a status value" "ask:status=" \
     "$builtin status=1"
 done
+run_case "status after a prefix assignment holding a substitution" "ask:status=" \
+  'a=$(x) status=1 true'
+run_case "status array element assignment" "ask:status[1]=" \
+  'status[1]=x'
+run_case "status after nocorrect" "ask:status=" \
+  'nocorrect status=1'
+run_case "status after coproc" "ask:status=" \
+  'coproc status=1'
+run_case "status after repeat and its count" "ask:status=" \
+  'repeat 1 status=1'
+run_case "status after a leading redirection" "ask:status=" \
+  '>out status=1 true'
+run_case "status after a spaced redirection and its target" "ask:status=" \
+  '2> err status=1 true'
+run_case "status inside =( )" "ask:status=" \
+  'cat =(status=1)'
+run_case "status inside <( )" "ask:status=" \
+  'cat <(status=1)'
+run_case "status after a pipe" "ask:status=" \
+  'echo a | status=1'
+run_case "status in a function body" "ask:status=" \
+  'f() { status=1; }'
+run_case "status in a case branch after a parenthesized pattern" "ask:status=" \
+  'case $x in (a) status=1;; esac'
 
 run_case "local status without a value does not assign" silent \
   'local status'
@@ -253,13 +277,37 @@ run_case "env sets it in the child environment, not zsh" silent \
 run_case "a long flag named status" silent \
   'gh run list --status=failure'
 run_case "a quoted word is a command name, not an assignment" silent \
-  'print "status=1"'
+  '"status=1"'
 run_case "a single-quoted script for another shell" silent \
   "sh -c 'status=1; echo \$status'"
 run_case "reading status is fine" silent \
   '[[ $status == 0 ]] && echo $status'
 run_case "an array element is not an assignment" silent \
   'arr=(status=1 other)'
+run_case "a later array element is not an assignment" silent \
+  'arr=(a status=1)'
+run_case "an array element of a declaration is not an assignment" silent \
+  'local -a arr=(a status=1)'
+run_case "an argument after a command substitution" silent \
+  'echo $(date) status=1'
+run_case "an argument after a parameter expansion" silent \
+  'echo ${HOME} status=1'
+run_case "an argument after backticks" silent \
+  'echo `date` status=1'
+run_case "status= glued after an expansion" silent \
+  'echo ${a}status=1'
+run_case "a default-assigning parameter expansion" silent \
+  'echo ${status=1}'
+run_case "a brace expansion" silent \
+  'echo {status=1,b}'
+run_case "a case pattern" silent \
+  'case $x in status=1) echo;; esac'
+run_case "a parenthesized case pattern" silent \
+  'case $x in (status=1) echo;; esac'
+run_case "a later case pattern" silent \
+  'case $x in a) true;; status=1) echo;; esac'
+run_case "an argument after a glob qualifier" silent \
+  'ls *(N) status=1'
 run_case "status assignment in a comment" silent \
   'true # status=1'
 run_case "status assignment in a heredoc body" silent \
