@@ -269,6 +269,67 @@ run_case "R11: global flag between gh and its subcommand" \
   'gh --repo owner/name pr comment 1 --body "5x faster"'
 
 # ---------------------------------------------------------------------------
+# === PRECISION (#1544) — #1538's replay found 0 true positives in 11 fires.
+# A lever verdict names a lever and gives it a verdict; an x/배 multiplier
+# sits on one line with its number and near a performance word.
+# ---------------------------------------------------------------------------
+
+MARKER="advisory:[perf-multiplier-evidence-advisory]"
+
+run_case "P1: a verdict word with no lever is not a lever verdict (silent)" silent \
+  'gh pr comment 1 --body "번호 지목은 라벨을 그대로 채택합니다"'
+run_case "P2: the word lever with no verdict is not a lever verdict (silent)" silent \
+  'gh pr comment 1 --body "names this lever the completion criterion"'
+run_case "P3: 레버 with a verdict word is a lever verdict (warn)" "$MARKER" \
+  'gh pr comment 1 --body "이 레버는 역효과입니다"'
+run_case "P4: an uppercase Lever with a verdict word still reads (warn)" "$MARKER" \
+  'gh pr comment 1 --body "Lever: 채택"'
+run_case "P5: a count and a header on the next line are not a multiplier (silent)" silent \
+  'gh pr comment 1 --body "headers: 50
+X-XSRF-TOKEN speed"'
+run_case "P6: a number and 배 split by a newline are not a multiplier (silent)" silent \
+  'gh pr comment 1 --body "속도 2
+배 차이"'
+run_case "P7: a space or tab between the number and x still reads (warn)" "$MARKER" \
+  "gh pr comment 1 --body \"3 x faster, then 2$(printf '\t')x faster\""
+# The issue's own control; the number follows ×, so it was silent before too.
+run_case "P8: retry ×2 with no performance word is silent" silent \
+  'gh pr comment 1 --body "retry ×2 before giving up"'
+run_case "P8b: a call count 200 ×2 is not a speed factor (silent)" silent \
+  'gh pr comment 1 --body "PUT 200 ×2 then GET 200"'
+run_case "P8c: 3x faster still fires" "$MARKER" \
+  'gh pr comment 1 --body "the new path is 3x faster"'
+run_case "P9: 2배 with no performance word is a count (silent)" silent \
+  'gh pr comment 1 --body "사용량 표가 약 2배 과대 집계됩니다"'
+run_case "P10: a performance word before the multiplier (warn)" "$MARKER" \
+  'gh pr comment 1 --body "speedup of 3x on the grid"'
+run_case "P11: a Korean performance word next to 배 (warn)" "$MARKER" \
+  'gh pr comment 1 --body "속도가 2배 빨라집니다"'
+run_case "P12: a performance word past 40 characters does not count (silent)" silent \
+  'gh pr comment 1 --body "3x the calls were issued across every retry in this run, and the speed was fine"'
+run_case "P13: a timing pair still fires with no performance word (warn)" "$MARKER" \
+  'gh pr comment 1 --body "precompute: 49m -> 12m"'
+run_case "P14: a ratio of two timings reads as performance context (warn)" "$MARKER" \
+  'gh pr comment 1 --body "기동이 80~110 ms 로 본문의 8 ms 와 10배 차이입니다"'
+# A timing near a count also reads as context; spec records this trade-off.
+run_case "P15: a retry count next to its interval still fires (warn)" "$MARKER" \
+  'gh pr comment 1 --body "retry 3x every 5s"'
+
+# Replay of #1538's sample, pseudonymized (spec "Replay fixtures"). 06 and 08
+# still warn (a configuration change written as a timing pair, the #850
+# shape); the other 9 were false positives.
+REPLAY_DIR="$ROOT_DIR/tests/fixtures/perf-multiplier-evidence-advisory/replay-1544"
+for d in "$REPLAY_DIR"/*/; do
+  n=$(basename "$d")
+  case "$n" in
+    06|08) expect="$MARKER"; label=warn ;;
+    *) expect=silent; label=silent ;;
+  esac
+  run_case "replay-1544 case $n ($label)" "$expect" \
+    "gh pr comment 1 --body-file ${d}body.txt"
+done
+
+# ---------------------------------------------------------------------------
 # === SILENT: non-Bash tool / malformed payload ===
 # ---------------------------------------------------------------------------
 

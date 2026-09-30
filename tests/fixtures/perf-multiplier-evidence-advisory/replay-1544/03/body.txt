@@ -1,0 +1,102 @@
+### zqqv_: `zqbka_46zqbkb_` (zqbkj_ 1)
+
+| # | zqbkk_ | zqbkl_ |
+|---|---|---|
+| 0 | 뷁뷁뷁 뷁뷁뷁뷁 이 뷁뷁뷁(뷁뷁뷁 뷁뷁 뷁 뷁뷁 + 뷁 뷁 뷁뷁뷁뷁)에 뷁뷁 | zqul_(zqbkm_) |
+| 1 | 뷁 뷁 zqbko_, 뷁뷁 뷁뷁, 422 zqbkq__1 뷁뷁뷁 뷁뷁뷁뷁 뷁뷁뷁뷁 | zqul_(zqbku_) |
+| 2 | 뷁뷁 뷁뷁뷁 CI 뷁뷁 뷁뷁 뷁뷁 뷁뷁뷁뷁 뷁뷁뷁뷁 | zqul_(zqbkm_) |
+| 3 | 뷁뷁 zqbkv_ 뷁뷁(뷁뷁, `X-zqbkz_-zqbla_`, 뷁뷁 뷁뷁)이 뷁뷁뷁뷁 뷁뷁뷁뷁 | zqul_(zqbkm_) |
+| 4 | 뷁뷁 zqblb_ 이 뷁뷁 뷁 131뷁뷁 뷁뷁뷁 뷁뷁 뷁뷁 뷁뷁 | zqul_(zqbkm_) |
+| 5 | 뷁뷁 뷁뷁 뷁뷁뷁 뷁뷁뷁 뷁뷁 zqbm_-to-zqbm_ 로 뷁뷁뷁뷁 | zqblj_ |
+
+<zqblk_><zqa_>zqbll_: 뷁뷁 zqbm_-to-zqbm_ 뷁뷁 뷁뷁, 뷁뷁뷁/뷁 뷁뷁뷁 뷁뷁 zqblm__at·뷁뷁 뷁뷁 뷁뷁 뷁뷁뷁</zqa_>
+
+- 뷁 3·4 는 뷁뷁 zqbkv_ 를 뷁뷁뷁뷁뷁 뷁뷁뷁 뷁뷁뷁뷁 뷁뷁뷁 뷁뷁뷁 뷁뷁뷁뷁, 이 PR 의 뷁뷁뷁 뷁뷁뷁 뷁뷁뷁 뷁뷁뷁뷁.
+- 뷁뷁뷁 뷁뷁뷁 뷁뷁뷁 뷁뷁 뷁뷁뷁 뷁뷁뷁 뷁뷁뷁 뷁뷁뷁뷁. 뷁뷁 뷁뷁뷁 뷁뷁 뷁뷁뷁 뷁뷁뷁뷁뷁뷁 뷁뷁 뷁뷁뷁뷁뷁.
+- `zqblo_: zqblq_` (뷁뷁 뷁 뷁 뷁뷁 zqblb_ 에서 뷁뷁뷁 뷁뷁뷁뷁 뷁뷁, 뷁뷁 뷁뷁 뷁뷁뷁)
+
+</zqblk_>
+
+<zqblk_><zqa_>zqblu_ 0 — 뷁뷁 zqblb_ 의 뷁뷁뷁 뷁뷁뷁 뷁뷁 뷁 뷁뷁뷁 뷁 뷁뷁뷁뷁 422 로 뷁뷁뷁뷁</zqa_>
+
+뷁뷁 zqblb_ `zqblv___2996_14675_2026-09-23T00:26:16+00:00` 의 `zqblz__zqbma_` zqbmb_ 1~4 뷁뷁뷁, 2026-09-24 뷁뷁뷁뷁뷁 뷁뷁 뷁뷁뷁 뷁뷁뷁뷁뷁뷁. 뷁뷁뷁 뷁뷁 뷁 zqblb_·뷁뷁뷁 뷁 뷁뷁뷁 이 뷁뷁 뷁뷁뷁뷁뷁뷁. 뷁뷁 뷁뷁뷁 zqbmj_/zqbmk_-zqbml_-zqbmm_#6984 뷁뷁뷁 뷁뷁뷁뷁.
+
+```
+63601:   a1=ok   a2=422  a3=422  a4=422   (49뷁 + 뷁뷁 1뷁 = 50)
+1992381: a1=ok   a2=ok   a3=422  a4=422   (48뷁 + 뷁뷁 2뷁 = 50)
+1997476: a1=422  a2=422  a3=422  a4=422   (뷁뷁 뷁뷁뷁뷁 뷁뷁 50)
+```
+
+</zqblk_>
+
+<zqblk_><zqa_>zqbmo_ 1 — 뷁뷁 뷁뷁뷁(zqbku_ 뷁뷁뷁 2026-09-24 뷁뷁 뷁뷁뷁뷁 뷁뷁)</zqa_>
+
+`zqbmq__zqbmu_.zquo_.ts` 의 `뷁뷁뷁 뷁 뷁뷁 (zqbmm_#6984)` 뷁뷁뷁뷁뷁. zqbku_ 뷁뷁 뷁뷁뷁 뷁뷁뷁뷁뷁.
+
+```
+$ zqbmv_ zqbmz_ zqblb_ zqboa_/zqbob_/zqboj__zqbok__zqbol_
+ zquo_ zqbom_  10 zqboo_ (10)
+      zqboq_  277 zqboo_ (277)
+```
+
+</zqblk_>
+
+<zqblk_><zqa_>zqbmo_ 2 — CI(`zquo_.zqbou_`)와 뷁뷁 뷁뷁뷁 뷁뷁 뷁뷁</zqa_>
+
+CI 는 `zqbov_`·`zqbkv__zqboz_` 뷁뷁뷁뷁 뷁뷁 뷁뷁뷁 뷁 뷁뷁 뷁뷁뷁뷁 뷁뷁뷁뷁 뷁뷁 뷁뷁뷁 뷁뷁뷁뷁뷁뷁. 뷁뷁 뷁뷁뷁뷁 CI zqblb_ 뷁뷁뷁 뷁뷁뷁뷁.
+
+```
+$ zqbqa_ --zqbqb_ zqbov_ zqbqj_ --zqbqk_-zqbql_ --zqbqm_-zqqz_; zqbmv_ zqbqo_ --zqbqq_ -p zqbov_/zqbqu_.zqbqv_; zqbqz_ ci --zqbua_ zqbkv__zqboz_; zqbqa_ zqblb_ zqbub_; zqbqa_ zqblb_ zquo_
+zqbov_ zqbqj_ zqbbm_=0
+zqbov_ zqbqo_ zqbbm_=0
+zqbkv__zqboz_ ci zqbbm_=0
+zqbub_ zqbbm_=0
+ zquo_ zqbom_  311 zqboo_ (311)
+      zqboq_  6689 zqboo_ | 3 zqbuj_ (6692)
+```
+(뷁 `$` 뷁뷁 뷁뷁 뷁뷁뷁뷁 zqbbm_ zqbjl_ zqbuk_ 와 뷁뷁 뷁뷁뷁 뷁 뷁뷁뷁뷁뷁.)
+
+</zqblk_>
+
+<zqblk_><zqa_>zqbmo_ 3 — 뷁뷁 zqbkv_ 를 뷁뷁 뷁뷁뷁 뷁뷁 뷁뷁</zqa_>
+
+뷁뷁 뷁뷁 뷁뷁뷁뷁뷁뷁 뷁뷁 뷁뷁/뷁뷁뷁 뷁뷁 뷁뷁 뷁뷁 뷁 뷁뷁뷁뷁뷁. 뷁뷁 뷁뷁 뷁뷁 403 뷁뷁 뷁뷁뷁 뷁뷁 뷁뷁뷁뷁, 200 이 뷁뷁 뷁뷁뷁뷁 뷁뷁 뷁뷁뷁.
+
+```
+zqbul_ .../zqbum_/63601/zqbmq_/zqbuo_?zqbuq_=11641391&zqbuu_=zqbuv_
+뷁뷁 뷁뷁:        403 (zqbuz_ zqbva_), 뷁뷁 50 → 50
+X-zqbkz_-zqbla_ 뷁뷁: 200 {"zqbvb_":zqbvj_,"zqbvk_":"뷁뷁뷁뷁뷁뷁뷁."}, 뷁뷁 50 → 49
+```
+
+뷁뷁 뷁뷁: 뷁 뷁 뷁뷁 뷁뷁뷁뷁 뷁뷁 뷁뷁뷁뷁 뷁 뷁 뷁뷁 403 (뷁뷁 3539, 2026-09-24). 뷁뷁뷁 뷁뷁뷁뷁 뷁뷁뷁 뷁뷁 뷁뷁뷁뷁.
+
+</zqblk_>
+
+<zqblk_><zqa_>zqbmo_ 4 — 뷁뷁 뷁뷁 뷁뷁 34뷁 뷁뷁 뷁뷁뷁(zqbvl_ 만)</zqa_>
+
+뷁 뷁뷁뷁 뷁뷁뷁 뷁뷁 뷁뷁 뷁 뷁뷁뷁 뷁 뷁 뷁뷁뷁뷁 뷁뷁뷁뷁. `zqbvm_` 이 뷁뷁뷁 뷁뷁뷁 뷁뷁 뷁뷁뷁 뷁뷁뷁 뷁 뷁뷁 뷁뷁뷁뷁뷁(뷁뷁뷁 뷁뷁뷁뷁 `zqlb_-zqmk_` 가 뷁뷁).
+zqbvo_: 뷁뷁뷁 뷁 뷁뷁뷁 뷁뷁 뷁뷁뷁뷁뷁 `zqbvq_` 이 1 뷁뷁.
+
+```
+34 뷁뷁, zqbvq_ 뷁뷁 = 0, zqlb_-zqmk_ 0뷁
+63601   zqbvm_=49 zqbvq_=0 zqbvu_=0
+1992381 zqbvm_=48 zqbvq_=0 zqbvu_=0
+1998434 zqbvm_=34 zqbvq_=0 zqbvu_=1
+2232548 zqbvm_=11 zqbvq_=0 zqbvu_=1
+2568789 zqbvm_=21 zqbvq_=0 zqbvu_=14
+```
+`zqbvu_` 은 뷁뷁 뷁뷁뷁 뷁뷁 뷁뷁 뷁(뷁뷁 zqblb_ 뷁뷁 뷁뷁)뷁뷁 뷁뷁 뷁뷁 뷁뷁 뷁뷁뷁뷁.
+
+</zqblk_>
+
+<zqblk_><zqa_>zqbmo_ 5 — zqblj_</zqa_>
+
+뷁뷁뷁 뷁뷁뷁 뷁뷁 뷁뷁뷁뷁 뷁뷁 뷁뷁뷁뷁뷁 zqblz_ 을 뷁뷁뷁뷁 뷁뷁 뷁뷁뷁뷁 뷁뷁 뷁뷁뷁뷁뷁. 뷁뷁 뷁 뷁 뷁뷁 zqblb_ 에서 422/500 이 뷁뷁뷁뷁뷁뷁 뷁뷁뷁뷁뷁.
+
+</zqblk_>
+
+<zqblk_><zqa_>zqbvv_</zqa_>
+
+- zqbkj_ 1: 뷁뷁 뷁뷁
+
+</zqblk_>

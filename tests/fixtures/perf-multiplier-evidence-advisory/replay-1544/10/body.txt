@@ -1,0 +1,72 @@
+## zqa_
+
+`zqkuz_-zqkva_-zqkvb_-zqkvj_` is zqkvk_ zqkb_ a **zqkvl_ zqkva_** (zqq_ zqkvm_ zqbv_
+zqkvo_ zqbla_ zqkvq_ zqbv_ zqkvu_ zqbla_ as a zqkvv_, e.g. `zqkvz__id` -> `zqkza__zqkvz__id`). zqkzb_
+zqbv_ zqkva_ *zqkzj_* zqbv_ zqkzk_ zqva_, so zqbv_ zqbaj_ zqjo_ zqba_ go zqkzl_, zqko_ zqblq_ of zqbv_
+zqkzm_ zqkzo_ zqkzq_ zqkzu_ zqkzv_. zqkzz_ zqbv_ zqzz_.
+
+## zqlaa_
+
+zqbv_ zqkuz_ zqlab_ zqkzm_ zqlaj_ (`zqkub_.md`, "zqlak_ is zqblj_"). zqmz_ 3 zquu_:
+
+> zqbv_ zqkvu_ zqbla_ zquv_ zqkkq_ zqlal_ in zqbv_ zqlam_ zqlao_ (`zqbao_ zqbja_ -n --zqlaq_-zqlau_`),
+> zqbk_ at zqlav_ zqq_ zqlaz_ zqql_ zqlb_ zqlba_ zqlbb_.
+
+`zqkoa_.py:199` zqlbj_ it as a zqlbk_ zqkvv_ zqlbl_:
+
+```zqkaz_
+["zqbao_", "zqbja_", "-n", "--zqlaq_-zqlau_", zqbla_],
+```
+
+`--zqlaq_-zqlau_` zqlab_ no zqlbm_ zqjjk_, so zqlu_ zqql_ zqlbo_ zqbv_ **zqkvo_** zqbla_ zqlbq_
+zqlbu_ zqbv_ **zqkvu_** zqq_. zqbv_ zqlbv_ zqlbz_ zqlja_ zqljb_ as zqkvj_ of zqljj_ zqljk_ zqkva_.
+
+## zqljl_
+
+zqkva_ a zqljm_ `zqjlk__id` -> `zqjlu__zqjlk__id` zqljo_ a zqljq_ of zqbom_, zqlju_ zqbma_
+of zqljv_, zqko_ zqkql_. zqbv_ zqbaj_ zqljz_, zqko_ zqbv_ zqkzk_ zqmk_ it zqlka_ zqlkb_ zqlbz_ zquq_
+zqlkj_ zqlkk_ zqbv_ zqkvo_ zqlkl_:
+
+```
+$ zqbao_ zqbja_ -n --zqlaq_-zqlau_ 'zqjlk__id' -- zqkma_/to/zqkok_.py
+zqkma_/to/zqkok_.py:12:    zqjlu__zqjlk__id: zqlkm_
+```
+
+zqqb_ zqkuz_ on a zqlko_-zqlkq_ 4-zqlku_ zqkvb_ (zqkzk_ zqva_ is zqlkv_-zqlkz_):
+
+```
+zqlla_: zqkva_ zqkvb_ zqllb_ (4x): 'zqjlk__id' -> 'zqjlu__zqjlk__id' - 950 zqkzk_(s) in zqlam_ zqlao_
+```
+
+## zqlla_ zqbv_ zqkzq_ zqkzu_ do zqlb_ zqllj_
+
+- **(a) zqllk_ zqbv_ zqkvb_** - zqbv_ zqkvb_ *zqlll_* zqllk_. zqllm_ zqllo_ zqbom_ zqllq_ zqllo_
+  zqllu_ of zqbv_ zqkvo_ zqbla_, zqllv_ zqbv_ zqkvv_ zqlbl_ zqllz_ as zqllo_ zqkvj_.
+- **(b) zqlma_ zqkvj_ zqlbb_** - zqlmb_ zqlmj_ zqlmk_ zqbv_ zqlbz_ zqlml_ zqzm_, zqlmm_ zqlu_
+  zqlmo_ zqlmq_ in zqbv_ zqlao_ (950 zqlmu_, zqlmv_ zqlmz_ in a zqkba_ zqloa_ zqjbv_).
+- **(c) zqom_ zqbv_ zqkql_** - zqbv_ zqkvj_ zqlja_ zqlb_ zqlkq_ zqko_ zqlob_ zqba_ zqloj_ of zqbv_ zqmj_,
+  so zqlok_ is zqlol_ to zqom_ zqqm_.
+
+zqbv_ zqbvq_ zqkma_ is zqbv_ zqlom_ zqbaa_, zqjbz_ at `zqkoa_.py:251` from `os.zqloo_` of zqbv_ zqzz_
+zqmv_. An zqbz_ zqloq_ zqlou_ zquq_ from zqlov_ a zqloz_ zqkku_ (a `zqlqa_=1 zqbao_ zqkql_ ...` zqbua_
+zqlqb_ in zqbv_ zqlqj_ zqmv_, zqlb_ in zqbv_ zqzz_'s zqlqk_), so an zqbz_ zquq_ zqlql_ zqkl_ zqlab_
+no in-zqlqm_ zqlqo_ zqqm_ zqko_ zqlab_ to zqlqq_ zqbv_ zqkql_ zqlqu_ to zqbv_ zqlqv_.
+
+## zqlla_ zqlqz_ zqlua_ zqlub_ a zqluj_ zqluk_
+
+zqlul_ to a zqlbm_-zqjjk_ zqlum_ (`zqbao_ zqbja_ -nw`, or a zqjjk_ zqluo_) zqko_ zqluq_ zqbv_
+zqlkq_ zqluu_ from zqbv_ zqluv_ zqlmb_ zqluk_ zqkl_ zqluz_. It zqlk_ zqlb_ zqlva_ zqbv_ zqzz_'s zqlvb_:
+zqbv_ zqkzk_ zqlvj_ zquv_ zqloq_ zqlvk_ a zqlvl_ zqlvm_ zqkva_ from an zqlmo_
+zqlvo_ zquq_ zqlvq_ to zqlvu_ zqbv_ zqlkl_, zqko_ a zqlvv_-zqlbm_ zqbla_ zqlvz_ a zqlza_
+zqkzk_ zqmk_ zqlzb_ zqlqo_. zqbv_ zqjaz_-zqluk_ zqlzj_ zqlzk_ zqbv_ zqzz_ zqkkq_ to zqlzl_ is zqlzm_
+zqlzo_ by zqbza_ zqlub_ by an zqkvk_ zqkql_-zqlzq_ zqbaj_.
+
+If zqbv_ zqzz_ is zqlzu_ zqlzv_, zqbv_ zqlzz_ zqluk_ is zqbv_ zqlbm_-zqjjk_ zqlum_ zqlmm_ zqluq_
+zqlkq_ zqluu_, zqko_ zqbv_ zqkzq_-zqmaa_ zqmk_ in `zqkub_.md` zqmab_ zqjaj_ zquq_ zqbv_ zqlom_ zqbaa_ is
+zqlqv_-zqoq_.
+
+## zqzk_
+
+- `zqkqo_/zqmaj_-zqbaj_/zqkuz_-zqkva_-zqkvb_-zqkvj_/zqkub_.md`
+- `zqkqo_/zqmaj_-zqbaj_/zqkuz_-zqkva_-zqkvb_-zqkvj_/zqkoa_.py:199,251`
+- zqmak_ in #556; zqkjm_ zqmal_ in #603

@@ -1,0 +1,69 @@
+$(zqjkk_ <<'zqjkl_'
+### 뷁뷁뷁
+
+🟠 zqjkm_ - 뷁뷁 뷁뷁 뷁뷁
+
+### 뷁뷁
+
+zqjko_
+
+### 뷁뷁 뷁뷁
+
+#### 뷁뷁
+
+뷁뷁뷁뷁 뷁뷁뷁뷁 뷁뷁뷁 뷁뷁 뷁뷁 zqbkv_(`zqbvl_ zqbjm_://zqjkq_.zqjku_.zqbjo_/v1/zqjkv_/zqjkz_`)의 뷁뷁뷁 뷁뷁뷁뷁뷁 뷁뷁뷁뷁뷁.
+
+- 1뷁 2026-10-23: 뷁뷁뷁뷁 뷁뷁뷁 뷁뷁뷁 뷁뷁 뷁뷁뷁 뷁뷁 뷁 뷁 뷁뷁. 뷁뷁 뷁뷁 뷁뷁 뷁뷁 뷁뷁 뷁뷁
+- 2뷁 2026-11-30: zqbkv_ 뷁뷁 뷁뷁. 뷁뷁 뷁 뷁뷁
+
+뷁뷁 뷁뷁뷁뷁뷁뷁·뷁뷁뷁 뷁뷁뷁뷁뷁 뷁뷁뷁 이 zqbkv_를 뷁뷁뷁뷁뷁. 2026-11-30 뷁뷁 뷁뷁뷁 뷁뷁뷁뷁뷁.
+
+| # | 뷁뷁 | 뷁뷁 | 뷁뷁 | 뷁뷁 뷁 뷁뷁 |
+|---|---|---|---|---|
+| 1 | zqbmk_-zqjla_-zqjlb_ | `zqjlj_/zqjlk_/ad/zqjku__zqjll_/zqjlm_.py:129` | 뷁뷁 뷁뷁뷁 zqjlk__zqjlo_·뷁뷁뷁 | 뷁뷁 뷁뷁 뷁뷁 |
+| 2 | zqbmk_-zqjla_-zqjlb_ | `zqjlj_/zqjlk_/ad/zqjku__zqjlq_/zqjlm_.py:139` | 뷁뷁 뷁뷁뷁 zqjlk__zqjlo_·뷁뷁뷁 | 뷁뷁 뷁뷁 뷁뷁 |
+| 3 | zqbmk_-zqjla_-zqjlb_ | `zqjlj_/zqjlk_/v2/zqjlu__zqjlk_/zqjlm_.py:595, 647` | 뷁뷁뷁 뷁 뷁뷁 뷁뷁뷁 뷁뷁 | 뷁뷁뷁 뷁뷁 |
+| 4 | zqbmk_-zqjlv_-zqjlz_ | `zqjlz_/zqbmk_/zqjma_/zqjlk_/zqjaq_.py:199` | 뷁뷁뷁뷁뷁 뷁뷁 뷁뷁뷁 뷁뷁 | 뷁뷁 뷁뷁뷁 뷁뷁 뷁뷁뷁 뷁뷁 |
+| 5 | zqbmk_-zqjlv_-zqjlz_ | `zqjlz_/zqbmk_/zqjma_/zqjlu__zqbob__zqjmb_/zqjmj_.py:474` | 뷁뷁뷁뷁 뷁뷁뷁 뷁뷁 | 뷁 뷁뷁뷁뷁 뷁뷁 → 뷁뷁뷁뷁 뷁뷁 뷁뷁 뷁뷁 |
+
+뷁뷁 뷁뷁뷁 뷁뷁뷁 뷁뷁뷁 뷁뷁(zqjmk_ 뷁뷁)은 이 zqbkv_를 뷁뷁뷁뷁 뷁뷁 뷁뷁뷁 뷁뷁뷁뷁.
+
+#### 뷁뷁 뷁뷁
+
+뷁뷁뷁뷁 뷁뷁 뷁뷁 뷁뷁 zqbkv_(`zqbvl_ zqbjm_://zqjkq_.zqjku_.zqbjo_/v1/zqjkv_/zqjml_`)의 `zqbla__zqjmm__id` 로 뷁뷁뷁뷁, 2026-11-30 뷁뷁뷁뷁 뷁뷁 뷁뷁·뷁뷁뷁·뷁뷁 뷁뷁·뷁뷁뷁뷁 뷁뷁뷁 뷁뷁 뷁뷁뷁뷁뷁.
+
+뷁뷁뷁뷁뷁뷁 뷁뷁 뷁뷁뷁 뷁뷁 zqjml_ 로 뷁뷁뷁뷁 뷁뷁뷁뷁(zqbmj_/zqbmk_-zqjlv_-zqjlz_#7456, `zqjlz_/zqbmk_/zqjma_/zqjku__zqjll_/zqbkv_.py` 의 `zqbvl__zqjkv__zqbla__zqjmo_`). 이 뷁뷁뷁 뷁뷁뷁 뷁뷁뷁뷁 뷁뷁뷁뷁뷁.
+
+### 뷁뷁 뷁뷁
+
+1. 뷁뷁뷁뷁뷁뷁 뷁뷁 뷁뷁뷁뷁뷁 뷁뷁뷁 뷁뷁 뷁뷁뷁뷁뷁 뷁뷁뷁뷁뷁
+2. zqjlb_ 가 `zqbvl_ zqbjm_://zqjkq_.zqjku_.zqbjo_/v1/zqjkv_/zqjkz_` 를 뷁뷁뷁뷁
+3. 2026-11-30 뷁뷁 이 뷁뷁뷁 뷁뷁뷁 뷁뷁뷁뷁 뷁뷁뷁 뷁뷁뷁뷁
+
+### 뷁뷁 뷁뷁
+
+- [ ] 뷁뷁 뷁 뷁뷁: 뷁뷁 뷁뷁뷁뷁 뷁뷁뷁뷁 zqjml_ 와 zqjkz_ 를 뷁뷁뷁 `zqbla__zqjmm__id` 뷁뷁 뷁뷁뷁뷁 뷁뷁 (뷁뷁뷁 뷁뷁 뷁뷁뷁 뷁뷁뷁 뷁뷁뷁 뷁뷁)
+- [ ] zqbmk_-zqjla_-zqjlb_: `zqjku__zqjll_/zqjmq_.py`·`zqjku__zqjlq_/zqjmq_.py` 의 `zqbvl__zqjkv__zqjmm__zqjmo_` 를 zqjml_ 뷁뷁뷁 뷁뷁, 뷁뷁 뷁뷁뷁뷁뷁 `zqjmu_`·`zqjmu__zqjmv_` 뷁뷁
+- [ ] zqbmk_-zqjla_-zqjlb_: 뷁 zqjlm_ 의 뷁뷁뷁 뷁뷁뷁 `zqbla__zqjmm__id` 로 뷁뷁뷁
+- [ ] zqbmk_-zqjlv_-zqjlz_: `zqjlk_/zqjaq_.py` 의 뷁뷁뷁뷁뷁 뷁뷁뷁 `zqbvl__zqjkv__zqbla__zqjmo_` 로 뷁뷁
+- [ ] zqbmk_-zqjlv_-zqjlz_: `zqjmj_.py` 의 뷁뷁뷁뷁뷁 zqjkz_ 뷁뷁 뷁뷁 (뷁뷁뷁뷁 뷁뷁 뷁 뷁뷁)
+- [ ] 뷁뷁 뷁뷁 뷁뷁뷁 뷁뷁 뷁뷁 (뷁뷁뷁 뷁뷁 뷁 → `zqbla__zqjmm__id` 뷁뷁 뷁뷁 뷁뷁)
+
+### 뷁뷁 뷁뷁 · 뷁뷁
+
+- **뷁뷁뷁뷁 `zqbla__zqjmm__id` 를 뷁뷁뷁 뷁뷁뷁뷁뷁.** zqjml_ 뷁뷁뷁뷁 `zqjmu_` 뷁뷁뷁 뷁뷁뷁뷁. 뷁뷁뷁뷁 뷁뷁뷁 뷁뷁뷁 뷁뷁뷁뷁 뷁뷁 뷁뷁뷁뷁 뷁뷁 뷁뷁뷁 뷁뷁뷁뷁뷁, 뷁뷁 뷁뷁뷁뷁뷁 채택뷁뷁 뷁뷁뷁뷁.
+  - zqjmz_ 뷁뷁: 뷁뷁뷁뷁 뷁뷁 뷁뷁 뷁뷁 13뷁 뷁 12뷁뷁 뷁뷁뷁 뷁뷁뷁(뷁뷁뷁뷁뷁 7/8, 뷁뷁뷁 5/5, 1뷁뷁 뷁 뷁). 뷁뷁뷁뷁뷁뷁 2026-03 뷁뷁, 뷁뷁뷁뷁 2026-08 뷁뷁뷁뷁 뷁뷁 뷁뷁 뷁뷁 뷁뷁 뷁뷁뷁 뷁뷁 뷁뷁뷁 뷁뷁뷁뷁뷁뷁. 뷁뷁뷁 뷁뷁뷁 147뷁뷁 뷁뷁뷁 뷁뷁뷁 0뷁뷁뷁뷁.
+  - 뷁뷁 뷁뷁 뷁뷁뷁뷁 뷁뷁뷁 뷁뷁, 뷁뷁 뷁뷁 뷁뷁 뷁뷁뷁 뷁뷁뷁뷁 뷁뷁 ID로 뷁뷁뷁뷁뷁.
+- **`zqjoa__zqjob__zqjmu_` 뷁뷁뷁뷁 뷁뷁뷁뷁 뷁뷁뷁뷁.** zqjmk_ 뷁뷁뷁뷁뷁뷁 뷁뷁뷁 이 뷁뷁뷁 뷁뷁뷁뷁 뷁뷁 뷁뷁 뷁뷁뷁 뷁뷁뷁뷁뷁(`zqboa_/zqbob_/zqjku__zqjll_/zqjaq_/zqbbb_.ts:17`). 뷁뷁뷁뷁뷁 zqjoj_ 뷁뷁뷁뷁뷁 이 뷁뷁 뷁뷁 뷁뷁 뷁뷁뷁 뷁뷁뷁 뷁뷁뷁 뷁뷁뷁 뷁뷁 뷁뷁뷁뷁뷁.
+- 2026-11-30 뷁뷁 `zqjoa__zqjob__zqjmu_` 뷁뷁뷁뷁 뷁뷁 뷁뷁뷁뷁뷁 뷁뷁뷁 뷁뷁뷁 뷁뷁뷁 뷁뷁 뷁뷁뷁뷁 뷁뷁뷁뷁뷁.
+
+### 📦 뷁뷁 뷁뷁뷁뷁뷁 (뷁뷁)
+
+- [x] zqbmk_-zqjlv_-zqjlz_ (zqjlv_ - 뷁뷁 뷁뷁)
+- [x] zqbmk_-zqjla_-zqjlb_ (뷁뷁 zqbkv_)
+
+### 뷁뷁
+
+- [뷁뷁뷁뷁 뷁뷁 > zqjok_ zqbkv_ - 뷁뷁뷁뷁뷁뷁뷁뷁](zqbjm_://zqjol_.zqjku_.zqbjo_/zqb_/ko/zqjkv_-zqjaq_/zqjok_-zqbkv_)
+zqjkl_
+)

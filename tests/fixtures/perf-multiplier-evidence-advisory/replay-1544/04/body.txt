@@ -1,0 +1,32 @@
+## 뷁뷁
+
+뷁뷁 뷁뷁(zqbvz_/zqbza_ zqbzb_)가 zqbjk_ 뷁뷁뷁 뷁뷁 뷁뷁뷁, 뷁 뷁, zqbzj_ 뷁뷁뷁 뷁뷁뷁뷁 뷁뷁뷁 뷁뷁뷁.
+
+#6911 (zqbzk_-zqbzj_ zqbzl_ 400K) 을 #6917 로 뷁뷁뷁 뷁뷁뷁 "뷁뷁뷁 뷁 뷁뷁뷁 뷁뷁" 뷁뷁뷁뷁. zqbzm_ 뷁뷁 뷁뷁(zqbjm_://zqbmj_.zqbzm_.zqbjo_/zqbzo_/C0A11zqbzq_27K/p1790135132792199)는 뷁뷁 뷁뷁 뷁뷁, 뷁뷁뷁 뷁뷁, 400K 뷁뷁뷁, 뷁뷁 뷁뷁뷁 뷁뷁뷁뷁뷁. 이 뷁뷁뷁 뷁 뷁 뷁뷁뷁뷁뷁.
+
+### 뷁뷁 (2026-09-23 뷁뷁)
+
+| 뷁뷁 | 뷁뷁 뷁뷁뷁뷁 뷁뷁 뷁뷁 |
+|---|---|
+| 뷁뷁 zqbzu_ · 뷁 뷁 · zqbzj_ 뷁뷁 | 뷁뷁. `zqbzv_-zqa_.zqbqv_` 뷁뷁뷁 `zqbzz_`, `zqjaa__zqjab_`, `pr_zqjaj_`, `zqjak__zqjal_`, `zqjak__zqjam__zqjao__at`, `zqjaq__zqjau_` 뷁 |
+| 뷁뷁 뷁뷁 | 뷁뷁. 9/15 뷁뷁 `pr-*` 뷁뷁 zqa_ 926뷁 뷁 84뷁 (9.1%) |
+| zqjav_ 뷁뷁 zqbza_ 뷁뷁 | 뷁뷁뷁. 뷁뷁 zqa_ 뷁뷁 117뷁 zqbmq_ 뷁뷁 (뷁뷁 59 · zqbjk_ 뷁뷁 14 · 뷁뷁 뷁뷁 44). zqjaz_ zqa_ 만 뷁뷁 뷁뷁 248뷁뷁 `zqjba_.zqbqv_` 이 뷁뷁 뷁뷁 뷁뷁 |
+
+- zqjbb_ zqjbj_ 는 #5187 뷁뷁 zqbzb_ 뷁뷁뷁 뷁뷁뷁 뷁뷁뷁뷁, 뷁뷁뷁 zqbzb_ 뷁뷁 `zqjbk_` 에서 뷁뷁 뷁뷁뷁.
+- zqbza_ 뷁뷁뷁 `zqjba_.zqbqv_` 을 뷁뷁 뷁뷁뷁뷁. 뷁뷁뷁 `zqjbl_` 의 뷁뷁뷁뷁 `zqbvz_.go:678` 뷁뷁뷁뷁, `RunWorkerEgressFromReview` (`zqjbm__zqjbo_.go:206`) 는 뷁뷁 zqjba_ 뷁뷁 zqjbo_ 만 뷁뷁뷁.
+
+## 뷁뷁 뷁뷁
+
+- [ ] `zqbzv_-zqa_.zqbqv_` 에 zqbzu_ 뷁뷁: zqjbq_ / zqjbu_ / zqjbv_ zqjbz_ / zqjbv_ zqjja_ 뷁뷁, `zqjjb__zqjjj_`, `zqbzj__zqjjk_` 뷁뷁뷁 뷁. zqbza_ 뷁뷁뷁 뷁 뷁뷁뷁 zqbjk_ 뷁뷁뷁 뷁뷁 뷁 뷁뷁뷁 뷁 뷁뷁뷁뷁 `zqbkl_` 뷁뷁뷁 뷁뷁뷁 뷁뷁뷁뷁뷁. `zqjjl_` 을 뷁뷁뷁 `zqjjm_()` 를 뷁뷁뷁뷁.
+- [ ] zqbza_ 뷁뷁뷁 `zqjba_.zqbqv_` 을 뷁뷁 뷁뷁뷁. zqbvz_ 뷁뷁 뷁뷁뷁 뷁뷁 뷁뷁(`zqjjo_`, `zqjjq_`, `zqjbo__ok`, `zqjab_`)를 zqjbo_ 뷁뷁뷁뷁 뷁뷁뷁 뷁뷁 뷁뷁뷁뷁뷁.
+- [ ] 뷁뷁 뷁뷁뷁 zqjju_ 가 `zqbkl_` 뷁뷁뷁뷁 `zqbzu_` · `zqjjb__zqjjj_` 를 뷁뷁뷁뷁뷁 뷁뷁뷁뷁뷁 (뷁뷁 2.1.280 뷁뷁뷁 뷁뷁, 뷁뷁 뷁뷁뷁 뷁뷁뷁 뷁뷁뷁).
+
+## 뷁뷁뷁 뷁뷁 뷁뷁 (이 뷁뷁 뷁뷁 뷁뷁)
+
+- 뷁뷁 zqbza_ 의 PR 뷁뷁뷁 뷁뷁 뷁뷁 뷁뷁뷁 뷁뷁 뷁뷁뷁뷁. zqbzb_ 뷁뷁뷁 뷁뷁 뷁뷁뷁 뷁뷁뷁뷁 뷁뷁 뷁뷁(`zqbza_.go:418`) `zqjjv_ zqbza_ zqa_ --zqjjz_` 가 뷁뷁 뷁뷁뷁 뷁뷁뷁뷁. 뷁뷁 뷁뷁 뷁뷁 PR 은 뷁뷁 170뷁, 9/13 뷁뷁 뷁뷁뷁뷁 1뷁뷁뷁뷁.
+- `zqjka_` (`zqbza__zqjkb_.go`) 는 zqjkj_ 뷁뷁뷁 zqbzu_ 를 뷁뷁뷁 zqbvk_ id 로 뷁뷁뷁 뷁뷁뷁뷁 뷁뷁뷁뷁. 뷁뷁 zqjbj_ 1뷁뷁뷁 zqjkj_ 2492뷁 뷁 뷁뷁 id 1321뷁뷁뷁뷁뷁 뷁뷁 뷁뷁 뷁 2배 뷁뷁뷁 뷁뷁뷁뷁 뷁뷁뷁뷁 (zqbmu_-zqbqv_ 뷁뷁뷁뷁뷁 뷁뷁뷁).
+
+## 뷁뷁 뷁뷁
+
+- [ ] 뷁뷁 zqbvz_ · zqbza_ 뷁뷁뷁 S3 뷁뷁뷁뷁뷁 뷁 뷁뷁뷁 뷁뷁 뷁 뷁뷁 (뷁뷁 zqbzb_ 뷁뷁 1뷁 뷁뷁뷁뷁 뷁뷁)
+- [ ] 뷁뷁 뷁뷁뷁: 뷁뷁 `zqbkl_` 뷁뷁뷁 뷁뷁, `zqbzj__zqjjk_` 뷁뷁, 뷁뷁뷁 zqa_ 뷁뷁 뷁뷁

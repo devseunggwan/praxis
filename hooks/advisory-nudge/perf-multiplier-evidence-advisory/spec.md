@@ -60,15 +60,24 @@ body text" means the body of ONE invocation (see
 
 ### (1) Perf multiplier notation OR lever verdict
 
-- Multiplier: `3x` / `3.06x` / `3×` (digit + `x`/`×`), `1.76배` (Korean
-  multiplier suffix), a timing pair `49m -> 12m` / `49분 → 12분`
-  (unit-tagged number, arrow, unit-tagged number), the prose form `from 49m
-  to 12m`, or a percentage tied to a direction word within a 24-char window
-  either side (`faster`/`slower`/`regression`/`improvement`/`빠름`/`느림`/
-  `향상`/`저하`) — a bare `%` with no direction word does not count (avoids
-  firing on unrelated percentages like disk usage).
-- Lever verdict: KO substrings `채택` / `개선` / `역효과`, or the EN word
-  `lever` (word-boundary, case-insensitive).
+- Multiplier: `3x` / `3.06x` / `3×` (digit + `x`/`×`) or `1.76배` (Korean
+  multiplier suffix), with the suffix on the number's own line and a
+  performance context within 40 chars either side (issue #1544). The context
+  is a performance word (`speed`, `faster`, `slower`, `improv`, `regress`,
+  `latency`, `throughput`, `runtime`, `개선`, `향상`, `저하`, `빠르`,
+  `빨라`, `느려`, `느리`, `속도`, `성능`) or a timing (`8 ms`, `5s`, `12초`,
+  `3분`), which keeps a ratio of two timings. Without one, `PUT 200 ×2` or
+  `약 2배 과대` is a count, not a speed factor.
+- A timing pair `49m -> 12m` / `49분 → 12분` (unit-tagged number, arrow,
+  unit-tagged number), the prose form `from 49m to 12m`, or a percentage tied
+  to a direction word within a 24-char window either side (`faster`/`slower`/
+  `regression`/`improvement`/`빠름`/`느림`/`향상`/`저하`) — a bare `%` with
+  no direction word does not count (avoids firing on unrelated percentages
+  like disk usage). These need no further context.
+- Lever verdict: the body names a lever (the EN word `lever`, word-boundary
+  and case-insensitive, or KO `레버`) and gives it a verdict (KO substrings
+  `채택` / `개선` / `역효과`). Either alone is not a verdict: `채택` also
+  means "adopt a label", and `lever` also appears as a metaphor (issue #1544).
 
 ### (2) NO controlled-timing artifact in the same body
 
@@ -154,12 +163,36 @@ the `Stop`-lane concern already covered by `proposal-premise-gate`
 | body with `3x` but also a `$ hyperfine ./bench -> wall-clock: 12.4s` line | timing artifact present |
 | body with a bare `73%` and no direction word nearby | no direction word — likely an unrelated percentage |
 | body with `lever` discussed but no multiplier and no verdict token | condition (1) not met |
+| body with `채택` / `개선` / `역효과` but no `lever` / `레버` | a verdict word alone is not a lever verdict |
+| `PUT 200 ×2`, `약 2배 과대`, `(4x)` with no performance word or timing within 40 chars | a count multiplier, not a speed factor |
+| a number at a line end and `X-…` / `배` at the start of the next | the suffix must sit on the number's line |
 | `--body-file` target does not exist on disk | no body text extractable |
 | a chain where EVERY `gh` body carries its own timing artifact | each body satisfies the pass condition independently |
 | `gh issue create` appearing only inside a quoted string (`echo "… gh issue create …"`) | no `gh` invocation is actually run |
 | a non-`gh` command's `--body` (e.g. `curl --body …`) with no `gh` deliverable in the command | the body belongs to no deliverable write |
 | non-Bash tool call | out of scope |
 | malformed JSON stdin | fail-open |
+
+## Known false positives
+
+| Input | Why it still fires |
+| --- | --- |
+| A configuration change written as a timing pair (`1h→6h`, `2시간 → 2시간 30분`) | same shape as the #850 case `49m -> 12m`, which has no performance word either; a context rule would silence the motivating case |
+| A count with its interval (`retry 3x every 5s`) | the timing that keeps a ratio of two timings also sits next to a retry count |
+
+## Replay fixtures
+
+`tests/fixtures/perf-multiplier-evidence-advisory/replay-1544/NN/body.txt`
+holds the 11 fires #1538 replayed, pseudonymized. ASCII words of three or more
+letters outside the hook's own vocabulary became aliases (`zqab_`, drawn from
+letters that spell no word or unit the hook matches); a word holding a
+performance word kept its spelling. In Hangul, the hook's keywords, a unit
+right after a number and a particle right after a unit or keyword stayed, and
+every other syllable became `뷁`. Digits and punctuation stayed. A fixture was
+accepted only when the multiplier, lever-verdict and timing-artifact checks
+and the final verdict gave the same result as its real body under the base and
+the new impl. 06 and 08 (configuration timing pairs) still warn; the other 9
+were false positives and are silent.
 
 ## Fail-open contract
 
