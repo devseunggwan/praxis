@@ -1,0 +1,105 @@
+### zqa_ — `3c0zqjaj_06` (zqk_ 1)
+
+| # | zqjak_ | zqzu_ |
+|---|---|---|
+| 0 | 뷁뷁 뷁뷁뷁 zqjal_ 뷁뷁 zqjam_ 뷁뷁 `zqblq__zqxb__zqjao__zqjaq__zqblu_` 가 뷁뷁 (뷁함이 뷁뷁뷁뷁 zqjam_ 뷁뷁뷁 뷁뷁 뷁뷁) | PASS(live) |
+| 1 | 뷁뷁 뷁뷁뷁 zqjau_ 12뷁뷁 zqjav_ zqjax_ 의 `zqjaz_-zqjba_` 뷁뷁뷁뷁뷁 `zqblq__zqxb__zqjao__zqjaq__zqblu_=400000` 이 뷁뷁뷁뷁 | PASS(mock) |
+| 2 | 이 zqzx_ 는 zqjbb_ 뷁뷁 뷁뷁뷁뷁 (뷁뷁 뷁뷁뷁 zqjbj_ zqjbk_ 2.1.272 뷁함) | PASS(mirror) |
+| 3 | 뷁뷁 뷁 뷁뷁 뷁뷁 zqjal_ zqjam_ 이 이 zqzx_ 를 뷁뷁 뷁뷁 | BLOCKED |
+
+<zqjbl_><zqjm_><b>zqjbm_ (4)</b> — 뷁뷁 뷁 zqjam_ zqzx_ 뷁뷁 · 400K 뷁뷁뷁 뷁뷁 뷁뷁 · zqjav_ zqjax_ 의 zqjbo_ zqjbq_ 뷁뷁 뷁뷁 뷁뷁 · 뷁뷁 뷁뷁 뷁뷁 뷁뷁</zqjm_>
+<br>
+
+- 뷁뷁 뷁 zqjam_ zqzx_ 뷁뷁 — 뷁뷁 뷁뷁뷁 뷁뷁뷁 뷁뷁뷁뷁 뷁뷁뷁 뷁뷁. 뷁뷁·뷁뷁 뷁 뷁 zqjam_ 에 뷁 0 과 뷁뷁 뷁뷁뷁 뷁뷁 `zqqk__zqjbu_:zqjbv_` 를 뷁뷁뷁 뷁뷁뷁.
+- 400K 뷁뷁뷁 뷁뷁 뷁뷁 — 뷁 뷁뷁뷁뷁 zqjaq_ 가 뷁뷁 뷁뷁뷁 뷁뷁뷁뷁뷁 측정뷁뷁 뷁뷁. 로컬 run 은 뷁뷁 뷁뷁 뷁뷁뷁 뷁뷁 뷁뷁뷁 뷁뷁 뷁뷁뷁 뷁뷁.
+- zqjav_ zqjax_ 의 zqjbo_ zqjbq_ 뷁뷁 — 뷁뷁(뷁 1)만 뷁뷁. zqjbq_ 0.3.278 이 뷁뷁뷁 zqblq_ 가 zqzx_ 를 뷁뷁뷁뷁 실행뷁 뷁뷁 뷁뷁.
+- 뷁뷁 뷁뷁 뷁뷁 뷁뷁 — zqjal_ run 은 뷁뷁 뷁뷁뷁뷁 뷁뷁뷁뷁 뷁뷁(zqjbx_ 뷁뷁뷁 `zqjbz__zqjja_.go` 의 zqjbz_-zqbjk_ 뷁뷁뷁뷁 뷁뷁) 뷁뷁뷁 뷁뷁뷁뷁 뷁뷁.
+
+</zqjbl_>
+
+<zqjbl_><zqjm_>zqbb_ 0 — 뷁뷁 뷁뷁뷁 zqjal_ 뷁뷁 zqjam_ 뷁뷁 zqzx_ 가 뷁뷁</zqjm_>
+<br>
+
+zqbzz_ 뷁뷁뷁뷁뷁뷁 뷁뷁 뷁뷁뷁 뷁뷁뷁 zqjaz_ zqjam_ 의 `zqjaz_-zqjba_` 뷁뷁뷁뷁 zqzx_ 뷁뷁뷁 뷁뷁 뷁뷁뷁. 이 PR 이 뷁뷁뷁 뷁뷁뷁뷁 뷁뷁뷁 뷁뷁 뷁뷁뷁뷁뷁뷁 뷁함의 뷁뷁뷁뷁뷁.
+
+```
+$ zqxz_ -o zqjjb_; J=$(zqjjj_ --zqjjk_ zqjjl_-zqbzz_ -n zqjaz_ zqjjm_ zqjjo_ --zqjjq_-by=.zqjju_.zqjjv_ -o zqjjx_ | grep -E '^zqjam_.zqbkv_/zqjaz_-' | zqjjz_ -1); zqlm_ "zqjka_=$J"; zqjjj_ --zqjjk_ zqjjl_-zqbzz_ -n zqjaz_ zqjjm_ "$J" -o zqjkb_ | jq -c '{zqjkj_:.zqjju_.zqjjv_, zqjkk_:(.zqkk_.zqjkl_.zqkk_.zqjkm_[]|zqjko_(.zqjjx_=="zqjaz_-zqjba_")|.zqjkk_), zqzx_:[.zqkk_.zqjkl_.zqkk_.zqjkm_[]|zqjko_(.zqjjx_=="zqjaz_-zqjba_")|.zqzx_[]?.zqjjx_]}'
+zqjka_=zqjam_.zqbkv_/zqjaz_-zqjkq_-6852
+{"zqjkj_":"2026-09-23T01:53:46Z","zqjkk_":"<zqjku_>/zqjaz_-zqjba_:zqjkv_-a6c506c","zqzx_":["zqjj__zqjkx__zqjkz_","zqjla__zqjlb__zqjlj_","zqjlk__zqjla__zqjlj_","zqjj__GIT_MIRROR_zqjll_","zqjj__GIT_MIRROR_zqjlm_","zqjlo__zqjjx_","zqjj__zqjaz__zqjlq__zqjlu_","zqjj__zqjlv__zqjlx_","zqjj__zqjal__zqjlz__zqjma_","GH_zqjlm_","GH_zqjmb__zqjlm_","GH_zqjlm__zqjmj__AT","zqblq__zqxb__zqjmk__zqjlm_","zqjj__zqjmb__zqjlm_","zqblq__zqjml_"]}
+```
+`# <zqjku_> zqjmm_ — zqjku_ 뷁뷁뷁트리 뷁뷁뷁(뷁뷁 id 뷁함)를 뷁뷁뷁뷁 뷁뷁`
+
+zqjmo_: zqzx_ 뷁뷁 뷁뷁뷁 `zqblq__zqxb__zqjao__zqjaq__zqblu_` 가 뷁뷁뷁뷁 뷁함이 뷁뷁 뷁뷁뷁.
+zqjmq_ zqjmu_: 뷁뷁 zqjam_ 에서 뷁뷁 뷁뷁 뷁뷁뷁 뷁뷁뷁 `zqjj__zqjkx__zqjkz_` 는 뷁뷁 뷁뷁뷁 뷁뷁뷁뷁.
+
+```
+$ zqxz_ -o zqjjb_; zqjjj_ --zqjjk_ zqjjl_-zqbzz_ -n zqjaz_ zqjjm_ zqjam_ zqjaz_-zqjkq_-6852 -o zqjkb_ | jq -c '[.zqkk_.zqjkl_.zqkk_.zqjkm_[]|zqjko_(.zqjjx_=="zqjaz_-zqjba_")|.zqzx_[]?.zqjjx_] | {n:zqjmv_, zqqk__zqjbu_:(zqjmx_("zqblq__zqxb__zqjao__zqjaq__zqblu_")!=zqjmz_), zqqk__zqjkx__zqjkz_:(zqjmx_("zqjj__zqjkx__zqjkz_")!=zqjmz_)}'
+{"n":15,"zqqk__zqjbu_":zqjoa_,"zqqk__zqjkx__zqjkz_":zqjbv_}
+```
+
+zqzx_ 가 뷁뷁 뷁뷁 뷁뷁: 뷁뷁(zqbk_://zqxb_.zqblq_.zqbm_/zqbqo_/en/zqjob_-zqjlb_)는 zqjoj_ 1M 뷁뷁 뷁뷁뷁 뷁뷁뷁뷁뷁 뷁 967K 뷁뷁뷁뷁 zqjaq_ 뷁뷁뷁 뷁뷁 뷁뷁.
+
+</zqjbl_>
+
+<zqjbl_><zqjm_>zqbb_ 1 — 뷁뷁 zqjau_ 과 zqjav_ zqjax_ 의 zqjba_ 뷁뷁뷁뷁뷁 zqzx_ 가 뷁뷁뷁뷁</zqjm_>
+<br>
+
+`zqjok_` 로 뷁뷁뷁 zqjol_ 에서 `zqjaz_-zqjba_` 뷁뷁뷁뷁 뷁뷁 zqzx_ 뷁뷁뷁 뷁뷁 함뷁 뷁뷁뷁 뷁뷁뷁뷁 테스트. 뷁뷁뷁뷁 zqjam_ 은 이 함뷁뷁 뷁뷁뷁뷁 뷁뷁 뷁뷁 뷁뷁뷁뷁뷁. 뷁뷁뷁 뷁뷁 뷁뷁뷁 뷁뷁 뷁뷁 뷁뷁뷁뷁뷁 mock.
+
+```
+$ go test ./zqjom_/preview/ -run 'zqjoo_' -v -zqz_=1 2>&1 | grep -E '^(=== RUN|--- (PASS|FAIL)|ok|FAIL|PASS)' | grep -vE '^=== RUN'
+--- PASS: zqjoq__zqjou_ (0.01s)
+--- PASS: zqjoq__zqjov_ (0.00s)
+PASS
+ok  	zqbl_.zqbm_/zqjb_/zqjj_-zqbzz_-zqjaa_/zqjox_/zqjom_/preview	0.473s
+```
+
+뷁뷁뷁 zqjau_ 뷁뷁 테스트 뷁, 뷁뷁뷁 뷁뷁뷁뷁 `999` 로 뷁뷁뷁 뷁 뷁뷁뷁뷁뷁(테스트가 뷁뷁 뷁뷁뷁 뷁뷁뷁뷁뷁) 뷁뷁뷁 뷁뷁 뷁뷁. 뷁뷁뷁뷁 테스트 뷁뷁뷁 뷁뷁뷁뷁.
+
+```
+$ go test ./zqjom_/preview/ -run 'zqjoo_' -v -zqz_=1 2>&1 | grep -cE '^\s+--- PASS'; zqjoz_ -i '' 's/zqjqa_: \\"400000\\"\\n"/zqjqa_: \\"999\\"\\n"/' zqjom_/preview/zqjal__zqjbu__zqzx__test.go && grep -n 'zqjqb_ =' zqjom_/preview/zqjal__zqjbu__zqzx__test.go; go test ./zqjom_/preview/ -run 'zqjoo_' -v -zqz_=1 2>&1 | grep -E '^(\s+)?--- FAIL' | wc -l; git zqjqj_ -- zqjom_/preview/zqjal__zqjbu__zqzx__test.go && git zqjqk_ --zqjql_
+12
+11:zqjqm_ zqjqb_ = "- zqjjx_: zqblq__zqxb__zqjao__zqjaq__zqblu_\n          zqjqa_: \"999\"\n"
+      14
+```
+
+`14` = zqjau_ 뷁뷁 테스트 12 + 뷁뷁 테스트 1 + zqjav_ zqjax_ 테스트 1. `git zqjqk_ --zqjql_` 뷁뷁뷁 뷁뷁 뷁뷁 뷁뷁됨.
+
+</zqjbl_>
+
+<zqjbl_><zqjm_>zqbb_ 2 — zqzx_ 가 zqjbb_ 뷁뷁 뷁뷁뷁뷁 (zqjbj_ zqjbk_ 2.1.272 뷁함)</zqjm_>
+<br>
+
+뷁뷁뷁 이 zqzx_ 가 zqjbb_ 에 뷁뷁뷁뷁뷁 뷁뷁뷁뷁 뷁뷁 뷁뷁뷁뷁 뷁뷁뷁뷁. zqjbb_ 가 뷁뷁 5개를 뷁뷁 100K 를 뷁뷁뷁 뷁뷁 뷁뷁뷁 zqzx_ 뷁뷁뷁 뷁뷁 로컬 `zqblq_ -p` 로 실행뷁뷁, zqjbb_ zqblz_(`zqjqo_/zqjbo_-*.zqjqq_`)에서 `zqjaq__zqjqu_` 를 뷁뷁. 뷁뷁 뷁뷁뷁 뷁뷁 로컬 재현이뷁뷁 mirror.
+
+```
+$ zqkm_ r in zqjqv_2_zqzx_ zqjqv_2_zqjqx_ zqjqv_3_zqjbj_; do S=$(jq -r .zqzv__id $r.zqjkb_); n=$(find ~/.zqblq_/zqjqz_ -zqxj_ "*$S*zqjqo_*" -zqjjx_ '*.zqjqq_' -zqjua_ zqjub_ {} + | grep -c '"zqjaq__zqjqu_"'); v=$(find ~/.zqblq_/zqjqz_ -zqxj_ "*$S*zqjqo_*" -zqjjx_ '*.zqjqq_' -zqjua_ zqjub_ {} + | grep -o '"zqjuj_":"[^"]*"' | zqjjq_ -u | tr '\n' ' '); zqlm_ "$r zqjaq__zqjqu_=$n $v"; zqjuk_
+zqjqv_2_zqzx_ zqjaq__zqjqu_=1 "zqjuj_":"2.1.280" 
+zqjqv_2_zqjqx_ zqjaq__zqjqu_=0 "zqjuj_":"2.1.280" 
+zqjqv_3_zqjbj_ zqjaq__zqjqu_=1 "zqjuj_":"2.1.272"
+```
+
+`zqjqv_2_zqzx_` / `zqjqv_3_zqjbj_` 은 `zqblq__zqxb__zqjao__zqjaq__zqblu_=100000`, `zqjqv_2_zqjqx_` 는 zqzx_ 뷁뷁. 2.1.272 는 뷁뷁 뷁뷁뷁 zqjbj_(`zqjox_/zqjaz_-zqjba_/zqjul_:302`) 과 뷁뷁 뷁뷁뷁뷁. zqjbj_ 뷁뷁 run 의 zqjaq_ 뷁뷁뷁(뷁뷁):
+
+```
+$ S=$(jq -r .zqzv__id zqjqv_3_zqjbj_.zqjkb_); find ~/.zqblq_/zqjqz_ -zqxj_ "*$S*zqjqo_*" -zqjjx_ '*.zqjqq_' | zqjum_ zqbqz_ f; do zqlm_ "== ${f##*/}"; grep -h '"zqjaq__zqjqu_"' "$f" | jq -c '{zqjuo_, zqjuj_, zqjuq_}'; zqjuk_
+== zqjbo_-a3e424cd58491bd1a.zqjqq_
+{"zqjuo_":"zqjaq__zqjqu_","zqjuj_":"2.1.272","zqjuq_":{"zqjuu_":"zqjao_","zqjuv_":67070,"zqjux_":73862, ... ,"zqjuz_":13868,"zqjva_":53202}}
+```
+`# 뷁뷁 — zqjvb_/zqjvj_ 의 zqjvk_ 뷁뷁뷁 ... 로 뷁뷁. 뷁뷁뷁 실행뷁 뷁뷁뷁뷁 jq -r .zqzv__id 뷁뷁 jq -c '{zqzv__id, is_zqbz_, zqjvl__zqjvm_}' zqjqv_3_zqjbj_.zqjkb_; 가 뷁뷁 뷁뷁뷁`
+
+</zqjbl_>
+
+<zqjbl_><zqjm_>zqbb_ 3 — 뷁뷁 뷁 뷁 zqjal_ zqjam_ 이 zqzx_ 를 뷁뷁뷁</zqjm_>
+<br>
+
+뷁뷁뷁 zqjam_ 뷁뷁뷁뷁 뷁뷁 뷁뷁뷁 뷁뷁뷁뷁 뷁뷁뷁 실행뷁 뷁 뷁뷁. 뷁 0 의 뷁뷁뷁 뷁뷁 `zqqk__zqjbu_:zqjoa_` 를 뷁뷁뷁뷁 뷁뷁 뷁뷁 뷁 뷁뷁뷁뷁, 뷁뷁 뷁 뷁뷁 뷁뷁뷁 `zqjbv_` 를 뷁뷁뷁뷁 이 뷁뷁 뷁뷁뷁.
+
+</zqjbl_>
+
+<zqjbl_><zqjm_>zqjvo_</zqjm_>
+<br>
+
+- zqk_ 1 — `3c0zqjaj_06`: 뷁뷁 검증
+
+</zqjbl_>
