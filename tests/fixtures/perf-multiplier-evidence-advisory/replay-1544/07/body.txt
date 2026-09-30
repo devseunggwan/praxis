@@ -1,0 +1,79 @@
+### zqqv_ — `5853512` (zqbkj_ 1)
+
+| # | zqbkk_ | zqbkl_ |
+|---|---|---|
+| 0 | 뷁뷁 뷁 뷁뷁뷁뷁 뷁뷁뷁뷁 뷁뷁뷁 `zqjvo_://` 로 뷁뷁뷁뷁 뷁뷁 뷁뷁뷁 뷁뷁뷁뷁 뷁뷁뷁 | zqul_(zqbkm_) |
+| 1 | `zqjvq_` 가 뷁뷁 뷁 `zqjvo_://` 로 뷁뷁뷁뷁 뷁뷁 뷁 뷁뷁뷁뷁 | zqul_(zqbku_) |
+| 2 | 이 뷁뷁뷁 뷁뷁뷁 뷁뷁뷁 뷁뷁 S3·뷁뷁뷁뷁 뷁뷁뷁 zqbjm_ 뷁뷁뷁뷁뷁 뷁뷁뷁 뷁뷁 zqjvu_ 을 뷁뷁뷁 (뷁뷁, zqjvv_ 1.2 뷁뷁, 뷁뷁 뷁) | zqul_(zqbkm_) |
+| 3 | 뷁뷁뷁 뷁뷁 뷁뷁 뷁뷁뷁뷁 뷁뷁뷁 뷁뷁 | zqul_(zqbku_) |
+
+<zqblk_><zqa_>zqbll_ — 뷁뷁 뷁뷁 뷁뷁 zqbjm_ 뷁뷁 뷁뷁 뷁뷁 뷁뷁, zqjmz_ 뷁뷁 뷁뷁뷁 뷁뷁</zqa_>
+
+뷁 2 는 뷁뷁 뷁뷁 뷁뷁 뷁뷁뷁뷁 뷁뷁뷁 뷁뷁 뷁뷁뷁 뷁뷁뷁뷁 뷁뷁 뷁뷁뷁뷁. 뷁뷁 zqjvz_ 3.6 이 뷁뷁뷁 zqjvv_ 1.3 에서 뷁뷁 zqjvv_ 1.2 로 뷁뷁뷁 뷁뷁뷁, zqjmz_ zqjlv_ 뷁뷁뷁 뷁뷁 `zqbjm_://zqjza_15` 뷁뷁뷁 0.14초에 뷁뷁뷁 뷁뷁 뷁 뷁뷁뷁 뷁뷁뷁뷁 뷁뷁뷁뷁.
+뷁뷁 뷁뷁: 뷁뷁 뷁 뷁 zqjmz_ `zqjzb_` zqblb_ 에서 `zqjzb_ zqjzj_ zqjzk_: zqbjm_://...` 와 뷁뷁 뷁뷁뷁 뷁뷁뷁 뷁뷁 뷁뷁뷁뷁 뷁뷁뷁뷁뷁.
+</zqblk_>
+
+<zqblk_><zqa_>zqbak_ 0 — 뷁뷁 뷁 zqjmz_ 뷁뷁뷁 뷁뷁뷁 뷁뷁 뷁뷁뷁 zqjvo_</zqa_>
+
+2026-09-21 PR #10744 뷁뷁뷁뷁 zqjmz_ 와 뷁뷁 `zqjzl__zqjzj__zqjzm_`(이 PR 뷁뷁 뷁뷁)로 뷁뷁뷁 뷁뷁뷁 뷁뷁 뷁뷁뷁뷁뷁. 뷁뷁뷁뷁 zqbjm_ 뷁뷁뷁 zqjvo_ zqjzo_ 을 뷁뷁뷁뷁 뷁뷁뷁 채택뷁뷁뷁. 뷁뷁 뷁 zqjmz_ zqblb_ `zqjzq___2026-09-21T09:00:30` 뷁뷁뷁뷁 `zqjzb_ zqjzj_ zqjzk_: zqjvo_://zqjza_03...` 가 뷁뷁뷁뷁뷁.
+
+```
+$ zqbja_ -E "^(ts|zqjba_|zqjzu_|zqbvq_|zqjjz_ zqjzv_|zqjzz_-zqjbz_)|zqjzj_ zqjzk_|zqkaa_|zqkab_|zqvq_|zqkaj_" $S/zqbkm__zqkak__10744_zqjvv_12.zqqm_ | zqkal_ -c1-260  (뷁뷁, zqkam_ 뷁뷁 뷁뷁 뷁뷁)
+[2026-09-21T19:16:44.399+0900] {zqkao_.py:368} zqjmo_ - zqjzb_ zqjzj_ zqjzk_: zqjvo_://zqjza_04.zqjzb_.co.kr/zqkaq__zqbkv_
+zqjzu_: zqjzl__zqjzj__zqjzm_.zqkau_ 'zqjvo_://zqjza_04.zqjzb_.co.kr/zqkaq__zqbkv_'
+```
+</zqblk_>
+
+<zqblk_><zqa_>zqbak_ 1 — 뷁뷁 뷁 뷁뷁, 뷁뷁 뷁 13 zqboo_</zqa_>
+
+뷁뷁뷁뷁 zqjzo_ 뷁(`zqjvo_://zqjza_09...`)은 zqbak_ 0 에서 뷁뷁뷁 뷁뷁뷁 뷁뷁뷁 뷁뷁뷁 뷁뷁뷁뷁. `P` 는 뷁뷁 zqjlv_ zqkav_ zqkaz_ 3.8.20 뷁뷁뷁뷁뷁뷁뷁뷁.
+
+```
+$ $P -m zqkba_ zqjlz_/zqboq_/zqbmk_/zqkbb_/zqblz__zqkbj_/zqjok__zqbkv_/zqjma_/zqjzb_/zquo__zqkao_.py -k zqjvq_ -q -p no:zqkbk_ 2>&1 | zqbja_ -E "^E  |zqboo_|zqjuq_" | zqbbv_ -5
+E       zqkbl_: zqkbm_ 'zqjvo_://zqkbo_...co.kr/zqkaq__zqbkv_' == 'zqbjm_://zqkbq_...co.kr/zqkaq__zqbkv_'
+E         
+E         - zqbjm_://zqjza_09.zqjzb_.co.kr/zqkaq__zqbkv_
+E         ?     -
+E         + zqjvo_://zqjza_09.zqjzb_.co.kr/zqkaq__zqbkv_
+$ $P -m zqkba_ zqjlz_/zqboq_/zqbmk_/zqkbb_/zqblz__zqkbj_/zqjok__zqbkv_/zqjma_/zqjzb_/zquo__zqkao_.py -k zqjvq_ -q -p no:zqkbk_ 2>&1 | zqkbu_ -1
+====================== 13 zqboo_, 36 zqkbv_ in 0.84s =======================
+```
+</zqblk_>
+
+<zqblk_><zqa_>zqbak_ 2 — zqbjm_ 뷁뷁뷁 뷁뷁 뷁 뷁뷁뷁 뷁뷁 zqjvu_ 을 뷁뷁, 뷁뷁뷁 2뷁 뷁뷁</zqa_>
+
+zqkbz_: 이 PR 뷁뷁뷁 뷁뷁 zqkja_ 이 뷁뷁뷁뷁 뷁뷁뷁뷁뷁뷁. 뷁뷁 id `mw154143` + 뷁뷁 뷁뷁뷁뷁 뷁뷁 뷁뷁뷁뷁 뷁뷁뷁뷁뷁. 뷁뷁뷁·뷁뷁뷁 뷁뷁·뷁뷁 뷁뷁뷁 뷁뷁뷁 뷁뷁뷁뷁 뷁뷁 뷁뷁뷁 뷁뷁뷁 zqkjb_ 뷁뷁뷁. 뷁뷁뷁 뷁뷁뷁 뷁뷁뷁뷁 `zqkjj_(zqkjk__zqkjl_=zqjzj__zqjzm_)` 로 뷁뷁뷁뷁뷁(`zqjzb_.py:941, 947`), 뷁뷁 뷁뷁 뷁뷁 "뷁 뷁뷁뷁" 뷁뷁뷁 zqbjm_ 뷁뷁뷁뷁뷁 뷁뷁뷁 뷁뷁 zqjvu_ 을 뷁뷁뷁뷁 뷁뷁뷁뷁뷁.
+
+```
+$ ... zqkjm_ 240 <zqjlv_ py3.8> $S/zqbkm__zqkak__10744_zqjvv_12.py > $S/zqbkm__zqkak__6682.zqqm_ 2>&1; zqbuk_ "zqbbm_=$?"
+zqbbm_=0
+$ zqbja_ -E "^(ts|zqjba_|zqjzu_|zqbvq_|zqjjz_ zqjzv_|zqjzz_-zqjbz_)|zqjzj_ zqjzk_|zqkaa_|zqkab_|zqvq_|zqkaj_" $S/zqbkm__zqkak__6682.zqqm_ | zqkal_ -c1-260  (뷁뷁 뷁 뷁뷁, zqkam_ 뷁뷁 뷁뷁 뷁뷁)
+[2026-09-22T08:30:03.224+0900] {zqkao_.py:369} zqjmo_ - zqjzb_ zqjzj_ zqjzk_: zqbjm_://zqjza_04.zqjzb_.co.kr/zqkaq__zqbkv_
+[2026-09-22T08:30:04.147+0900] {s3.py:1348} zqjmo_ - zqkaa_: ['zqjzb_/zqkjo_/zqbkk_-c1a85b7048da46zqkjq_3b135fe8ce16b5f.zqjvu_']
+[2026-09-22T08:30:04.682+0900] {s3.py:1348} zqjmo_ - zqkaa_: ['zqjzb_/zqkjo_/zqkju_-9706412760c14642zqkjv_27a6886e63zqkjz_.zqjvu_']
+zqjba_: ('zqkka_', 'zqkkb_: zqjzb_ zqbkv_ zqjlo_ is zqlb_ zqkkj_ or is zqkkk_. zqkkl_ zqbv_ zqjzb__id zqko_ zqbkv__zqjlo_ in zqkkm_ zqkko_.')
+zqjzu_: zqjzl__zqjzj__zqjzm_ zqjzb_/zqkjo_/zqkju_-9706412760c14642zqkjv_27a6886e63zqkjz_.zqjvu_ zqkkq__at_zqkku_=zqbvj_
+zqjzu_: zqjzl__zqjzj__zqjzm_.zqkau_ 'zqbjm_://zqjza_04.zqjzb_.co.kr/zqkaq__zqbkv_'
+zqbvq_ zqmm_ zqblb_: {'zqjzb_/zqkjo_/zqbkk_-c1a85b7048da46zqkjq_3b135fe8ce16b5f.zqjvu_': zqkkv_, 'zqjzb_/zqkjo_/zqkju_-9706412760c14642zqkjv_27a6886e63zqkjz_.zqjvu_': zqkkv_}
+zqjjz_ zqjzv_ zqkkz_ zqkla_: zqkkv_ | zqjjz_ zqjzv_ zqklb_ zqjlo_: zqkkv_
+zqjzz_-zqjbz_ zqklj_ in zqklk_/zqjba_: zqbvj_
+$ zqkll_ s3 ls s3://zqbmk_-zqklm_-zqklo_/zqjzb_/zqkjo_/; zqbuk_ "ls_zqbbm_=$?"
+ls_zqbbm_=1
+```
+# <zqjlv_ py3.8> zqklq_: zqklu_ zqklv_ zqklz_ zqkma_; 뷁뷁 뷁뷁 뷁뷁 cd·뷁뷁뷁뷁 뷁뷁뷁 뷁뷁. 뷁뷁뷁 `zqkmb_.zqkmj_.zqkmk__zqkml_` 에서 뷁뷁 zqjvv_ 뷁뷁뷁 1.2 로 뷁뷁뷁뷁뷁. `zqkll_ s3 ls` 는 뷁뷁 0뷁뷁 뷁 뷁뷁 뷁뷁 1 로 뷁뷁뷁뷁.
+</zqblk_>
+
+<zqblk_><zqa_>zqbak_ 3 — 뷁뷁뷁 뷁뷁 뷁뷁뷁 201 zqboo_, 2 zqbuj_</zqa_>
+
+zqkmm_ 뷁 zqbbv_ `5853512` 에서 뷁뷁 뷁뷁뷁 뷁뷁 뷁뷁뷁뷁 뷁뷁뷁뷁뷁뷁. CI 뷁뷁 뷁뷁 뷁뷁뷁 뷁뷁뷁뷁.
+
+```
+$ $P -m zqkba_ zqjlz_/zqboq_ -k "zqjzb_ or zqjvo__zqzz__zqkmo_" -q -p no:zqkbk_ 2>&1 | zqkbu_ -1
+=============== 201 zqboo_, 2 zqbuj_, 9384 zqkbv_ in 19.25s ===============
+```
+</zqblk_>
+
+<zqblk_><zqa_>zqbvv_</zqa_>
+
+- zqbkj_ 1 (`5853512`): 뷁뷁 뷁뷁
+</zqblk_>

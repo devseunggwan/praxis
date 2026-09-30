@@ -42,9 +42,10 @@ dispatch time.
 Design — same family as `output-block-falsify-advisory` /
 `secret-print-redaction-advisory` (advisory nudge, never blocks):
 
-  1. A **perf multiplier notation** (`3x`, `3×`, `1.76배`, `300%`,
-     `A -> B` timing pair, `from 49m to 12m`) OR a **lever verdict** token
-     (채택/개선/역효과/lever) appears in body text destined for
+  1. A **perf multiplier notation** (`3x`, `3×`, `1.76배` near a
+     performance word or timing, `300% faster`, `A -> B` timing pair,
+     `from 49m to 12m`) OR a **lever verdict** (`lever`/`레버` with
+     채택/개선/역효과, issue #1544) appears in body text destined for
      `gh issue create|comment` / `gh pr create|comment` (inline `--body`/
      `-b`, or a readable `--body-file`/`-F` target), AND
   2. NO adjacent controlled-timing artifact (a cited `$ command -> output`
@@ -120,11 +121,21 @@ _BODY_FILE_FLAGS = ("--body-file", "-F")
 # (1) Perf multiplier notation
 # ---------------------------------------------------------------------------
 
-# `3x`, `3.06x`, `3×` — a digit run immediately followed by x/X/× with no
-# intervening space required (matches the issue's own examples verbatim).
-_MULT_X_RE = re.compile(r"\b\d+(?:\.\d+)?\s*[x×]\b", re.IGNORECASE)
+# `3x`, `3.06x`, `3×` — a digit run followed by x/X/× on the same line; a
+# newline between them is a list count and a header (`50` / `X-XSRF-TOKEN`).
+_MULT_X_RE = re.compile(r"\b\d+(?:\.\d+)?[ \t]*[x×]\b", re.IGNORECASE)
 # `1.76배` — Korean multiplier suffix.
-_MULT_BAE_RE = re.compile(r"\d+(?:\.\d+)?\s*배\b")
+_MULT_BAE_RE = re.compile(r"\d+(?:\.\d+)?[ \t]*배\b")
+# A count multiplier (`PUT 200 ×2`, `약 2배 과대`) is not a speed factor, so
+# an x/배 multiplier needs a performance word or a timing this close on either
+# side; the timing keeps a ratio of two timings (`8 ms 와 10배 차이`).
+_PERF_CONTEXT_RE = re.compile(
+    r"speed|faster|slower|improv|regress|latency|throughput|runtime"
+    r"|개선|향상|저하|빠르|빨라|느려|느리|속도|성능"
+    r"|(?<![A-Za-z0-9_.])\d+(?:\.\d+)?[ \t]*(?:ms|s|secs?|min|초|분)(?![A-Za-z])",
+    re.IGNORECASE,
+)
+_PERF_CONTEXT_REACH = 40
 # `300%`, `49% faster`, `73% slower`, `향상 30%`, `역효과 27%` — percentage
 # tied to a direction word nearby (either side, within a short window).
 _PERCENT_RE = re.compile(r"\d+(?:\.\d+)?\s*%")
@@ -142,8 +153,11 @@ _FROM_TO_RE = re.compile(
     re.IGNORECASE,
 )
 
+# A verdict word alone ("adopt a label", "the redirect is accepted") is not a
+# lever verdict; the body has to name a lever and give it a verdict.
 _LEVER_KO = ("채택", "개선", "역효과")
 _LEVER_EN_RE = re.compile(r"\blever\b", re.IGNORECASE)
+_LEVER_NOUN_KO = "레버"
 
 
 def _has_percent_with_direction(text: str) -> bool:
@@ -154,10 +168,17 @@ def _has_percent_with_direction(text: str) -> bool:
     return False
 
 
+def _has_perf_multiplier(text: str) -> bool:
+    for pattern in (_MULT_X_RE, _MULT_BAE_RE):
+        for m in pattern.finditer(text):
+            window = text[max(0, m.start() - _PERF_CONTEXT_REACH):m.end() + _PERF_CONTEXT_REACH]
+            if _PERF_CONTEXT_RE.search(window):
+                return True
+    return False
+
+
 def _has_multiplier(text: str) -> bool:
-    if _MULT_X_RE.search(text):
-        return True
-    if _MULT_BAE_RE.search(text):
+    if _has_perf_multiplier(text):
         return True
     if _TIMING_PAIR_RE.search(text):
         return True
@@ -167,9 +188,8 @@ def _has_multiplier(text: str) -> bool:
 
 
 def _has_lever_verdict(text: str) -> bool:
-    if any(k in text for k in _LEVER_KO):
-        return True
-    return bool(_LEVER_EN_RE.search(text))
+    names_lever = bool(_LEVER_EN_RE.search(text)) or _LEVER_NOUN_KO in text
+    return names_lever and any(k in text for k in _LEVER_KO)
 
 
 # ---------------------------------------------------------------------------
