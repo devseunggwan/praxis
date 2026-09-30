@@ -64,7 +64,11 @@ left for the harness to kill hours later). A background call whose whole job is
 to elapse is recorded in a session registry keyed on its sleep-normalized
 command signature; a second such call arriving while the first's armed window
 is still open draws an ADVISORY (exit 0) naming the already-armed waiter and
-`TaskStop`. It is written to BOTH `hookSpecificOutput.additionalContext` — the
+`TaskStop`. A single background `while`/`until` waiter with no ceiling (no
+`timeout` wrapper, no elapsed-time or counter test in the loop) draws its own
+advisory (issue #1527): a background call notifies only on exit, so a waiter
+whose condition never matches runs until the session ends. Both advisories are
+written to BOTH `hookSpecificOutput.additionalContext` — the
 one PreToolUse channel that reaches the model at exit 0 — and stderr, which the
 fire ledger reads to classify the fire as `advise`. It never blocks — the block message hands out
 `run_in_background: true` as the escape, so denying it would contradict the
@@ -689,6 +693,62 @@ def _background_waiter_advisory(command: str, session_id: str | None) -> str | N
     )
 
 
+# Ordering comparisons read as a loop bound: `[ $i -ge 40 ]`, `(( i < 40 ))`.
+# Equality (`-eq`/`-ne`) is left out — it is how a waiter tests exit status
+# (`[ $? -ne 0 ]`) at least as often as a counter.
+_BOUND_TEST_OPS = {"-lt", "-le", "-gt", "-ge"}
+_BOUND_ARITH_OPS = {"<", "<=", ">", ">="}
+# An elapsed-time test inside the loop: `$SECONDS`, `$EPOCHSECONDS`,
+# `$(date +%s)`.
+_ELAPSED_RE = re.compile(r"SECONDS|\+%s")
+
+
+def _has_ceiling(header: list[str], body: list[str]) -> bool:
+    """True when the loop can end on a count or on elapsed time.
+
+    `<` / `>` count only inside `(( … ))`: elsewhere they are redirections,
+    and `grep -q x f > /dev/null` bounds nothing.
+    """
+    in_arith = False
+    for tok in header + body:
+        if tok == "((" or tok.endswith("$(("):
+            in_arith = True
+        elif tok == "))":
+            in_arith = False
+        if tok in _BOUND_TEST_OPS or (in_arith and tok in _BOUND_ARITH_OPS):
+            return True
+        if _ELAPSED_RE.search(tok):
+            return True
+    return False
+
+
+def _uncapped_waiter_advisory(command: str) -> str | None:
+    """Advisory when a background `while`/`until` sleep-waiter has no ceiling.
+
+    A background call notifies only when it exits, so a waiter whose success
+    condition never matches runs until the session ends with nothing
+    surfacing meanwhile. A `timeout N sh -c '…'` wrapper hides the loop inside
+    one string token, so a wrapped loop is never seen here; `bash -c '…'`
+    without one is unwrapped by `_inline_shell_c` and is.
+    """
+    tokens = _inline_shell_c(safe_tokenize(_strip_non_executable(command)))
+    for kw, header, body in _iter_loops(tokens):
+        if kw not in ("while", "until") or _is_line_consumer(header):
+            continue
+        if not _sleep_args(body) or _has_ceiling(header, body):
+            continue
+        return (
+            f"[{_HOOK_NAME}] This background `{kw}` waiter has no time ceiling. "
+            "A background call notifies only when it exits, so if the loop's "
+            "condition never matches it runs until the session ends and nothing "
+            "surfaces meanwhile.\n"
+            f"Add one: `timeout <sec> sh -c '{kw} <check>; do sleep N; done'`, or "
+            "stop on elapsed time inside the loop (`(( SECONDS > <sec> )) && exit 1`).\n"
+            f"Set {_BYPASS_ENV}=1 to silence this guard."
+        )
+    return None
+
+
 def _emit_additional_context(advisory: str) -> None:
     """Write the advisory as `hookSpecificOutput.additionalContext` (issue #1063).
 
@@ -822,8 +882,16 @@ def main() -> int:
     # the guard's own redirect message names `run_in_background: true` as the
     # correct path, so denying it would contradict the escape it hands out.
     if tool_input.get("run_in_background") is True:
-        advisory = _background_waiter_advisory(command, session_id)
-        if advisory:
+        advisories = [
+            text
+            for text in (
+                _uncapped_waiter_advisory(command),
+                _background_waiter_advisory(command, session_id),
+            )
+            if text
+        ]
+        if advisories:
+            advisory = "\n\n".join(advisories)
             sys.stderr.write(advisory + "\n")
             _emit_additional_context(advisory)
         return 0
@@ -838,7 +906,8 @@ def main() -> int:
     reference = _reference_path()
     correct_path = (
         "use a native async-wait primitive: run_in_background: true "
-        "(Claude is re-invoked on exit — no polling loop needed), a "
+        "(Claude is re-invoked on exit — no polling loop needed; if it waits "
+        "in a loop, give it a ceiling: `timeout <sec> sh -c 'until …; done'`), a "
         "Monitor until-loop, `aws cloudformation wait`, `gh run watch` / "
         "`gh pr checks --watch` / `kubectl wait`; a short bounded "
         "foreground poll (worst-case < 90s) is fine"

@@ -92,8 +92,9 @@ the duration; the behaviour then moved to chaining short background calls
 across turns and the block count went to 0. The cost: 146 of 500 Bash calls
 (29%) spent waiting on one test suite, 40 waiting calls in the densest 4-minute
 window, and 9 waiters the harness killed two hours later. The first call had
-already been the correct one — `run_in_background` with an `until` loop. The
-agent did not wait for the notification it had itself armed.
+already been the correct shape — `run_in_background` with an `until` loop. The
+agent did not wait for the notification it had itself armed. (That loop still
+needs a time ceiling; see the next section.)
 
 **What a waiter is.** A background Bash call whose whole job is to elapse: its
 command contains a parseable `sleep` in command position. Launching the awaited
@@ -225,11 +226,62 @@ state (the test is "a live entry exists", not an exact count — Q1), and no gat
 decides block-vs-pass from it (Q2). A lost update costs one advisory that does
 not fire — Q3, no lock.
 
+## Background waiter with no time ceiling (issue #1527)
+
+The waiter-chain lane fires only on a *second* waiter for one target, so a
+single background `while`/`until` waiter with no ceiling passed silently. A
+background call notifies only when it exits: when the loop's success string
+never appears, the waiter runs until the session ends and nothing surfaces
+meanwhile. The observed case waited on a `docker buildx` log for a string the
+driver in use never printed (it printed `sending tarball ... DONE` instead) and
+ran for about 24 hours before it was found and stopped by hand.
+
+The correct background pattern therefore carries a ceiling:
+
+```sh
+timeout 600 sh -c 'until grep -q DONE "$LOG"; do sleep 15; done'
+```
+
+A background `while`/`until` loop whose body has a parseable `sleep` draws an
+**advisory** (exit 0, `additionalContext` + stderr, same channels as the chain
+lane) unless the loop can end on its own:
+
+| Ceiling | How it is recognised |
+| --- | --- |
+| `timeout N sh -c '…'` / `gtimeout N bash -c '…'` | The loop sits inside one string token, so no loop is seen at all. `bash -c '…'` *without* a wrapper is spliced (`_inline_shell_c`) and is seen |
+| Elapsed-time test in the header or body | a token containing `SECONDS` (also `EPOCHSECONDS`) or `+%s` (`$(date +%s)`) |
+| Counter bound in the header or body | `-lt` / `-le` / `-gt` / `-ge`, or `<` / `<=` / `>` / `>=` inside `(( … ))` |
+
+| Situation (all `run_in_background: true`) | Action |
+| --- | --- |
+| `until grep -q X "$LOG"; do sleep 15; done` | **advisory** |
+| `while true; do grep -q X f && break; sleep 5; done` | **advisory** — `break` on success is not a ceiling |
+| `bash -c 'until …; do sleep 5; done'` | **advisory** |
+| `until timeout 5 curl …; do sleep 3; done` | **advisory** — the timeout bounds one probe, not the loop |
+| `until grep -q X f > /dev/null; do sleep 5; done` | **advisory** — `>` outside `(( ))` is a redirection |
+| `timeout 600 sh -c 'until …; done'` | pass |
+| `[ $i -ge 40 ] && break` / `while (( i < 40 ))` / `(( SECONDS > 600 ))` in the loop | pass |
+| `for i in $(seq 1 40); do …; sleep 15; done` | pass — a fixed count ends |
+| `while read …; do …; sleep 1; done < f`, a loop with no `sleep` | pass |
+| Relaunch of an uncapped waiter inside the chain window | both advisories, joined in one payload |
+
+Known limitations, intentional: `-eq` / `-ne` are not read as a bound, because a
+waiter tests exit status with them (`[ $? -ne 0 ]`) at least as often as it
+counts, so a counter written with `-eq` draws the advisory. Any ordering
+comparison counts as a bound even when it compares something else, and a
+waiter hidden in a script file (`bash wait.sh`) is not seen. Both directions
+cost one advisory line on a call that proceeds.
+
+Replayed over one local transcript corpus (4,521 background Bash calls), 637
+were `while`/`until` sleep-waiters and 493 of them (77%) had no ceiling by the
+rule above.
+
 ## Redirect message
 
 The block message names the alternatives so the caller can self-correct:
-`run_in_background: true`, Monitor with an until-loop, `aws cloudformation wait`,
-`gh run watch` / `gh pr checks --watch` / `kubectl wait`.
+`run_in_background: true` (with a ceiling when it waits in a loop), Monitor with
+an until-loop, `aws cloudformation wait`, `gh run watch` /
+`gh pr checks --watch` / `kubectl wait`.
 
 `Reference:` is this file, named by ABSOLUTE path resolved from the package root
 (`impl.py`'s own `__file__`), never a cwd-relative string. Until issue #1012 it
