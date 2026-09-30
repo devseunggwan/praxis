@@ -328,8 +328,8 @@ cat > "$B" <<'EOF'
 $ FOO=1 grep -rn safe_tokenize hooks/ | wc -l
 ```
 EOF
-run_case "env prefix + different tail pipe still match (silent)" \
-  "silent" "advisory" "$(body_payload "$B" "$TRANSCRIPT")"
+run_case "env prefix kept, but a different tail pipe is a different command (warn)" \
+  "warn" "advisory" "$(body_payload "$B" "$TRANSCRIPT")"
 
 nextbody
 cat > "$B" <<'EOF'
@@ -398,7 +398,7 @@ run_case "unreadable transcript path — silent (silent)" \
   "silent" "advisory" "$(body_payload "$B" "/tmp/does-not-exist-1117.jsonl")"
 
 # A path that exists but cannot be read as a file (a directory) is "no
-# oracle", not "ran nothing": strict tail_lines raises, the gate stays silent.
+# oracle", not "ran nothing": iter_transcript_bounded raises, the gate stays silent.
 run_case "transcript path is a directory — silent (silent)" \
   "silent" "advisory" "$(body_payload "$B" "$(dirname "$TRANSCRIPT")")"
 
@@ -482,7 +482,7 @@ run_case "REGRESSION P1: hook-blocked call is not provenance (warn)" \
   "warn" "advisory" "$(body_payload "$B" "$TRANSCRIPT")"
 
 # An unreadable-but-present transcript is "no oracle", not "nothing ran" —
-# tail_lines returns [] for both, and conflating them fires on every line.
+# a lenient reader yields nothing for both, and conflating them fires on every line.
 UNREADABLE="$BODY_DIR/unreadable.jsonl"
 : > "$UNREADABLE"
 chmod 000 "$UNREADABLE"
@@ -617,6 +617,198 @@ EOF
 run_case "SILENT FIXTURE: same body on a gh api GET is not a write (silent)" \
   "silent" "advisory" \
   "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"gh api --method GET /repos/o/r/issues/comments/999 -F body=@$B\"},\"transcript_path\":\"$TRANSCRIPT\"}"
+
+# --- Whole-pipeline match (#1540) -------------------------------------------
+# The published pipeline must appear verbatim, segment by segment, inside one
+# executed command. These pairs are the positive controls: each silent case
+# has a warn twin that differs only in the one operand the old first-segment
+# overlap check could not see.
+
+TRANSCRIPT2="$BODY_DIR/t2.jsonl"
+cat > "$TRANSCRIPT2" <<'EOF'
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"tw_1","name":"Bash","input":{"command":"nl -ba hooks/x.py | sed -n '1,9p'"}}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"tw_2","name":"Bash","input":{"command":"ruff check hooks/ 2>&1 | tail -5"}}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"tw_3","name":"Bash","input":{"command":"wc -l /abs/repo/docs/hook/INDEX.md"}}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"tw_4","name":"Bash","input":{"command":"python3 -c 'import sys\nprint(len(sys.argv))'"}}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"tw_5","name":"mcp__srv__lookup","input":{"q":"x"}}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"tw_6","name":"mcp__srv__query","input":{"phase":"prod","sql":"SELECT 1"}}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"tw_7","name":"mcp__srv__drop","input":{"t":"x"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tw_7","is_error":true,"content":"PreToolUse:mcp__srv__drop hook error: BLOCKED"}]}}
+EOF
+
+nextbody
+cat > "$B" <<'EOF'
+```
+$ nl -ba hooks/x.py | sed -n '1,5p'
+```
+EOF
+run_case "later segment differs: sed range 1,5p vs ran 1,9p (warn)" \
+  "warn" "advisory" "$(body_payload "$B" "$TRANSCRIPT2")"
+
+nextbody
+cat > "$B" <<'EOF'
+```
+$ nl -ba hooks/x.py | sed -n '1,9p'
+```
+EOF
+run_case "later segment identical: sed range 1,9p (silent)" \
+  "silent" "advisory" "$(body_payload "$B" "$TRANSCRIPT2")"
+
+nextbody
+cat > "$B" <<'EOF'
+```
+$ pytest tests/hooks -q | head -3
+```
+EOF
+run_case "trailing | head on the published line only is display trimming (silent)" \
+  "silent" "advisory" "$(body_payload "$B" "$TRANSCRIPT")"
+
+nextbody
+cat > "$B" <<'EOF'
+```
+$ ruff check hooks/
+$ ruff check hooks/ 2>&1
+```
+EOF
+run_case "redirection differences are ignored (silent)" \
+  "silent" "advisory" "$(body_payload "$B" "$TRANSCRIPT2")"
+
+nextbody
+cat > "$B" <<'EOF'
+```
+$ wc -l docs/hook/INDEX.md
+```
+EOF
+run_case "relative path is the tail of the absolute path that ran (silent)" \
+  "silent" "advisory" "$(body_payload "$B" "$TRANSCRIPT2")"
+
+nextbody
+cat > "$B" <<'EOF'
+```
+$ wc -l hook/INDEX.md.bak
+```
+EOF
+run_case "path that is not a /-tail of the ran path (warn)" \
+  "warn" "advisory" "$(body_payload "$B" "$TRANSCRIPT2")"
+
+nextbody
+cat > "$B" <<'EOF'
+```
+$ python3 -c 'import sys
+print(len(sys.argv))'
+```
+EOF
+run_case "multi-line quoted script, same as ran (silent)" \
+  "silent" "advisory" "$(body_payload "$B" "$TRANSCRIPT2")"
+
+nextbody
+cat > "$B" <<'EOF'
+```
+$ python3 -c 'import sys
+print(sys.argv)'
+```
+EOF
+run_case "multi-line quoted script, body line differs from ran (warn)" \
+  "warn" "advisory" "$(body_payload "$B" "$TRANSCRIPT2")"
+
+# A probe run early in a long session: the old 400-line tail lost it.
+TRANSCRIPT3="$BODY_DIR/t3.jsonl"
+{
+  echo '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"tf_1","name":"Bash","input":{"command":"git log --oneline -3"}}]}}'
+  for _ in $(seq 1 500); do
+    echo '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"filler"}]}}'
+  done
+} > "$TRANSCRIPT3"
+
+nextbody
+cat > "$B" <<'EOF'
+```
+$ git log --oneline -3
+```
+EOF
+run_case "command run more than 400 lines back still counts (silent)" \
+  "silent" "advisory" "$(body_payload "$B" "$TRANSCRIPT3")"
+
+# --- MCP provenance (#1540) ---------------------------------------------------
+
+nextbody
+cat > "$B" <<'EOF'
+```
+$ lookup(q="x")
+```
+EOF
+run_case "MCP call written as name(args) matches the executed call (silent)" \
+  "silent" "advisory" "$(body_payload "$B" "$TRANSCRIPT2")"
+
+nextbody
+cat > "$B" <<'EOF'
+```
+$ lookup(q="y")
+```
+EOF
+run_case "MCP call with a value the executed call never had (warn)" \
+  "warn" "advisory" "$(body_payload "$B" "$TRANSCRIPT2")"
+
+nextbody
+cat > "$B" <<'EOF'
+```
+$ query (phase=prod)
+```
+EOF
+run_case "MCP call written as name (args) with a space (silent)" \
+  "silent" "advisory" "$(body_payload "$B" "$TRANSCRIPT2")"
+
+nextbody
+cat > "$B" <<'EOF'
+```
+$ (tool, phase=prod) SELECT 1
+```
+EOF
+run_case "prose description of an MCP call stays composed (warn)" \
+  "warn" "advisory" "$(body_payload "$B" "$TRANSCRIPT2")"
+
+nextbody
+cat > "$B" <<'EOF'
+```
+$ drop(t="x")
+```
+EOF
+run_case "hook-blocked MCP call is not provenance (warn)" \
+  "warn" "advisory" "$(body_payload "$B" "$TRANSCRIPT2")"
+
+nextbody
+cat > "$B" <<'EOF'
+```
+$ lookup(y)
+```
+EOF
+run_case "MCP call with only a bare positional argument cannot be matched (warn)" \
+  "warn" "advisory" "$(body_payload "$B" "$TRANSCRIPT2")"
+
+nextbody
+cat > "$B" <<'EOF'
+```
+$ lookup()
+```
+EOF
+run_case "MCP call written with no arguments, executed call had input (warn)" \
+  "warn" "advisory" "$(body_payload "$B" "$TRANSCRIPT2")"
+
+# --- Replay of #1538's sample (#1540) ----------------------------------------
+# Pseudonymized from real fires; see the spec's "Replay fixtures" section.
+# 01 02 04 08 14 were false positives the whole-session scan clears; the rest
+# still warn, 10 and 12 being the sample's true positives.
+
+REPLAY_DIR="$ROOT_DIR/tests/fixtures/composed-command-gate/replay-1540"
+for d in "$REPLAY_DIR"/*/; do
+  n=$(basename "$d")
+  case "$n" in
+    01|02|04|08|14) want="silent" ;;
+    *) want="warn" ;;
+  esac
+  run_case "replay-1540 case $n ($want)" "$want" "advisory" \
+    "$(body_payload "${d}body.txt" "${d}transcript.jsonl")"
+done
 
 # --- Summary -----------------------------------------------------------------
 
