@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """PreToolUse(Bash) advisory: zsh dialect shapes that fail where bash does not.
 
-Issues #1405 (word split) and #1425 (the other three).
+Issues #1405 (word split), #1425 (shapes 1-3) and #1526 (shape 5).
 
-Four shapes, measured on this machine's zsh 5.9 rather than read from a manual:
+Five shapes, measured on this machine's zsh 5.9 rather than read from a manual:
 
   1. `echo ======` → `zsh:1: ===== not found`. A word starting with `=` is a
      command path lookup (EQUALS expansion), so `[ "$x" == y ]` fails too —
@@ -17,16 +17,18 @@ Four shapes, measured on this machine's zsh 5.9 rather than read from a manual:
   4. `for f in $list` → one iteration over the whole string, because
      `SH_WORD_SPLIT` is off by default in zsh. bash splits it, which is where
      the habit comes from.
+  5. `status=$?` → `zsh:1: read-only variable: status`. `status` is zsh's
+     alias of `$?`, so every assignment to it fails.
 
-The first three are deterministic: the command as written cannot do what it
-says, whatever the author meant, so they return `ask` — a correction point
+Shapes 1, 2, 3 and 5 are deterministic: the command as written cannot do what
+it says, whatever the author meant, so they return `ask` — a correction point
 while the command is still being written. Shape 4 is not: passing a
 deliberately unsplit single argument uses identical syntax, and a gate that
 cannot tell intent apart must not block. It stays an advisory, on
 `additionalContext` (reaches the actor) and stderr (grades the fire).
 
 Silent when:
-  • the executing shell is not zsh — shapes 1, 2 and 4 do not exist under
+  • the executing shell is not zsh — shapes 1, 2, 4 and 5 do not exist under
     bash or fish. Shape 3 is shell-general and fires regardless.
   • the text is quoted in a way that actually protects it — which differs per
     shape: both quotes protect shape 1, only single quotes protect shape 2
@@ -166,7 +168,9 @@ def _mask_arithmetic(text: str) -> str:
     return "".join(out)
 
 
-_COMMENT_RE = re.compile(r"(?:^|(?<=\s))#[^\n]*", re.MULTILINE)
+# After a control operator too: `true;# note` is a comment. Not after `{` or
+# `(`, where `${#arr}` and the `(#i)` glob flag keep their `#`.
+_COMMENT_RE = re.compile(r"(?:^|(?<=[\s;&|]))#[^\n]*", re.MULTILINE)
 
 
 def _mask_comments(text: str) -> str:
@@ -293,6 +297,258 @@ def shadowed_heredocs(command: str) -> list[str]:
     return found
 
 
+# Words after which the next word is again in command position.
+_LEADING_KEYWORDS = frozenset(
+    {"if", "then", "else", "elif", "do", "while", "until", "!", "time",
+     "nocorrect", "coproc"}
+)
+_ASSIGNMENT_WORD_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*(?:\[[^\]]*\])?\+?=")
+_STATUS_ASSIGNMENT_RE = re.compile(r"status(?:\[[^\]]*\])?\+?=")
+# A redirection word. Operator-only (`>`, `2>&`) takes the next word as its
+# target; `>out` carries it. Neither ends the assignment prefix.
+_REDIRECT_RE = re.compile(r"(?:\d*|&)[<>]")
+_REDIRECT_OPERATOR_RE = re.compile(r"(?:\d*|&)[<>]+[&|]?")
+# Builtins whose `NAME=value` arguments are assignments. `local status` with no
+# value is a declaration and succeeds (measured), so only `status=` counts.
+_DECLARATION_BUILTINS = frozenset(
+    {"local", "typeset", "declare", "export", "readonly", "integer", "float"}
+)
+# Stands in for an expansion inside a word, so `$(x)status=1` is not read as
+# starting with `status=`.
+_EXPANSION_PLACEHOLDER = "x"
+
+
+class _Frame:
+    """One nesting level of the scan.
+
+    `cmd` holds commands (the top level, `( … )`, `$( … )`, `` ` … ` ``,
+    `<( … )`, `=( … )`). `array`, `param` and `pattern` hold values, whose words
+    are never assignments.
+    """
+
+    def __init__(self, kind: str, closer: str, opened_mid_word: bool = False):
+        self.kind = kind
+        self.closer = closer
+        self.opened_mid_word = opened_mid_word
+        self.has_content = False
+        self.word: list[str] = []
+        self.prefix = True  # the next word may be an assignment or the command
+        self.declaration = False  # arguments are assignments (`local x=1`)
+        self.skip_next = False  # the next word is a redirect target or a count
+        # `case` survives command separators, so `reset` leaves it alone.
+        self.case_header = 0  # 1: the subject is next, 2: `in` is next
+        self.case_depth = 0
+        self.pattern_next = False  # the next word is a case pattern
+
+    def reset(self) -> None:
+        self.prefix = True
+        self.declaration = False
+        self.skip_next = False
+
+
+def _finish_word(frame: _Frame, found: list[str]) -> None:
+    word = "".join(frame.word)
+    frame.word.clear()
+    if not word or frame.kind != "cmd":
+        return
+    if frame.skip_next:
+        frame.skip_next = False
+        return
+    if frame.case_header:
+        if frame.case_header == 2 and word == "in":
+            frame.case_depth += 1
+            frame.pattern_next = True
+        frame.case_header = 2 if frame.case_header == 1 else 0
+        return
+    if frame.case_depth and word == "esac" and (frame.prefix or frame.pattern_next):
+        frame.case_depth -= 1
+        frame.pattern_next = False
+        frame.prefix = False
+        return
+    if frame.pattern_next:
+        # A case pattern (`a|status=1)`) is a value, not a command.
+        return
+    status = _STATUS_ASSIGNMENT_RE.match(word)
+    if frame.declaration:
+        if status and status.group(0) not in found:
+            found.append(status.group(0))
+        return
+    if not frame.prefix:
+        return
+    if _REDIRECT_RE.match(word):
+        frame.skip_next = bool(_REDIRECT_OPERATOR_RE.fullmatch(word))
+        return
+    if word in _LEADING_KEYWORDS:
+        return
+    if word in ("repeat", "function"):
+        # The count or the function name; the body after it is in command
+        # position again (`function f { status=1; }`).
+        frame.skip_next = True
+        return
+    if _ASSIGNMENT_WORD_RE.match(word):
+        if status and status.group(0) not in found:
+            found.append(status.group(0))
+        return
+    frame.prefix = False
+    frame.declaration = word in _DECLARATION_BUILTINS
+    if word == "case":
+        frame.case_header = 1
+
+
+def _close_frame(stack: list[_Frame], found: list[str]) -> None:
+    closed = stack.pop()
+    _finish_word(closed, found)
+    outer = stack[-1]
+    if closed.kind != "pattern":
+        outer.word.append(_EXPANSION_PLACEHOLDER)
+        return
+    if not closed.opened_mid_word:
+        # `(pat)` of a case branch: the branch body follows.
+        outer.reset()
+        outer.pattern_next = False
+    elif not closed.has_content and outer.prefix:
+        # `f()`: a function definition, whose body follows.
+        outer.word.clear()
+        outer.reset()
+    else:
+        # A glob qualifier (`*(N)`): the word goes on.
+        outer.word.append(_EXPANSION_PLACEHOLDER)
+
+
+def _join_line_continuations(text: str) -> str:
+    """`text` with each unquoted backslash-newline removed.
+
+    zsh joins the lines before it splits words, so `status\\<newline>=1` is
+    one `status=1` word. `_mask_quoted` blanks the pair instead and would split
+    it. Inside single quotes the pair is literal; `\\\\` is a literal backslash.
+    Inside double quotes the pair still joins, and a `'` there is a character.
+    """
+    out: list[str] = []
+    in_single = False
+    in_double = False
+    i = 0
+    while i < len(text):
+        ch = text[i]
+        if in_single:
+            in_single = ch != "'"
+        elif ch == "'" and not in_double:
+            in_single = True
+        elif ch == '"':
+            in_double = not in_double
+        elif ch == "\\":
+            if text[i + 1:i + 2] == "\n":
+                i += 2
+                continue
+            out.append(text[i:i + 2])
+            i += 2
+            continue
+        out.append(ch)
+        i += 1
+    return "".join(out)
+
+
+def status_assignments(command: str) -> list[str]:
+    """`status=` / `status+=` assignment words, in source order.
+
+    `status` is read-only in zsh, so any assignment to it fails with
+    `read-only variable: status`. An assignment is a leading `NAME=` word of a
+    simple command, or a `NAME=` argument of a declaration builtin; the same
+    text as an ordinary argument (`echo status=1`) is not one. The scan keeps a
+    stack of nesting levels so a command inside `$( … )` has its own prefix,
+    and the words of an array, a `${ … }` or a pattern are skipped.
+    """
+    text = _mask_quoted(_join_line_continuations(strip_heredoc_bodies(command)))
+    text = _mask_arithmetic(_mask_double_bracket(_mask_comments(text)))
+    found: list[str] = []
+    stack = [_Frame("cmd", closer="")]
+    i = 0
+    while i < len(text):
+        ch = text[i]
+        pair = text[i:i + 2]
+        frame = stack[-1]
+        if ch == frame.closer and len(stack) > 1:
+            _close_frame(stack, found)
+            i += 1
+            continue
+        if frame.kind != "cmd" and not ch.isspace():
+            frame.has_content = True
+        if ch == "`":
+            stack.append(_Frame("cmd", closer="`"))
+            i += 1
+            continue
+        if pair in ("$(", "<(", ">("):
+            stack.append(_Frame("cmd", closer=")"))
+            i += 2
+            continue
+        if pair == "${":
+            stack.append(_Frame("param", closer="}"))
+            i += 2
+            continue
+        if frame.kind != "cmd":
+            if ch == "(":
+                stack.append(_Frame("pattern", closer=")", opened_mid_word=True))
+            i += 1
+            continue
+        # `frame.word` is read in place: joining it per character is quadratic
+        # on a long unbroken token.
+        if ch == "(":
+            word = "".join(frame.word)
+            if word == "=":
+                frame.word.clear()
+                stack.append(_Frame("cmd", closer=")"))
+            elif word.endswith("="):
+                stack.append(_Frame("array", closer=")"))
+            elif not word and frame.prefix and not frame.pattern_next:
+                stack.append(_Frame("cmd", closer=")"))
+            else:
+                stack.append(
+                    _Frame("pattern", closer=")", opened_mid_word=bool(word))
+                )
+            i += 1
+            continue
+        if ch == ")":
+            # Unmatched: the end of a case pattern, and the branch body follows.
+            frame.word.clear()
+            frame.reset()
+            frame.pattern_next = False
+            i += 1
+            continue
+        if frame.case_depth and pair in (";;", ";&", ";|"):
+            _finish_word(frame, found)
+            frame.reset()
+            frame.pattern_next = True  # the next case pattern
+            i += 2
+            continue
+        # `&>` / `&>>` redirect both streams; unlike `&`, `&|` or `&!` they do
+        # not end the command.
+        if (ch in "&|" and frame.word and frame.word[-1] in "<>") or pair == "&>":
+            frame.word.append(ch)
+            i += 1
+            continue
+        if ch in ";&|\n":
+            _finish_word(frame, found)
+            frame.reset()
+            i += 1
+            continue
+        if ch.isspace():
+            _finish_word(frame, found)
+            i += 1
+            continue
+        if (ch == "{" and not frame.word and frame.prefix
+                and text[i + 1:i + 2].isspace()):
+            i += 1  # a `{ … }` group: the next word is still in command position
+            continue
+        if ch == "}" and not frame.word:
+            frame.prefix = False
+            i += 1
+            continue
+        frame.word.append(ch)
+        i += 1
+    while stack:
+        _finish_word(stack.pop(), found)
+    return found
+
+
 def executing_shell_is_zsh() -> bool:
     """True when the shell that will run the command is zsh.
 
@@ -324,7 +580,10 @@ def word_split_text(names: list[str]) -> str:
 
 
 def deterministic_text(
-    equals: list[str], patterns: list[str], heredocs: list[str]
+    equals: list[str],
+    patterns: list[str],
+    heredocs: list[str],
+    statuses: list[str],
 ) -> str:
     lines = ["⚠️ 이 명령은 zsh 에서 쓴 대로 실행되지 않습니다", ""]
     if equals:
@@ -352,7 +611,14 @@ def deterministic_text(
             "  고치기: 안쪽 구분자를 다른 이름으로 바꾸거나, 파일을 먼저 쓰고 "
             "호출을 나누세요.",
         ]
-    lines += ["", f"의도한 대로라면 이 표지로 끕니다: {OPT_OUT_MARKERS[0]}"]
+    if statuses:
+        listed = ", ".join(f"`{word}`" for word in statuses)
+        lines += [
+            f"- {listed} — zsh 에서 `status` 는 `$?` 와 같은 읽기 전용 "
+            "변수라 할당하면 `read-only variable: status` 로 실패합니다.",
+            "  고치기: 다른 이름을 쓰세요 — `rc=$?`.",
+        ]
+    lines +=["", f"의도한 대로라면 이 표지로 끕니다: {OPT_OUT_MARKERS[0]}"]
     return "\n".join(lines)
 
 
@@ -371,9 +637,12 @@ def main() -> int:
     equals = equals_words(command) if zsh else []
     patterns = bad_patterns(command) if zsh else []
     heredocs = shadowed_heredocs(command)
+    statuses = status_assignments(command) if zsh else []
 
-    if equals or patterns or heredocs:
-        emit_decision("ask", deterministic_text(equals, patterns, heredocs))
+    if equals or patterns or heredocs or statuses:
+        emit_decision(
+            "ask", deterministic_text(equals, patterns, heredocs, statuses)
+        )
         return 0
 
     names = unsplit_params(command) if zsh else []
