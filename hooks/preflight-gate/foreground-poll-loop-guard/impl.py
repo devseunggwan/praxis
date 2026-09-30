@@ -699,6 +699,8 @@ def _background_waiter_advisory(command: str, session_id: str | None) -> str | N
 _BOUND_TEST_OPS = {"-lt", "-le", "-gt", "-ge"}
 _TEST_OPENERS = {"[", "[[", "test"}
 _TEST_CLOSERS = {"]", "]]"} | _COMMAND_SEPARATORS | {"do", "then"}
+# `[[ … ]]` joins its tests with `&&` / `||` inside, so only `]]` ends it.
+_DOUBLE_BRACKET_CLOSERS = {"]]"}
 # An arithmetic command and an ordering operator inside it, matched on the
 # token text joined from the `((` token on, so a glued `((i<40))` reads the
 # same as a spaced one.
@@ -732,7 +734,7 @@ def _has_ceiling(header: list[str], body: list[str]) -> bool:
     """
     tokens = header + body
     cmd_pos = _command_position_flags(tokens)
-    in_test = False
+    closers: set[str] | None = None  # set while inside a test
     for i, tok in enumerate(tokens):
         if (
             tok.startswith("((")
@@ -740,11 +742,12 @@ def _has_ceiling(header: list[str], body: list[str]) -> bool:
             and _ARITH_COMPARISON_RE.match(" ".join(tokens[i:]))
         ):
             return True
-        if tok in _TEST_OPENERS and _runs_as_command(tokens, cmd_pos, i):
-            in_test = True
-        elif tok in _TEST_CLOSERS:
-            in_test = False
-        elif in_test and tok in _BOUND_TEST_OPS:
+        if closers is None:
+            if tok in _TEST_OPENERS and _runs_as_command(tokens, cmd_pos, i):
+                closers = _DOUBLE_BRACKET_CLOSERS if tok == "[[" else _TEST_CLOSERS
+        elif tok in closers:
+            closers = None
+        elif tok in _BOUND_TEST_OPS:
             return True
     return False
 

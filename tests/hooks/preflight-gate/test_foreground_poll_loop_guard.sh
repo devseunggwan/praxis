@@ -697,6 +697,8 @@ bw_ceiling_case "ceiling-bracket-as-argument-is-not-a-bound" ceiling \
   'until grep -q DONE /tmp/x.log; do echo [ x -lt 40 ]; sleep 5; done'
 bw_ceiling_case "ceiling-double-bracket-as-argument-is-not-a-bound" ceiling \
   "until grep -q DONE /tmp/x.log; do printf '%s\\n' [[ -gt; sleep 5; done"
+bw_ceiling_case "ceiling-flag-after-double-bracket-is-not-a-bound" ceiling \
+  'until grep -q DONE /tmp/x.log; do [[ -n $x ]] && ls -lt; sleep 5; done'
 bw_ceiling_case "ceiling-quoted-arithmetic-is-not-a-bound" ceiling \
   'until grep -q DONE /tmp/x.log; do echo "(( i < 40 ))"; sleep 5; done'
 bw_ceiling_case "ceiling-quoted-glued-arithmetic-is-not-a-bound" ceiling \
@@ -727,6 +729,12 @@ bw_ceiling_case "ceiling-seconds-test-builtin" silent \
   'until grep -q DONE /tmp/x.log; do [ $SECONDS -ge 600 ] && exit 1; sleep 5; done'
 bw_ceiling_case "ceiling-if-test-counter" silent \
   'until grep -q DONE /tmp/x.log; do if [ $i -ge 40 ]; then break; fi; sleep 5; done'
+bw_ceiling_case "ceiling-double-bracket-and-counter-in-header" silent \
+  'while [[ $READY == yes && $i -lt 40 ]]; do sleep 5; ((i++)); done'
+bw_ceiling_case "ceiling-double-bracket-or-counter-in-header" silent \
+  'until [[ -f /tmp/done || $i -ge 40 ]]; do sleep 5; ((i++)); done'
+bw_ceiling_case "ceiling-double-bracket-and-counter-in-body" silent \
+  'until grep -q DONE /tmp/x.log; do [[ -n $x && $i -ge 40 ]] && break; sleep 5; done'
 bw_ceiling_case "ceiling-if-negated-test-counter" silent \
   'until grep -q DONE /tmp/x.log; do if ! [ $i -lt 40 ]; then break; fi; sleep 5; done'
 bw_ceiling_case "ceiling-if-negated-arithmetic-counter" silent \

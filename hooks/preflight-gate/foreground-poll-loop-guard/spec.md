@@ -249,7 +249,7 @@ lane) unless the loop can end on its own:
 | Ceiling | How it is recognised |
 | --- | --- |
 | `timeout N sh -c '…'` / `gtimeout N bash -c '…'` | The loop sits inside one string token, so no loop is seen at all. A command that starts with exactly `bash -c '…'` / `sh -c '…'` (no wrapper) is spliced (`_inline_shell_c`) and is seen |
-| Counter or elapsed-time bound in the header or body | `-lt` / `-le` / `-gt` / `-ge` inside `[`, `[[` or `test`, or `<` / `<=` / `>` / `>=` inside `(( … ))`, where the `[` / `((` runs as a command (after a separator, `do`, `then`, or a run of `if` / `!` / `while` / `until`; `echo test -lt 40` and `echo "(( i < 40 ))"` are not one), spaced or glued (`((i<40))`, `(( SECONDS > 600 ))`). A bare `$SECONDS` or `date +%s` that is only logged is not a bound |
+| Counter or elapsed-time bound in the header or body | `-lt` / `-le` / `-gt` / `-ge` inside `[`, `[[` or `test`, or `<` / `<=` / `>` / `>=` inside `(( … ))`, where the `[` / `((` runs as a command (after a separator, `do`, `then`, or a run of `if` / `!` / `while` / `until`; `echo test -lt 40` and `echo "(( i < 40 ))"` are not one; inside `[[ … ]]` the comparison may follow `&&` / `\|\|`, since only `]]` ends it), spaced or glued (`((i<40))`, `(( SECONDS > 600 ))`). A bare `$SECONDS` or `date +%s` that is only logged is not a bound |
 
 | Situation (all `run_in_background: true`) | Action |
 | --- | --- |
@@ -282,8 +282,8 @@ call that proceeds, or one that does not appear.
   `bash -lc '…'`, `cd d && bash -c '…'`), and a loop in a `( … )` subshell.
   Silence therefore does not mean a `timeout` wrapper is present.
 
-Replayed over one local transcript corpus (4,519 background Bash calls), 634
-were `while`/`until` sleep-waiters and 490 of them (77%) had no ceiling by the
+Replayed over one local transcript corpus (4,482 background Bash calls), 628
+were `while`/`until` sleep-waiters and 484 of them (77%) had no ceiling by the
 rule above.
 
 ## Redirect message
