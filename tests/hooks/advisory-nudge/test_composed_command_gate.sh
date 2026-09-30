@@ -807,7 +807,7 @@ for d in "$REPLAY_DIR"/*/; do
     *) want="warn" ;;
   esac
   run_case "replay-1540 case $n ($want)" "$want" "advisory" \
-    "$(body_payload "${d}body.md" "${d}transcript.jsonl")"
+    "$(body_payload "${d}body.txt" "${d}transcript.jsonl")"
 done
 
 # --- Summary -----------------------------------------------------------------

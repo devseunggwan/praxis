@@ -293,6 +293,8 @@ published line and the run it was or was not copied from keep the same equal
 or unequal relation. The body keeps only its fenced blocks; the transcript
 keeps the Bash and MCP calls that clear at least one published line, plus the
 never-ran results, with the last 450 lines at their original spacing.
+The body is stored as `body.txt`, not `.md`, so the markdownlint and
+link-check jobs do not lint a pasted PR body as a repository document.
 
 A fixture was accepted only when it produced the same tier list as its real
 counterpart under both the base and the new impl. Cases 01, 02, 04, 08 and 14
