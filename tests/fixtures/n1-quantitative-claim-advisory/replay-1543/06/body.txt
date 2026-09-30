@@ -1,0 +1,30 @@
+zqbja_ #1487
+
+## zqv_
+zqbjb_ `zqbjj_-zqkl_-zqbjk_`, a zqbjl_ zqbjm_ zqol_ zqbjo_ zqbbb_ a zqbjq_ zqbju_
+zqbjv_ zqka_ zqbjx_ zqll_ zqbjz_ zqka_ zqbka_ zqzq_ zqbju_ zqqk_ no `zqkl_: <zqbkb_>`
+zqzm_ zqbkj_ a zqbkk_ of zqka_ zqbkl_ zqkl_ file.
+
+- zqka_ zqbjq_-zqbju_ zqbkm_ is zqka_ zqbko_ `is_zqbjq__zqbju_` zqxa_ #1490.
+- zqmx_ zqbkq_ zqbbb_ a zqbku_ zqbkv_ zqbkx_ zquj_ zqbju_ in it.
+- `zqbq__zqbjj__zqkl__zqbkz_` zqm_ `zqbq__zqbjj__zqkl__FILES` zqbla_ zqka_
+  zqblb_ zqm_ zqka_ zqkl_ files; zqul_ no zqblj_ zqkl_ file zqblk_ zqbll_ zqbkb_
+  zqblm_.
+- zqblo_ on zqblq_ zqoo_: zqka_ zqblu_ is zqblv_ by `zqzq__zqblx__id` in zqka_
+  zqblq_ zqxb_ zqblz_ zqbma_.
+
+## zqbmb_'s zqbju_
+zqmb_ by zqbmj_; `zqbq__zqbjj__zqkl__zqbmk_=1` zqbml_. zqbmm_ zqbmo_ 868 zqbmq_
+zqbmu_: 142,391 zqbjq_ zqbmv_, zqub_ zqbmx_ by a zqbkq_ zqzm_, so zquj_
+zqmx_ zqbmz_ zqlv_ (median 48 zqba_ zqzv_). An zqboa_ zqbmj_ at zqol_ zqbob_ zqbmz_ be
+zqboj_ zqbok_.
+
+## zqa_
+- test_zqbjj__zqkl__zqbjk_.sh: 28 passed, 0 failed.
+- pytest tests/test_zqblz_.py tests/zqma_/_zqbol_: 597 passed.
+- zqbom_ zqm_ zqboo_ zqboq_.
+- zqbou_ run-tests.sh zqbov_ run zqbox_; CI is zqka_ zqboz_.
+
+🤖 zqbqa_ zqul_ [zqblq_ zqxb_](zqbk_://zqblq_.zqbm_/zqblq_-zqxb_)
+
+zqbk_://zqblq_.ai/zqxb_/zqzv__01C49zqbqb_7zqbqj_2zqbqk_4Z

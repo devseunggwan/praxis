@@ -354,6 +354,99 @@ run_case "F6: non-gh command" silent \
   "echo 'p50 91ms PASS(live)'"
 
 # ---------------------------------------------------------------------------
+# === PRECISION (#1543) — #1538's replay found 0 true positives in 19 fires.
+# Fenced blocks are pasted output (Forms B and C skip them); a measurement
+# cannot start inside a token; a Form A marker needs its own figure; the
+# run-location vocabulary widens and a count excludes ids and row labels.
+# ---------------------------------------------------------------------------
+
+nb() { printf '%s\n' "$2" > "$TMPDIR_TEST/$1.txt"; echo "gh pr comment 1 --body-file $TMPDIR_TEST/$1.txt"; }
+
+FENCED_B='검증 앵커 rev 2 입니다.
+
+```text
+--- PASS: TestLive (0.01s)
+36 passed in 8.76s
+```'
+run_case "P1: Form B measurement inside a fence is pasted output (silent)" silent "$(nb p1 "$FENCED_B")"
+run_case "P2: the same lines outside a fence still warn" "advisory:$MARKER" \
+  "$(nb p2 '검증 앵커 rev 2 입니다.
+--- PASS: TestLive (0.01s)')"
+run_case "P3: tilde fence is skipped too (silent)" silent \
+  "$(nb p3 '~~~
+PASS 0.473s
+~~~')"
+run_case "P4: fence indented by up to three spaces is skipped (silent)" silent \
+  "$(nb p4 '   ```
+   PASS 0.473s
+   ```')"
+run_case "P5: an unclosed fence is still scanned (warn)" "advisory:$MARKER" \
+  "$(nb p5 '```
+PASS 0.473s')"
+run_case "P6: Form C count inside a fence is pasted output (silent)" silent \
+  "$(nb p6 '```
+FAIL: 3 failed
+```')"
+run_case "P7: a cited command inside a fence still clears a count outside it" silent \
+  "$(nb p7 'PASS — 48건 확인
+
+```
+$ grep -c x f
+48
+```')"
+run_case "P8: a runs list inside a fence still clears Form A outside it" silent \
+  "$(nb p8 'median=91ms
+
+```
+15 runs
+```')"
+run_case "P9: 4s inside the job duration 14m4s is not a measurement (silent)" silent \
+  "gh pr comment 1 --body 'CI 완료로 행 5 BLOCKED → PASS(live) (test 14m4s)'"
+run_case "P10: a measurement right after Hangul still reads (warn)" "advisory:$MARKER" \
+  "gh pr comment 1 --body 'PASS(live) 응답91ms'"
+run_case "P11: #949 shape — PASS(실환경) with a single 2,920ms (warn)" "advisory:$MARKER" \
+  "gh pr comment 949 --body '| 1 | 목록 응답 지연 해소 | PASS(실환경) | 응답 2,920ms'"
+run_case "P12: median 48 with no sample size (warn)" "advisory:$MARKER" \
+  "gh pr comment 1 --body 'median 48'"
+run_case "P13: percentile in a table row, figure in the next cell (warn)" "advisory:$MARKER" \
+  "gh pr comment 1 --body '| p50 | 91ms |'"
+run_case "P14: median with no figure of its own, digits elsewhere (silent)" silent \
+  "gh pr comment 1 --body 'Verification updated — abc1234 rev 2 · signal and median figures now state what they count'"
+run_case "P15: the verb mean with a number later in the sentence (silent)" silent \
+  "gh pr comment 1 --body 'we mean to close it in rev 3 after 2 checks'"
+run_case "P16: run location stated as preview (silent)" silent \
+  "gh pr comment 1 --body 'preview 실환경 재실증 — 10 개 행이 PASS(live)'"
+run_case "P17: run location stated as CI \`test\` job (silent)" silent \
+  "gh pr comment 1 --body 'PASS — 41 failed 에서 0 failed 로, CI \`test\` 잡'"
+run_case "P18: run location stated as pod (silent)" silent \
+  "gh pr comment 1 --body 'PASS — 12 rows on the worker pod'"
+run_case "P19: 파드 as run location (silent)" silent \
+  "gh pr comment 1 --body 'PASS — 12 rows, 파드 안에서'"
+run_case "P20: 워킹 트리 as run location (silent)" silent \
+  "gh pr comment 1 --body 'PASS — 12 rows, 워킹 트리 기준'"
+run_case "P21: a CI run id followed by the job name is not a count (silent)" silent \
+  "gh pr comment 1 --body 'PASS(live) (run 35678080220 test job 12m23s)'"
+run_case "P22: a seven-digit number is an id, not a count (silent)" silent \
+  "gh pr comment 1 --body 'PASS — 1234567 rows'"
+run_case "P23: a thousands-separated count still reads (warn)" "advisory:$MARKER" \
+  "gh pr comment 1 --body 'PASS — 2,000건 적재'"
+run_case "P24: a table row label N행 is not a count (silent)" silent \
+  "gh pr comment 1 --body '2행은 PASS(live) → PASS(mirror)'"
+
+# Replay of #1538's sample, pseudonymized (spec "Replay fixtures"). 05 and 06
+# still warn (a count naming a class; a sample stated as local transcripts);
+# the other 17 were false positives.
+REPLAY_DIR="$ROOT_DIR/tests/fixtures/n1-quantitative-claim-advisory/replay-1543"
+for d in "$REPLAY_DIR"/*/; do
+  n=$(basename "$d")
+  case "$n" in
+    05|06) exp="advisory:$MARKER" ;;
+    *) exp=silent ;;
+  esac
+  run_case "replay-1543 case $n" "$exp" "gh pr comment 1 --body-file ${d}body.txt"
+done
+
+# ---------------------------------------------------------------------------
 # === FAIL-OPEN / EDGE
 # ---------------------------------------------------------------------------
 

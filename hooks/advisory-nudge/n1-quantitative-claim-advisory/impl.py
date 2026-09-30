@@ -154,8 +154,11 @@ _UNIT_TAIL = rf"(?![A-Za-z])(?!(?:(?!{_KO_PARTICLE})[가-힣]))"
 # hour-scale durations are excluded — those are overwhelmingly build/run
 # times rather than sample-dependent claims, and including them fires on
 # ordinary prose.
+# The left guard keeps a number from starting inside a token: `14m4s` is a
+# job duration, not a `4s` measurement. It is ASCII-only so `응답91ms` still
+# reads as one.
 _MEASUREMENT_RE = re.compile(
-    rf"(?:{_NUM})\s*(?:ms|sec|secs|s|초|qps|rps|req/s){_UNIT_TAIL}",
+    rf"(?<![A-Za-z0-9_.])(?:{_NUM})\s*(?:ms|sec|secs|s|초|qps|rps|req/s){_UNIT_TAIL}",
 )
 _VERDICT_WINDOW = 80
 
@@ -163,10 +166,10 @@ _VERDICT_WINDOW = 80
 def _has_summary_statistic(text: str) -> bool:
     """Form A — a statistical summary marker carrying a number."""
     for m in _PERCENTILE_RE.finditer(text):
-        if _number_within(text, m.start(), m.end()):
+        if _number_follows(text, m.end()):
             return True
     for m in _SUMMARY_WORD_RE.finditer(text):
-        if _number_within(text, m.start(), m.end()):
+        if _number_follows(text, m.end()):
             return True
     for word in _SUMMARY_KO:
         start = 0
@@ -174,20 +177,47 @@ def _has_summary_statistic(text: str) -> bool:
             idx = text.find(word, start)
             if idx < 0:
                 break
-            if _number_within(text, idx, idx + len(word)):
+            if _number_follows(text, idx + len(word)):
                 return True
             start = idx + 1
     return False
 
 
-def _number_within(text: str, start: int, end: int) -> bool:
-    """A number near the marker, excluding the marker's own digits."""
-    window = text[max(0, start - _VERDICT_WINDOW):start] + " " + text[end:end + _VERDICT_WINDOW]
-    return bool(re.search(_NUM, window))
+# `median 48`, `p50: 91ms`, `중앙값은 102 ms`, `| p50 | 91ms |`. A number
+# elsewhere in the sentence does not make the verb `mean` or a `median`
+# that states no figure into a statistic.
+_ADJACENT_NUM_RE = re.compile(
+    rf"[ \t]*(?:[:=|(]|of(?![A-Za-z])|은|는|이|가)?[ \t]*(?:{_NUM})"
+)
+
+
+# `median latency was 91ms`, `평균 응답 91ms`: a unit-bearing figure a few
+# words on, in the same line, is the marker's figure too.
+_MARKER_REACH = 24
+
+
+def _number_follows(text: str, end: int) -> bool:
+    """The marker's own figure: a number right after it, or a measurement just past it."""
+    if _ADJACENT_NUM_RE.match(text, end):
+        return True
+    reach = text[end:end + _MARKER_REACH].split("\n", 1)[0]
+    return bool(_MEASUREMENT_RE.search(reach))
+
+
+# Pasted tool output (`--- PASS: TestX (0.01s)`, `36 passed in 8.76s`) is a
+# transcript of a run, not a claim; Forms B and C skip fenced blocks. The
+# pass conditions still read the whole body, since a cited `$` command or a
+# `runs=[…]` list sits inside a fence. An unclosed fence is scanned.
+_FENCE_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})[^\n]*\n.*?^ {0,3}\1[ \t]*$", re.MULTILINE | re.DOTALL)
+
+
+def _outside_fences(text: str) -> str:
+    return _FENCE_RE.sub("\n", text)
 
 
 def _has_verdict_measurement(text: str) -> bool:
     """Form B — a verdict token within the window of a measurement."""
+    text = _outside_fences(text)
     measurements = [m.span() for m in _MEASUREMENT_RE.finditer(text)]
     if not measurements:
         return False
@@ -203,8 +233,13 @@ def _has_verdict_measurement(text: str) -> bool:
 # produced it. Same shape as Form B with a count in place of a unit-bearing
 # measurement, and a different pass condition: any one of the three run-
 # condition fields (command / collection scope / where it ran) silences it.
+# At most six digits and not after `run`: `run 35678080220 test` names a CI
+# run id and a job. `N행` is left out: in a verification comment it is a
+# table row label (`2행은 … 재측정`), not a counted result.
+_COUNT_NUM = r"\d{1,3}(?:,\d{3})?(?:\.\d+)?|\d{1,6}(?:\.\d+)?"
 _COUNT_RE = re.compile(
-    rf"(?:{_NUM})\s*(?:건|개|행|줄|rows?|hits?|matches?|files?|cases?|tests?|failures?|failed)"
+    rf"(?<![\d,.])(?<!run )(?:{_COUNT_NUM})(?![\d,])"
+    rf"\s*(?:건|개|줄|rows?|hits?|matches?|files?|cases?|tests?|failures?|failed)"
     rf"{_UNIT_TAIL}",
     re.IGNORECASE,
 )
@@ -216,12 +251,14 @@ _RUN_SCOPE_RE = re.compile(
     re.IGNORECASE,
 )
 _RUN_LOCATION_RE = re.compile(
-    r"로컬\s*재현|로컬\s*실행|CI\s*run\b|CI\s*조건|workflow\s*run|워크트리|실행\s*위치|ran on\b|ran in\b",
+    r"로컬|CI\s*run\b|CI\s*조건|CI\s*`?test|workflow\s*run|워크트리|워킹\s*트리|실행\s*위치"
+    r"|파드|(?<![A-Za-z])pods?(?![A-Za-z])|(?<![A-Za-z])preview|ran on\b|ran in\b",
     re.IGNORECASE,
 )
 
 
 def _has_verdict_count(text: str) -> bool:
+    text = _outside_fences(text)
     counts = [m.span() for m in _COUNT_RE.finditer(text)]
     if not counts:
         return False
