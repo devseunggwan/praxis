@@ -392,6 +392,34 @@ def _close_frame(stack: list[_Frame], found: list[str]) -> None:
         outer.word.append(_EXPANSION_PLACEHOLDER)
 
 
+def _join_line_continuations(text: str) -> str:
+    """`text` with each unquoted backslash-newline removed.
+
+    zsh joins the lines before it splits words, so `status\\<newline>=1` is
+    one `status=1` word. `_mask_quoted` blanks the pair instead and would split
+    it. Inside single quotes the pair is literal; `\\\\` is a literal backslash.
+    """
+    out: list[str] = []
+    in_single = False
+    i = 0
+    while i < len(text):
+        ch = text[i]
+        if in_single:
+            in_single = ch != "'"
+        elif ch == "'":
+            in_single = True
+        elif ch == "\\":
+            if text[i + 1:i + 2] == "\n":
+                i += 2
+                continue
+            out.append(text[i:i + 2])
+            i += 2
+            continue
+        out.append(ch)
+        i += 1
+    return "".join(out)
+
+
 def status_assignments(command: str) -> list[str]:
     """`status=` / `status+=` assignment words, in source order.
 
@@ -402,7 +430,7 @@ def status_assignments(command: str) -> list[str]:
     stack of nesting levels so a command inside `$( … )` has its own prefix,
     and the words of an array, a `${ … }` or a pattern are skipped.
     """
-    text = _mask_quoted(strip_heredoc_bodies(command))
+    text = _mask_quoted(_join_line_continuations(strip_heredoc_bodies(command)))
     text = _mask_arithmetic(_mask_double_bracket(_mask_comments(text)))
     found: list[str] = []
     stack = [_Frame("cmd", closer="")]

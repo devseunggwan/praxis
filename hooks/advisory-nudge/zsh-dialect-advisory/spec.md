@@ -102,7 +102,8 @@ assignments, redirections (`>out`, `2> err`, `&>out`), the words `if` `then` `el
 count.
 
 The scan keeps one prefix per nesting level, so `a=$(x) status=1 cmd` is still
-an assignment. A declaration without a value (`local status`) succeeds and is
+an assignment. An unquoted backslash-newline is joined first, as zsh does, so a
+`status=` split across lines is still one word. A declaration without a value (`local status`) succeeds and is
 not reported, and neither is the same text as an ordinary argument
 (`echo status=1`, `echo $(date) status=1`, `env status=1 cmd`), an array
 element (`arr=(a status=1)`), part of `${…}` or `{a,b}`, or a case pattern.

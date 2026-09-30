@@ -257,6 +257,18 @@ run_case "status after a pipe" "ask:status=" \
   'echo a | status=1'
 run_case "status after a leading &> redirection" "ask:status=" \
   '&>out status=1 true'
+run_case "status= split by a line continuation" "ask:status=" \
+  'status\
+=1'
+run_case "status name split by a line continuation" "ask:status=" \
+  'sta\
+tus=1'
+run_case "status after a continued && line" "ask:status=" \
+  'true \
+  && status=1'
+run_case "status after an escaped backslash and a real newline" "ask:status=" \
+  'echo a\\
+status=1'
 for op in '&' '&|' '&!' '|&'; do
   run_case "status after the $op separator" "ask:status=" \
     "echo a $op status=1"
@@ -324,6 +336,12 @@ run_case "an argument after a &> redirection" silent \
   'true &>/dev/null status=1'
 run_case "an argument after a &>> redirection" silent \
   'true &>>log status=1'
+run_case "a backslash-newline inside single quotes is literal" silent \
+  "echo 'a\\
+' status=1"
+run_case "an argument on a continued line" silent \
+  'echo x \
+status=1'
 run_case "status assignment in a comment" silent \
   'true # status=1'
 run_case "status assignment in a heredoc body" silent \
