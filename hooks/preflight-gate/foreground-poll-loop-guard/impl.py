@@ -699,19 +699,24 @@ def _background_waiter_advisory(command: str, session_id: str | None) -> str | N
 _BOUND_TEST_OPS = {"-lt", "-le", "-gt", "-ge"}
 _TEST_OPENERS = {"[", "[[", "test"}
 _TEST_CLOSERS = {"]", "]]"} | _COMMAND_SEPARATORS | {"do", "then"}
-# An arithmetic span and an ordering operator inside it, on the joined token
-# text, so a glued `((i<40))` or `$(( n+1))` reads the same as a spaced one.
+# An arithmetic command and an ordering operator inside it, matched on the
+# token text joined from the `((` token on, so a glued `((i<40))` reads the
+# same as a spaced one.
 _ARITH_COMPARISON_RE = re.compile(r"\(\((?:(?!\)\)).)*[<>]", re.DOTALL)
-# Words after which a test still runs as a command: `if [ … ]`, `! [ … ]`.
+# Words after which a test still runs as a command: `if [ … ]`, `if ! [ … ]`.
 # Local to the ceiling check so the shared command-position rule, which also
 # decides what counts as a `sleep`, stays unchanged.
 _TEST_PREFIX_WORDS = {"if", "!", "while", "until"}
 
 
-def _opens_test(tokens: list[str], cmd_pos: list[bool], i: int) -> bool:
-    if cmd_pos[i]:
-        return True
-    return i > 0 and tokens[i - 1] in _TEST_PREFIX_WORDS and cmd_pos[i - 1]
+def _runs_as_command(tokens: list[str], cmd_pos: list[bool], i: int) -> bool:
+    """True when token `i` is a command, possibly behind `if` / `!` / … words."""
+    j = i
+    while not cmd_pos[j]:
+        j -= 1
+        if j < 0 or tokens[j] not in _TEST_PREFIX_WORDS:
+            return False
+    return True
 
 
 def _has_ceiling(header: list[str], body: list[str]) -> bool:
@@ -722,16 +727,20 @@ def _has_ceiling(header: list[str], body: list[str]) -> bool:
     `<` / `>` count only inside `(( … ))`: elsewhere they are redirections,
     and `grep -q x f > /dev/null` bounds nothing. `-lt` and friends count only
     inside `[`, `[[` or `test`: elsewhere they are flags (`ls -lt`). The
-    opener itself counts only as a command: `echo test -lt 40` prints a
-    string and bounds nothing.
+    opener itself counts only as a command: `echo test -lt 40` and
+    `echo "(( i < 40 ))"` print a string and bound nothing.
     """
     tokens = header + body
-    if _ARITH_COMPARISON_RE.search(" ".join(tokens)):
-        return True
     cmd_pos = _command_position_flags(tokens)
     in_test = False
     for i, tok in enumerate(tokens):
-        if tok in _TEST_OPENERS and _opens_test(tokens, cmd_pos, i):
+        if (
+            tok.startswith("((")
+            and _runs_as_command(tokens, cmd_pos, i)
+            and _ARITH_COMPARISON_RE.match(" ".join(tokens[i:]))
+        ):
+            return True
+        if tok in _TEST_OPENERS and _runs_as_command(tokens, cmd_pos, i):
             in_test = True
         elif tok in _TEST_CLOSERS:
             in_test = False

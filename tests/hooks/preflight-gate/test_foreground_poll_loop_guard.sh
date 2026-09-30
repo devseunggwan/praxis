@@ -697,6 +697,12 @@ bw_ceiling_case "ceiling-bracket-as-argument-is-not-a-bound" ceiling \
   'until grep -q DONE /tmp/x.log; do echo [ x -lt 40 ]; sleep 5; done'
 bw_ceiling_case "ceiling-double-bracket-as-argument-is-not-a-bound" ceiling \
   "until grep -q DONE /tmp/x.log; do printf '%s\\n' [[ -gt; sleep 5; done"
+bw_ceiling_case "ceiling-quoted-arithmetic-is-not-a-bound" ceiling \
+  'until grep -q DONE /tmp/x.log; do echo "(( i < 40 ))"; sleep 5; done'
+bw_ceiling_case "ceiling-quoted-glued-arithmetic-is-not-a-bound" ceiling \
+  "until grep -q DONE /tmp/x.log; do echo '((i<40))'; sleep 5; done"
+bw_ceiling_case "ceiling-printed-arithmetic-expansion-is-not-a-bound" ceiling \
+  'until grep -q DONE /tmp/x.log; do echo $(( i < 40 )); sleep 5; done'
 
 # Silent: a ceiling is present, or the loop is not an open-ended waiter.
 bw_ceiling_case "ceiling-timeout-wrapper" silent \
@@ -721,6 +727,10 @@ bw_ceiling_case "ceiling-seconds-test-builtin" silent \
   'until grep -q DONE /tmp/x.log; do [ $SECONDS -ge 600 ] && exit 1; sleep 5; done'
 bw_ceiling_case "ceiling-if-test-counter" silent \
   'until grep -q DONE /tmp/x.log; do if [ $i -ge 40 ]; then break; fi; sleep 5; done'
+bw_ceiling_case "ceiling-if-negated-test-counter" silent \
+  'until grep -q DONE /tmp/x.log; do if ! [ $i -lt 40 ]; then break; fi; sleep 5; done'
+bw_ceiling_case "ceiling-if-negated-arithmetic-counter" silent \
+  'until grep -q DONE /tmp/x.log; do if ! (( i < 40 )); then break; fi; sleep 5; done'
 bw_ceiling_case "ceiling-negated-test-counter" silent \
   'until grep -q DONE /tmp/x.log; do ! [ $i -lt 40 ] && break; sleep 5; done'
 bw_ceiling_case "ceiling-while-test-counter-in-header" silent \

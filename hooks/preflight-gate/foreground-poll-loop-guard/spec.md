@@ -249,7 +249,7 @@ lane) unless the loop can end on its own:
 | Ceiling | How it is recognised |
 | --- | --- |
 | `timeout N sh -c '…'` / `gtimeout N bash -c '…'` | The loop sits inside one string token, so no loop is seen at all. A command that starts with exactly `bash -c '…'` / `sh -c '…'` (no wrapper) is spliced (`_inline_shell_c`) and is seen |
-| Counter or elapsed-time bound in the header or body | `-lt` / `-le` / `-gt` / `-ge` inside `[`, `[[` or `test` run as a command (after a separator, `do`, `then`, `if`, `!`, `while` or `until`; `echo test -lt 40` is not one), or `<` / `<=` / `>` / `>=` inside `(( … ))`, spaced or glued (`((i<40))`, `(( SECONDS > 600 ))`). A bare `$SECONDS` or `date +%s` that is only logged is not a bound |
+| Counter or elapsed-time bound in the header or body | `-lt` / `-le` / `-gt` / `-ge` inside `[`, `[[` or `test`, or `<` / `<=` / `>` / `>=` inside `(( … ))`, where the `[` / `((` runs as a command (after a separator, `do`, `then`, or a run of `if` / `!` / `while` / `until`; `echo test -lt 40` and `echo "(( i < 40 ))"` are not one), spaced or glued (`((i<40))`, `(( SECONDS > 600 ))`). A bare `$SECONDS` or `date +%s` that is only logged is not a bound |
 
 | Situation (all `run_in_background: true`) | Action |
 | --- | --- |
