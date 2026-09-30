@@ -477,10 +477,15 @@ def _mcp_transcribed(published: str, mcp: list[tuple[str, str]]) -> bool:
     name, args = m.group(1), m.group(2)
     # findall reports unmatched groups as "", so exactly one group is non-empty.
     values = ["".join(g) for g in _ARG_VALUE_RE.findall(args)]
+    if not values and args.strip():
+        # Bare positional arguments give no value to look for in the call's input.
+        return False
     for tool, dumped in mcp:
         if tool != name and tool.rsplit("__", 1)[-1] != name:
             continue
-        if all(v in dumped for v in values):
+        if values and all(v in dumped for v in values):
+            return True
+        if not values and dumped == "{}":
             return True
     return False
 

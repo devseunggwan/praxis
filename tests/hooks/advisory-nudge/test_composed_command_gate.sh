@@ -776,6 +776,24 @@ EOF
 run_case "hook-blocked MCP call is not provenance (warn)" \
   "warn" "advisory" "$(body_payload "$B" "$TRANSCRIPT2")"
 
+nextbody
+cat > "$B" <<'EOF'
+```
+$ lookup(y)
+```
+EOF
+run_case "MCP call with only a bare positional argument cannot be matched (warn)" \
+  "warn" "advisory" "$(body_payload "$B" "$TRANSCRIPT2")"
+
+nextbody
+cat > "$B" <<'EOF'
+```
+$ lookup()
+```
+EOF
+run_case "MCP call written with no arguments, executed call had input (warn)" \
+  "warn" "advisory" "$(body_payload "$B" "$TRANSCRIPT2")"
+
 # --- Replay of #1538's sample (#1540) ----------------------------------------
 # Pseudonymized from real fires; see the spec's "Replay fixtures" section.
 # 01 02 04 08 14 were false positives the whole-session scan clears; the rest
