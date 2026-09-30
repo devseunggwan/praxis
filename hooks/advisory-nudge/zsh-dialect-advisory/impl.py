@@ -304,8 +304,8 @@ _ASSIGNMENT_WORD_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*(?:\[[^\]]*\])?\+?=")
 _STATUS_ASSIGNMENT_RE = re.compile(r"status(?:\[[^\]]*\])?\+?=")
 # A redirection word. Operator-only (`>`, `2>&`) takes the next word as its
 # target; `>out` carries it. Neither ends the assignment prefix.
-_REDIRECT_RE = re.compile(r"\d*[<>]")
-_REDIRECT_OPERATOR_RE = re.compile(r"\d*[<>]+[&|]?")
+_REDIRECT_RE = re.compile(r"(?:\d*|&)[<>]")
+_REDIRECT_OPERATOR_RE = re.compile(r"(?:\d*|&)[<>]+[&|]?")
 # Builtins whose `NAME=value` arguments are assignments. `local status` with no
 # value is a declaration and succeeds (measured), so only `status=` counts.
 _DECLARATION_BUILTINS = frozenset(
@@ -457,7 +457,9 @@ def status_assignments(command: str) -> list[str]:
             frame.reset()
             i += 1
             continue
-        if ch in "&|" and frame.word and frame.word[-1] in "<>":
+        # `&>` / `&>>` redirect both streams; unlike `&`, `&|` or `&!` they do
+        # not end the command.
+        if (ch in "&|" and frame.word and frame.word[-1] in "<>") or pair == "&>":
             frame.word.append(ch)
             i += 1
             continue

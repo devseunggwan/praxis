@@ -255,6 +255,12 @@ run_case "status inside <( )" "ask:status=" \
   'cat <(status=1)'
 run_case "status after a pipe" "ask:status=" \
   'echo a | status=1'
+run_case "status after a leading &> redirection" "ask:status=" \
+  '&>out status=1 true'
+for op in '&' '&|' '&!' '|&'; do
+  run_case "status after the $op separator" "ask:status=" \
+    "echo a $op status=1"
+done
 run_case "status in a function body" "ask:status=" \
   'f() { status=1; }'
 run_case "status in a function-keyword body" "ask:status=" \
@@ -314,6 +320,10 @@ run_case "an argument after a glob qualifier" silent \
   'ls *(N) status=1'
 run_case "an argument inside a function-keyword body" silent \
   'function foo { echo status=1; }'
+run_case "an argument after a &> redirection" silent \
+  'true &>/dev/null status=1'
+run_case "an argument after a &>> redirection" silent \
+  'true &>>log status=1'
 run_case "status assignment in a comment" silent \
   'true # status=1'
 run_case "status assignment in a heredoc body" silent \

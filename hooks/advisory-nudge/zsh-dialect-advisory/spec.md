@@ -97,7 +97,7 @@ and a `status=` argument of `local`, `typeset`, `declare`, `export`,
 A word is leading when it starts a command (the start of the text, or after
 `;`, `&`, `|`, a newline, `(`, `$(`, `<(`, `>(`, `=(`, a backtick, `{`, the end
 of a case pattern, or a `f()` / `function f` header) and is preceded only by other
-assignments, redirections (`>out`, `2> err`), the words `if` `then` `else`
+assignments, redirections (`>out`, `2> err`, `&>out`), the words `if` `then` `else`
 `elif` `do` `while` `until` `!` `time` `nocorrect` `coproc`, or `repeat` and its
 count.
 
