@@ -257,6 +257,10 @@ run_case "status after a pipe" "ask:status=" \
   'echo a | status=1'
 run_case "status in a function body" "ask:status=" \
   'f() { status=1; }'
+run_case "status in a function-keyword body" "ask:status=" \
+  'function foo { status=1; }'
+run_case "status in a function-keyword body with parens" "ask:status=" \
+  'function foo() { status=1; }'
 run_case "status in a case branch after a parenthesized pattern" "ask:status=" \
   'case $x in (a) status=1;; esac'
 
@@ -308,6 +312,8 @@ run_case "a later case pattern" silent \
   'case $x in a) true;; status=1) echo;; esac'
 run_case "an argument after a glob qualifier" silent \
   'ls *(N) status=1'
+run_case "an argument inside a function-keyword body" silent \
+  'function foo { echo status=1; }'
 run_case "status assignment in a comment" silent \
   'true # status=1'
 run_case "status assignment in a heredoc body" silent \

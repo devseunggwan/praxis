@@ -360,7 +360,9 @@ def _finish_word(frame: _Frame, found: list[str]) -> None:
         return
     if word in _LEADING_KEYWORDS:
         return
-    if word == "repeat":
+    if word in ("repeat", "function"):
+        # The count or the function name; the body after it is in command
+        # position again (`function f { status=1; }`).
         frame.skip_next = True
         return
     if _ASSIGNMENT_WORD_RE.match(word):
@@ -432,8 +434,10 @@ def status_assignments(command: str) -> list[str]:
                 stack.append(_Frame("pattern", closer=")", opened_mid_word=True))
             i += 1
             continue
-        word = "".join(frame.word)
+        # `frame.word` is read in place: joining it per character is quadratic
+        # on a long unbroken token.
         if ch == "(":
+            word = "".join(frame.word)
             if word == "=":
                 frame.word.clear()
                 stack.append(_Frame("cmd", closer=")"))
@@ -453,7 +457,7 @@ def status_assignments(command: str) -> list[str]:
             frame.reset()
             i += 1
             continue
-        if ch in "&|" and word and word[-1] in "<>":
+        if ch in "&|" and frame.word and frame.word[-1] in "<>":
             frame.word.append(ch)
             i += 1
             continue
@@ -466,10 +470,11 @@ def status_assignments(command: str) -> list[str]:
             _finish_word(frame, found)
             i += 1
             continue
-        if ch == "{" and not word and frame.prefix and text[i + 1:i + 2].isspace():
+        if (ch == "{" and not frame.word and frame.prefix
+                and text[i + 1:i + 2].isspace()):
             i += 1  # a `{ … }` group: the next word is still in command position
             continue
-        if ch == "}" and not word:
+        if ch == "}" and not frame.word:
             frame.prefix = False
             i += 1
             continue
