@@ -274,6 +274,17 @@ run_case "Arm A: Caller chain verified N/A names no search tool (warn)" \
   "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"gh pr comment 5 --body-file $CCV_NA\"}}"
 rm -f "$CCV_NA"
 
+# A scaffold placeholder is not evidence even on the caller-chain line.
+CCV_PH=$(mktemp /tmp/cpg-ccvph-XXXXXX.md)
+printf 'worker.py fails to check membership.\n\nCaller chain verified: grep <command> → <output>\n' > "$CCV_PH"
+run_case "Arm A: Caller chain verified with placeholders (warn)" \
+  "warn" "advisory" \
+  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"gh pr comment 5 --body-file $CCV_PH\"}}"
+run_case "Arm A: Caller chain verified with placeholders, strict (block)" \
+  "block" "strict" \
+  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"gh pr comment 5 --body-file $CCV_PH\"}}"
+rm -f "$CCV_PH"
+
 # --- Per-write isolation (Codex round 1, P2) ---------------------------------
 # A fix( title on one write must not make a sibling write's incidental file
 # mention read as a defect citation.

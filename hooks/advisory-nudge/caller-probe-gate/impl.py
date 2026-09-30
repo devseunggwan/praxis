@@ -253,12 +253,12 @@ def _has_valid_caller_probe(body: str) -> bool:
     """
     for raw_line in body.splitlines():
         line = raw_line.strip()
+        if any(tok in line for tok in _PROBE_PLACEHOLDER_TOKENS):
+            continue
         if _CALLER_CHAIN_RE.match(line):
             return True
         prefix = next((p for p in _PROBE_PREFIXES if line.startswith(p)), None)
         if prefix is None:
-            continue
-        if any(tok in line for tok in _PROBE_PLACEHOLDER_TOKENS):
             continue
         m = _PROBE_ARROW_RE.search(line)
         if not m:
