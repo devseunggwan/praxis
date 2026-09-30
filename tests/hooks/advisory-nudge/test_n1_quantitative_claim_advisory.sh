@@ -432,6 +432,26 @@ run_case "P23: a thousands-separated count still reads (warn)" "advisory:$MARKER
   "gh pr comment 1 --body 'PASS — 2,000건 적재'"
 run_case "P24: a table row label N행 is not a count (silent)" silent \
   "gh pr comment 1 --body '2행은 PASS(live) → PASS(mirror)'"
+run_case "P25: a closing fence longer than the opener closes it (silent)" silent \
+  "$(nb p25 '```
+PASS 0.473s
+````')"
+run_case "P26: a shorter closer leaves a longer fence unclosed (warn)" "advisory:$MARKER" \
+  "$(nb p26 '````
+PASS 0.473s
+```')"
+run_case "P27: a closer of the other character does not close (warn)" "advisory:$MARKER" \
+  "$(nb p27 '```
+PASS 0.473s
+~~~')"
+run_case "P28: a closer with trailing text does not close (warn)" "advisory:$MARKER" \
+  "$(nb p28 '```
+PASS 0.473s
+``` x')"
+run_case "P29: a backtick in a backtick info string opens no fence (warn)" "advisory:$MARKER" \
+  "$(nb p29 '```a`
+PASS 0.473s
+```')"
 
 # Replay of #1538's sample, pseudonymized (spec "Replay fixtures"). 05 and 06
 # still warn (a count naming a class; a sample stated as local transcripts);

@@ -160,7 +160,7 @@ it when the sample size is deliberate and already stated in prose.
 | Minute- and hour-scale durations (`12분`, `2h`) | overwhelmingly build/run times, not sample-dependent claims |
 | A one-digit `[P1]` tag | Codex finding-severity tags appear in this repo's own PR bodies; the percentile pattern requires two digits |
 | Prose completeness / enumeration breadth | semantic, noisy — the coverage ceiling above |
-| Fenced code blocks, for Forms B and C | pasted tool output (`--- PASS: TestX (0.01s)`, `36 passed in 8.76s`) records a run; it is not a claim. The pass conditions still read the whole body, since a cited `$` command or a `runs=[…]` list sits inside a fence. An unclosed fence is scanned |
+| Fenced code blocks, for Forms B and C | pasted tool output (`--- PASS: TestX (0.01s)`, `36 passed in 8.76s`) records a run; it is not a claim. The pass conditions still read the whole body, since a cited `$` command or a `runs=[…]` list sits inside a fence. Fences pair as CommonMark pairs them: a closer uses the opener's character, at least as many of them, and nothing but whitespace after, and a backtick in a backtick opener's info string opens nothing. An unclosed fence is scanned |
 | `N행`, a 7+ digit number, a number after `run` | a table row label (`2행은 … 재측정`) and a CI run id (`run 35678080220 test`) are not counted results |
 | A Form A marker with no figure of its own | the verb `mean`, or `median figures now state what they count`, is not a statistic because a SHA or `rev 2` sits in the same sentence. The cost: `평균 응답 시간이 지난주보다 늘어 91ms` puts the figure past 24 characters and is missed |
 

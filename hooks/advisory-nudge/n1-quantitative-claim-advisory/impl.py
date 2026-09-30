@@ -208,11 +208,30 @@ def _number_follows(text: str, end: int) -> bool:
 # transcript of a run, not a claim; Forms B and C skip fenced blocks. The
 # pass conditions still read the whole body, since a cited `$` command or a
 # `runs=[…]` list sits inside a fence. An unclosed fence is scanned.
-_FENCE_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})[^\n]*\n.*?^ {0,3}\1[ \t]*$", re.MULTILINE | re.DOTALL)
+# CommonMark closes a fence with the same character, at least as many of
+# them, and nothing but whitespace after; a backtick opener's info string
+# may not hold a backtick.
+_FENCE_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
 
 
 def _outside_fences(text: str) -> str:
-    return _FENCE_RE.sub("\n", text)
+    kept: list[str] = []
+    fenced: list[str] = []
+    fence = ""
+    for line in text.split("\n"):
+        m = _FENCE_RE.match(line)
+        if not fence:
+            if m and not (m.group(1)[0] == "`" and "`" in m.group(2)):
+                fence = m.group(1)
+                fenced = [line]
+            else:
+                kept.append(line)
+            continue
+        fenced.append(line)
+        if m and m.group(1)[0] == fence[0] and len(m.group(1)) >= len(fence) and not m.group(2).strip():
+            fence = ""
+            kept.append("")
+    return "\n".join(kept + fenced if fence else kept)
 
 
 def _has_verdict_measurement(text: str) -> bool:
