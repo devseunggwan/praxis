@@ -404,7 +404,9 @@ bw_run() {
   )
 }
 
-# bw_assert <name> <advise|silent> <rc> <stderr>
+# bw_assert <name> <advise|ceiling|silent> <rc> <stderr>
+#   ceiling — the no-ceiling advisory, and no waiter-chain advisory. A first
+#   launch of an unbounded loop fixture draws exactly this.
 bw_assert() {
   local name="$1" want="$2" rc="$3" err="$4"
   if [ "$rc" -ne 0 ]; then
@@ -413,6 +415,14 @@ bw_assert() {
   fi
   if [ "$want" = "advise" ] && ! echo "$err" | grep -q 'background waiter for this same target'; then
     echo "FAIL  [$name] expected the waiter-chain advisory, got: ${err:-<empty>}"
+    FAIL=$((FAIL + 1)); FAILED_NAMES+=("$name"); return
+  fi
+  if [ "$want" = "ceiling" ] && echo "$err" | grep -q 'background waiter for this same target'; then
+    echo "FAIL  [$name] expected no waiter-chain advisory, got: $err"
+    FAIL=$((FAIL + 1)); FAILED_NAMES+=("$name"); return
+  fi
+  if [ "$want" = "ceiling" ] && ! echo "$err" | grep -q 'has no time ceiling'; then
+    echo "FAIL  [$name] expected the no-ceiling advisory, got: ${err:-<empty>}"
     FAIL=$((FAIL + 1)); FAILED_NAMES+=("$name"); return
   fi
   if [ "$want" = "silent" ] && [ -n "$err" ]; then
@@ -436,7 +446,7 @@ bw_assert "waiter-duration-only-retry-advises" advise "$rc" "$err"
 BW_B="$BW_DIR/home-b"
 BW_LOOP='until grep -q DONE /tmp/suite.log; do sleep 20; done; tail -50 /tmp/suite.log'
 err=$(bw_run "$BW_B" bw-b "$BW_LOOP"); rc=$?
-bw_assert "waiter-loop-first-launch-silent" silent "$rc" "$err"
+bw_assert "waiter-loop-first-launch-no-chain" ceiling "$rc" "$err"
 err=$(bw_run "$BW_B" bw-b "$BW_LOOP"); rc=$?
 bw_assert "waiter-loop-relaunch-advises" advise "$rc" "$err"
 
@@ -449,9 +459,9 @@ bw_assert "waiter-distinct-target-first" silent "$rc" "$err"
 err=$(bw_run "$BW_C" bw-c 'sleep 60 && tail -50 /tmp/b.log'); rc=$?
 bw_assert "waiter-distinct-file-stays-silent" silent "$rc" "$err"
 err=$(bw_run "$BW_C" bw-c 'until gh run view 123 -q .status | grep -q completed; do sleep 15; done'); rc=$?
-bw_assert "waiter-distinct-run-id-first" silent "$rc" "$err"
+bw_assert "waiter-distinct-run-id-first" ceiling "$rc" "$err"
 err=$(bw_run "$BW_C" bw-c 'until gh run view 456 -q .status | grep -q completed; do sleep 15; done'); rc=$?
-bw_assert "waiter-distinct-run-id-stays-silent" silent "$rc" "$err"
+bw_assert "waiter-distinct-run-id-no-chain" ceiling "$rc" "$err"
 
 # Launching the awaited work is not waiting on it — no `sleep`, never recorded.
 BW_D="$BW_DIR/home-d"
@@ -474,10 +484,10 @@ bw_assert "waiter-expired-window-stays-silent" silent "$rc" "$err"
 # cases above to the TTL rather than to an accident of timing.
 BW_F="$BW_DIR/home-f"
 err=$(PRAXIS_POLL_LOOP_WAITER_TTL=1 bw_run "$BW_F" bw-f "$BW_LOOP"); rc=$?
-bw_assert "waiter-ttl-override-first-launch-silent" silent "$rc" "$err"
+bw_assert "waiter-ttl-override-first-launch-no-chain" ceiling "$rc" "$err"
 python3 -c 'import time; time.sleep(1.3)'
 err=$(PRAXIS_POLL_LOOP_WAITER_TTL=1 bw_run "$BW_F" bw-f "$BW_LOOP"); rc=$?
-bw_assert "waiter-ttl-override-expired-stays-silent" silent "$rc" "$err"
+bw_assert "waiter-ttl-override-expired-no-chain" ceiling "$rc" "$err"
 
 # `sleep` counts only in command position. `echo sleep 20` prints a word and
 # waits for nothing — registering it as a waiter would advise against the next
@@ -532,7 +542,7 @@ bw_assert "waiter-descending-seq-past-own-total-stays-silent" silent "$rc" "$err
 # not a timing accident.
 BW_J="$BW_DIR/home-j"
 err=$(bw_run "$BW_J" bw-j "$BW_LOOP"); rc=$?
-bw_assert "waiter-unbounded-loop-first-launch-silent" silent "$rc" "$err"
+bw_assert "waiter-unbounded-loop-first-launch-no-chain" ceiling "$rc" "$err"
 python3 -c 'import time; time.sleep(2.3)'
 err=$(bw_run "$BW_J" bw-j "$BW_LOOP"); rc=$?
 bw_assert "waiter-unbounded-loop-keeps-ttl-advises" advise "$rc" "$err"
@@ -636,9 +646,151 @@ bw_assert "waiter-norm-trailing-noop-not-dropped" silent "$rc" "$err"
 # no-op rule leaves it alone and the loop still registers as a waiter.
 BW_N4="$BW_DIR/home-n4"
 err=$(bw_run "$BW_N4" bw-n4 'while true; do sleep 20; done'); rc=$?
-bw_assert "waiter-norm-while-true-first-silent" silent "$rc" "$err"
+bw_assert "waiter-norm-while-true-first-no-chain" ceiling "$rc" "$err"
 err=$(bw_run "$BW_N4" bw-n4 'while true; do sleep 20; done'); rc=$?
 bw_assert "waiter-norm-while-true-still-advises" advise "$rc" "$err"
+
+# ---- background waiter with no time ceiling (issue #1527) ---------------------
+#
+# A background call notifies only on exit, so a `while`/`until` waiter whose
+# success condition never matches runs until the session ends. The observed
+# case waited ~24h on a build log that never printed the expected string. Each
+# case runs in a fresh home so the waiter-chain lane cannot be what fires.
+
+bw_ceiling_case() {
+  local name="$1" want="$2" command="$3"
+  local home="$BW_DIR/ceiling-$((PASS + FAIL))"
+  err=$(bw_run "$home" bw-ceiling "$command"); rc=$?
+  bw_assert "$name" "$want" "$rc" "$err"
+}
+
+# Fire: an unbounded waiter, in every shape that reaches the loop.
+bw_ceiling_case "ceiling-observed-build-log-waiter" ceiling \
+  'until grep -q -E "Successfully built|ERROR|error:|failed to solve" "$LOG"; do sleep 15; done'
+bw_ceiling_case "ceiling-while-true-break-on-success" ceiling \
+  'while true; do grep -q DONE /tmp/x.log && break; sleep 5; done'
+bw_ceiling_case "ceiling-shell-c-wrapper-without-timeout" ceiling \
+  "bash -c 'until grep -q DONE /tmp/x.log; do sleep 5; done'"
+bw_ceiling_case "ceiling-path-invoked-sleep" ceiling \
+  'until [ -s /tmp/x.out ]; do /bin/sleep 10; done'
+bw_ceiling_case "ceiling-redirect-is-not-a-comparison" ceiling \
+  'until grep -q DONE /tmp/x.log > /dev/null 2>&1; do sleep 5; done'
+bw_ceiling_case "ceiling-exit-status-check-is-not-a-bound" ceiling \
+  'until [ $? -ne 0 ] || gh pr checks 12; do sleep 20; done'
+bw_ceiling_case "ceiling-timeout-on-an-inner-command-does-not-bound-the-loop" ceiling \
+  'until timeout 5 curl -sf http://localhost:8080/health; do sleep 3; done'
+bw_ceiling_case "ceiling-glued-arith-close-does-not-leak-to-a-redirect" ceiling \
+  'until grep -q DONE f; do n=$(( n+1)); date > /tmp/last; sleep 5; done'
+bw_ceiling_case "ceiling-glued-arith-increment-does-not-leak" ceiling \
+  'until grep -q DONE f; do (( n++)); date > /tmp/last; sleep 5; done'
+bw_ceiling_case "ceiling-ls-lt-flag-is-not-a-bound" ceiling \
+  'until ls -lt /tmp/out | grep -q done; do sleep 5; done'
+bw_ceiling_case "ceiling-seconds-inside-a-name-is-not-elapsed" ceiling \
+  'until curl -sf --max-time $TIMEOUT_SECONDS http://x; do sleep 5; done'
+bw_ceiling_case "ceiling-logged-epoch-is-not-a-bound" ceiling \
+  'until grep -q DONE /tmp/x.log; do date +%s >> /tmp/wait.log; sleep 15; done'
+bw_ceiling_case "ceiling-printed-seconds-is-not-a-bound" ceiling \
+  'until grep -q DONE /tmp/x.log; do echo $SECONDS; sleep 15; done'
+bw_ceiling_case "ceiling-test-as-argument-is-not-a-bound" ceiling \
+  'until grep -q DONE /tmp/x.log; do echo test -lt 40; sleep 5; done'
+bw_ceiling_case "ceiling-bracket-as-argument-is-not-a-bound" ceiling \
+  'until grep -q DONE /tmp/x.log; do echo [ x -lt 40 ]; sleep 5; done'
+bw_ceiling_case "ceiling-double-bracket-as-argument-is-not-a-bound" ceiling \
+  "until grep -q DONE /tmp/x.log; do printf '%s\\n' [[ -gt; sleep 5; done"
+bw_ceiling_case "ceiling-flag-after-double-bracket-is-not-a-bound" ceiling \
+  'until grep -q DONE /tmp/x.log; do [[ -n $x ]] && ls -lt; sleep 5; done'
+bw_ceiling_case "ceiling-quoted-arithmetic-is-not-a-bound" ceiling \
+  'until grep -q DONE /tmp/x.log; do echo "(( i < 40 ))"; sleep 5; done'
+bw_ceiling_case "ceiling-quoted-glued-arithmetic-is-not-a-bound" ceiling \
+  "until grep -q DONE /tmp/x.log; do echo '((i<40))'; sleep 5; done"
+bw_ceiling_case "ceiling-printed-arithmetic-expansion-is-not-a-bound" ceiling \
+  'until grep -q DONE /tmp/x.log; do echo $(( i < 40 )); sleep 5; done'
+
+# Silent: a ceiling is present, or the loop is not an open-ended waiter.
+bw_ceiling_case "ceiling-timeout-wrapper" silent \
+  "timeout 600 sh -c 'until grep -q DONE /tmp/x.log; do sleep 5; done'"
+bw_ceiling_case "ceiling-gtimeout-wrapper" silent \
+  "gtimeout 600 bash -c 'until grep -q DONE /tmp/x.log; do sleep 5; done'"
+bw_ceiling_case "ceiling-counter-break" silent \
+  'i=0; until grep -q DONE /tmp/x.log; do i=$((i+1)); [ $i -ge 40 ] && break; sleep 15; done'
+bw_ceiling_case "ceiling-counter-in-header" silent \
+  'i=0; while [[ $i -lt 40 ]] && ! grep -q DONE /tmp/x.log; do sleep 5; i=$((i+1)); done'
+bw_ceiling_case "ceiling-arithmetic-counter" silent \
+  'i=0; while (( i < 40 )); do grep -q DONE /tmp/x.log && break; sleep 5; i=$((i+1)); done'
+bw_ceiling_case "ceiling-glued-arithmetic-counter" silent \
+  'i=0; while ((i<40)); do sleep 5; ((i++)); done'
+bw_ceiling_case "ceiling-glued-arithmetic-counter-spaced-parens" silent \
+  'while (( i<40 )); do sleep 5; done'
+bw_ceiling_case "ceiling-test-builtin-counter" silent \
+  'until grep -q DONE f || test $n -ge 3; do n=$((n+1)); sleep 5; done'
+bw_ceiling_case "ceiling-seconds-check" silent \
+  'until grep -q DONE /tmp/x.log || (( SECONDS > 600 )); do sleep 5; done'
+bw_ceiling_case "ceiling-seconds-test-builtin" silent \
+  'until grep -q DONE /tmp/x.log; do [ $SECONDS -ge 600 ] && exit 1; sleep 5; done'
+bw_ceiling_case "ceiling-if-test-counter" silent \
+  'until grep -q DONE /tmp/x.log; do if [ $i -ge 40 ]; then break; fi; sleep 5; done'
+bw_ceiling_case "ceiling-double-bracket-and-counter-in-header" silent \
+  'while [[ $READY == yes && $i -lt 40 ]]; do sleep 5; ((i++)); done'
+bw_ceiling_case "ceiling-double-bracket-or-counter-in-header" silent \
+  'until [[ -f /tmp/done || $i -ge 40 ]]; do sleep 5; ((i++)); done'
+bw_ceiling_case "ceiling-double-bracket-and-counter-in-body" silent \
+  'until grep -q DONE /tmp/x.log; do [[ -n $x && $i -ge 40 ]] && break; sleep 5; done'
+bw_ceiling_case "ceiling-if-negated-test-counter" silent \
+  'until grep -q DONE /tmp/x.log; do if ! [ $i -lt 40 ]; then break; fi; sleep 5; done'
+bw_ceiling_case "ceiling-if-negated-arithmetic-counter" silent \
+  'until grep -q DONE /tmp/x.log; do if ! (( i < 40 )); then break; fi; sleep 5; done'
+bw_ceiling_case "ceiling-negated-test-counter" silent \
+  'until grep -q DONE /tmp/x.log; do ! [ $i -lt 40 ] && break; sleep 5; done'
+bw_ceiling_case "ceiling-while-test-counter-in-header" silent \
+  'while [ $i -lt 40 ]; do grep -q DONE /tmp/x.log && break; sleep 5; done'
+bw_ceiling_case "ceiling-date-epoch-check" silent \
+  'start=$(date +%s); until grep -q DONE /tmp/x.log; do (( $(date +%s) - start > 600 )) && exit 1; sleep 5; done'
+bw_ceiling_case "ceiling-fixed-count-for" silent \
+  'for i in $(seq 1 40); do grep -q DONE /tmp/x.log && break; sleep 15; done'
+bw_ceiling_case "ceiling-line-consumer" silent \
+  'while read -r line; do echo "$line"; sleep 1; done < /tmp/x.txt'
+bw_ceiling_case "ceiling-loop-without-sleep" silent \
+  'until make -q; do make; done'
+bw_ceiling_case "ceiling-loop-in-heredoc-body" silent \
+  "cat > /tmp/w.sh <<'EOF'
+until grep -q DONE /tmp/x.log; do sleep 5; done
+EOF"
+
+# The advisory reaches the model as additionalContext, like the chain lane.
+out=$(bw_stdout "$BW_DIR/ceiling-ctx" bw-ceiling 'until grep -q DONE /tmp/c.log; do sleep 5; done'); rc=$?
+if [ "$rc" -eq 0 ] && printf '%s' "$out" | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+hso = d.get("hookSpecificOutput", {})
+assert "has no time ceiling" in hso.get("additionalContext", ""), d
+assert "permissionDecision" not in hso and "decision" not in d, d
+' 2>/dev/null; then
+  PASS=$((PASS + 1)); echo "ok    [ceiling-advisory-reaches-model-as-context]"
+else
+  echo "FAIL  [ceiling-advisory-reaches-model-as-context] expected exit 0 + additionalContext, got rc=$rc: ${out:-<empty>}"
+  FAIL=$((FAIL + 1)); FAILED_NAMES+=("ceiling-advisory-reaches-model-as-context")
+fi
+
+# Both lanes on one call: a relaunch of an unbounded waiter carries both texts
+# in one additionalContext payload.
+BW_CB="$BW_DIR/ceiling-both"
+bw_run "$BW_CB" bw-cb 'until grep -q DONE /tmp/both.log; do sleep 5; done' >/dev/null
+out=$(bw_stdout "$BW_CB" bw-cb 'until grep -q DONE /tmp/both.log; do sleep 5; done'); rc=$?
+if [ "$rc" -eq 0 ] && printf '%s' "$out" | python3 -c '
+import json, sys
+ctx = json.load(sys.stdin)["hookSpecificOutput"]["additionalContext"]
+assert "has no time ceiling" in ctx and "background waiter for this same target" in ctx, ctx
+' 2>/dev/null; then
+  PASS=$((PASS + 1)); echo "ok    [ceiling-and-chain-advisories-combine]"
+else
+  echo "FAIL  [ceiling-and-chain-advisories-combine] got rc=$rc: ${out:-<empty>}"
+  FAIL=$((FAIL + 1)); FAILED_NAMES+=("ceiling-and-chain-advisories-combine")
+fi
+
+# The bypass silences this lane too.
+err=$(PRAXIS_HOOK_BYPASS_POLL_LOOP_GUARD=1 bw_run "$BW_DIR/ceiling-bypass" bw-ceiling \
+  'until grep -q DONE /tmp/x.log; do sleep 5; done'); rc=$?
+bw_assert "ceiling-bypass-silences" silent "$rc" "$err"
 
 # ---- summary ------------------------------------------------------------------
 echo ""
