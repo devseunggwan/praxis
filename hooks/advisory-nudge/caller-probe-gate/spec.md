@@ -233,8 +233,9 @@ bash tests/hooks/advisory-nudge/test_caller_probe_gate.sh
 ### Replay fixtures
 
 `tests/fixtures/caller-probe-gate/replay-1542/NN/` holds the 16 fires
-from #1538's sample, pseudonymized, as `body.md`, `title.txt`, `labels.txt` and
-`transcript.jsonl`. ASCII alphanumeric runs of 4+ characters became
+from #1538's sample, pseudonymized, as `body.txt`, `title.txt`, `labels.txt` and
+`transcript.jsonl`. The body is not stored as `.md`, so the markdownlint and
+link-check jobs do not lint a pasted PR body as a repository document. ASCII alphanumeric runs of 4+ characters became
 consistent aliases (`w12_`; the underscore keeps a path of aliases from
 forming the 40-character run `tests/test_no_live_keys_in_fixtures.sh`
 flags); shorter words, the defect-token words, source

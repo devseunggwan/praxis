@@ -396,7 +396,7 @@ labels = [x for x in open(d + "labels.txt").read().splitlines() if x]
 cmd = ["gh", "issue", "create", "--title", shlex.quote(title)]
 for lab in labels:
     cmd += ["--label", shlex.quote(lab)]
-cmd += ["--body-file", shlex.quote(d + "body.md")]
+cmd += ["--body-file", shlex.quote(d + "body.txt")]
 print(json.dumps({"tool_name": "Bash", "tool_input": {"command": " ".join(cmd)}, "transcript_path": d + "transcript.jsonl"}))
 ')
   run_case "replay-1542 case $n ($want)" "$want" "advisory" "$payload"
