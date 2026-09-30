@@ -40,7 +40,7 @@ line into one command.
 | Tier | Shape | Needs the transcript? |
 | --- | --- | --- |
 | T1 `non-shell` | the head token is function-call syntax — `$ safe_tokenize('...')` — where a binary name belongs. Nothing shaped like this runs at a shell, so it cannot have been transcribed from anything | no |
-| T2 `unmatched` | a shell-shaped line whose head binary + operand overlap finds no counterpart in the recent transcript's Bash commands | yes |
+| T2 `unmatched` | a shell-shaped line whose pipeline does not appear, segment by segment, inside any Bash command this session ran | yes |
 
 Surfaces scanned are the shared ones (`_lib/_external_write_body.py`): `gh
 issue|pr comment|create|edit`, `gh pr review` with `--body` / `-b` /
@@ -76,9 +76,33 @@ FOO=1 grep ...`, a pipe into `head`), and normalizing the whole string leaves
 genuinely transcribed line would then read as composed — the hook's dominant
 output would be false positives (codex review round 1, P2).
 
-The published line is judged on its **primary segment** — the first whose head
-is not `cd`. It clears when some transcript segment shares that head **and**
-covers at least **60%** of its operands.
+The published line is judged on **every segment**, not only the first (#1540).
+`cd` segments are dropped on both sides, and trailing `| head` / `| tail`
+segments are dropped from the published side only: trimming long output for
+the body is honest and cannot change what the earlier segments ran. The line
+clears when its remaining segments appear as a **contiguous run** inside the
+segments of one executed command, each pair matching as follows:
+
+- the heads are equal;
+- the operand counts are equal, and the operands pair up one to one;
+- a published operand pairs with an executed one when they are equal, or when
+  the executed operand ends with `/` plus the published one
+  (`docs/hook/INDEX.md` for a run of `/abs/repo/docs/hook/INDEX.md`).
+
+Segments the executed command has around that run (`; echo "EXIT=$?"`, a
+`| head` the body dropped) do not matter. A changed operand anywhere in the
+published pipeline does: under the earlier first-segment, 60%-overlap rule,
+`git show … | sed -n '125,133p'` cleared against a run of `sed -n '120,145p'`,
+and that later segment is exactly where a tidied line hides.
+
+Redirections (`2>&1`, `>/dev/null`, `> out.txt`) are dropped before operands
+are counted: they say where output went, not what ran, and a body routinely
+omits them.
+
+A `$` line that ends inside an open single or double quote continues to the
+line that closes the quote. `$ python3 -c "` opens a script; reading only its
+first line compared a bare `python3 -c` against the run and cleared any script
+at all.
 
 Only an **odd** run of backslashes continues a Bash line. `foo \\` followed by a
 newline is a literal backslash and then a *real* separator, so collapsing it
@@ -94,7 +118,7 @@ line rides in behind the transcribed one and is never examined.
 On the transcript side a segment following `||` is **not** recorded as
 provenance: `A || B` runs `B` only when `A` failed, so `true || grep ...` would
 otherwise register a `grep` that never ran and clear the published line this
-gate exists to catch. Flags and the binary are excluded from the ratio
+gate exists to catch. Flags and the binary are excluded from the operands
 deliberately: those are what two unrelated invocations of the same binary
 share, so counting them makes a swapped search term look like a match. What
 discriminates one `grep` run from another is what it was pointed at.
@@ -111,9 +135,38 @@ A line never reaches T2 at all when any of these holds:
   advisory would carry no information. T1 still fires — it needs none.
   A missing or unreadable file and a genuinely empty one are different
   answers — only the last means "this session ran nothing" — so the read is
-  `tail_lines(strict=True)`, which raises for the first and returns `[]` for
+  `iter_transcript_bounded`, which raises for the first and yields nothing for
   the last in one open, instead of the earlier probe-then-read whose window
   let a file vanish between the two (codex review round 1, P3; issue #1279).
+
+## Transcript scope
+
+The **whole session** is read, not a tail (#1540). A body is written long
+after the probe it quotes, and the 400-line tail the hook used to read missed
+runs the body really did quote.
+Only lines carrying `"tool_use"` or `"tool_result"` are parsed.
+
+The read is capped at **512 MiB** (`SCAN_MAX_BYTES`). The largest local
+session measured (140 MB) streamed through the needle filter in 0.23–0.26 s,
+so the cap costs about 0.9 s against the hook's 5 s timeout. A transcript over
+the cap is treated like an unreadable one: no oracle, T2 silent, T1 still
+fires.
+
+## MCP calls as provenance
+
+A `$` line may quote an MCP tool call rather than a shell command. It clears
+when it has the shape `name(args)` or `name (args)` and an executed MCP call
+matches it:
+
+- the tool's full name, or its last `__`-separated part, equals `name`
+  (`lookup` for `mcp__srv__lookup`);
+- every quoted value and every `key=value` / `key: value` value in `args`
+  appears in that call's JSON-encoded input.
+
+A prose description of a call (`$ (tool, phase=prod) SELECT …`) has neither
+shape and stays unmatched: it transcribes nothing. The same never-ran rule
+below applies — a blocked MCP call is not provenance. A T1 line that matches
+an executed MCP call this way is not reported either.
 
 ## Provenance excludes calls that never ran
 
@@ -170,10 +223,17 @@ Recall is deliberately low. An advisory that fires on honest bodies gets
 ignored, and an ignored hook is worse than an absent one; the issue's own
 direction was to start under-firing and raise later on measured fire data.
 
-- **One differing operand does not fire.** At the 60% threshold, `gh pr view
-  9999 --json headRefOid` clears against a transcript `gh pr view 1255 --json
-  headRefOid` (3 of 4 operands match). Catching a single swapped identifier
-  would need a threshold that fires on ordinary pipe-and-path drift.
+- **Honest rewrites that still fire.** #1538's sample left these causes out
+  of scope (#1540): an invocation prefix that differs (`pytest` published,
+  `python3 -m pytest` run); quoting that changes how the words split; a
+  command openly shortened for the body; a command that ran as a string
+  argument of another command; a `for` or `echo` loop published as its body;
+  a comment after the `$`. Mark such a line `[transcribed]` after checking it.
+- **Operands are compared as sets.** A published line that repeats an
+  operand, or swaps the order of two, matches a run that has them once or in
+  the other order.
+- **MCP values are substring-matched** against the call's JSON input, so a
+  short value (`1`, `a`) matches almost any call to that tool.
 - **Only a `$` followed by a space is a prompt.** The `❯`, `%`, and `>` prompt
   glyphs are not detected — `>` in particular is markdown quoting, and the
   other two are rare enough that admitting them buys little against the
@@ -189,9 +249,6 @@ direction was to start under-firing and raise later on measured fire data.
 - **Indented (4-space) code blocks are not scanned** — fenced blocks only.
 - **An unclosed fence contributes nothing.** A body still mid-composition is
   not evidence anyone can act on, and scanning it would fire on drafts.
-- **Only the last 400 transcript JSONL lines** are read (shared
-  `TRANSCRIPT_SCAN_LINES`). A command run much earlier in a long session reads
-  as unmatched. Mark it `[transcribed]` when that happens.
 - **A `$` line inside a heredoc body or a quoted string** inside a fenced
   block is treated as a prompt line like any other.
 - **Conversational prose is not covered.** A PreToolUse hook only sees tool
@@ -223,3 +280,19 @@ fenced `$` line matches T1 or, against the transcript, T2. The body extractor th
 ```bash
 bash tests/hooks/advisory-nudge/test_composed_command_gate.sh
 ```
+
+### Replay fixtures
+
+`tests/fixtures/composed-command-gate/replay-1540/NN/` holds the 14 fires
+from #1538's sample that reproduced, pseudonymized. Every word outside a short list
+of common command names became a consistent alias (`w12x`; digit-only words
+became six-digit numbers, so `2>&1` and `1,5p` keep their shape), so a
+published line and the run it was or was not copied from keep the same equal
+or unequal relation. The body keeps only its fenced blocks; the transcript
+keeps the Bash and MCP calls that clear at least one published line, plus the
+never-ran results, with the last 450 lines at their original spacing.
+
+A fixture was accepted only when it produced the same tier list as its real
+counterpart under both the base and the new impl. Cases 01, 02, 04, 08 and 14
+are silent under the new impl; 10 and 12 are the sample's true positives and
+still warn; the others still warn for the out-of-scope causes above.

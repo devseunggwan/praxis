@@ -1,0 +1,23 @@
+```
+$ .w591x/w46x/python -w57x w58x w993x.w50x w716x/w42x/w994x.w188x
+w995x w55x w996x     : 100996 w998x= w999x
+w995x w1000x w1001x  : 101001
+w1003x w342x w1004x    : w1005x
+$ .w591x/w46x/python -w57x w58x w993x.w50x w1006x.w188x   # git show w86x/w148x:w716x/w42x/w994x.w188x
+w995x w55x w996x     : w1005x w998x= w999x
+w995x w1000x w1001x  : 101001
+w1003x w342x w1004x    : w1005x
+```
+```
+$ w1007x=100059 w552x=w43x .w591x/w46x/python -w57x w58x - <<'w412x'   # w995x w1008x, w1009x w461x ∧ (w39x w461x ∨ > w1010x)
+w1011x w1012x.w1013x w1014x=w484x w1015x=w1005x
+w1011x w1012x.w1016x w1014x=w484x w1015x=w1005x
+w1011x w1017x.w1013x w1014x=w484x w1015x=w1005x
+w1011x w1017x.w1016x w1014x=w484x w1015x=w1005x
+w1018x w995x=101018 w1020x(w55x/w1021x-w1010x w39x)=100087 w43x=100058 w1022x=100163
+```
+```
+$ w1x(w2x=<w1023x>, w4x=w5x, w14x=100043)   # w1024x w1025x w461x
+w1012x w16x= 100163 []
+w1017x w16x= 100163 []
+```

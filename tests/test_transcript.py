@@ -629,7 +629,7 @@ _CONSUMERS = {
     # Also correlates each Bash tool_use with its result, so it binds the
     # refusal sentence the never-ran markers are keyed on (#1117).
     HOOKS / "advisory-nudge" / "composed-command-gate" / "impl.py":
-        ["tail_lines", "TranscriptReadError"],
+        ["iter_transcript_bounded", "TranscriptReadError"],
     # Only the turn reader is imported (issue #1476): the last-assistant-uuid
     # selection is a local helper — `extract_last_assistant_text` alone drops
     # the uuid the dedup keys on, and widening that shared function's return
@@ -674,7 +674,7 @@ _CONSTANT_CONSUMERS = {
     HOOKS / "advisory-nudge" / "cited-rule-gate" / "impl.py":
         ["TRANSCRIPT_SCAN_LINES"],
     HOOKS / "advisory-nudge" / "composed-command-gate" / "impl.py":
-        ["TRANSCRIPT_SCAN_LINES", "REJECTION_PHRASE"],
+        ["REJECTION_PHRASE"],
     HOOKS / "preflight-gate" / "block-gh-issue-create-without-dup-search" / "impl.py":
         ["TRANSCRIPT_SCAN_LINES"],
     HOOKS / "completion-verify" / "denied-action-report-gate" / "impl.py":

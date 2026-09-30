@@ -1,0 +1,71 @@
+```w875x
+$ git w136x-w137x --w117x w113x
+w1052x
+$ git w150x-w151x w86x/w158x w113x | cut -w1053x-100081
+w1054x
+$ w1055x -w54x "$w246x/w1056x" && git w1057x w1054x | w1058x -w162x -w69x "$w246x/w1056x"
+$ w1059x w47x/w1060x.w50x "$w246x/w1056x/w47x/"
+$ (cd "$w246x/w1056x" && python3 -w127x pytest w47x/w1060x.w50x -w53x -w54x w55x:w283x 100058>&100059 | grep -w61x "^w62x|w64x|w65x")
+w1061x w1062x w1063x
+    w502x w1062x(w1064x):
+w62x w47x/w1060x.w50x::w1065x
+w62x w47x/w1060x.w50x::w1062x
+w62x w47x/w1060x.w50x::w1066x[w1005x-w1067x-w926x]
+w62x w47x/w1060x.w50x::w1066x[w1005x-w1067x-w1068x]
+100087 w65x, 100019 w64x in 100058.w83x
+```
+```w875x
+$ python3 -w127x pytest w47x/w1060x.w50x -w53x -w54x w55x:w283x 100058>&100059 | tail -100059
+101068 w64x in 100058.w1070x
+$ w869x=$(grep -w1071x "w1072x-w1073x\|w1074x-w1075x\|w1076x-w1077x" w47x/*.w50x | w1078x "\w114x" " "); echo $w869x
+w47x/w1079x.w50x w47x/w1080x.w50x w47x/w1081x.w50x w47x/w1082x.w50x w47x/w1083x.w50x w47x/w929x.w50x w47x/w1060x.w50x 
+$ python3 -w127x pytest ${=w869x} -w53x -w54x w55x:w283x 100058>&100059 | tail -100059
+101083 w64x in 100092.w1085x
+$ w1055x -w54x "$w246x/w1086x"
+$ for w476x in w47x/w888x/w1087x-w1088x/w1089x.sh w47x/w1090x.sh; do w1091x="$w246x/w1086x/w156x" w1092x="$w246x/w1086x/w1093x" w1094x="$w246x/w1086x/w1095x.w1096x" bash "$w476x" 100058>&100059 | tail -100059; done
+== 101096 w64x, 100163 w65x ==
+w534x=100092 w898x=100163
+```
+```w875x
+$ w212x --w214x
+100058.100059.101097 (w1099x w1100x)
+$ grep -w490x "^w1067x|w1101x=100059 w212x|--w1102x|--w1103x|--w1104x|--w1105x-w1106x-w1107x \"" w535x/w1108x.w1109x.sh
+100065:w1067x w1110x w1111x w1101x
+101111:      w1101x=100059 w212x \
+101112:      --w1102x "$w1114x" \
+101114:      --w1103x 'w1116x' \
+101116:      --w1104x w1118x \
+101118:      --w1105x-w1106x-w1107x "$w1120x" \
+$ jq -w465x "w1121x(.w492x==\"w1122x\") | .w1123x.w1124x | w1125x | .[] | w1121x(.w492x==\"w1126x\") | .w1124x" "$w1127x" | grep w1128x
+w1128x=[100059]
+$ jq -w465x "w1121x(.w1129x==\"w1130x\") | .w1131x[]?" "$w1127x" | grep -w61x "w1074x-w1075x|w1132x w290x"
+[w1074x-w1075x-w1133x] w1134x w1135x w1136x w1137x w1138x w1139x w1140x w190x — w770x w556x w1141x w1142x w1143x w943x w944x:
+(w1132x w290x, w1101x=100059: w1144x w1145x 100059 w951x 100058 w1146x w1135x.)
+$ jq -w465x "w1121x(.w492x==\"w1147x\") | .w1123x.w1124x[]? | w1121x(.w492x==\"w1148x\") | .w792x.w1149x" "$w1127x"
+echo "w1128x=[${w1101x:-w1067x}]"
+w1150x
+```
+```w875x
+$ w931x w374x w47x/w1060x.w50x
+w1151x w340x w64x!
+$ python3 -w127x w1152x 100058>&100059 | tail -100059
+w1153x: w55x w429x w183x in 101153 w297x w877x
+$ python3 w255x/w374x-w213x-w912x.w50x
+w213x-w913x w374x w914x
+```
+```w875x
+$ gh w152x w340x 101154 | cut -w1156x,100058 | sort
+w1157x	w345x
+w1158x (python)	w345x
+w1159x	w345x
+w1160x	w345x
+w1161x	w345x
+w1162x-w374x	w345x
+w1163x	w345x
+w1152x	w345x
+w931x	w345x
+w1164x	w345x
+w307x	w1165x
+$ gh w152x w153x 101154 --w154x w761x -w53x .w761x
+w1166x
+```

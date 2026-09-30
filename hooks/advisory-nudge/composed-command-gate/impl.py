@@ -55,9 +55,8 @@ from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
 from _payload import read_payload  # type: ignore[import-not-found]  # noqa: E402
 from _transcript import (  # type: ignore[import-not-found]  # noqa: E402
     REJECTION_PHRASE,
-    TRANSCRIPT_SCAN_LINES,
     TranscriptReadError,
-    tail_lines,
+    iter_transcript_bounded,
 )
 from _external_write_body import (  # type: ignore[import-not-found]  # noqa: E402
     extract_gh_body as _extract_gh_body,
@@ -126,12 +125,40 @@ def _continues(text: str) -> tuple[bool, str]:
     return True, stripped[:-1].strip()
 
 
+def _open_quote(text: str) -> bool:
+    """True when `text` ends inside a single- or double-quoted string."""
+    quote: str | None = None
+    escaped = False
+    for ch in text:
+        if escaped:
+            escaped = False
+        elif ch == "\\" and quote != "'":
+            escaped = True
+        elif quote:
+            if ch == quote:
+                quote = None
+        elif ch in "'\"":
+            quote = ch
+    return quote is not None
+
+
 def _prompt_commands(lines: list[str]) -> list[str]:
-    """Pull `$ `-prefixed commands out of block lines, joining continuations."""
+    """Pull `$ `-prefixed commands out of block lines, joining continuations.
+
+    A line that ends inside a quote continues to the line that closes it:
+    `$ python3 -c "` opens a script, and reading only that first line compared
+    a bare `python3 -c` against the run and cleared any script at all (#1540).
+    """
     commands: list[str] = []
     buffer: str | None = None
     for line in lines:
         if buffer is not None:
+            if _open_quote(buffer):
+                buffer += "\n" + line
+                if not _open_quote(buffer):
+                    commands.append(buffer)
+                    buffer = None
+                continue
             more, body = _continues(line.strip())
             buffer += " " + body
             if not more:
@@ -143,6 +170,9 @@ def _prompt_commands(lines: list[str]) -> list[str]:
             continue
         text = m.group(1).strip()
         if _TRANSCRIBED_TOKEN in text:
+            continue
+        if _open_quote(text):
+            buffer = text
             continue
         more, body = _continues(text)
         if more:
@@ -187,11 +217,11 @@ def _join_continuations(command: str) -> str:
     return _LINE_CONTINUATION_RE.sub(r"\1 ", command)
 _QUOTE_CHARS = str.maketrans("", "", "'\"")
 
-# Clearing needs a head-binary match plus this much operand overlap. The value
-# is a deliberate under-fire: a pasted line is routinely a subset or superset
-# of what ran (a `| head` added, a path shortened), and every one of those is
-# honest. It has to take more than one differing operand to fire.
-_OVERLAP_THRESHOLD = 0.6
+# Trailing segments a published line may add to what ran: trimming long output
+# for the body is honest, and it cannot change what the earlier segments ran.
+_TRIM_HEADS = frozenset({"head", "tail"})
+
+Segment = tuple[str, frozenset[str]]
 
 
 def _segments(command: str, executed_only: bool = False) -> list[tuple[str, frozenset[str]]]:
@@ -225,7 +255,7 @@ def _segments(command: str, executed_only: bool = False) -> list[tuple[str, froz
         if executed_only and preceding_sep == "||":
             continue
         text = _ENV_PREFIX_RE.sub("", raw.strip())
-        tokens = [t for t in text.translate(_QUOTE_CHARS).split() if t]
+        tokens = _drop_redirections([t for t in text.translate(_QUOTE_CHARS).split() if t])
         if not tokens:
             continue
         operands = frozenset(t for t in tokens[1:] if not t.startswith("-"))
@@ -233,16 +263,73 @@ def _segments(command: str, executed_only: bool = False) -> list[tuple[str, froz
     return out
 
 
-def _primary(command: str) -> tuple[str, frozenset[str]] | None:
-    """The segment a published line is *about* — the first that is not a `cd`.
+# `2>&1`, `>/dev/null`, `> out.txt`: where output went, not what ran. A body
+# routinely drops them, and counting them as operands made an honest line
+# differ from its run (#1540).
+_REDIRECT_RE = re.compile(r"^\d*(?:>>?|<|&>)(&\d+)?(\S*)$")
 
-    `$ cd /repo && grep ...` is a claim about the grep; matching on the `cd`
-    would clear it against any transcript command that also changed directory.
+
+def _drop_redirections(tokens: list[str]) -> list[str]:
+    kept: list[str] = []
+    skip_target = False
+    for tok in tokens:
+        if skip_target:
+            skip_target = False
+            continue
+        m = _REDIRECT_RE.match(tok)
+        if m:
+            # A bare operator (`>`, `2>`) takes the next token as its target.
+            skip_target = not m.group(1) and not m.group(2)
+            continue
+        kept.append(tok)
+    return kept
+
+
+def _operand_matches(published: str, ran: str) -> bool:
+    """Same operand, or the published one is a trailing part of the run's path.
+
+    `scripts/x.py` for a run of `"$W"/scripts/x.py` or `/abs/repo/scripts/x.py`
+    only shortens where the file lives; the file is the same one.
     """
-    for head, operands in _segments(command):
-        if head != "cd":
-            return head, operands
-    return None
+    return published == ran or ran.endswith("/" + published)
+
+
+def _segment_matches(published: Segment, ran: Segment) -> bool:
+    """Same head, and the operands pair up one to one.
+
+    One to one is what keeps a changed operand visible: `sed -n '125,133p' f`
+    has two operands and the run `sed -n '120,145p' f` pairs only one of them.
+    """
+    head, operands = published
+    ran_head, ran_operands = ran
+    if head != ran_head or len(operands) != len(ran_operands):
+        return False
+    remaining = set(ran_operands)
+    for op in sorted(operands, key=len, reverse=True):
+        hit = next((r for r in remaining if _operand_matches(op, r)), None)
+        if hit is None:
+            return False
+        remaining.discard(hit)
+    return True
+
+
+def _work_segments(segments: list[Segment]) -> list[Segment]:
+    """Drop `cd` segments: a directory change is where a command ran, not what."""
+    return [s for s in segments if s[0] != "cd"]
+
+
+def _claimed_segments(command: str) -> list[Segment]:
+    """The segments a published line vouches for, minus a trailing trim.
+
+    Every segment is compared, not only the first: a line whose pipeline head
+    matches a real run can still carry a changed operand further along
+    (`git show … | sed -n '125,133p'` over a run of `sed -n '120,145p'`),
+    and that later segment is exactly where a tidied line hides (#1540).
+    """
+    work = _work_segments(_segments(command))
+    while len(work) > 1 and work[-1][0] in _TRIM_HEADS:
+        work.pop()
+    return work
 
 
 # A tool_result carrying one of these was never executed: the harness or a
@@ -256,16 +343,32 @@ _NEVER_RAN_MARKERS = (
 )
 
 
-def _transcript_commands(transcript_path: str) -> list[str] | None:
-    """Executed Bash commands from the last N JSONL lines; None when unreadable.
+# The whole session is read, not a tail: a body is written long after the probe
+# it quotes, and a 400-line tail missed runs the body really did quote (#1540).
+# 512 MiB is the latency budget: the largest local session (140 MB) streamed
+# through the needle filter in 0.23–0.26 s, so the cap costs about 0.9 s
+# against the hook's 5 s timeout. Past it the transcript is "no oracle".
+SCAN_MAX_BYTES = 512 * 1024 * 1024
+_SCAN_NEEDLES = (b'"tool_use"', b'"tool_result"')
 
-    A missing or unreadable transcript and a genuinely empty one are
-    different answers: only the last is "this session ran nothing"; the
+
+class _Calls:
+    """Executed tool calls: Bash command strings and MCP (name, input) pairs."""
+
+    def __init__(self) -> None:
+        self.bash: list[str] = []
+        self.mcp: list[tuple[str, str]] = []
+
+
+def _transcript_calls(transcript_path: str) -> _Calls | None:
+    """Executed tool calls from the whole session; None when there is no oracle.
+
+    A missing, unreadable or over-budget transcript and a genuinely empty one
+    are different answers: only the last is "this session ran nothing"; the
     others are "no oracle", and treating them as an empty provenance set
-    turns every published line into an advisory. `tail_lines(strict=True)`
-    keeps them apart in one open — it raises for the first and returns `[]`
-    for the last — where the former probe-then-read left a window in which
-    a file that passed the probe was gone by the read (issue #1279).
+    turns every published line into an advisory (issue #1279).
+    `iter_transcript_bounded` raises for the first and yields nothing for the
+    last, in one open.
 
     Calls whose `tool_result` says they never ran — hook-blocked, denied,
     user-rejected — are dropped. Admitting them would let a command the
@@ -274,47 +377,51 @@ def _transcript_commands(transcript_path: str) -> list[str] | None:
     """
     if not transcript_path:
         return None
+    bash: dict[str, str] = {}
+    mcp: dict[str, tuple[str, str]] = {}
+    order: list[str] = []
+    blocked: set[str] = set()
     try:
-        lines = tail_lines(transcript_path, TRANSCRIPT_SCAN_LINES, strict=True)
+        for entry in iter_transcript_bounded(transcript_path, SCAN_MAX_BYTES, _SCAN_NEEDLES):
+            msg = entry.get("message") or {}
+            if not isinstance(msg, dict):
+                continue
+            for block in (msg.get("content") or []):
+                if not isinstance(block, dict):
+                    continue
+                if block.get("type") == "tool_use":
+                    # A tool_use with no id cannot be correlated to a result, so
+                    # it gets a key nothing will ever mark blocked — dropping it
+                    # instead would silently shrink the provenance set.
+                    use_id = block.get("id")
+                    if not isinstance(use_id, str):
+                        use_id = f"anon-{len(order)}"
+                    name = block.get("name")
+                    inp = block.get("input") or {}
+                    if name == "Bash":
+                        cmd = inp.get("command", "") if isinstance(inp, dict) else ""
+                        if isinstance(cmd, str) and cmd.strip():
+                            bash[use_id] = cmd
+                            order.append(use_id)
+                    elif isinstance(name, str) and name.startswith("mcp__"):
+                        mcp[use_id] = (name, json.dumps(inp, ensure_ascii=False))
+                        order.append(use_id)
+                elif block.get("type") == "tool_result" and block.get("is_error") is True:
+                    use_id = block.get("tool_use_id")
+                    if isinstance(use_id, str) and _never_ran(block.get("content")):
+                        blocked.add(use_id)
     except TranscriptReadError:
         return None
 
-    by_id: dict[str, str] = {}
-    order: list[str] = []
-    blocked: set[str] = set()
-    for line in lines:
-        line = line.strip()
-        if not line:
+    calls = _Calls()
+    for i in order:
+        if i in blocked:
             continue
-        try:
-            entry = json.loads(line)
-        except (json.JSONDecodeError, ValueError):
-            continue
-        if not isinstance(entry, dict):
-            continue
-        msg = entry.get("message") or {}
-        if not isinstance(msg, dict):
-            continue
-        for block in (msg.get("content") or []):
-            if not isinstance(block, dict):
-                continue
-            if block.get("type") == "tool_use" and block.get("name") == "Bash":
-                inp = block.get("input") or {}
-                cmd = inp.get("command", "") if isinstance(inp, dict) else ""
-                # A tool_use with no id cannot be correlated to a result, so
-                # it gets a key nothing will ever mark blocked — dropping it
-                # instead would silently shrink the provenance set.
-                use_id = block.get("id")
-                if not isinstance(use_id, str):
-                    use_id = f"anon-{len(order)}"
-                if isinstance(cmd, str) and cmd.strip():
-                    by_id[use_id] = cmd
-                    order.append(use_id)
-            elif block.get("type") == "tool_result" and block.get("is_error") is True:
-                use_id = block.get("tool_use_id")
-                if isinstance(use_id, str) and _never_ran(block.get("content")):
-                    blocked.add(use_id)
-    return [by_id[i] for i in order if i not in blocked]
+        if i in bash:
+            calls.bash.append(bash[i])
+        else:
+            calls.mcp.append(mcp[i])
+    return calls
 
 
 def _never_ran(content) -> bool:
@@ -331,19 +438,49 @@ def _never_ran(content) -> bool:
     return any(marker in text for marker in _NEVER_RAN_MARKERS)
 
 
-def _is_transcribed(published: str, ran: list[tuple[str, frozenset[str]]]) -> bool:
-    primary = _primary(published)
-    if primary is None:
+def _is_transcribed(published: str, ran: list[list[Segment]]) -> bool:
+    """True when one executed command contains the published pipeline verbatim.
+
+    The claimed segments must appear as a contiguous run of one executed
+    command's segments, each matching under `_segment_matches`. Extra
+    segments around that run in the executed command (`; echo "EXIT=$?"`, a
+    `| head` the body dropped) are fine; a changed operand anywhere is not.
+    """
+    claimed = _claimed_segments(published)
+    if not claimed:
         return True
-    head, operands = primary
-    for ran_head, ran_operands in ran:
-        if head != ran_head:
+    width = len(claimed)
+    for segments in ran:
+        for start in range(len(segments) - width + 1):
+            window = segments[start:start + width]
+            if all(_segment_matches(p, r) for p, r in zip(claimed, window)):
+                return True
+    return False
+
+
+# `$ name(args)` / `$ name (args)` — how an MCP tool call is written on a `$`
+# line. Only this shape can be matched to an MCP call; a prose description of
+# one (`(tool, phase=prod) SELECT …`) transcribes nothing and stays composed.
+_TOOL_CALL_RE = re.compile(r"^([A-Za-z_][\w.-]*)\s*\((.*)\)\s*$")
+_ARG_VALUE_RE = re.compile(r"'([^']*)'|\"([^\"]*)\"|[=:]\s*([^\s,)'\"]+)")
+
+
+def _mcp_transcribed(published: str, mcp: list[tuple[str, str]]) -> bool:
+    """True when an executed MCP call has this name and every quoted/assigned value.
+
+    The name matches the tool's full name or its last `__` part, since a `$`
+    line names the tool without the `mcp__<server>__` prefix.
+    """
+    m = _TOOL_CALL_RE.match(published)
+    if not m:
+        return False
+    name, args = m.group(1), m.group(2)
+    # findall reports unmatched groups as "", so exactly one group is non-empty.
+    values = ["".join(g) for g in _ARG_VALUE_RE.findall(args)]
+    for tool, dumped in mcp:
+        if tool != name and tool.rsplit("__", 1)[-1] != name:
             continue
-        # A bare `$ pwd` has nothing to discriminate on — the head match is
-        # all the evidence available, and it is enough.
-        if not operands:
-            return True
-        if len(operands & ran_operands) / len(operands) >= _OVERLAP_THRESHOLD:
+        if all(v in dumped for v in values):
             return True
     return False
 
@@ -354,18 +491,21 @@ def _findings(body: str, transcript_path: str) -> list[tuple[str, str]]:
     if not published:
         return []
 
+    calls = _transcript_calls(transcript_path)
+    mcp = calls.mcp if calls is not None else []
     non_shell = [c for c in published if _NON_SHELL_HEAD_RE.match(c)]
-    findings = [("non-shell", c) for c in non_shell]
+    findings = [("non-shell", c) for c in non_shell if not _mcp_transcribed(c, mcp)]
 
     # Arm B needs a transcript. Without one the comparison has no oracle at
     # all, and an advisory would carry no information — stay silent.
-    commands = _transcript_commands(transcript_path)
-    if commands is None:
+    if calls is None:
         return findings
 
-    ran = [seg for c in commands for seg in _segments(c, executed_only=True)]
+    ran = [_work_segments(_segments(c, executed_only=True)) for c in calls.bash]
     for cmd in published:
         if cmd in non_shell or _SUBSTITUTION_RE.search(cmd):
+            continue
+        if _mcp_transcribed(cmd, mcp):
             continue
         if not _is_transcribed(cmd, ran):
             findings.append(("unmatched", cmd))
