@@ -168,7 +168,9 @@ def _mask_arithmetic(text: str) -> str:
     return "".join(out)
 
 
-_COMMENT_RE = re.compile(r"(?:^|(?<=\s))#[^\n]*", re.MULTILINE)
+# After a control operator too: `true;# note` is a comment. Not after `{` or
+# `(`, where `${#arr}` and the `(#i)` glob flag keep their `#`.
+_COMMENT_RE = re.compile(r"(?:^|(?<=[\s;&|]))#[^\n]*", re.MULTILINE)
 
 
 def _mask_comments(text: str) -> str:
@@ -333,6 +335,10 @@ class _Frame:
         self.prefix = True  # the next word may be an assignment or the command
         self.declaration = False  # arguments are assignments (`local x=1`)
         self.skip_next = False  # the next word is a redirect target or a count
+        # `case` survives command separators, so `reset` leaves it alone.
+        self.case_header = 0  # 1: the subject is next, 2: `in` is next
+        self.case_depth = 0
+        self.pattern_next = False  # the next word is a case pattern
 
     def reset(self) -> None:
         self.prefix = True
@@ -347,6 +353,20 @@ def _finish_word(frame: _Frame, found: list[str]) -> None:
         return
     if frame.skip_next:
         frame.skip_next = False
+        return
+    if frame.case_header:
+        if frame.case_header == 2 and word == "in":
+            frame.case_depth += 1
+            frame.pattern_next = True
+        frame.case_header = 2 if frame.case_header == 1 else 0
+        return
+    if frame.case_depth and word == "esac" and (frame.prefix or frame.pattern_next):
+        frame.case_depth -= 1
+        frame.pattern_next = False
+        frame.prefix = False
+        return
+    if frame.pattern_next:
+        # A case pattern (`a|status=1)`) is a value, not a command.
         return
     status = _STATUS_ASSIGNMENT_RE.match(word)
     if frame.declaration:
@@ -371,6 +391,8 @@ def _finish_word(frame: _Frame, found: list[str]) -> None:
         return
     frame.prefix = False
     frame.declaration = word in _DECLARATION_BUILTINS
+    if word == "case":
+        frame.case_header = 1
 
 
 def _close_frame(stack: list[_Frame], found: list[str]) -> None:
@@ -383,6 +405,7 @@ def _close_frame(stack: list[_Frame], found: list[str]) -> None:
     if not closed.opened_mid_word:
         # `(pat)` of a case branch: the branch body follows.
         outer.reset()
+        outer.pattern_next = False
     elif not closed.has_content and outer.prefix:
         # `f()`: a function definition, whose body follows.
         outer.word.clear()
@@ -398,16 +421,20 @@ def _join_line_continuations(text: str) -> str:
     zsh joins the lines before it splits words, so `status\\<newline>=1` is
     one `status=1` word. `_mask_quoted` blanks the pair instead and would split
     it. Inside single quotes the pair is literal; `\\\\` is a literal backslash.
+    Inside double quotes the pair still joins, and a `'` there is a character.
     """
     out: list[str] = []
     in_single = False
+    in_double = False
     i = 0
     while i < len(text):
         ch = text[i]
         if in_single:
             in_single = ch != "'"
-        elif ch == "'":
+        elif ch == "'" and not in_double:
             in_single = True
+        elif ch == '"':
+            in_double = not in_double
         elif ch == "\\":
             if text[i + 1:i + 2] == "\n":
                 i += 2
@@ -471,7 +498,7 @@ def status_assignments(command: str) -> list[str]:
                 stack.append(_Frame("cmd", closer=")"))
             elif word.endswith("="):
                 stack.append(_Frame("array", closer=")"))
-            elif not word and frame.prefix:
+            elif not word and frame.prefix and not frame.pattern_next:
                 stack.append(_Frame("cmd", closer=")"))
             else:
                 stack.append(
@@ -483,7 +510,14 @@ def status_assignments(command: str) -> list[str]:
             # Unmatched: the end of a case pattern, and the branch body follows.
             frame.word.clear()
             frame.reset()
+            frame.pattern_next = False
             i += 1
+            continue
+        if frame.case_depth and pair in (";;", ";&", ";|"):
+            _finish_word(frame, found)
+            frame.reset()
+            frame.pattern_next = True  # the next case pattern
+            i += 2
             continue
         # `&>` / `&>>` redirect both streams; unlike `&`, `&|` or `&!` they do
         # not end the command.

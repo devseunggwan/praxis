@@ -269,6 +269,13 @@ run_case "status after a continued && line" "ask:status=" \
 run_case "status after an escaped backslash and a real newline" "ask:status=" \
   'echo a\\
 status=1'
+run_case "a continuation after a double-quoted apostrophe" "ask:status=" \
+  'echo "it'"'"'s"; status\
+=1'
+run_case "status in a later case branch" "ask:status=" \
+  'case $x in a) true;; b) status=1;; esac'
+run_case "status after esac that follows ;;" "ask:status=" \
+  'case $x in a) true;; esac; status=1'
 for op in '&' '&|' '&!' '|&'; do
   run_case "status after the $op separator" "ask:status=" \
     "echo a $op status=1"
@@ -342,6 +349,12 @@ run_case "a backslash-newline inside single quotes is literal" silent \
 run_case "an argument on a continued line" silent \
   'echo x \
 status=1'
+run_case "a later parenthesized case pattern" silent \
+  'case $x in a) true;; (status=1) echo;; esac'
+run_case "an alternative inside a case pattern" silent \
+  'case $x in a|status=1) echo;; esac'
+run_case "a comment glued to a separator" silent \
+  'true;# comment; status=1'
 run_case "status assignment in a comment" silent \
   'true # status=1'
 run_case "status assignment in a heredoc body" silent \

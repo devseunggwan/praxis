@@ -103,9 +103,12 @@ count.
 
 The scan keeps one prefix per nesting level, so `a=$(x) status=1 cmd` is still
 an assignment. An unquoted backslash-newline is joined first, as zsh does, so a
-`status=` split across lines is still one word. A declaration without a value (`local status`) succeeds and is
-not reported, and neither is the same text as an ordinary argument
-(`echo status=1`, `echo $(date) status=1`, `env status=1 cmd`), an array
+`status=` split across lines is still one word. After `case … in` and after
+each `;;`, `;&` or `;|`, the next word is a case pattern, so `(status=1)` there
+is a pattern, not a subshell.
+
+A declaration without a value (`local status`) succeeds and is not reported,
+and neither is the same text as an ordinary argument (`echo status=1`, `echo $(date) status=1`, `env status=1 cmd`), an array
 element (`arr=(a status=1)`), part of `${…}` or `{a,b}`, or a case pattern.
 
 ## Why four ask and one advisory
@@ -135,7 +138,7 @@ measured fire rate.
 | `status=$?`, `true; status=1`, `$(status=1)`, `a=$(x) status=2 cmd`, `status+=1`, `status[1]=x`, `>out status=1 cmd`, `f() { status=1; }`, `local status=1`, `export status=1` | `ask` |
 | `set -- $var`, `set - ${var}`, `for x in $var` | Advisory (`additionalContext` + stderr) |
 | `[[ $x == y ]]`, `test 1 = 1`, `print a=b`, `--stat=2` | Silent — not the shape |
-| `(( x == y ))`, `$(( 1 == 1 ))`, `print hi # a==b` | Silent — arithmetic and comments are not expanded words |
+| `(( x == y ))`, `$(( 1 == 1 ))`, `print hi # a==b`, `true;# a==b` | Silent — arithmetic and comments are not expanded words; a `#` starts a comment after whitespace or `;` `&` `\|` |
 | `${w#[a-z]}`, `${w#[[]}`, `${w#[]]}`, `${w#[[:alpha:]]}`, `${w:-[[}`, `'${w#[[}'` | Silent — valid pattern, non-pattern operator, or protected |
 | `${w#[]}`, `${w#[!]}` | Silent — an open class led by `]` is a no-match in zsh 5.9, not a bad pattern |
 | A nested heredoc with a different delimiter, or a body that mentions one | Silent |
