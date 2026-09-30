@@ -249,8 +249,7 @@ lane) unless the loop can end on its own:
 | Ceiling | How it is recognised |
 | --- | --- |
 | `timeout N sh -c '…'` / `gtimeout N bash -c '…'` | The loop sits inside one string token, so no loop is seen at all. A command that starts with exactly `bash -c '…'` / `sh -c '…'` (no wrapper) is spliced (`_inline_shell_c`) and is seen |
-| Elapsed-time test in the header or body | the word `SECONDS` or `EPOCHSECONDS` (not part of a longer name such as `$TIMEOUT_SECONDS`), or `+%s` (`$(date +%s)`) |
-| Counter bound in the header or body | `-lt` / `-le` / `-gt` / `-ge` inside `[`, `[[` or `test`, or `<` / `<=` / `>` / `>=` inside `(( … ))`, spaced or glued (`((i<40))`) |
+| Counter or elapsed-time bound in the header or body | `-lt` / `-le` / `-gt` / `-ge` inside `[`, `[[` or `test`, or `<` / `<=` / `>` / `>=` inside `(( … ))`, spaced or glued (`((i<40))`, `(( SECONDS > 600 ))`). A bare `$SECONDS` or `date +%s` that is only logged is not a bound |
 
 | Situation (all `run_in_background: true`) | Action |
 | --- | --- |
@@ -260,6 +259,7 @@ lane) unless the loop can end on its own:
 | `until timeout 5 curl …; do sleep 3; done` | **advisory** — the timeout bounds one probe, not the loop |
 | `until grep -q X f > /dev/null; do sleep 5; done` | **advisory** — `>` outside `(( ))` is a redirection |
 | `until ls -lt dir \| grep -q X; do sleep 5; done` | **advisory** — `-lt` outside a test is a flag |
+| `until grep -q X f; do date +%s >> log; sleep 15; done` | **advisory** — logging the time is not a bound |
 | `timeout 600 sh -c 'until …; done'` | pass |
 | `[ $i -ge 40 ] && break` / `while ((i<40))` / `(( SECONDS > 600 ))` in the loop | pass |
 | `for i in $(seq 1 40); do …; sleep 15; done` | pass — a fixed count ends |
@@ -282,8 +282,8 @@ call that proceeds, or one that does not appear.
   `bash -lc '…'`, `cd d && bash -c '…'`), and a loop in a `( … )` subshell.
   Silence therefore does not mean a `timeout` wrapper is present.
 
-Replayed over one local transcript corpus (4,526 background Bash calls), 637
-were `while`/`until` sleep-waiters and 493 of them (77%) had no ceiling by the
+Replayed over one local transcript corpus (4,519 background Bash calls), 634
+were `while`/`until` sleep-waiters and 490 of them (77%) had no ceiling by the
 rule above.
 
 ## Redirect message

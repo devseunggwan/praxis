@@ -702,14 +702,13 @@ _TEST_CLOSERS = {"]", "]]"} | _COMMAND_SEPARATORS | {"do", "then"}
 # An arithmetic span and an ordering operator inside it, on the joined token
 # text, so a glued `((i<40))` or `$(( n+1))` reads the same as a spaced one.
 _ARITH_COMPARISON_RE = re.compile(r"\(\((?:(?!\)\)).)*[<>]", re.DOTALL)
-# An elapsed-time test inside the loop: `$SECONDS`, `$EPOCHSECONDS`,
-# `$(date +%s)`. Word-bounded so `$TIMEOUT_SECONDS` is not one.
-_ELAPSED_RE = re.compile(r"(?<![A-Za-z0-9_])(?:EPOCH)?SECONDS(?![A-Za-z0-9_])|\+%s")
 
 
 def _has_ceiling(header: list[str], body: list[str]) -> bool:
     """True when the loop can end on a count or on elapsed time.
 
+    Both take an ordering comparison: `(( SECONDS > 600 ))` is one, while a
+    bare `$SECONDS` or `date +%s` only logs the time and bounds nothing.
     `<` / `>` count only inside `(( … ))`: elsewhere they are redirections,
     and `grep -q x f > /dev/null` bounds nothing. `-lt` and friends count only
     inside `[`, `[[` or `test`: elsewhere they are flags (`ls -lt`).
@@ -724,8 +723,6 @@ def _has_ceiling(header: list[str], body: list[str]) -> bool:
         elif tok in _TEST_CLOSERS:
             in_test = False
         elif in_test and tok in _BOUND_TEST_OPS:
-            return True
-        if _ELAPSED_RE.search(tok):
             return True
     return False
 

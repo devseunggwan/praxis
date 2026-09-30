@@ -687,6 +687,10 @@ bw_ceiling_case "ceiling-ls-lt-flag-is-not-a-bound" ceiling \
   'until ls -lt /tmp/out | grep -q done; do sleep 5; done'
 bw_ceiling_case "ceiling-seconds-inside-a-name-is-not-elapsed" ceiling \
   'until curl -sf --max-time $TIMEOUT_SECONDS http://x; do sleep 5; done'
+bw_ceiling_case "ceiling-logged-epoch-is-not-a-bound" ceiling \
+  'until grep -q DONE /tmp/x.log; do date +%s >> /tmp/wait.log; sleep 15; done'
+bw_ceiling_case "ceiling-printed-seconds-is-not-a-bound" ceiling \
+  'until grep -q DONE /tmp/x.log; do echo $SECONDS; sleep 15; done'
 
 # Silent: a ceiling is present, or the loop is not an open-ended waiter.
 bw_ceiling_case "ceiling-timeout-wrapper" silent \
@@ -707,6 +711,8 @@ bw_ceiling_case "ceiling-test-builtin-counter" silent \
   'until grep -q DONE f || test $n -ge 3; do n=$((n+1)); sleep 5; done'
 bw_ceiling_case "ceiling-seconds-check" silent \
   'until grep -q DONE /tmp/x.log || (( SECONDS > 600 )); do sleep 5; done'
+bw_ceiling_case "ceiling-seconds-test-builtin" silent \
+  'until grep -q DONE /tmp/x.log; do [ $SECONDS -ge 600 ] && exit 1; sleep 5; done'
 bw_ceiling_case "ceiling-date-epoch-check" silent \
   'start=$(date +%s); until grep -q DONE /tmp/x.log; do (( $(date +%s) - start > 600 )) && exit 1; sleep 5; done'
 bw_ceiling_case "ceiling-fixed-count-for" silent \
