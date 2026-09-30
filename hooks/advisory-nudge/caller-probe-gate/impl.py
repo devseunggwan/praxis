@@ -29,14 +29,16 @@ Firing requires two axes to co-occur, with no clearing arm present:
 
   A. defect assertion — a `fix(...)` title or bug label on the call, or a
      defect token in the body prose
-  B. code identification — a source path or backtick symbol, within a ±3-line
-     window of a body-level axis-A token (call-level axis A needs no window)
+  B. code identification — a source path or backtick symbol on the same line
+     as a body-level axis-A token; a call-level signal also puts the title and
+     the body's first paragraph in scope
 
 Axis A alone is an ordinary bug report; the conjunction isolates the class.
 
 Cleared by either arm:
 
-  Arm A (in-body): a filled-in `Caller-probe: <command> → <output>` line.
+  Arm A (in-body): a filled-in `Caller-probe: <command> → <output>` line,
+      or the repository's `Caller chain verified:` line naming a search tool.
       Scaffold placeholders and empty post-arrow evidence do not count
       (anti-bypass ported from output-block-falsify-advisory PR #796).
   Arm B (transcript): a search-tool call — Bash `grep`/`rg`, or the `Grep`
@@ -49,7 +51,6 @@ Exits 0 by default — advisory, not block. Set `PRAXIS_CALLER_PROBE_STRICT=1`
 """
 from __future__ import annotations
 
-import json
 import os
 import re
 import sys
@@ -62,21 +63,19 @@ from _external_write_body import (  # type: ignore[import-not-found]  # noqa: E4
 )
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
 from _payload import read_payload  # type: ignore[import-not-found]  # noqa: E402
-from _transcript import tail_lines  # type: ignore[import-not-found]  # noqa: E402
+from _transcript import iter_transcript  # type: ignore[import-not-found]  # noqa: E402
 from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
     iter_command_starts,
     safe_tokenize,
 )
 
-# Deliberately wider than the shared TRANSCRIPT_SCAN_LINES (400) used by the
-# sibling gates. This gate's error class is long-investigation-specific: the
-# call-site search that clears Arm B happens early, while the defect claim is
-# published late. Measured on the motivating session (3,412 JSONL lines /
-# 5.8 MB), the clearing `grep` sat ~1,350 lines from the end — outside a
-# 400-line tail, so the gate would have fired on a correctly-probed claim.
-# Cost is negligible: the file is read in full either way, and parsing 6,000
-# lines of that transcript took 24 ms against a 5 s hook timeout.
-CALLER_PROBE_SCAN_LINES = 4000
+# The whole session is read. This gate's error class is
+# long-investigation-specific: the call-site search that clears Arm B happens
+# early, while the defect claim is published late — in #1538's sample one
+# clearing search sat more than 4,000 JSONL lines before the write (#1542).
+# Only tool_use lines can clear, so every other line is rejected before
+# `json.loads` (see `iter_transcript`).
+_PROBE_NEEDLE = '"tool_use"'
 
 
 # ---------------------------------------------------------------------------
@@ -114,10 +113,6 @@ _DEFECT_TOKENS_KO = (
     "소실",
 )
 
-# Axis A / axis B must co-occur within this many lines of each other when the
-# axis-A signal is body-level. Mirrors exclusion-probe-gate's block window.
-_BLOCK_WINDOW = 3
-
 
 # ---------------------------------------------------------------------------
 # Axis B — code identification
@@ -133,25 +128,40 @@ _SYMBOL_RE = re.compile(r"^[A-Za-z_][\w.]{3,}$")
 
 _URL_RE = re.compile(r"\w+://\S+")
 
+# A commit SHA names a revision, not code whose caller decides anything; in
+# #1538's sample a SHA was the only "blamed code" in two fires (#1542).
+_COMMIT_SHA_RE = re.compile(r"^[0-9a-f]{7,40}$")
+
 
 def _path_stem(path: str) -> str:
     """`analytics_backend/app/x/controller.py` → `controller`."""
     return path.rsplit("/", 1)[-1].rsplit(".", 1)[0]
 
 
-def _axis_a_call_level(argv: list[str]) -> bool:
-    """True if the gh call itself declares a defect (fix title / bug label)."""
+def _flag_values(argv: list[str]) -> list[tuple[str, str]]:
+    """(flag, value) for `--flag value` and `--flag=value` tokens."""
+    out: list[tuple[str, str]] = []
     for i, tok in enumerate(argv):
         key, val = (tok.partition("=")[0], tok.partition("=")[2]) if "=" in tok else (tok, None)
         if val is None and i + 1 < len(argv):
             val = argv[i + 1]
-        if val is None:
-            continue
+        if val is not None:
+            out.append((key, val))
+    return out
+
+
+def _axis_a_call_level(argv: list[str]) -> bool:
+    """True if the gh call itself declares a defect (fix title / bug label)."""
+    for key, val in _flag_values(argv):
         if key in _TITLE_FLAGS and _FIX_TITLE_RE.search(val.strip()):
             return True
         if key in _LABEL_FLAGS and _BUG_LABEL_RE.search(val):
             return True
     return False
+
+
+def _title(argv: list[str]) -> str:
+    return next((val for key, val in _flag_values(argv) if key in _TITLE_FLAGS), "")
 
 
 def _defect_line_indices(lines: list[str]) -> list[int]:
@@ -175,28 +185,41 @@ def _cited_code(line: str) -> list[tuple[str, str]]:
         out.append((path, _path_stem(path)))
     for span in _INLINE_CODE_RE.findall(stripped):
         span = span.strip()
-        if _SYMBOL_RE.match(span):
+        if _SYMBOL_RE.match(span) and not _COMMIT_SHA_RE.match(span):
             out.append((span, span.rsplit(".", 1)[-1]))
     return out
 
 
-def _detect(body: str, call_level_defect: bool) -> list[tuple[str, str]]:
-    """Return (sample, clear_key) for code cited inside a defect assertion."""
+def _first_paragraph(lines: list[str]) -> list[str]:
+    """Lines up to the first blank line after the body's first non-blank one."""
+    out: list[str] = []
+    for line in lines:
+        if not line.strip():
+            if out:
+                break
+            continue
+        out.append(line)
+    return out
+
+
+def _detect(body: str, title: str, call_level_defect: bool) -> list[tuple[str, str]]:
+    """Return (sample, clear_key) for code cited inside a defect assertion.
+
+    A body-level token blames only code on its own line: within a ±3-line
+    window, an evidence heading, a known-limits note or a retraction carrying
+    `결함` blamed every path near it (#1542). A call-level signal (`fix(`
+    title, bug label) is about the change as a whole, so it adds the title and
+    the body's first paragraph — where the defect is stated — not the whole
+    body, where it made every path anywhere count as blamed.
+    """
     lines = body.splitlines()
+    scoped = [lines[i] for i in _defect_line_indices(lines)]
     if call_level_defect:
-        windows = range(len(lines))
-    else:
-        anchors = _defect_line_indices(lines)
-        if not anchors:
-            return []
-        keep: set[int] = set()
-        for a in anchors:
-            keep.update(range(max(0, a - _BLOCK_WINDOW), min(len(lines), a + _BLOCK_WINDOW + 1)))
-        windows = sorted(keep)  # type: ignore[assignment]
+        scoped = [title, *_first_paragraph(lines), *scoped]
 
     found: list[tuple[str, str]] = []
-    for i in windows:
-        found.extend(_cited_code(lines[i]))
+    for line in scoped:
+        found.extend(_cited_code(line))
     # de-dup on clear_key, first sample wins
     seen: set[str] = set()
     uniq: list[tuple[str, str]] = []
@@ -213,6 +236,10 @@ def _detect(body: str, call_level_defect: bool) -> list[tuple[str, str]]:
 # ---------------------------------------------------------------------------
 
 _PROBE_PREFIXES = ("Caller-probe:", "반증 프로브:")
+# `block-pr-without-caller-evidence` makes every PR body carry this line; one
+# that names a search tool is the same evidence as a Caller-probe line (#1542).
+# `Caller chain verified: N/A — docs-only change` names none and clears nothing.
+_CALLER_CHAIN_RE = re.compile(r"^Caller chain verified:.*\b(?:grep|rg|ag|ack)\b")
 _PROBE_PLACEHOLDER_TOKENS = ("<command>", "<observed>", "<...>", "<output>")
 _PROBE_ARROW_RE = re.compile(r"→|->")
 
@@ -226,10 +253,12 @@ def _has_valid_caller_probe(body: str) -> bool:
     """
     for raw_line in body.splitlines():
         line = raw_line.strip()
+        if any(tok in line for tok in _PROBE_PLACEHOLDER_TOKENS):
+            continue
+        if _CALLER_CHAIN_RE.match(line):
+            return True
         prefix = next((p for p in _PROBE_PREFIXES if line.startswith(p)), None)
         if prefix is None:
-            continue
-        if any(tok in line for tok in _PROBE_PLACEHOLDER_TOKENS):
             continue
         m = _PROBE_ARROW_RE.search(line)
         if not m:
@@ -250,27 +279,17 @@ def _has_valid_caller_probe(body: str) -> bool:
 _SEARCH_TOOL_RE = re.compile(r"\b(?:grep|rg|ag|ack)\b")
 
 
-def _recent_search_probes(transcript_path: str) -> list[str]:
-    """Search-tool haystacks from the last N JSONL lines.
+def _search_probes(transcript_path: str) -> list[str]:
+    """Search-tool haystacks from the whole session.
 
     Collects Bash grep/rg command strings and `Grep` tool patterns. Read tool
     calls are deliberately NOT collected — see module docstring.
     """
     if not transcript_path or not os.path.isfile(transcript_path):
         return []
-    lines = tail_lines(transcript_path, CALLER_PROBE_SCAN_LINES)
 
     probes: list[str] = []
-    for line in lines:
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            entry = json.loads(line)
-        except (json.JSONDecodeError, ValueError):
-            continue
-        if not isinstance(entry, dict):
-            continue
+    for entry in iter_transcript(transcript_path, _PROBE_NEEDLE):
         msg = entry.get("message") or {}
         if not isinstance(msg, dict) or msg.get("role") != "assistant":
             continue
@@ -302,8 +321,8 @@ def _is_caller_probed(clear_key: str, probes: list[str]) -> bool:
 
 ADVISORY_MESSAGE = (
     "REMINDER (External-Surface Write / Caller Probe): body asserts a code "
-    "defect citing {samples} with no call-site search found in the recent "
-    "transcript.\n"
+    "defect citing {samples} with no call-site search found in this "
+    "session's transcript.\n"
     "Reading the cited code proves what it DOES; whether that outcome is "
     "wrong depends on the caller, which decides the state the code runs "
     "under. Attached query output is not a substitute — evidence gathered on "
@@ -337,7 +356,7 @@ def main() -> int:
     # axis-A state and its own body — a `fix(` title on one write must not
     # make a sibling comment's incidental file mention read as a defect
     # citation, and the +-3-line window must not span a write boundary.
-    writes: list[tuple[str, bool]] = []
+    writes: list[tuple[str, str, bool]] = []
 
     if tool_name == "Bash":
         command = tool_input.get("command", "") or ""
@@ -352,7 +371,7 @@ def main() -> int:
                 continue
             candidate = extract_gh_body(argv)
             if candidate is not None:
-                writes.append((candidate, _axis_a_call_level(argv)))
+                writes.append((candidate, _title(argv), _axis_a_call_level(argv)))
     else:
         return 0
 
@@ -360,18 +379,18 @@ def main() -> int:
         return 0
 
     cited: list[tuple[str, str]] = []
-    for body, call_level_defect in writes:
+    for body, title, call_level_defect in writes:
         # Arm A is per-write: a probe line in one body says nothing about a
         # claim published by another.
         if _has_valid_caller_probe(body):
             continue
-        cited.extend(_detect(body, call_level_defect))
+        cited.extend(_detect(body, title, call_level_defect))
 
     if not cited:
         return 0
 
     # Arm B: per-citation transcript search scan.
-    probes = _recent_search_probes(transcript_path)
+    probes = _search_probes(transcript_path)
     unprobed = [sample for sample, key in cited if not _is_caller_probed(key, probes)]
     if not unprobed:
         return 0

@@ -611,9 +611,11 @@ _CONSUMERS = {
     # meant to serve, so it binds the turn reader and the user-message reader.
     HOOKS / "preflight-gate" / "fan-out-scope-gate" / "impl.py":
         ["load_current_turn", "read_last_user_message"],
+    # A call-site search can precede the write by hundreds of lines, so it
+    # streams the whole session instead of reading a tail (#1542).
+    HOOKS / "advisory-nudge" / "caller-probe-gate" / "impl.py": ["iter_transcript"],
     # Match only against the last N lines, so they read the tail instead of
     # `readlines()` over the whole transcript (#1240).
-    HOOKS / "advisory-nudge" / "caller-probe-gate" / "impl.py": ["tail_lines"],
     HOOKS / "advisory-nudge" / "pre-output-falsification-gate" / "impl.py": ["tail_lines"],
     HOOKS / "advisory-nudge" / "external-write-falsify-check" / "impl.py": ["tail_lines"],
     # Needs the whole session (a dispatch or enumeration anywhere in it clears
