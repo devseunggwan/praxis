@@ -697,25 +697,33 @@ def _background_waiter_advisory(command: str, session_id: str | None) -> str | N
 # Equality (`-eq`/`-ne`) is left out — it is how a waiter tests exit status
 # (`[ $? -ne 0 ]`) at least as often as a counter.
 _BOUND_TEST_OPS = {"-lt", "-le", "-gt", "-ge"}
-_BOUND_ARITH_OPS = {"<", "<=", ">", ">="}
+_TEST_OPENERS = {"[", "[[", "test"}
+_TEST_CLOSERS = {"]", "]]"} | _COMMAND_SEPARATORS | {"do", "then"}
+# An arithmetic span and an ordering operator inside it, on the joined token
+# text, so a glued `((i<40))` or `$(( n+1))` reads the same as a spaced one.
+_ARITH_COMPARISON_RE = re.compile(r"\(\((?:(?!\)\)).)*[<>]", re.DOTALL)
 # An elapsed-time test inside the loop: `$SECONDS`, `$EPOCHSECONDS`,
-# `$(date +%s)`.
-_ELAPSED_RE = re.compile(r"SECONDS|\+%s")
+# `$(date +%s)`. Word-bounded so `$TIMEOUT_SECONDS` is not one.
+_ELAPSED_RE = re.compile(r"(?<![A-Za-z0-9_])(?:EPOCH)?SECONDS(?![A-Za-z0-9_])|\+%s")
 
 
 def _has_ceiling(header: list[str], body: list[str]) -> bool:
     """True when the loop can end on a count or on elapsed time.
 
     `<` / `>` count only inside `(( … ))`: elsewhere they are redirections,
-    and `grep -q x f > /dev/null` bounds nothing.
+    and `grep -q x f > /dev/null` bounds nothing. `-lt` and friends count only
+    inside `[`, `[[` or `test`: elsewhere they are flags (`ls -lt`).
     """
-    in_arith = False
-    for tok in header + body:
-        if tok == "((" or tok.endswith("$(("):
-            in_arith = True
-        elif tok == "))":
-            in_arith = False
-        if tok in _BOUND_TEST_OPS or (in_arith and tok in _BOUND_ARITH_OPS):
+    tokens = header + body
+    if _ARITH_COMPARISON_RE.search(" ".join(tokens)):
+        return True
+    in_test = False
+    for tok in tokens:
+        if tok in _TEST_OPENERS:
+            in_test = True
+        elif tok in _TEST_CLOSERS:
+            in_test = False
+        elif in_test and tok in _BOUND_TEST_OPS:
             return True
         if _ELAPSED_RE.search(tok):
             return True
@@ -742,7 +750,8 @@ def _uncapped_waiter_advisory(command: str) -> str | None:
             "A background call notifies only when it exits, so if the loop's "
             "condition never matches it runs until the session ends and nothing "
             "surfaces meanwhile.\n"
-            f"Add one: `timeout <sec> sh -c '{kw} <check>; do sleep N; done'`, or "
+            f"Add one: `timeout <sec> sh -c '{kw} <check>; do sleep N; done'` "
+            "(`gtimeout` on macOS without GNU coreutils linked as `timeout`), or "
             "stop on elapsed time inside the loop (`(( SECONDS > <sec> )) && exit 1`).\n"
             f"Set {_BYPASS_ENV}=1 to silence this guard."
         )
@@ -882,13 +891,11 @@ def main() -> int:
     # the guard's own redirect message names `run_in_background: true` as the
     # correct path, so denying it would contradict the escape it hands out.
     if tool_input.get("run_in_background") is True:
+        # The chain lane runs first: it records the waiter, and its advisory
+        # names an already-armed waiter, the more urgent of the two.
+        chain = _background_waiter_advisory(command, session_id)
         advisories = [
-            text
-            for text in (
-                _uncapped_waiter_advisory(command),
-                _background_waiter_advisory(command, session_id),
-            )
-            if text
+            text for text in (chain, _uncapped_waiter_advisory(command)) if text
         ]
         if advisories:
             advisory = "\n\n".join(advisories)

@@ -248,9 +248,9 @@ lane) unless the loop can end on its own:
 
 | Ceiling | How it is recognised |
 | --- | --- |
-| `timeout N sh -c '…'` / `gtimeout N bash -c '…'` | The loop sits inside one string token, so no loop is seen at all. `bash -c '…'` *without* a wrapper is spliced (`_inline_shell_c`) and is seen |
-| Elapsed-time test in the header or body | a token containing `SECONDS` (also `EPOCHSECONDS`) or `+%s` (`$(date +%s)`) |
-| Counter bound in the header or body | `-lt` / `-le` / `-gt` / `-ge`, or `<` / `<=` / `>` / `>=` inside `(( … ))` |
+| `timeout N sh -c '…'` / `gtimeout N bash -c '…'` | The loop sits inside one string token, so no loop is seen at all. A command that starts with exactly `bash -c '…'` / `sh -c '…'` (no wrapper) is spliced (`_inline_shell_c`) and is seen |
+| Elapsed-time test in the header or body | the word `SECONDS` or `EPOCHSECONDS` (not part of a longer name such as `$TIMEOUT_SECONDS`), or `+%s` (`$(date +%s)`) |
+| Counter bound in the header or body | `-lt` / `-le` / `-gt` / `-ge` inside `[`, `[[` or `test`, or `<` / `<=` / `>` / `>=` inside `(( … ))`, spaced or glued (`((i<40))`) |
 
 | Situation (all `run_in_background: true`) | Action |
 | --- | --- |
@@ -259,20 +259,30 @@ lane) unless the loop can end on its own:
 | `bash -c 'until …; do sleep 5; done'` | **advisory** |
 | `until timeout 5 curl …; do sleep 3; done` | **advisory** — the timeout bounds one probe, not the loop |
 | `until grep -q X f > /dev/null; do sleep 5; done` | **advisory** — `>` outside `(( ))` is a redirection |
+| `until ls -lt dir \| grep -q X; do sleep 5; done` | **advisory** — `-lt` outside a test is a flag |
 | `timeout 600 sh -c 'until …; done'` | pass |
-| `[ $i -ge 40 ] && break` / `while (( i < 40 ))` / `(( SECONDS > 600 ))` in the loop | pass |
+| `[ $i -ge 40 ] && break` / `while ((i<40))` / `(( SECONDS > 600 ))` in the loop | pass |
 | `for i in $(seq 1 40); do …; sleep 15; done` | pass — a fixed count ends |
 | `while read …; do …; sleep 1; done < f`, a loop with no `sleep` | pass |
-| Relaunch of an uncapped waiter inside the chain window | both advisories, joined in one payload |
+| Relaunch of an uncapped waiter inside the chain window | both advisories in one payload, the chain advisory first |
 
-Known limitations, intentional: `-eq` / `-ne` are not read as a bound, because a
-waiter tests exit status with them (`[ $? -ne 0 ]`) at least as often as it
-counts, so a counter written with `-eq` draws the advisory. Any ordering
-comparison counts as a bound even when it compares something else, and a
-waiter hidden in a script file (`bash wait.sh`) is not seen. Both directions
-cost one advisory line on a call that proceeds.
+Known limitations, intentional. Each direction costs one advisory line on a
+call that proceeds, or one that does not appear.
 
-Replayed over one local transcript corpus (4,521 background Bash calls), 637
+- **Drawn when it should not be:** `-eq` / `-ne` are not read as a bound,
+  because a waiter tests exit status with them (`[ $? -ne 0 ]`) at least as
+  often as it counts, so a counter written with `-eq` draws the advisory.
+- **Missed:** any ordering comparison in a test or `(( ))` counts as a bound,
+  even when it compares something other than a count or a time. An inner
+  loop's tokens sit inside its parent's body, so an inner loop's bound also
+  silences an uncapped outer loop. `sleep $N` is not a parseable sleep, so a
+  waiter with a variable interval is not seen. A loop the tokenizer does not
+  reach is not seen either: a script file (`bash wait.sh`), a wrapped shell
+  other than a leading `bash -c` / `sh -c` (`nohup bash -c '…'`,
+  `bash -lc '…'`, `cd d && bash -c '…'`), and a loop in a `( … )` subshell.
+  Silence therefore does not mean a `timeout` wrapper is present.
+
+Replayed over one local transcript corpus (4,526 background Bash calls), 637
 were `while`/`until` sleep-waiters and 493 of them (77%) had no ceiling by the
 rule above.
 
