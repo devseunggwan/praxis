@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """PreToolUse(Bash) advisory: zsh dialect shapes that fail where bash does not.
 
-Issues #1405 (word split) and #1425 (the other three).
+Issues #1405 (word split), #1425 (shapes 1-3) and #1526 (shape 5).
 
-Four shapes, measured on this machine's zsh 5.9 rather than read from a manual:
+Five shapes, measured on this machine's zsh 5.9 rather than read from a manual:
 
   1. `echo ======` → `zsh:1: ===== not found`. A word starting with `=` is a
      command path lookup (EQUALS expansion), so `[ "$x" == y ]` fails too —
@@ -17,16 +17,18 @@ Four shapes, measured on this machine's zsh 5.9 rather than read from a manual:
   4. `for f in $list` → one iteration over the whole string, because
      `SH_WORD_SPLIT` is off by default in zsh. bash splits it, which is where
      the habit comes from.
+  5. `status=$?` → `zsh:1: read-only variable: status`. `status` is zsh's
+     alias of `$?`, so every assignment to it fails.
 
-The first three are deterministic: the command as written cannot do what it
-says, whatever the author meant, so they return `ask` — a correction point
+Shapes 1, 2, 3 and 5 are deterministic: the command as written cannot do what
+it says, whatever the author meant, so they return `ask` — a correction point
 while the command is still being written. Shape 4 is not: passing a
 deliberately unsplit single argument uses identical syntax, and a gate that
 cannot tell intent apart must not block. It stays an advisory, on
 `additionalContext` (reaches the actor) and stderr (grades the fire).
 
 Silent when:
-  • the executing shell is not zsh — shapes 1, 2 and 4 do not exist under
+  • the executing shell is not zsh — shapes 1, 2, 4 and 5 do not exist under
     bash or fish. Shape 3 is shell-general and fires regardless.
   • the text is quoted in a way that actually protects it — which differs per
     shape: both quotes protect shape 1, only single quotes protect shape 2
@@ -293,6 +295,51 @@ def shadowed_heredocs(command: str) -> list[str]:
     return found
 
 
+# Where a new simple command starts. `(` right after `=` opens an array
+# (`arr=(status=1)`), whose elements are values, not assignments.
+_COMMAND_BREAK_RE = re.compile(r"[;&|){}\n`]|(?<!=)\(")
+_LEADING_KEYWORDS = frozenset(
+    {"if", "then", "else", "elif", "do", "while", "until", "!", "time"}
+)
+_ASSIGNMENT_WORD_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*(?:\[[^\]]*\])?\+?=")
+_STATUS_ASSIGNMENT_RE = re.compile(r"status\+?=")
+# Builtins whose `NAME=value` arguments are assignments. `local status` with no
+# value is a declaration and succeeds (measured), so only `status=` counts.
+_DECLARATION_BUILTINS = frozenset(
+    {"local", "typeset", "declare", "export", "readonly", "integer", "float"}
+)
+
+
+def status_assignments(command: str) -> list[str]:
+    """`status=` / `status+=` assignment words, in source order.
+
+    `status` is read-only in zsh, so any assignment to it fails with
+    `read-only variable: status`. An assignment is a leading `NAME=` word of a
+    simple command, or a `NAME=` argument of a declaration builtin; the same
+    text as an ordinary argument (`echo status=1`) is not one.
+    """
+    text = _mask_quoted(strip_heredoc_bodies(command))
+    text = _mask_arithmetic(_mask_double_bracket(_mask_comments(text)))
+    found: list[str] = []
+    for segment in _COMMAND_BREAK_RE.split(text):
+        words = segment.split()
+        while words and words[0] in _LEADING_KEYWORDS:
+            words.pop(0)
+        hits: list[str] = []
+        for index, word in enumerate(words):
+            if _ASSIGNMENT_WORD_RE.match(word):
+                hits.append(word)
+                continue
+            if word in _DECLARATION_BUILTINS:
+                hits.extend(words[index + 1:])
+            break
+        for word in hits:
+            match = _STATUS_ASSIGNMENT_RE.match(word)
+            if match and match.group(0) not in found:
+                found.append(match.group(0))
+    return found
+
+
 def executing_shell_is_zsh() -> bool:
     """True when the shell that will run the command is zsh.
 
@@ -324,9 +371,19 @@ def word_split_text(names: list[str]) -> str:
 
 
 def deterministic_text(
-    equals: list[str], patterns: list[str], heredocs: list[str]
+    equals: list[str],
+    patterns: list[str],
+    heredocs: list[str],
+    statuses: list[str],
 ) -> str:
     lines = ["⚠️ 이 명령은 zsh 에서 쓴 대로 실행되지 않습니다", ""]
+    if statuses:
+        listed = ", ".join(f"`{word}`" for word in statuses)
+        lines += [
+            f"- {listed} — zsh 에서 `status` 는 `$?` 와 같은 읽기 전용 "
+            "변수라 할당하면 `read-only variable: status` 로 실패합니다.",
+            "  고치기: 다른 이름을 쓰세요 — `rc=$?`.",
+        ]
     if equals:
         listed = ", ".join(f"`{word}`" for word in equals)
         lines += [
@@ -371,9 +428,12 @@ def main() -> int:
     equals = equals_words(command) if zsh else []
     patterns = bad_patterns(command) if zsh else []
     heredocs = shadowed_heredocs(command)
+    statuses = status_assignments(command) if zsh else []
 
-    if equals or patterns or heredocs:
-        emit_decision("ask", deterministic_text(equals, patterns, heredocs))
+    if equals or patterns or heredocs or statuses:
+        emit_decision(
+            "ask", deterministic_text(equals, patterns, heredocs, statuses)
+        )
         return 0
 
     names = unsplit_params(command) if zsh else []

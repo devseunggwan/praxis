@@ -3,14 +3,15 @@
 Supported hosts: all
 
 `hooks/advisory-nudge/zsh-dialect-advisory/impl.py` fires on PreToolUse for
-`Bash` tool calls and reports four shapes that behave differently under zsh
-than the bash habit they come from. Three are deterministic and return
-`permissionDecision: ask`; the fourth cannot be decided from syntax and stays
+`Bash` tool calls and reports five shapes that behave differently under zsh
+than the bash habit they come from. Four are deterministic and return
+`permissionDecision: ask`; shape 4 cannot be decided from syntax and stays
 an advisory.
 
 ## Why this exists
 
-All four were observed in a single session on macOS default zsh, and each one
+Shapes 1-4 were observed in a single session on macOS default zsh, shape 5 in a
+later one, and each one
 reports a failure that names something other than the shell — or nothing at
 all. Every behaviour below was verified on this machine's zsh 5.9 rather than
 read from a manual.
@@ -76,7 +77,27 @@ at the shell; the error, when there is one, names the receiving CLI's argument
 parser. Measured across the local transcript corpus: **182 uses in 72 sessions,
 82 of them (45%) ending in such an error**.
 
-## Why three ask and one advisory
+### 5 — an assignment to `status` (ask)
+
+```text
+$ zsh -f -c 'status=$?'
+zsh:1: read-only variable: status
+$ zsh -f -c 'local status=1'
+zsh:1: read-only variable: status
+$ zsh -f -c 'local status'; echo "rc=$?"
+status=0
+rc=0
+```
+
+`status` is zsh's read-only alias of `$?`. Every assignment to it fails: a
+leading `status=` word of a simple command (after `;`, `&&`, `(`, `$(`, a
+backtick, `{`, `if`, `do`, `!`, or other prefix assignments), and a `status=`
+argument of `local`, `typeset`, `declare`, `export`, `readonly`, `integer` or
+`float`. A declaration without a value (`local status`) succeeds and is not
+reported, and neither is the same text as an ordinary argument
+(`echo status=1`, `env status=1 cmd`) or an array element (`arr=(status=1)`).
+
+## Why four ask and one advisory
 
 A deterministic shape cannot do what it says whatever the author meant, so an
 `ask` gives the call a correction point while it is still being written — the
@@ -90,7 +111,9 @@ Neither path is a block. `ask` surfaces the fork; it does not deny the command.
 
 Measured fire rate across the local corpus (851 transcripts, 147,281 Bash
 calls): **263 ask-grade fires (0.18%)** — 243 `=word`, 1 pattern, 19 heredoc —
-and 486 advisory-grade word-split fires (0.33%).
+and 486 advisory-grade word-split fires (0.33%). Shape 5, replayed later over
+the same kind of corpus, fired on 8 distinct commands, each a real `status=`
+assignment.
 
 ## Detected shapes
 
@@ -99,6 +122,7 @@ and 486 advisory-grade word-split fires (0.33%).
 | `echo ======`, `echo =foo`, `[ "$x" == y ]`, `V==foo` | `ask` |
 | `${w#[[}`, `"${w#[[}"`, `${w/[[/Z}` | `ask` |
 | An opener inside an open body reusing the outer delimiter, with its own terminator | `ask` |
+| `status=$?`, `true; status=1`, `$(status=1)`, `a=1 status=2 cmd`, `status+=1`, `local status=1`, `export status=1` | `ask` |
 | `set -- $var`, `set - ${var}`, `for x in $var` | Advisory (`additionalContext` + stderr) |
 | `[[ $x == y ]]`, `test 1 = 1`, `print a=b`, `--stat=2` | Silent — not the shape |
 | `(( x == y ))`, `$(( 1 == 1 ))`, `print hi # a==b` | Silent — arithmetic and comments are not expanded words |
@@ -106,8 +130,9 @@ and 486 advisory-grade word-split fires (0.33%).
 | `${w#[]}`, `${w#[!]}` | Silent — an open class led by `]` is a no-match in zsh 5.9, not a bad pattern |
 | A nested heredoc with a different delimiter, or a body that mentions one | Silent |
 | `"$var"`, `${=var}`, `$=var`, `${(s: :)var}`, `$@`, `$1` | Silent |
-| Inside a heredoc body | Silent for shapes 1, 2 and 4 — data, not words |
-| `$SHELL` is not zsh, or unset | Silent for shapes 1, 2 and 4; shape 3 still fires |
+| `local status`, `STATUS=1`, `exit_status=1`, `echo status=1`, `env status=1 cmd`, `--status=x`, `arr=(status=1)` | Silent — no assignment to `status` |
+| Inside a heredoc body | Silent for shapes 1, 2, 4 and 5 — data, not words |
+| `$SHELL` is not zsh, or unset | Silent for shapes 1, 2, 4 and 5; shape 3 still fires |
 | `# zsh-dialect:ok` or `# word-split:ok` on the command | Silent — opt-out |
 | Malformed stdin, non-Bash tool | Silent — fail-open |
 
@@ -137,10 +162,15 @@ against zsh 5.9 and left in place:
   heredoc and asks, although it is only data. The opener scan is not
   quote-aware, and `<<-` terminators are compared after a full `strip()`
   rather than tab-only removal.
+- **`status` bound by something other than an assignment** —
+  `for status in a b`, `read status` and `(( status = 1 ))` fail the same way,
+  but none is an assignment word, so none is scanned. A `status=` inside a
+  double-quoted `"$(…)"` is masked with the quotes and is missed too.
 
 Closing any of them needs a real tokenizer (quotes, comments, control
 operators, arithmetic and conditional contexts in one pass). That is a
 different hook, not a patch to this one.
 
-Reference: issues [#1405](https://github.com/devseunggwan/praxis/issues/1405)
-and [#1425](https://github.com/devseunggwan/praxis/issues/1425).
+Reference: issues [#1405](https://github.com/devseunggwan/praxis/issues/1405),
+[#1425](https://github.com/devseunggwan/praxis/issues/1425) and
+[#1526](https://github.com/devseunggwan/praxis/issues/1526).

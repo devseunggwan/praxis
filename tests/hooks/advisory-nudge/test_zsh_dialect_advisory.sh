@@ -1,12 +1,12 @@
 #!/bin/bash
-# test_zsh_dialect_advisory.sh — coverage for the dialect hook (#1405, #1425).
+# test_zsh_dialect_advisory.sh — coverage for the dialect hook (#1405, #1425, #1526).
 #
 # Synthesizes Claude Code PreToolUse(Bash) payloads and asserts:
 #   ask      → exit 0 + stdout permissionDecision=ask carrying the given marker
 #   advisory → exit 0 + stdout additionalContext + stderr with the tag + remedy
 #   silent   → exit 0 + both streams empty
 #
-# $SHELL is forced per case: three of the four shapes are zsh-specific, so the
+# $SHELL is forced per case: four of the five shapes are zsh-specific, so the
 # non-zsh cases are part of the contract rather than environment noise. The
 # nested-heredoc shape is shell-general and is asserted under bash too.
 #
@@ -196,6 +196,80 @@ run_case "a single ordinary heredoc" silent \
   "cat <<'EOF'
 plain
 EOF"
+
+# === ASK — an assignment to the read-only `status` =========================
+
+run_case "a bare status assignment" "ask:status=" \
+  'gh run view 1; status=$?'
+run_case "status assignment at the start" "ask:status=" \
+  'status=1'
+run_case "status assignment after &&" "ask:status=" \
+  'true && status=1'
+run_case "status assignment in a subshell" "ask:status=" \
+  '( status=1 )'
+run_case "status assignment in a command substitution" "ask:status=" \
+  'x=$(status=1; echo hi)'
+run_case "status assignment in backticks" "ask:status=" \
+  'echo `status=1`'
+run_case "status assignment as an if condition" "ask:status=" \
+  'if status=$(cmd); then print ok; fi'
+run_case "status assignment in a loop body" "ask:status=" \
+  'while true; do status=1; break; done'
+run_case "status assignment in a brace group" "ask:status=" \
+  '{ status=1; }'
+run_case "status assignment after !" "ask:status=" \
+  '! status=1'
+run_case "status as a command-prefix assignment" "ask:status=" \
+  'status=1 true'
+run_case "status after another prefix assignment" "ask:status=" \
+  'a=1 status=2 true'
+run_case "status append assignment" "ask:status+=" \
+  'status+=1'
+run_case "local with a value assigns" "ask:status=" \
+  'local status=1'
+run_case "local with an option still assigns" "ask:status=" \
+  'local -i status=1'
+run_case "local with status as a later argument" "ask:status=" \
+  'local x=1 status=2'
+for builtin in typeset declare export readonly integer float; do
+  run_case "$builtin with a status value" "ask:status=" \
+    "$builtin status=1"
+done
+
+run_case "local status without a value does not assign" silent \
+  'local status'
+run_case "an uppercase STATUS is an ordinary name" silent \
+  'STATUS=1'
+run_case "a name ending in status is not status" silent \
+  'exit_status=1'
+run_case "a name starting with status is not status" silent \
+  'status_code=1'
+run_case "status=1 as an argument is not an assignment" silent \
+  'echo status=1'
+run_case "status=1 after a prefix assignment and a command" silent \
+  'x=1 echo status=1'
+run_case "env sets it in the child environment, not zsh" silent \
+  'env status=1 true'
+run_case "a long flag named status" silent \
+  'gh run list --status=failure'
+run_case "a quoted word is a command name, not an assignment" silent \
+  'print "status=1"'
+run_case "a single-quoted script for another shell" silent \
+  "sh -c 'status=1; echo \$status'"
+run_case "reading status is fine" silent \
+  '[[ $status == 0 ]] && echo $status'
+run_case "an array element is not an assignment" silent \
+  'arr=(status=1 other)'
+run_case "status assignment in a comment" silent \
+  'true # status=1'
+run_case "status assignment in a heredoc body" silent \
+  "cat <<'EOF'
+status=1
+EOF"
+run_case "status assignment is zsh-only" silent \
+  'status=$?' /bin/bash
+run_case "the opt-out marker silences the status shape" silent \
+  'status=$? # zsh-dialect:ok'
 
 # === ADVISORY — word split, where intent is not decidable ===================
 
