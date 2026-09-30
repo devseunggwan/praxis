@@ -174,6 +174,35 @@ run_case "&& still passes through" pass Bash \
   "true && echo *.nonexistent-xyz"
 run_case "background & still passes through" pass Bash \
   "echo *.nonexistent-xyz &"
+run_case "background &| still passes through" pass Bash \
+  "echo *.nonexistent-xyz &|"
+run_case "background &! still passes through" pass Bash \
+  "echo *.nonexistent-xyz &!"
+run_case "|& pipe still passes through" pass Bash \
+  "echo *.nonexistent-xyz |& cat"
+run_case "|& followed by a redirect still passes through" pass Bash \
+  "echo *.nonexistent-xyz |&> /dev/null cat"
+run_case "background job beside a redirect still passes through" pass Bash \
+  "echo *.nonexistent-xyz 2>&1 &"
+
+# An `&` touching a redirect arrow moves a file descriptor and detaches
+# nothing (live zsh: no `$!` for any of these), so the glob is still judged.
+run_case "2>&1 is a redirect, not a background job" block Bash \
+  "ls $FIXTURE/*.nonexistent-xyz 2>&1 | head -3"
+run_case ">&2 is a redirect" block Bash \
+  "echo $FIXTURE/*.nonexistent-xyz >&2"
+run_case "<&0 is a redirect" block Bash \
+  "cat $FIXTURE/*.nonexistent-xyz <&0"
+run_case "2>&- is a redirect" block Bash \
+  "ls $FIXTURE/*.nonexistent-xyz 2>&-"
+run_case "&>/dev/null is a redirect" block Bash \
+  "ls $FIXTURE/*.nonexistent-xyz &>/dev/null"
+run_case "&>>file is a redirect" block Bash \
+  "ls $FIXTURE/*.nonexistent-xyz &>>/dev/null"
+run_case "&>| clobber is a redirect" block Bash \
+  "ls $FIXTURE/*.nonexistent-xyz &>|/dev/null"
+run_case "2>&1 with a matching glob still passes" pass Bash \
+  "ls $FIXTURE/logs/*.log 2>&1 | head -3"
 # `noglob` is a prefix, so only its own segment is dropped — the neighbour in
 # the same line is still judged.
 run_case "noglob shields its own segment only" block Bash \

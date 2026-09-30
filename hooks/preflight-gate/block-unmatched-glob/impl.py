@@ -55,6 +55,7 @@ glob. Exits 0 otherwise (transparent pass-through).
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import sys as _sys
 import time
@@ -126,6 +127,14 @@ _GLOB_OPTIONS = {
 # `<<` starts a heredoc whose body is data — none of those survive being cut
 # into pieces and judged piece by piece.
 _UNSPLITTABLE_MARKERS = ("&&", "||", "&", "\n", "<<")
+
+# An `&` touching a redirect arrow (`2>&1`, `<&0`, `&>out`, `>&|out`) duplicates
+# or merges a file descriptor; it does not detach anything. Left in the
+# skeleton, the `&` marker above read `ls *.x 2>&1 | head` as a background job
+# and passed through one abort in seven (79 of 559 in the local transcript
+# corpus). `|&` is a pipe, not a redirect, so it is not matched and stays a
+# pass-through even when a redirect follows it (`|&> out cmd`).
+_REDIRECT_AMPERSAND = re.compile(r"(?<=[<>])&|(?<!\|)&(?=>)")
 
 # Separators that DO survive it. Each of `a ; b` and `a | b` is an ordinary
 # simple command whose own words expand under the same `nomatch`, so a glob in
@@ -324,6 +333,7 @@ def should_pass_through(command: str) -> bool:
     skeleton = unquoted_skeleton(command)
     if any(marker in skeleton for marker in _DYNAMIC_MARKERS):
         return True
+    skeleton = _REDIRECT_AMPERSAND.sub(_MASK, skeleton)
     return any(marker in skeleton for marker in _UNSPLITTABLE_MARKERS)
 
 
