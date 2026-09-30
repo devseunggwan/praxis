@@ -613,7 +613,7 @@ _CONSUMERS = {
         ["load_current_turn", "read_last_user_message"],
     # Match only against the last N lines, so they read the tail instead of
     # `readlines()` over the whole transcript (#1240).
-    HOOKS / "advisory-nudge" / "caller-probe-gate" / "impl.py": ["tail_lines"],
+    HOOKS / "advisory-nudge" / "caller-probe-gate" / "impl.py": ["iter_transcript"],
     HOOKS / "advisory-nudge" / "pre-output-falsification-gate" / "impl.py": ["tail_lines"],
     HOOKS / "advisory-nudge" / "external-write-falsify-check" / "impl.py": ["tail_lines"],
     # Needs the whole session (a dispatch or enumeration anywhere in it clears

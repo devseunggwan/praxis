@@ -164,14 +164,21 @@ run_case "short backtick span is not a symbol (silent)" \
   "silent" "advisory" \
   '{"tool_name":"Bash","tool_input":{"command":"gh pr comment 5 --body \"the `id` value incorrectly resets\""}}'
 
-# --- Block window (body-level axis A only) -----------------------------------
+# --- Same-line rule (body-level axis A only, #1542) --------------------------
+# A body-level token blames only code on its own line. The +-3-line window it
+# replaced blamed every path near an evidence heading or a known-limits note.
 
 WINDOW_NEAR=$(mktemp /tmp/cpg-near-XXXXXX.md)
 printf 'Some context line.\nThe guard fails to check membership.\nSee worker.py for the code.\n' > "$WINDOW_NEAR"
-run_case "code within +-3 lines of defect token (warn)" \
-  "warn" "advisory" \
+run_case "code on the line after the defect token (silent)" \
+  "silent" "advisory" \
   "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"gh pr comment 5 --body-file $WINDOW_NEAR\"}}"
 rm -f "$WINDOW_NEAR"
+
+# Positive control for the same-line rule: the issue's own control.
+run_case "helper_fn blamed on the same line as 결함, no search (warn)" \
+  "warn" "advisory" \
+  '{"tool_name":"Bash","tool_input":{"command":"gh pr comment 5 --body \"`helper_fn` 에 결함이 있습니다\""}}'
 
 WINDOW_FAR=$(mktemp /tmp/cpg-far-XXXXXX.md)
 printf 'The guard fails to check membership.\nfiller\nfiller\nfiller\nfiller\nUnrelated appendix: worker.py is the entry point.\n' > "$WINDOW_FAR"
@@ -179,6 +186,33 @@ run_case "code outside +-3 lines of defect token (silent)" \
   "silent" "advisory" \
   "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"gh pr comment 5 --body-file $WINDOW_FAR\"}}"
 rm -f "$WINDOW_FAR"
+
+# --- Commit SHAs are not code (#1542) ----------------------------------------
+
+run_case "SHA-shaped span on a defect line is not blamed code (silent)" \
+  "silent" "advisory" \
+  '{"tool_name":"Bash","tool_input":{"command":"gh pr comment 5 --body \"결함은 `e5f87c89` 에서 들어왔습니다\""}}'
+
+run_case "non-hex span of the same length still counts (warn)" \
+  "warn" "advisory" \
+  '{"tool_name":"Bash","tool_input":{"command":"gh pr comment 5 --body \"결함은 `e5f87c8z` 에서 들어왔습니다\""}}'
+
+# --- Call-level scope: title + first paragraph (#1542, option A2) ------------
+
+A2_LATER=$(mktemp /tmp/cpg-a2later-XXXXXX.md)
+printf 'Summary of the change.\n\nSee handler.py for the flow.\n' > "$A2_LATER"
+run_case "fix( title: code only after the first paragraph (silent)" \
+  "silent" "advisory" \
+  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"gh pr create --title 'fix(auth): reject stale token' --body-file $A2_LATER\"}}"
+rm -f "$A2_LATER"
+
+run_case "fix( title citing code in the title itself (warn)" \
+  "warn" "advisory" \
+  '{"tool_name":"Bash","tool_input":{"command":"gh pr create --title \"fix(auth): handler.py drops the token\" --body \"Summary only.\""}}'
+
+run_case "title code is out of scope without a call-level signal (silent)" \
+  "silent" "advisory" \
+  '{"tool_name":"Bash","tool_input":{"command":"gh pr create --title \"docs: explain handler.py\" --body \"Summary only.\""}}'
 
 # --- Arm A — in-body Caller-probe line ---------------------------------------
 
@@ -223,6 +257,22 @@ run_case "Arm A: arrow with no command before it does not clear (warn)" \
   "warn" "advisory" \
   "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"gh pr comment 5 --body-file $PROBE_NOCMD\"}}"
 rm -f "$PROBE_NOCMD"
+
+# The repository's own PR-body line (block-pr-without-caller-evidence) clears
+# when it names a search tool, and only then (#1542).
+CCV_OK=$(mktemp /tmp/cpg-ccv-XXXXXX.md)
+printf 'worker.py fails to check membership.\n\nCaller chain verified: grep -rn worker app/ → app/main.py:12\n' > "$CCV_OK"
+run_case "Arm A: Caller chain verified naming grep (silent)" \
+  "silent" "advisory" \
+  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"gh pr comment 5 --body-file $CCV_OK\"}}"
+rm -f "$CCV_OK"
+
+CCV_NA=$(mktemp /tmp/cpg-ccvna-XXXXXX.md)
+printf 'worker.py fails to check membership.\n\nCaller chain verified: N/A — docs-only change\n' > "$CCV_NA"
+run_case "Arm A: Caller chain verified N/A names no search tool (warn)" \
+  "warn" "advisory" \
+  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"gh pr comment 5 --body-file $CCV_NA\"}}"
+rm -f "$CCV_NA"
 
 # --- Per-write isolation (Codex round 1, P2) ---------------------------------
 # A fix( title on one write must not make a sibling write's incidental file
@@ -310,6 +360,47 @@ run_case "malformed stdin JSON (silent fail-open)" \
 run_case "non-write non-MCP tool (silent)" \
   "silent" "advisory" \
   '{"tool_name":"Read","tool_input":{"file_path":"/tmp/impl.py"}}'
+
+# --- Whole-session scan (#1542) ----------------------------------------------
+# A call-site search early in a long session clears a claim published late.
+
+LONG_TRANSCRIPT=$(mktemp /tmp/cpg-long-XXXXXX.jsonl)
+{
+  echo '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"Bash","input":{"command":"grep -rn early_helper app/"}}]}}'
+  for _ in $(seq 1 4500); do
+    echo '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"filler"}]}}'
+  done
+} > "$LONG_TRANSCRIPT"
+run_case "search more than 4000 lines back still clears (silent)" \
+  "silent" "advisory" \
+  "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"gh pr comment 5 --body 'early_helper.py fails to close the pool'\"},\"transcript_path\":\"$LONG_TRANSCRIPT\"}"
+rm -f "$LONG_TRANSCRIPT"
+
+# --- Replay of #1538's sample (#1542) ----------------------------------------
+# Pseudonymized from real fires; see the spec's "Replay fixtures" section.
+# 03, 08 and 16 are the three known false positives the token match cannot
+# resolve; the other 13 were false positives this change clears.
+
+REPLAY_DIR="$ROOT_DIR/tests/fixtures/caller-probe-gate/replay-1542"
+for d in "$REPLAY_DIR"/*/; do
+  n=$(basename "$d")
+  case "$n" in
+    03|08|16) want="warn" ;;
+    *) want="silent" ;;
+  esac
+  payload=$(DIR="$d" python3 -c '
+import json, os, shlex
+d = os.environ["DIR"]
+title = open(d + "title.txt").read().rstrip("\n")
+labels = [x for x in open(d + "labels.txt").read().splitlines() if x]
+cmd = ["gh", "issue", "create", "--title", shlex.quote(title)]
+for lab in labels:
+    cmd += ["--label", shlex.quote(lab)]
+cmd += ["--body-file", shlex.quote(d + "body.md")]
+print(json.dumps({"tool_name": "Bash", "tool_input": {"command": " ".join(cmd)}, "transcript_path": d + "transcript.jsonl"}))
+')
+  run_case "replay-1542 case $n ($want)" "$want" "advisory" "$payload"
+done
 
 rm -f "$READ_ONLY_TRANSCRIPT" "$SEARCH_TRANSCRIPT"
 
