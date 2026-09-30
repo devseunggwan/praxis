@@ -232,6 +232,16 @@ for bad in "abc" "-5" "17000010.5" " 1700001000" "01700001000" "1234567890123" "
   run_hook "$HOOK" PostToolUse PRAXIS_TIME_START_EPOCH="$bad" PRAXIS_TIME_BUDGET_S=1200
   expect_silent "malformed start '$bad' -> silent"
 done
+# A start of 0 is 1970: well-formed digits, but no launch on this host wrote
+# it. Budget 0 stays valid (elapsed-only, case 3), so the two fields cannot
+# share one validator.
+run_hook "$HOOK" PostToolUse PRAXIS_TIME_START_EPOCH=0 PRAXIS_TIME_BUDGET_S=1200
+expect_silent "zero start -> silent"
+if [ ! -e "$LEDGER" ]; then
+  pass "zero start -> no fire-ledger record"
+else
+  fail "zero start -> no fire-ledger record" "$(cat "$LEDGER")"
+fi
 for bad in "abc" "-1" "1200s" "012" "1e3" "1234567890123"; do
   run_hook "$HOOK" PostToolUse PRAXIS_TIME_START_EPOCH=$START PRAXIS_TIME_BUDGET_S="$bad"
   expect_silent "malformed budget '$bad' -> silent"

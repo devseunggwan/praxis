@@ -191,6 +191,7 @@ wrapper's trap. The per-session cost above is what that choice buys.
 | start or budget not a plain decimal (`abc`, `-5`, `1.5`, `1e3`, `1200s`, whitespace) | silent |
 | leading zero (`012`), which `sh` arithmetic would read as octal | silent |
 | more than 12 digits | silent |
+| start of `0` | silent, no ledger record. It is 1970, which no launch on this host wrote; a budget of `0` stays valid (elapsed-only) |
 | start later than now | silent. The same host wrote it at launch, so this is malformed, not skew |
 | `date +%s` fails | silent |
 | argv event not one of the three registered | silent |

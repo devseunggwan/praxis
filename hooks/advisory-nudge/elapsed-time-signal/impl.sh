@@ -47,6 +47,9 @@ START="$PRAXIS_TIME_START_EPOCH"
 BUDGET="${PRAXIS_TIME_BUDGET_S:-0}"
 _is_uint "$START" || exit 0
 _is_uint "$BUDGET" || exit 0
+# `_is_uint` accepts 0 so a budget of 0 can mean elapsed-only. A start of 0 is
+# 1970, which no launch on this host wrote, so it is malformed.
+[ "$START" -gt 0 ] || exit 0
 
 NOW=$(date +%s 2>/dev/null)
 _is_uint "$NOW" || exit 0
