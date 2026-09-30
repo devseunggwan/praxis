@@ -285,7 +285,9 @@ bash tests/hooks/advisory-nudge/test_composed_command_gate.sh
 
 `tests/fixtures/composed-command-gate/replay-1540/NN/` holds the 14 fires
 from #1538's sample that reproduced, pseudonymized. Every word outside a short list
-of common command names became a consistent alias (`w12x`; digit-only words
+of common command names became a consistent alias (`w12_`, whose underscore
+keeps a path of aliases from forming the 40-character run
+`tests/test_no_live_keys_in_fixtures.sh` flags; digit-only words
 became six-digit numbers, so `2>&1` and `1,5p` keep their shape), so a
 published line and the run it was or was not copied from keep the same equal
 or unequal relation. The body keeps only its fenced blocks; the transcript

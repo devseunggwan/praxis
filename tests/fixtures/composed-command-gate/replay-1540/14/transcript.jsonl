@@ -1,6 +1,6 @@
-{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "toolu_fx1", "name": "Bash", "input": {"command": " : ; npx vitest w290x w718x/w3289x.w3290x.w307x.w1388x w718x/w1471x.w3291x.w307x.w1388x w718x/w297x/w3244x 100058>&100059 | : "}}]}}
-{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "toolu_fx2", "name": "Bash", "input": {"command": " : && npx vitest w290x w718x/w3289x.w3290x.w307x.w1388x 100058>&100059 | : "}}]}}
-{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "toolu_fx3", "name": "Bash", "input": {"command": " : ; npx vitest w290x w718x/w297x/w3244x/w241x.w307x.w1388x 100058>&100059 | : && npx vitest w290x w718x/w297x/w3244x/w241x.w307x.w1388x -w476x 'w3280x w3281x w3282x w911x' 100058>&100059 | : "}}]}}
+{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "toolu_fx1", "name": "Bash", "input": {"command": " : ; npx vitest w290_ w718_/w3289_.w3290_.w307_.w1388_ w718_/w1471_.w3291_.w307_.w1388_ w718_/w297_/w3244_ 100058>&100059 | : "}}]}}
+{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "toolu_fx2", "name": "Bash", "input": {"command": " : && npx vitest w290_ w718_/w3289_.w3290_.w307_.w1388_ 100058>&100059 | : "}}]}}
+{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "toolu_fx3", "name": "Bash", "input": {"command": " : ; npx vitest w290_ w718_/w297_/w3244_/w241_.w307_.w1388_ 100058>&100059 | : && npx vitest w290_ w718_/w297_/w3244_/w241_.w307_.w1388_ -w476_ 'w3280_ w3281_ w3282_ w911_' 100058>&100059 | : "}}]}}
 {}
 {}
 {}
@@ -18,7 +18,7 @@
 {}
 {}
 {}
-{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "toolu_fx4", "name": "Bash", "input": {"command": " : ; npx vitest w290x w718x/w297x/w3244x w718x/w3289x.w3290x.w307x.w1388x w718x/w1471x.w3291x.w307x.w1388x 100058>&100059 | : ; npx w1382x --w3293x -w54x . ; : ; npx w3294x --w374x w718x/w297x/w3244x/w241x.w1388x w718x/w297x/w3244x/w241x.w307x.w1388x 100058>&100059 | : "}}]}}
+{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "toolu_fx4", "name": "Bash", "input": {"command": " : ; npx vitest w290_ w718_/w297_/w3244_ w718_/w3289_.w3290_.w307_.w1388_ w718_/w1471_.w3291_.w307_.w1388_ 100058>&100059 | : ; npx w1382_ --w3293_ -w54_ . ; : ; npx w3294_ --w374_ w718_/w297_/w3244_/w241_.w1388_ w718_/w297_/w3244_/w241_.w307_.w1388_ 100058>&100059 | : "}}]}}
 {}
 {}
 {}
@@ -120,7 +120,7 @@
 {}
 {}
 {}
-{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "toolu_fx5", "name": "Bash", "input": {"command": " : ; npx vitest w290x w718x/w297x/w3244x w718x/w3289x.w3290x.w307x.w1388x w718x/w1471x.w3291x.w307x.w1388x 100058>&100059 | : ; npx w1382x --w3293x -w54x . ; : "}}]}}
+{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "toolu_fx5", "name": "Bash", "input": {"command": " : ; npx vitest w290_ w718_/w297_/w3244_ w718_/w3289_.w3290_.w307_.w1388_ w718_/w1471_.w3291_.w307_.w1388_ 100058>&100059 | : ; npx w1382_ --w3293_ -w54_ . ; : "}}]}}
 {}
 {}
 {}
@@ -383,7 +383,7 @@
 {}
 {}
 {}
-{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "toolu_fx6", "name": "Bash", "input": {"command": " : ; npx vitest w290x w718x/w297x/w3244x w718x/w3289x.w3290x.w307x.w1388x w718x/w1471x.w3291x.w307x.w1388x 100058>&100059 | : ; npx w1382x --w3293x -w54x .; : "}}]}}
+{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "toolu_fx6", "name": "Bash", "input": {"command": " : ; npx vitest w290_ w718_/w297_/w3244_ w718_/w3289_.w3290_.w307_.w1388_ w718_/w1471_.w3291_.w307_.w1388_ 100058>&100059 | : ; npx w1382_ --w3293_ -w54_ .; : "}}]}}
 {}
 {}
 {}
@@ -401,7 +401,7 @@
 {}
 {}
 {}
-{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "toolu_fx7", "name": "Bash", "input": {"command": " : && w3295x=100059 npx vitest w290x w718x/w297x/w3244x/w241x.w307x.w1388x w718x/w3289x.w3290x.w307x.w1388x 100058>&100059 | : "}}]}}
+{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "toolu_fx7", "name": "Bash", "input": {"command": " : && w3295_=100059 npx vitest w290_ w718_/w297_/w3244_/w241_.w307_.w1388_ w718_/w3289_.w3290_.w307_.w1388_ 100058>&100059 | : "}}]}}
 {}
 {}
 {}
@@ -432,7 +432,7 @@
 {}
 {}
 {}
-{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "toolu_fx8", "name": "Bash", "input": {"command": " : \n\n : \n\n : \n\n : \n\n : \n\n : \n\n : \n\n : && w3295x=100059 npx vitest w290x w718x/w297x/w3244x/w241x.w307x.w1388x w718x/w3289x.w3290x.w307x.w1388x 100058>&100059 | : \n\n : \n\n : \n\n : \n\n : \n\n : ; npx vitest w290x w718x/w297x/w3244x w718x/w3289x.w3290x.w307x.w1388x w718x/w1471x.w3291x.w307x.w1388x 100058>&100059 | : ; npx w1382x --w3293x -w54x .; : \n\n : \n\n : \n\n : "}}]}}
+{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "toolu_fx8", "name": "Bash", "input": {"command": " : \n\n : \n\n : \n\n : \n\n : \n\n : \n\n : \n\n : && w3295_=100059 npx vitest w290_ w718_/w297_/w3244_/w241_.w307_.w1388_ w718_/w3289_.w3290_.w307_.w1388_ 100058>&100059 | : \n\n : \n\n : \n\n : \n\n : \n\n : ; npx vitest w290_ w718_/w297_/w3244_ w718_/w3289_.w3290_.w307_.w1388_ w718_/w1471_.w3291_.w307_.w1388_ 100058>&100059 | : ; npx w1382_ --w3293_ -w54_ .; : \n\n : \n\n : \n\n : "}}]}}
 {}
 {}
 {}

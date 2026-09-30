@@ -1,4 +1,4 @@
-{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "toolu_fx1", "name": "Bash", "input": {"command": " : \n\n : \n\n : && .w591x/w46x/python -w57x w58x $w246x/w993x.w50x /w399x/w400x.w401x/w402x/w42x-w403x/w48x-w1026x-w138x-101026/w716x/w42x/w994x.w188x 100058>&100059 | : && .w591x/w46x/python -w57x w58x $w246x/w993x.w50x $w246x/w1006x.w188x 100058>&100059 | : "}}]}}
+{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "toolu_fx1", "name": "Bash", "input": {"command": " : \n\n : \n\n : && .w591_/w46_/python -w57_ w58_ $w246_/w993_.w50_ /w399_/w400_.w401_/w402_/w42_-w403_/w48_-w1026_-w138_-101026/w716_/w42_/w994_.w188_ 100058>&100059 | : && .w591_/w46_/python -w57_ w58_ $w246_/w993_.w50_ $w246_/w1006_.w188_ 100058>&100059 | : "}}]}}
 {}
 {}
 {}
