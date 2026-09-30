@@ -1,0 +1,33 @@
+### 뷁뷁
+
+뷁뷁 뷁뷁뷁뷁 `zqbko_/zqbql_.md`를 **146,018 → 40,434 zqbqm_ (796 → 뷁 370줄)** 로 뷁뷁뷁, 뷁뷁 뷁뷁뷁뷁 뷁뷁뷁뷁 뷁뷁 뷁뷁뷁 뷁뷁뷁뷁뷁 뷁뷁뷁.
+
+- 뷁뷁뷁뷁 뷁뷁 + 뷁뷁 뷁뷁 + 뷁뷁 뷁뷁뷁뷁 뷁뷁뷁, 뷁뷁 뷁뷁뷁 `zqbqo_/zqkl_-zqbqq_.md`에 뷁뷁뷁 뷁뷁뷁뷁.
+- `zqbqu_` · `zqbqv_` · `zqbqx_` · `⚠️` 뷁뷁 뷁뷁뷁 뷁뷁뷁. 뷁뷁 뷁뷁뷁 `[E0/E1/E2]` 뷁뷁뷁 뷁뷁뷁뷁.
+- 뷁뷁 뷁뷁뷁 뷁뷁 뷁뷁뷁 뷁뷁뷁뷁: `RE-zqbqz_ zqbbb_ zqbua_ zqbub_`, `zqbqz_ zqm_ zqbuj_ zqvk_ zqbuk_ ... zqbul_ zquj_ zqjq_`, zqbum_ 뷁뷁, `zqbuo_-zqbuq_ zqbuu_ zqbuv_`.
+- 뷁뷁뷁뷁 뷁뷁 뷁뷁 뷁뷁뷁 뷁뷁 뷁뷁뷁뷁.
+
+뷁뷁뷁 #340 뷁뷁뷁 "뷁뷁 뷁뷁" 뷁뷁 뷁뷁 뷁뷁뷁뷁 뷁뷁 (zqbux_ zqbuz_: "zqbva_ zqbvb_ zqblk_ zqbvj_ zqbvk_"; zqbvl_ 5 뷁뷁뷁: 뷁뷁뷁 검증·뷁뷁뷁 뷁뷁뷁 zqbmo_-zqa_을 뷁뷁뷁).
+
+### 뷁뷁
+
+1. `zqbqo_(zqbuk_): zqbvm_ zqka_ zqbou_ zqkl_ zqll_ in zqbqo_` — `zqbqo_/zqkl_-zqbqq_.md` 뷁뷁(뷁뷁 zqbvo_ I 뷁뷁 zqbvq_), zqbqo_ 뷁뷁 뷁뷁
+2. `zqbqo_(zqbuk_): zqbvu_ zqbuk_ zqm_ zqbvv_ zqbvx_` — zqbql_.md 뷁뷁뷁, 뷁뷁뷁 zqbvz_·`(zqbqu_)` 뷁뷁뷁 뷁뷁 `zqkl_-zqbxa_.md`와 `zqkl_-zqbxb_-zqbxj_.md`의 뷁뷁 뷁뷁 뷁뷁 뷁뷁
+
+### 뷁뷁 검증 (로컬, 뷁뷁 뷁 워킹 트리)
+
+- **뷁뷁 뷁뷁 뷁뷁**: 뷁뷁뷁뷁 뷁뷁 뷁뷁 뷁뷁 뷁 607개 뷁 590개가 뷁 zqbql_.md뷁 `zqbqo_/*.md`에 뷁뷁뷁 뷁뷁. 뷁뷁뷁 17줄은 뷁뷁뷁뷁뷁 뷁뷁뷁 뷁뷁뷁 뷁뷁 뷁뷁(1, 5–10행)와 뷁뷁 뷁 뷁뷁 zqkl_ zqbxj_(14–29행)뷁뷁.
+- **뷁뷁 뷁뷁**: 뷁뷁뷁 뷁뷁 뷁뷁 뷁뷁뷁 뷁뷁뷁뷁 뷁뷁뷁뷁, 뷁뷁뷁 뷁뷁뷁뷁 뷁뷁뷁 `zqbxk_: zqbqz_ zqm_ zqbuj_…`와 `zqbuo_-zqbuq_ zqbuu_ zqbuv_` 2건뷁뷁뷁.
+- **zqbxl_ zqbxm_ 뷁뷁**: `zqkl_-zqbxb_-zqbxj_.md`의 zqbxo_ zqbxq_ 뷁뷁뷁뷁 뷁뷁 뷁뷁, zqbxu_ 0. 뷁뷁·뷁뷁 뷁뷁뷁뷁 뷁뷁 뷁뷁뷁뷁뷁 `zqbxv_` 4건을 뷁뷁뷁. `zqkl_-zqbxa_.md`의 zqbxx_ 뷁뷁뷁 17개 뷁뷁 뷁뷁 뷁뷁뷁뷁, 뷁뷁 뷁뷁뷁뷁 `zqbxz_` 8건을 뷁뷁뷁.
+- **뷁뷁 뷁뷁**: zqbq_ `zqma_/` · `zqbza_/` · `zqbqo_/`가 뷁뷁뷁뷁 뷁뷁뷁 20개가 뷁뷁 뷁 뷁뷁뷁 뷁뷁. 뷁뷁뷁 뷁뷁뷁뷁 뷁뷁 뷁뷁뷁 뷁뷁뷁 zqbxu_ 1이 뷁뷁 뷁뷁 뷁뷁뷁 뷁뷁뷁뷁 뷁뷁 뷁뷁뷁뷁.
+
+zqbzb_ zqbzj_ verified: zqbqo_-zqoo_ — zqbq_ `zqma_/` `zqbza_/` `zqbqo_/`가 뷁뷁뷁뷁 zqbql_.md 뷁뷁뷁 20개를 grep으로 뷁뷁, 20/20 뷁뷁
+
+### 뷁뷁
+
+- #323의 뷁 뷁뷁(zqbzk_ zqbzl_, Failure/zqbzm_)도 뷁뷁뷁 뷁뷁뷁뷁. 뷁뷁뷁 (b)뷁뷁뷁 zqbqo_(`zqkl_-zqbqq_.md`)로 뷁뷁뷁.
+- zqkz_에 뷁뷁 `zqbzo_ zqbzq_` 뷁 뷁뷁뷁(`[E0]` vs `[E2]`)도 함뷁 뷁뷁뷁.
+- 뷁검증: 뷁뷁뷁 뷁뷁뷁 뷁뷁 뷁뷁뷁뷁 뷁뷁뷁 뷁뷁 뷁뷁. 뷁뷁 뷁뷁뷁 측정뷁뷁 zqbzu_이 뷁뷁.
+
+zqbja_ #340
+zqbja_ #323

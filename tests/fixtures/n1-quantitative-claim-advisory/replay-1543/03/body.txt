@@ -1,0 +1,35 @@
+## zqjm_
+
+`zqjo_-zqjq_-zql_` zqju_ `zqbq__zqjq__zqjv__zqjx_=0` zqm_ zqjz_ zqka_ zqkb_ zqjx_ as zqka_ zqjo_ zqjq_, zqkj_ zqka_ zqkk_'s zqkl_ zqkm_ zqko_ zqkq_ is to zqku_ zqkv_.
+
+## zqbb_
+
+zqkx_ on `zqkz_` (`09576ce4`), zqbq_ zqu_ zqm_ zqla_ zqlb_ to zqlj_ zqlk_:
+
+```zqll_
+$ zqlm_ '{}' | zqbq__zqlo_=$(zqlq_ -d) zqbq__zqu__zqlu_=$(zqlq_ -d) zqbq__zqlv__zqlx__FILE=$(zqlq_) zqbq__zqjq__zqjv__zqjx_=0 zqbq__zqjq__zqlz__S=600 sh zqma_/zqmb_-zqmj_/zqjo_-zqjq_-zql_/zqmk_.sh zqml_; zqlm_ "rc=$?"
+{"zqmm_":{"zqmo_":"zqml_","zqmq_":"zqjo_ 1790584849s / 600s"}}
+rc=0
+```
+
+zqmu_: zqjv_ zqm_ zqlz_ zqmv_ zqmx_ zqmz_, `_is_zqoa_` in `zqmk_.sh`, zqob_ `0) zqoj_ 0` zqok_ so zqol_ `zqbq__zqjq__zqlz__S=0` zqom_ mean "zqjo_ zqoo_". zqka_ zqoq_ zqou_ zqov_ a zqjv_ of `0` zqox_.
+
+zqka_ zqkk_'s zqoz_ zqqa_ (`zqkk_.md`, "zqoz_ — zqkv_ on zqqb_ zqqj_") zqqk_ no row zqkm_ a zqql_ zqjv_; zqka_ case zqqm_ zqqo_ zqka_ zqkl_ zqqq_ zqqu_ zqka_ zqqa_: "A zqqv_ zqqx_ is zqqz_ zqua_ zqub_, so zquj_ zqko_ case zquk_ 0 zqul_ no zqum_." A zqjv_ of `0` is 1970, zquo_ no zquq_ on zquu_ zquv_ zqom_ zqux_ zquz_.
+
+zqva_ noted as a zqvb_ zqvj_ in zqka_ #1501 A/B run (zqvk_ 6 `zqvl_` runs zqvm_ it).
+
+## zqvo_ / zqvq_ / zqvu_
+
+- **zqvv_-zqvx_ zqvz_: 0; zqkx_ zqxa_ zqka_ zqxb_ zqxj_.** `zqxk_-zqxl_` zqxm_ zqxo_ zqka_ zqjv_ zqxa_ `zqxq_ +%s`, so zqxu_ zquu_ zqxv_ a zqxx_-zqxz_ or zqza_ zqzb_.
+- **zqvq_:** zqzj_ it; zqka_ zqoo_ zqzk_ is zqmx_ zqzl_ zqmb_ zqzm_ zqba_ zqzo_ or zqzq_ zqzu_ in a zqzv_ zqob_ zqzx_ is zqzz_ zqqv_.
+- **zqvu_:** zqbaa_.
+
+## zqbab_ zqbaj_
+
+- zqbak_ zqka_ zqjv_ zqbal_ zqxa_ zqka_ zqlz_ zqm_ zqbam_ `0` as zqqj_ (zqkv_, no zqla_ zqbao_), zqbaq_ `0` zqbau_ zqkm_ zqka_ zqlz_.
+- zqbav_ a row to zqka_ zqkk_'s zqoz_ zqqa_ zqkm_ a zqql_ zqjv_.
+
+## zqa_
+
+- `tests/zqma_/.../test_zqjo__zqjq__zql_*`: a zqql_ zqjv_ is zqkv_ zqul_ no zqla_ zqbao_; `zqbq__zqjq__zqlz__S=0` zqul_ a zqbau_ zqjv_ zqbax_ zqjz_ `zqjo_ <n>s`. zqka_ zqbaz_ case zqbba_ on `zqkz_` zqbbb_ zqka_ zqbbj_.
+- `zqbbk_ zqbbl_/run-tests.sh`.

@@ -56,8 +56,8 @@ All three conditions must hold, scanned over the **same** body text.
 
 | Form | Definition | Example |
 | --- | --- | --- |
-| A — summary statistic | a percentile (`p50`/`P95`/`p99.9`) or a central-tendency word (`median`, `average`, `avg`, `mean`, `중앙값`, `평균`, `백분위`) with a number within 80 chars | `p50 91ms 로 개선` |
-| B — verdict-attached measurement | a verdict token (`PASS`, `FAIL`, `verified`, `검증 완료/됨/함`) within 80 chars of a number + sub-minute unit | `PASS(live) — 응답 91ms` |
+| A — summary statistic | a percentile (`p50`/`P95`/`p99.9`) or a central-tendency word (`median`, `average`, `avg`, `mean`, `중앙값`, `평균`, `백분위`) with its own figure: a number right after it (past at most one `:`, `=`, `\|`, `(`, `of`, `은`/`는`/`이`/`가`), or a unit-bearing measurement within 24 characters on the same line | `p50 91ms 로 개선`, `median latency was 91ms` |
+| B — verdict-attached measurement | a verdict token (`PASS`, `FAIL`, `verified`, `검증 완료/됨/함`) within 80 chars of a number + sub-minute unit, outside fenced code blocks; the number cannot start inside a token (`14m4s` holds no `4s`) | `PASS(live) — 응답 91ms` |
 
 A percentile or a central tendency **is** a sample statistic: asserting one is
 asserting a distribution. Form B is instance 1's exact shape — a verification
@@ -69,7 +69,7 @@ unit-bearing measurement, and it carries its own pass condition.
 
 | Form | Definition | Example |
 | --- | --- | --- |
-| C — verdict-attached bare count | a verdict token within 80 chars of a count (`48건`, `12 rows`, `41 failed`, `3 hits`) | `검증 완료 — 48건 확인` |
+| C — verdict-attached bare count | a verdict token within 80 chars of a count (`48건`, `12 rows`, `41 failed`, `3 hits`), outside fenced code blocks; a count has at most six digits and does not follow `run` | `검증 완료 — 48건 확인` |
 
 Form C's pass condition is **not** sample size — it is the count's run
 condition. Any one of three fields silences it:
@@ -78,7 +78,7 @@ condition. Any one of three fields silences it:
 | --- | --- |
 | the command | a cited `$ …` line, or a backticked invocation naming `pytest`/`grep`/`rg`/`gh`/`git`/`find`/`wc` |
 | what it collected | `수집 범위`, `collection scope`, `PYTHONPATH`, `--maxfail`, `테스트 범위` |
-| where it ran | `로컬 재현`, `CI run`, `CI 조건`, `workflow run`, `ran on/in` |
+| where it ran | `로컬`, `CI run`, `CI 조건`, ``CI `test` ``, `workflow run`, `워크트리`, `워킹 트리`, `preview`, `파드`, `pod`, `ran on/in` |
 
 ### Why Form C exists — a live recurrence
 
@@ -160,6 +160,9 @@ it when the sample size is deliberate and already stated in prose.
 | Minute- and hour-scale durations (`12분`, `2h`) | overwhelmingly build/run times, not sample-dependent claims |
 | A one-digit `[P1]` tag | Codex finding-severity tags appear in this repo's own PR bodies; the percentile pattern requires two digits |
 | Prose completeness / enumeration breadth | semantic, noisy — the coverage ceiling above |
+| Fenced code blocks, for Forms B and C | pasted tool output (`--- PASS: TestX (0.01s)`, `36 passed in 8.76s`) records a run; it is not a claim. The pass conditions still read the whole body, since a cited `$` command or a `runs=[…]` list sits inside a fence. Fences pair as CommonMark pairs them: a closer uses the opener's character, at least as many of them, and nothing but whitespace after, and a backtick in a backtick opener's info string opens nothing. An unclosed fence is scanned |
+| `N행`, a 7+ digit number, a number after `run` | a table row label (`2행은 … 재측정`) and a CI run id (`run 35678080220 test`) are not counted results |
+| A Form A marker with no figure of its own | the verb `mean`, or `median figures now state what they count`, is not a statistic because a SHA or `rev 2` sits in the same sentence. The cost: `평균 응답 시간이 지난주보다 늘어 91ms` puts the figure past 24 characters and is missed |
 
 ## Adequacy is out of scope
 
@@ -273,6 +276,19 @@ environment. The hook cannot know which command produced the figure.
 | `shlex` parse error (unbalanced quote) | exit 0, silent |
 | `--body-file` unreadable | exit 0, silent for that invocation |
 | Any uncaught exception | exit 0 (`@fail_open`) |
+
+## Replay fixtures
+
+`tests/fixtures/n1-quantitative-claim-advisory/replay-1543/NN/body.txt` holds
+the 19 fires #1538 replayed, pseudonymized. ASCII words of three or more
+letters outside the hook's own vocabulary became aliases (`zqab_`, drawn from
+letters that spell no tool or unit the hook matches); in Hangul, the hook's
+keywords, a unit right after a number and a particle right after a unit or
+keyword stayed, and every other syllable became `뷁`. Digits and punctuation
+stayed. A fixture was accepted only when every form check and both pass
+conditions gave the same result as its real body under the base and the new
+impl. 05 (a count naming a class) and 06 (a sample stated as `868 local
+transcripts`) still warn; the other 17 were false positives and are silent.
 
 ## Tests
 

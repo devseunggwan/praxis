@@ -1,0 +1,50 @@
+### zqa_ — `6b4b0fc0` (zqk_ 1)
+
+| # | zqjak_ | zqzu_ |
+|---|---|---|
+| 1 | zqjkq_/pr zqkkx_ 뷁뷁 뷁뷁 zqjll_ 로 뷁뷁 뷁뷁, zqkkz_ 는 뷁뷁 뷁뷁 | PASS(mock) |
+| 2 | 뷁뷁 뷁뷁 뷁 뷁뷁뷁 뷁뷁뷁뷁 뷁뷁 뷁트리는 뷁뷁 뷁 뷁뷁 | PASS(mock) |
+| 3 | 뷁뷁 `gh` 뷁뷁뷁 뷁뷁뷁 뷁뷁뷁 뷁뷁뷁, 뷁뷁 뷁 gh 의 뷁뷁뷁 뷁뷁뷁 뷁뷁뷁 뷁뷁뷁 | PASS(live) |
+| 4 | 뷁뷁 `gh` 뷁뷁뷁 뷁뷁 뷁뷁뷁 뷁뷁뷁 뷁뷁뷁 | BLOCKED |
+
+<zqjbl_><zqjm_>zqjbm_ — 뷁뷁 뷁뷁뷁 뷁뷁 뷁뷁 뷁뷁 뷁뷁 뷁뷁(뷁 4), 뷁뷁뷁 zqkla_ 뷁뷁 뷁뷁 zqkjz_-to-zqkjz_</zqjm_>
+
+뷁 4 는 뷁뷁 zqjlv_ 뷁뷁 뷁뷁 뷁뷁뷁 뷁뷁뷁 뷁뷁 뷁 뷁 뷁 뷁뷁뷁 뷁뷁뷁뷁뷁. zqkla_ 뷁 zqkjz_-to-zqkjz_ 는 뷁뷁 뷁 뷁뷁 zqjlv_ 뷁뷁뷁뷁뷁 뷁뷁 뷁뷁뷁 뷁뷁뷁뷁뷁.
+</zqjbl_>
+
+<zqjbl_><zqjm_>zqbb_ 1, 2 — 뷁뷁 테스트 (gh 는 zqklb_)</zqjm_>
+
+zqbao_-zqkkx_ 뷁뷁뷁 zqklj_ 로 뷁뷁 실행뷁뷁, 뷁뷁 함뷁뷁 zqklb_ 으로 뷁뷁 뷁뷁 zqkkx_ 이 뷁뷁뷁뷁뷁뷁 뷁뷁 뷁뷁뷁 뷁뷁뷁뷁뷁뷁.
+
+```
+$ go test ./zqjom_/zqklk_/ -run 'zqkll_|zqklm_' -zqz_=1 -v 2>&1 | grep -E '^(--- |ok|FAIL)'
+--- PASS: zqklo_ (0.00s)
+--- PASS: zqklq__zqklu_ (0.00s)
+--- PASS: zqklq__zqklv_ (0.00s)
+--- PASS: zqklq__zqklx_ (0.00s)
+ok  	zqbl_.zqbm_/zqjb_/zqjj_-zqbzz_-zqjaa_/zqjox_/zqjom_/zqklk_	0.765s
+```
+(뷁뷁뷁뷁 이 PR 의 4개 테스트 뷁뷁 뷁뷁, 뷁뷁 실행의 뷁뷁 zqbao_-zqkkx_ 테스트 7건도 PASS)
+</zqjbl_>
+
+<zqjbl_><zqjm_>zqbb_ 3 — 뷁뷁 gh 뷁뷁 (뷁뷁뷁뷁 뷁뷁 뷁뷁 뷁뷁)</zqjm_>
+
+`zqklz_` 를 뷁뷁뷁뷁 뷁뷁 뷁뷁뷁 테스트에서 뷁뷁 gh 로 뷁뷁뷁뷁뷁뷁. 뷁뷁뷁 뷁뷁뷁 뷁뷁뷁 뷁뷁뷁뷁 뷁뷁 뷁뷁뷁 뷁뷁, 뷁뷁뷁 뷁뷁뷁 gh 뷁뷁 뷁뷁뷁 뷁뷁뷁뷁뷁.
+
+```
+$ go test ./zqjom_/zqklk_/ -run zqkma_ -zqz_=1 -v 2>&1 | grep -v '^=== '
+    zz_live_zqkmb__test.go:6: gh zqjkq_ zqkmj_ 99999999 --zqkmk_ zqjb_/zqjj_-zqbzz_-zqjaa_ --zqbav_-zqkmb_ zqkml_:zqjlv_: zqbxu_ zqjqk_ 1 (zqkmm_: zqkmo_ zqbov_ zqkmq_ to an zqjkq_ or zqbu_ zqkmu_ zqul_ zqka_ zqqx_ of 99999999. (zqkmv_.zqjkq_))
+--- PASS: zqkma_ (0.50s)
+PASS
+```
+</zqjbl_>
+
+<zqjbl_><zqjm_>zqbb_ 4 — BLOCKED</zqjm_>
+
+뷁뷁 뷁뷁뷁 뷁뷁뷁 뷁뷁뷁 뷁뷁 뷁뷁 뷁뷁 뷁뷁뷁뷁 뷁뷁 대상 뷁뷁 뷁뷁뷁 실행뷁뷁 뷁뷁뷁뷁뷁.
+</zqjbl_>
+
+<zqjbl_><zqjm_>zqjvo_</zqjm_>
+
+- zqk_ 1: 뷁뷁 뷁뷁
+</zqjbl_>
