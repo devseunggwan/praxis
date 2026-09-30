@@ -235,7 +235,9 @@ bash tests/hooks/advisory-nudge/test_caller_probe_gate.sh
 `tests/fixtures/caller-probe-gate/replay-1542/NN/` holds the 16 fires
 from #1538's sample, pseudonymized, as `body.md`, `title.txt`, `labels.txt` and
 `transcript.jsonl`. ASCII alphanumeric runs of 4+ characters became
-consistent aliases (`w12x`); shorter words, the defect-token words, source
+consistent aliases (`w12_`; the underscore keeps a path of aliases from
+forming the 40-character run `tests/test_no_live_keys_in_fixtures.sh`
+flags); shorter words, the defect-token words, source
 extensions and the `fix` / `bug` vocabulary stayed. SHA-shaped runs went
 through a fixed per-character permutation, so a short SHA stays a prefix of
 its full form and keeps its shape. Clear keys were swapped out before word
