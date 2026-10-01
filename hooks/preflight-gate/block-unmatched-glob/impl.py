@@ -106,6 +106,10 @@ _NOMATCH_DISABLERS = {"noglob", "setopt", "unsetopt", "eval"}
 # segment.
 _STATE_CHANGING_DISABLERS = {"setopt", "unsetopt"}
 
+# Commands that change the cwd for every later segment, so a glob there would be
+# probed in the wrong directory — in either direction. Passed through whole.
+_CWD_CHANGERS = {"cd", "pushd", "popd"}
+
 # Executing-shell options under which an unmatched glob does not abort.
 _NOMATCH_SUPPRESSORS = {"nullglob", "nonomatch", "noglob", "cshnullglob"}
 
@@ -135,6 +139,12 @@ _UNSPLITTABLE_MARKERS = ("&&", "||", "&", "\n", "<<")
 # corpus). `|&` is a pipe, not a redirect, so it is not matched and stays a
 # pass-through even when a redirect follows it (`|&> out cmd`).
 _REDIRECT_AMPERSAND = re.compile(r"(?<=[<>])&|(?<!\|)&(?=>)")
+
+# A leading `cd <dir> &&` is the one `&&` whose outcome the text decides: the
+# rest runs exactly when `<dir>` is a directory, and runs there. 167 of 229
+# `&&` pass-through aborts in the local transcript corpus had this shape. The
+# target must be a plain word — no quoting, expansion, glob, or option.
+_CD_PREFIX = re.compile(r"\s*cd[ \t]+([^\s;&|<>()$`'\"\\*?\[\]{}]+)[ \t]*&&")
 
 # Separators that DO survive it. Each of `a ; b` and `a | b` is an ordinary
 # simple command whose own words expand under the same `nomatch`, so a glob in
@@ -482,6 +492,38 @@ def zsh_finds_no_match(
     return proc.returncode != 0 and "no matches found" in proc.stderr
 
 
+def strip_cd_prefix(command: str, cwd: str) -> tuple[str, str]:
+    """`(rest, dir)` for a leading `cd <dir> &&` whose `<dir>` exists, else unchanged.
+
+    Only a target zsh cannot redirect is judged: one starting with `/`, `~/`,
+    `./`, or `../`, or exactly `~`, `.`, or `..`. A bare relative `<dir>` is
+    looked up in `cdpath` first when `cdpath` lists another entry before `.` or
+    `posixcd` is set, and the hook cannot see the shell's `cdpath`. The same
+    rule passes `-` (previous directory), `+N` (directory stack), `-P`, `=cmd`,
+    and `~user` / `~+`. `^`, `#`, and a non-leading `~` pass through too:
+    `extendedglob` turns them into pattern syntax.
+
+    zsh resolves `..` logically, so the path is normalised rather than
+    resolved; where `..` follows a symlink, `chaselinks` / `chasedots` would
+    resolve it physically instead, so that case passes through.
+    """
+    match = _CD_PREFIX.match(command)
+    if not match:
+        return command, cwd
+    target = match.group(1)
+    if not (target.startswith(("/", "~/", "./", "../")) or target in ("~", ".", "..")):
+        return command, cwd
+    if "^" in target or "#" in target or "~" in target[1:]:
+        return command, cwd
+    joined = os.path.join(cwd, os.path.expanduser(target))
+    path = os.path.normpath(joined)
+    if not os.path.isdir(path):
+        return command, cwd  # `cd` fails, so the rest never runs
+    if os.path.realpath(joined) != os.path.realpath(path):
+        return command, cwd  # `..` after a symlink: `chaselinks` would land elsewhere
+    return command[match.end():], path
+
+
 def find_unmatched_globs(command: str, cwd: str) -> list[str]:
     """Return the candidate spans that zsh would refuse to expand.
 
@@ -493,12 +535,15 @@ def find_unmatched_globs(command: str, cwd: str) -> list[str]:
     if not executing_shell_is_zsh():
         return []  # free check, and the cheapest possible one — do it first
 
+    command, cwd = strip_cd_prefix(command, cwd)
     if should_pass_through(command):
         return []
 
     parts = segments(command)
     if any(leading_command_word(part) in _STATE_CHANGING_DISABLERS for part in parts):
         return []  # a later segment expands under options set by an earlier one
+    if any(leading_command_word(part) in _CWD_CHANGERS for part in parts):
+        return []  # a later segment runs in a directory the probe would not use
 
     spans: list[str] = []
     for segment in parts:

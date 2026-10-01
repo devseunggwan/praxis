@@ -43,6 +43,9 @@ export SHELL
 FIXTURE=$(mktemp -d) || { echo "FATAL: mktemp -d failed — no writable temp dir" >&2; exit 1; }
 trap 'rm -rf "$FIXTURE"' EXIT
 mkdir -p "$FIXTURE/logs" "$FIXTURE/nested/deep"
+# Each exists so a cd-prefix pass case cannot pass as "missing target".
+mkdir -p "$FIXTURE/+1" "$FIXTURE/^logs" "$FIXTURE/logs#" "$FIXTURE/a~b"
+ln -s "$FIXTURE/nested/deep" "$FIXTURE/deeplink"
 : >"$FIXTURE/logs/alpha.log"
 : >"$FIXTURE/logs/beta.log"
 : >"$FIXTURE/nested/deep/found.txt"
@@ -148,8 +151,66 @@ run_case "setopt in-command changes glob behavior → pass" pass Bash \
   "setopt nullglob; print *.nonexistent-xyz"
 run_case "brace expansion with no match still aborts" block Bash \
   "echo {logs,nested}/*.nonexistent-xyz"
-run_case "cd in a compound command passes through" pass Bash \
+# A leading `cd <existing dir> &&` is judged with that dir as the cwd (#1554).
+run_case "cd <existing dir> && judges the rest there" block Bash \
   "cd $FIXTURE && echo *.nonexistent-xyz"
+# The reason `cd` used to pass through: the glob matches in the new dir only.
+run_case "cd prefix: glob matching only in the cd target passes" pass Bash \
+  "cd $FIXTURE/logs && echo *.log"
+run_case "cd prefix: ./ relative target" block Bash \
+  "cd ./logs && echo *.nonexistent-xyz"
+run_case "cd prefix: relative target, glob matches there" pass Bash \
+  "cd ./logs && echo *.log"
+run_case "cd prefix: .. is resolved logically" block Bash \
+  "cd ./logs/.. && echo logs/*.nonexistent-xyz"
+run_case "cd prefix: no spaces around &&" block Bash \
+  "cd ./logs&&echo *.nonexistent-xyz"
+run_case "cd prefix: leading whitespace" block Bash \
+  "  cd ./logs && echo *.nonexistent-xyz"
+run_case "cd prefix: rest is cut at ; and | as usual" block Bash \
+  "cd ./logs && echo ok; echo *.nonexistent-xyz | cat"
+run_case "cd prefix: ../ target is judged too" block Bash \
+  "cd ./nested/deep/../.. && echo *.nonexistent-xyz"
+# A bare relative target is where CDPATH (or posixcd) can redirect `cd`.
+run_case "cd prefix: bare relative target passes (CDPATH)" pass Bash \
+  "cd logs && echo *.nonexistent-xyz"
+# A later cwd change makes every later segment's cwd unknown.
+run_case "cd prefix: later cd in the rest passes" pass Bash \
+  "cd ./logs && cd ..; echo logs/*.log"
+run_case "cd segment: later segment runs in the new dir, passes" pass Bash \
+  "cd logs; echo *.log"
+run_case "pushd segment: later segment runs in the new dir, passes" pass Bash \
+  "pushd logs; echo *.log"
+run_case "cd prefix: missing target passes (rest never runs)" pass Bash \
+  "cd $FIXTURE/no-such-dir && echo *.nonexistent-xyz"
+run_case "cd prefix: cd - passes" pass Bash \
+  "cd - && echo *.nonexistent-xyz"
+run_case "cd prefix: option passes" pass Bash \
+  "cd -P ./logs && echo *.nonexistent-xyz"
+run_case "cd prefix: quoted target passes" pass Bash \
+  "cd \"./logs\" && echo *.nonexistent-xyz"
+run_case "cd prefix: glob in the target passes" pass Bash \
+  "cd ./lo* && echo *.nonexistent-xyz"
+run_case "cd prefix: +N (directory stack) passes" pass Bash \
+  "cd +1 && echo *.nonexistent-xyz"
+run_case "cd prefix: ^ (extendedglob negation) passes" pass Bash \
+  "cd ./^logs && echo *.nonexistent-xyz"
+run_case "cd prefix: # (extendedglob repetition) passes" pass Bash \
+  "cd ./logs# && echo *.nonexistent-xyz"
+run_case "cd prefix: non-leading ~ (extendedglob exclusion) passes" pass Bash \
+  "cd ./a~b && echo *.nonexistent-xyz"
+run_case "cd prefix: .. after a symlink passes (chaselinks lands elsewhere)" pass Bash \
+  "cd ./deeplink/.. && echo *.nonexistent-xyz"
+run_case "cd prefix: ~user form passes" pass Bash \
+  "cd ~nosuchuser-xyz && echo *.nonexistent-xyz"
+run_case "cd prefix: a second && still passes through" pass Bash \
+  "cd ./logs && true && echo *.nonexistent-xyz"
+run_case "cd prefix: || after cd passes through" pass Bash \
+  "cd ./logs || echo *.nonexistent-xyz"
+run_case "cd prefix: cd not in leading position passes" pass Bash \
+  "echo ok && cd ./logs && echo *.nonexistent-xyz"
+run_case "cd prefix: rest with background & passes" pass Bash \
+  "cd ./logs && echo *.nonexistent-xyz &"
 run_case "unexecuted branch passes through" pass Bash \
   "true || echo *.nonexistent-xyz"
 run_case "if/then body passes through" pass Bash \
@@ -335,6 +396,26 @@ else
   FAIL=$((FAIL + 1)); FAILED_NAMES+=("zsh control case")
   printf '  FAIL %s (rc=%s)\n' "same payload under SHELL=zsh still blocks" "$rc"
 fi
+
+# --- cd prefix: `~` expands against HOME ------------------------------------
+# HOME is pointed at the fixture so the verdict does not depend on the runner.
+for spec in "block|cd ~/logs && echo *.nonexistent-xyz" "pass|cd ~/logs && echo *.log"; do
+  expected=${spec%%|*}; command=${spec#*|}
+  label="cd prefix with ~ (HOME=fixture): $expected"
+  payload=$(python3 -c '
+import json, sys
+print(json.dumps({"tool_name": "Bash", "tool_input": {"command": sys.argv[1]}, "cwd": "/"}))' "$command")
+  err_file=$(mktemp)
+  echo "$payload" | HOME="$FIXTURE" "$HOOK" >/dev/null 2>"$err_file"
+  rc=$?; err=$(cat "$err_file"); rm -f "$err_file"
+  if { [ "$expected" = block ] && [ "$rc" = 2 ] && [ -n "$err" ]; } \
+     || { [ "$expected" = pass ] && [ "$rc" = 0 ] && [ -z "$err" ]; }; then
+    PASS=$((PASS + 1)); printf '  ok   %s\n' "$label"
+  else
+    FAIL=$((FAIL + 1)); FAILED_NAMES+=("$label")
+    printf '  FAIL %s (rc=%s stderr_len=%s)\n' "$label" "$rc" "${#err}"
+  fi
+done
 
 # --- fail-open --------------------------------------------------------------
 err_file=$(mktemp)
