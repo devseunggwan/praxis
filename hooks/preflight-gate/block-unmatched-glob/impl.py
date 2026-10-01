@@ -106,6 +106,10 @@ _NOMATCH_DISABLERS = {"noglob", "setopt", "unsetopt", "eval"}
 # segment.
 _STATE_CHANGING_DISABLERS = {"setopt", "unsetopt"}
 
+# Commands that change the cwd for every later segment, so a glob there would be
+# probed in the wrong directory — in either direction. Passed through whole.
+_CWD_CHANGERS = {"cd", "pushd", "popd"}
+
 # Executing-shell options under which an unmatched glob does not abort.
 _NOMATCH_SUPPRESSORS = {"nullglob", "nonomatch", "noglob", "cshnullglob"}
 
@@ -491,22 +495,25 @@ def zsh_finds_no_match(
 def strip_cd_prefix(command: str, cwd: str) -> tuple[str, str]:
     """`(rest, dir)` for a leading `cd <dir> &&` whose `<dir>` exists, else unchanged.
 
+    Only a target zsh cannot redirect is judged: one starting with `/`, `~/`,
+    `./`, or `../`, or exactly `~`, `.`, or `..`. A bare relative `<dir>` is
+    looked up in `cdpath` first when `cdpath` lists another entry before `.` or
+    `posixcd` is set, and the hook cannot see the shell's `cdpath`. The same
+    rule passes `-` (previous directory), `+N` (directory stack), `-P`, `=cmd`,
+    and `~user` / `~+`. `^`, `#`, and a non-leading `~` pass through too:
+    `extendedglob` turns them into pattern syntax.
+
     zsh resolves `..` logically, so the path is normalised rather than
     resolved; where `..` follows a symlink, `chaselinks` / `chasedots` would
-    resolve it physically instead, so that case passes through. A relative `<dir>` that exists under `cwd` is where zsh goes even
-    with `CDPATH` set, so requiring it to exist also rules out a `CDPATH` hop.
-    `-` (previous directory), `+N` (directory stack, even when a `+N`
-    directory exists), `-P`, `=cmd`, and `~user` / `~+` forms pass through: the
-    hook cannot see where they lead. So do `^`, `#`, and a non-leading `~`,
-    which `extendedglob` turns into pattern syntax.
+    resolve it physically instead, so that case passes through.
     """
     match = _CD_PREFIX.match(command)
     if not match:
         return command, cwd
     target = match.group(1)
-    if target[0] in "-=+" or "^" in target or "#" in target or "~" in target[1:]:
+    if not (target.startswith(("/", "~/", "./", "../")) or target in ("~", ".", "..")):
         return command, cwd
-    if target.startswith("~") and target != "~" and not target.startswith("~/"):
+    if "^" in target or "#" in target or "~" in target[1:]:
         return command, cwd
     joined = os.path.join(cwd, os.path.expanduser(target))
     path = os.path.normpath(joined)
@@ -535,6 +542,8 @@ def find_unmatched_globs(command: str, cwd: str) -> list[str]:
     parts = segments(command)
     if any(leading_command_word(part) in _STATE_CHANGING_DISABLERS for part in parts):
         return []  # a later segment expands under options set by an earlier one
+    if any(leading_command_word(part) in _CWD_CHANGERS for part in parts):
+        return []  # a later segment runs in a directory the probe would not use
 
     spans: list[str] = []
     for segment in parts:

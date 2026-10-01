@@ -157,48 +157,60 @@ run_case "cd <existing dir> && judges the rest there" block Bash \
 # The reason `cd` used to pass through: the glob matches in the new dir only.
 run_case "cd prefix: glob matching only in the cd target passes" pass Bash \
   "cd $FIXTURE/logs && echo *.log"
-run_case "cd prefix: relative target" block Bash \
-  "cd logs && echo *.nonexistent-xyz"
+run_case "cd prefix: ./ relative target" block Bash \
+  "cd ./logs && echo *.nonexistent-xyz"
 run_case "cd prefix: relative target, glob matches there" pass Bash \
-  "cd logs && echo *.log"
+  "cd ./logs && echo *.log"
 run_case "cd prefix: .. is resolved logically" block Bash \
-  "cd logs/.. && echo logs/*.nonexistent-xyz"
+  "cd ./logs/.. && echo logs/*.nonexistent-xyz"
 run_case "cd prefix: no spaces around &&" block Bash \
-  "cd logs&&echo *.nonexistent-xyz"
+  "cd ./logs&&echo *.nonexistent-xyz"
 run_case "cd prefix: leading whitespace" block Bash \
-  "  cd logs && echo *.nonexistent-xyz"
+  "  cd ./logs && echo *.nonexistent-xyz"
 run_case "cd prefix: rest is cut at ; and | as usual" block Bash \
-  "cd logs && echo ok; echo *.nonexistent-xyz | cat"
+  "cd ./logs && echo ok; echo *.nonexistent-xyz | cat"
+run_case "cd prefix: ../ target is judged too" block Bash \
+  "cd ./nested/deep/../.. && echo *.nonexistent-xyz"
+# A bare relative target is where CDPATH (or posixcd) can redirect `cd`.
+run_case "cd prefix: bare relative target passes (CDPATH)" pass Bash \
+  "cd logs && echo *.nonexistent-xyz"
+# A later cwd change makes every later segment's cwd unknown.
+run_case "cd prefix: later cd in the rest passes" pass Bash \
+  "cd ./logs && cd ..; echo logs/*.log"
+run_case "cd segment: later segment runs in the new dir, passes" pass Bash \
+  "cd logs; echo *.log"
+run_case "pushd segment: later segment runs in the new dir, passes" pass Bash \
+  "pushd logs; echo *.log"
 run_case "cd prefix: missing target passes (rest never runs)" pass Bash \
   "cd $FIXTURE/no-such-dir && echo *.nonexistent-xyz"
 run_case "cd prefix: cd - passes" pass Bash \
   "cd - && echo *.nonexistent-xyz"
 run_case "cd prefix: option passes" pass Bash \
-  "cd -P logs && echo *.nonexistent-xyz"
+  "cd -P ./logs && echo *.nonexistent-xyz"
 run_case "cd prefix: quoted target passes" pass Bash \
-  "cd \"logs\" && echo *.nonexistent-xyz"
+  "cd \"./logs\" && echo *.nonexistent-xyz"
 run_case "cd prefix: glob in the target passes" pass Bash \
-  "cd lo* && echo *.nonexistent-xyz"
+  "cd ./lo* && echo *.nonexistent-xyz"
 run_case "cd prefix: +N (directory stack) passes" pass Bash \
   "cd +1 && echo *.nonexistent-xyz"
 run_case "cd prefix: ^ (extendedglob negation) passes" pass Bash \
-  "cd ^logs && echo *.nonexistent-xyz"
+  "cd ./^logs && echo *.nonexistent-xyz"
 run_case "cd prefix: # (extendedglob repetition) passes" pass Bash \
-  "cd logs# && echo *.nonexistent-xyz"
+  "cd ./logs# && echo *.nonexistent-xyz"
 run_case "cd prefix: non-leading ~ (extendedglob exclusion) passes" pass Bash \
-  "cd a~b && echo *.nonexistent-xyz"
+  "cd ./a~b && echo *.nonexistent-xyz"
 run_case "cd prefix: .. after a symlink passes (chaselinks lands elsewhere)" pass Bash \
-  "cd deeplink/.. && echo *.nonexistent-xyz"
+  "cd ./deeplink/.. && echo *.nonexistent-xyz"
 run_case "cd prefix: ~user form passes" pass Bash \
   "cd ~nosuchuser-xyz && echo *.nonexistent-xyz"
 run_case "cd prefix: a second && still passes through" pass Bash \
-  "cd logs && true && echo *.nonexistent-xyz"
+  "cd ./logs && true && echo *.nonexistent-xyz"
 run_case "cd prefix: || after cd passes through" pass Bash \
-  "cd logs || echo *.nonexistent-xyz"
+  "cd ./logs || echo *.nonexistent-xyz"
 run_case "cd prefix: cd not in leading position passes" pass Bash \
-  "echo ok && cd logs && echo *.nonexistent-xyz"
+  "echo ok && cd ./logs && echo *.nonexistent-xyz"
 run_case "cd prefix: rest with background & passes" pass Bash \
-  "cd logs && echo *.nonexistent-xyz &"
+  "cd ./logs && echo *.nonexistent-xyz &"
 run_case "unexecuted branch passes through" pass Bash \
   "true || echo *.nonexistent-xyz"
 run_case "if/then body passes through" pass Bash \
