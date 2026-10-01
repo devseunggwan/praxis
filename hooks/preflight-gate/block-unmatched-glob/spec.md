@@ -72,7 +72,8 @@ segment executes, whether the text is a heredoc body:
 | No glob metacharacters in the command | Silent — pass |
 | Metacharacters were quoted (`-name '*.log'`) | Silent — never expanded |
 | Unquoted `$` / `` ` `` (variable, arithmetic, substitution) | Silent — prefix unresolvable |
-| Unquoted `&&`, `\|\|`, `&`, newline, `<<` | Silent — segment context unknown |
+| Unquoted `&&`, `\|\|`, `&`, `\|&`, newline, `<<` | Silent — segment context unknown |
+| `&` touching a redirect arrow (`2>&1`, `<&0`, `&>out`, `&>>out`, `&>\|out`) | **Not a background marker — the command is judged as if the `&` were absent** |
 | Unquoted `;` or `\|` | **Cut into segments; each simple command judged on its own** |
 | `setopt` / `unsetopt` **in command position of any segment** | Silent — a later segment expands under options set earlier |
 | Control-flow word or `cd` **in command position** | Silent — same reason |
@@ -101,6 +102,16 @@ the next command runs at all, and blocking a command that would never have run
 is the false positive this gate is most careful about. `&`, a newline, and `<<`
 stay out for their own reasons (detaching, arbitrary constructs, heredoc bodies
 that are data rather than words).
+
+The `&` marker is matched on the skeleton, so until #1526 it also caught the
+`&` inside a redirect. `ls *.x 2>&1 | head` read as a background job and passed
+through whole; across the local transcript corpus that was 79 of 559 `no
+matches found` aborts since 2026-09-16 (14%), the third-largest miss after
+dynamic prefixes and `&&` / `\|\|`. An `&` directly after `<` or `>`, or
+directly before `>`, is now masked before the markers are checked. Live zsh
+confirms every such form leaves no background job (`$!` stays `0`) while
+`cmd &`, `&\|`, and `&!` each leave one. `\|&` pipes both streams; its `&` is
+not masked and the command still passes through.
 
 The separator split is index-aligned with the *unquoted skeleton*, so a `;`
 inside quotes is invisible here exactly as it is to the shell. Two disabler
