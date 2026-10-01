@@ -136,6 +136,12 @@ _UNSPLITTABLE_MARKERS = ("&&", "||", "&", "\n", "<<")
 # pass-through even when a redirect follows it (`|&> out cmd`).
 _REDIRECT_AMPERSAND = re.compile(r"(?<=[<>])&|(?<!\|)&(?=>)")
 
+# A leading `cd <dir> &&` is the one `&&` whose outcome the text decides: the
+# rest runs exactly when `<dir>` is a directory, and runs there. 167 of 229
+# `&&` pass-through aborts in the local transcript corpus had this shape. The
+# target must be a plain word — no quoting, expansion, glob, or option.
+_CD_PREFIX = re.compile(r"\s*cd[ \t]+([^\s;&|<>()$`'\"\\*?\[\]{}]+)[ \t]*&&")
+
 # Separators that DO survive it. Each of `a ; b` and `a | b` is an ordinary
 # simple command whose own words expand under the same `nomatch`, so a glob in
 # either one aborts the whole line exactly as it would alone. Ordering matters:
@@ -482,6 +488,35 @@ def zsh_finds_no_match(
     return proc.returncode != 0 and "no matches found" in proc.stderr
 
 
+def strip_cd_prefix(command: str, cwd: str) -> tuple[str, str]:
+    """`(rest, dir)` for a leading `cd <dir> &&` whose `<dir>` exists, else unchanged.
+
+    zsh resolves `..` logically, so the path is normalised rather than
+    resolved; where `..` follows a symlink, `chaselinks` / `chasedots` would
+    resolve it physically instead, so that case passes through. A relative `<dir>` that exists under `cwd` is where zsh goes even
+    with `CDPATH` set, so requiring it to exist also rules out a `CDPATH` hop.
+    `-` (previous directory), `+N` (directory stack, even when a `+N`
+    directory exists), `-P`, `=cmd`, and `~user` / `~+` forms pass through: the
+    hook cannot see where they lead. So do `^`, `#`, and a non-leading `~`,
+    which `extendedglob` turns into pattern syntax.
+    """
+    match = _CD_PREFIX.match(command)
+    if not match:
+        return command, cwd
+    target = match.group(1)
+    if target[0] in "-=+" or "^" in target or "#" in target or "~" in target[1:]:
+        return command, cwd
+    if target.startswith("~") and target != "~" and not target.startswith("~/"):
+        return command, cwd
+    joined = os.path.join(cwd, os.path.expanduser(target))
+    path = os.path.normpath(joined)
+    if not os.path.isdir(path):
+        return command, cwd  # `cd` fails, so the rest never runs
+    if os.path.realpath(joined) != os.path.realpath(path):
+        return command, cwd  # `..` after a symlink: `chaselinks` would land elsewhere
+    return command[match.end():], path
+
+
 def find_unmatched_globs(command: str, cwd: str) -> list[str]:
     """Return the candidate spans that zsh would refuse to expand.
 
@@ -493,6 +528,7 @@ def find_unmatched_globs(command: str, cwd: str) -> list[str]:
     if not executing_shell_is_zsh():
         return []  # free check, and the cheapest possible one — do it first
 
+    command, cwd = strip_cd_prefix(command, cwd)
     if should_pass_through(command):
         return []
 

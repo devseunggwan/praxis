@@ -72,11 +72,12 @@ segment executes, whether the text is a heredoc body:
 | No glob metacharacters in the command | Silent — pass |
 | Metacharacters were quoted (`-name '*.log'`) | Silent — never expanded |
 | Unquoted `$` / `` ` `` (variable, arithmetic, substitution) | Silent — prefix unresolvable |
+| Leading `cd <dir> &&` with a plain-word `<dir>` that exists | **Stripped; the rest is judged with `<dir>` as the cwd** |
 | Unquoted `&&`, `\|\|`, `&`, `\|&`, newline, `<<` | Silent — segment context unknown |
 | `&` touching a redirect arrow (`2>&1`, `<&0`, `&>out`, `&>>out`, `&>\|out`) | **Not a background marker — the command is judged as if the `&` were absent** |
 | Unquoted `;` or `\|` | **Cut into segments; each simple command judged on its own** |
 | `setopt` / `unsetopt` **in command position of any segment** | Silent — a later segment expands under options set earlier |
-| Control-flow word or `cd` **in command position** | Silent — same reason |
+| Control-flow word or `cd` **in command position** (other than the leading `cd <dir> &&` above) | Silent — same reason |
 | Assignment word **before the command word** (`FOO=*.x cmd`) | Silent — values are not glob-expanded |
 | `noglob` / `setopt` / `unsetopt` / `eval` **in command position** | Silent — failure disabled by the command |
 | Shell-syntax word (`[`, `[[`, `]`, `]]`) | Silent — not a pathname pattern |
@@ -85,9 +86,9 @@ segment executes, whether the text is a heredoc body:
 | zsh reports `no matches found` | **Blocked (exit 2)** |
 | Malformed stdin, non-Bash tool, zsh unavailable, probe timeout | Silent — fail-open |
 
-This trades recall for precision deliberately. `cd hooks && echo *.md` does
-abort in zsh and the gate lets it through — a blocking gate that halts a valid
-command is worse than one that misses a case. The original incident
+This trades recall for precision deliberately. `make && echo *.md` does
+abort in zsh when `make` succeeds, and the gate lets it through — a blocking
+gate that halts a valid command is worse than one that misses a case. The original incident
 (`ls -d <path> <glob> 2>/dev/null`) is a single simple command and is still
 caught.
 
@@ -102,6 +103,28 @@ the next command runs at all, and blocking a command that would never have run
 is the false positive this gate is most careful about. `&`, a newline, and `<<`
 stay out for their own reasons (detaching, arbitrary constructs, heredoc bodies
 that are data rather than words).
+
+One `&&` is the exception, since #1554. In a leading `cd <dir> &&` the text
+decides both questions: the rest runs exactly when `<dir>` is a directory, and
+it runs there. That shape was 167 of the 229 `&&` pass-through aborts in the
+local transcript corpus — an agent's investigation line usually starts by
+entering a worktree. When `<dir>` is a plain word (no quoting, expansion, glob,
+or option) and exists, the prefix is stripped and the rest is judged by every
+rule above with `<dir>` as the cwd. `~` and `~/…` are expanded; `..` is
+normalised rather than resolved, matching zsh's logical `cd`. Where `..`
+follows a symlink, `chaselinks` or `chasedots` would resolve it physically
+instead, so a `<dir>` whose logical and physical resolutions differ passes
+through. A relative
+`<dir>` that exists under the cwd is where zsh goes even with `CDPATH` set, so
+requiring it to exist also rules out a `CDPATH` hop. `cd -`, `cd +N` (the
+directory stack, even when a `+N` directory exists), `cd -P`, `=cmd`, and
+`~user` forms pass through, because the hook cannot see where they lead. So
+does a `<dir>` holding `^`, `#`, or a non-leading `~`, which `extendedglob`
+turns into pattern syntax, and so does a missing `<dir>`, because then the
+rest never runs. A second `&&`
+or any `\|\|` in the rest still passes through whole. The remaining false
+positive is a `<dir>` that exists but cannot be entered (no search
+permission), where the gate blocks a command that would not have run.
 
 The `&` marker is matched on the skeleton, so until #1526 it also caught the
 `&` inside a redirect. `ls *.x 2>&1 | head` read as a background job and passed
