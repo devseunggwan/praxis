@@ -297,8 +297,10 @@ def expansion_end(command: str, start: int, in_double_quotes: bool) -> int | Non
         if end is None:
             return None
         # `case x in pat) ...` closes no paren it opened, so the count above
-        # may have ended inside the body.
-        if opener == "$(" and _CASE_WORD.search(command[start:end]):
+        # may have ended inside the body. Quoted text (`$(: 'case')`) is
+        # masked first, since only a bare `case` opens that construct.
+        body = unquoted_skeleton(command[start + 2:end - 1])
+        if opener == "$(" and _CASE_WORD.search(body):
             return None
         return end
     if in_double_quotes:

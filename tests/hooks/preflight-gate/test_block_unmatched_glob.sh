@@ -354,6 +354,10 @@ run_case "dynamic: unterminated \$( passes" pass Bash \
   'echo $(ls *.nonexistent-xyz'
 run_case "dynamic: case inside \$( ) passes (pat) breaks paren counting)" pass Bash \
   'echo $(case a in a) echo x;; esac) *.nonexistent-xyz'
+run_case "dynamic: quoted case text inside \$( ) is not a case" block Bash \
+  "echo \$(: 'case') *.nonexistent-xyz"
+run_case "dynamic: double-quoted case text inside \$( ) is not a case" block Bash \
+  'echo $(: "case") *.nonexistent-xyz'
 # zsh runs every substitution before any filename generation, so `touch` makes
 # the glob match and zsh runs the line (rc=0). The gate judges the glob anyway,
 # the same trade it already makes for `touch made.side; ls *.side`. The hook
