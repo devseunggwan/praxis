@@ -145,6 +145,10 @@ _ASSIGNMENT = re.compile(r"[A-Za-z_]\w*(?:\[[^\]]*\])?\+?=")
 # Their other arguments still are (`typeset *.x` aborts).
 _TYPESET_WORDS = {"typeset", "local", "export", "readonly", "declare", "integer", "float"}
 
+# Precommand words that make a typeset-family word an ordinary builtin call:
+# `builtin export x=*.x` globs `x=*.x` and aborts, unlike `export x=*.x`.
+_BUILTIN_PREFIXES = {"builtin", "command", "exec"}
+
 # Writing `options[name]=…` sets a shell option, so it outlives its segment
 # the same way `setopt` does.
 _OPTIONS_ASSIGNMENT = re.compile(r"options\[")
@@ -655,6 +659,7 @@ def candidate_spans(command: str) -> list[str] | None:
     in_condition = False
     saw_command_word = False
     typeset_args = False
+    after_builtin_prefix = False
     for word in scan_words(command):
         # zsh does not pathname-expand inside `[[ ... ]]`; a pattern there is a
         # match operand, so `[[ x = *.missing ]]` is simply false, not an abort.
@@ -677,9 +682,12 @@ def candidate_spans(command: str) -> list[str] | None:
             ):
                 return None
             if word.span in _PRECOMMAND_WORDS:
+                # `builtin export x=*.x` runs `export` as a plain builtin, whose
+                # arguments zsh globs like any other command's.
+                after_builtin_prefix = after_builtin_prefix or word.span in _BUILTIN_PREFIXES
                 continue  # `time noglob ls *.x` — the next word decides
             saw_command_word = True
-            typeset_args = word.span in _TYPESET_WORDS
+            typeset_args = word.span in _TYPESET_WORDS and not after_builtin_prefix
         if word.span in _SYNTAX_WORDS:
             continue
         if typeset_args and _is_assignment(word.span):

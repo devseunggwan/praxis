@@ -85,7 +85,7 @@ segment executes, whether the text is a heredoc body:
 | Arithmetic command `(( … ))` | Silent — its words are math, not pathnames |
 | `cd` / `pushd` / `popd` **in command position of any segment** (other than the leading `cd <dir> &&` above) | Silent — a later segment runs in a directory the probe would not use |
 | Assignment word **before the command word** (`FOO=*.x cmd`, `a+=*.x`, `a[1]=x`, `h[*.x]=v`) | Silent — values and element subscripts are not glob-expanded |
-| `NAME=value` argument of `typeset` / `local` / `export` / `readonly` / `declare` / `integer` / `float` | Silent — zsh treats it as an assignment; other arguments are still judged |
+| `NAME=value` argument of `typeset` / `local` / `export` / `readonly` / `declare` / `integer` / `float` | Silent — zsh treats it as an assignment; other arguments are still judged. After `builtin` / `command` / `exec` the word is an ordinary builtin argument, so it **is** judged |
 | Word split only at space, tab, and newline | `\r`, NBSP, and vertical tab stay inside the word, as in zsh, so `*.x\r(N)` keeps its qualifier |
 | `noglob` / `setopt` / `unsetopt` / `eval` **in command position** (also after `time`, `!`, `builtin`, …) | Silent for that segment — failure disabled by the command |
 | Shell-syntax word (`[`, `[[`, `]`, `]]`) | Silent — not a pathname pattern |

@@ -509,6 +509,14 @@ run_case "typeset family: a non-assignment argument is still judged" block Bash 
   'typeset x=1 *.nonexistent-xyz'
 run_case "typeset family: export then a glob segment is still judged" block Bash \
   'export FOO=bar; ls *.nonexistent-xyz'
+run_case "typeset family: builtin export globs its arguments" block Bash \
+  'builtin export FOO=*.nonexistent-xyz'
+run_case "typeset family: command export globs its arguments" block Bash \
+  'command export FOO=*.nonexistent-xyz'
+run_case "typeset family: time export keeps assignment semantics" pass Bash \
+  'time export FOO=*.nonexistent-xyz'
+run_case "typeset family: subscript argument is an assignment" pass Bash \
+  'typeset h[*.nonexistent-xyz]=v'
 run_case "assignment: array element" pass Bash \
   'a[1]=x'
 run_case "assignment: glob in an element subscript" pass Bash \
