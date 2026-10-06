@@ -29,10 +29,12 @@ model:
     is unanswerable for that word. Only that word is skipped; a literal glob
     beside it is still judged. A dynamic word in command position passes the
     whole command, since `$CMD` may be `noglob` or `cd`.
-  * compound structure (`&&`, `||`, `|`, `;`, `&`, newline, heredoc) — a later
+  * compound structure (`&&`, `||`, `&`, heredoc, backslash-newline) — a later
     segment may run in a different cwd, or not run at all, and a quoted heredoc
-    body is never glob-expanded
-  * control-flow and `cd` words, for the same reason
+    body is never glob-expanded. `;`, `|`, and a plain newline are cut into
+    segments instead, each judged alone.
+  * everything from the first control-flow word or function body on, since
+    that body may run zero times; and `cd` words, for the cwd reason above
   * assignment words (`FOO=*.x`), whose values zsh does not glob-expand
   * commands that disable the failure themselves (`noglob`, `setopt`,
     `unsetopt`, `eval`)
@@ -114,14 +116,23 @@ _CASE_WORD = re.compile(r"(?<![\w-])case(?![\w-])")
 # position: `echo noglob *.missing` still aborts, `noglob echo *.missing` does not.
 _NOMATCH_DISABLERS = {"noglob", "setopt", "unsetopt", "eval"}
 
-# The subset of those whose effect OUTLIVES their own command. `noglob` and
-# `eval` are prefixes — they shield the words they are given and nothing else,
-# so dropping their segment is the whole remedy. `setopt` / `unsetopt` change
-# the running shell's options, so `setopt nullglob; print *.x` leaves the
-# second segment expanding under rules this hook cannot see from the text. A
-# line containing one is therefore passed through whole, not segment by
-# segment.
-_STATE_CHANGING_DISABLERS = {"setopt", "unsetopt"}
+# The commands whose effect OUTLIVES their own command. `noglob` is a prefix —
+# it shields the words it is given and nothing else, so dropping its segment
+# is the whole remedy. These change the running shell's options, aliases, or
+# definitions, so `setopt nullglob; print *.x` leaves the second segment
+# expanding under rules this hook cannot see from the text: `setopt` /
+# `unsetopt` / `emulate` directly, `eval` / `source` / `.` through text the
+# hook does not read, `alias` by rewriting a later command word, and `set`
+# with an option flag (`set -o nullglob`, `set +o nomatch`). A line holding
+# one in any segment's command position passes through whole.
+_STATE_CHANGING_DISABLERS = {
+    "setopt", "unsetopt", "emulate", "eval", "source", ".", "alias",
+}
+
+# Precommand words that leave the real command word after them. Skipped before
+# a command word is classified, so `builtin setopt` and `time for …` read as
+# the `setopt` and the `for` they run.
+_PRECOMMAND_WORDS = {"!", "time", "nocorrect", "noglob", "builtin", "command", "exec", "-"}
 
 # Commands that change the cwd for every later segment, so a glob there would be
 # probed in the wrong directory — in either direction. Passed through whole.
@@ -141,13 +152,17 @@ _GLOB_OPTIONS = {
 
 # Structure markers. Their presence means a word's meaning depends on shell
 # grammar the hook does not model — which branch runs, what the cwd is by the
-# time a later segment executes, whether the text is a heredoc body. The gate
-# only judges a single simple command; anything else passes through.
-# Grammar this hook still refuses to reason about. `&&` / `||` gate whether the
-# next command runs at all, `&` detaches, a newline can open any construct, and
-# `<<` starts a heredoc whose body is data — none of those survive being cut
-# into pieces and judged piece by piece.
-_UNSPLITTABLE_MARKERS = ("&&", "||", "&", "\n", "<<", _OPAQUE)
+# time a later segment executes, whether the text is a heredoc body. `&&` /
+# `||` gate whether the next command runs at all, `&` detaches, `<<` starts a
+# heredoc whose body is data, and `;;` ends a `case` arm (or is a parse error
+# zsh rejects) — none of those survive being cut into pieces and judged piece
+# by piece.
+_UNSPLITTABLE_MARKERS = ("&&", "||", "&", "<<", ";;", _OPAQUE)
+
+# A backslash-newline joins two lines into one word stream. Passed through
+# rather than modelled; it also catches the newline a continuation would hide
+# from the separator split.
+_LINE_CONTINUATION = "\\\n"
 
 # An `&` touching a redirect arrow (`2>&1`, `<&0`, `&>out`, `>&|out`) duplicates
 # or merges a file descriptor; it does not detach anything. Left in the
@@ -157,21 +172,41 @@ _UNSPLITTABLE_MARKERS = ("&&", "||", "&", "\n", "<<", _OPAQUE)
 # pass-through even when a redirect follows it (`|&> out cmd`).
 _REDIRECT_AMPERSAND = re.compile(r"(?<=[<>])&|(?<!\|)&(?=>)")
 
-# A leading `cd <dir> &&` is the one `&&` whose outcome the text decides: the
-# rest runs exactly when `<dir>` is a directory, and runs there. 167 of 229
-# `&&` pass-through aborts in the local transcript corpus had this shape. The
-# target must be a plain word — no quoting, expansion, glob, or option.
-_CD_PREFIX = re.compile(r"\s*cd[ \t]+([^\s;&|<>()$`'\"\\*?\[\]{}]+)[ \t]*&&")
+# A leading `cd <dir>` is the one cwd change whose outcome the text decides.
+# Before `&&` the rest runs exactly when `<dir>` is a directory, and runs
+# there; 167 of 229 `&&` pass-through aborts in the local transcript corpus had
+# that shape. Before `;` or a newline the rest runs either way, but in `<dir>`
+# whenever it is a directory — which is the only case the strip applies to;
+# 45 of 124 newline pass-through aborts started with such a line. The target
+# must be a plain word — no quoting, expansion, glob, or option.
+_CD_PREFIX = re.compile(r"\s*cd[ \t]+([^\s;&|<>()$`'\"\\*?\[\]{}]+)[ \t]*(?:&&|;|\n)")
 
-# Separators that DO survive it. Each of `a ; b` and `a | b` is an ordinary
-# simple command whose own words expand under the same `nomatch`, so a glob in
-# either one aborts the whole line exactly as it would alone. Ordering matters:
-# `&&` and `||` contain `&` and `|`, so they are ruled out by the tuple above
-# before anything is split.
-_SEGMENT_SEPARATORS = (";", "|")
+# Separators that DO survive it. Each of `a ; b`, `a | b`, and two plain lines
+# is an ordinary simple command whose own words expand under the same
+# `nomatch`, so a glob in either one aborts it exactly as it would alone.
+# Ordering matters: `&&` and `||` contain `&` and `|`, so they are ruled out by
+# the tuple above before anything is split. A newline can also open a
+# construct (`for …⏎do`); `find_unmatched_globs` stops at the first segment led
+# by a control word, so a body that may never run is never judged.
+_SEGMENT_SEPARATORS = (";", "|", "\n")
 _CONTROL_WORDS = {
     "if", "then", "else", "elif", "fi", "for", "while", "until", "do", "done",
     "case", "esac", "select", "repeat", "function", "{", "}", "cd",
+}
+
+# Words that open or continue a compound command in command position: the
+# portable set plus zsh's `foreach … end`, `{ … } always { … }`, and `coproc`.
+_CONSTRUCT_WORDS = (_CONTROL_WORDS - {"cd"}) | {"foreach", "end", "always", "coproc"}
+
+# `set` flags that cannot change globbing: single letters for errexit,
+# nounset, xtrace, verbose, noclobber, and `-o`/`+o` option names likewise
+# (compared lowercase, `_` dropped, a leading `no` removed). Anything else
+# passes the line through — zsh's single letters reach glob options too
+# (`set -G` is nullglob, `set -3` is nonomatch, `set -F` is noglob).
+_SET_SAFE_LETTERS = set("euxvCo")
+_SET_SAFE_OPTIONS = {
+    "pipefail", "errexit", "nounset", "unset", "xtrace", "verbose", "errreturn",
+    "clobber", "monitor", "notify", "hup", "checkjobs", "printexitvalue",
 }
 
 _PROBE_TIMEOUT_SEC = 2
@@ -496,7 +531,9 @@ def unquoted_skeleton(command: str) -> str:
             i += 2
             continue
         out.append(ch)
-        at_word_start = ch.isspace()
+        # Matches `scan_words`: a separator ends the word too, so the `#` in
+        # `echo a;# it's` starts a comment, and its `'` opens no quote.
+        at_word_start = ch.isspace() or ch in _SEPARATORS
         i += 1
     return "".join(out)
 
@@ -505,7 +542,7 @@ def should_pass_through(command: str) -> bool:
     """True when the command's glob behaviour is not statically decidable.
 
     The reason is grammar that cutting into segments cannot preserve
-    (branches, backgrounding, heredocs, newlines), or an expansion whose end
+    (branches, backgrounding, heredocs, line continuations), or an expansion whose end
     the scanner cannot find. A resolvable expansion no longer lands here: it
     makes only its own word undecidable, which `candidate_spans` skips, and a
     dynamic command word is handled in `find_unmatched_globs`. Command-position
@@ -521,6 +558,8 @@ def should_pass_through(command: str) -> bool:
     skeleton = _REDIRECT_AMPERSAND.sub(_MASK, unquoted_skeleton(command))
     if any(marker in skeleton for marker in _UNSPLITTABLE_MARKERS):
         return True
+    if _LINE_CONTINUATION in command:
+        return True
     # A `case` arm (`*.c|*.h) …;;`) and a glob group (`(a|*.c)`) use `|` and
     # `;` as pattern grammar, not as separators; cutting there probes a
     # pattern as if it were a command.
@@ -530,29 +569,30 @@ def should_pass_through(command: str) -> bool:
 
 
 def _separator_inside_parens(skeleton: str) -> bool:
-    """True when an unquoted `;` or `|` sits inside `( … )` in the skeleton."""
+    """True when an unquoted `;`, `|`, or newline sits inside `( … )` or `[[ … ]]`.
+
+    Inside `[[ … ]]` a newline is whitespace and `|` is pattern grammar, so
+    neither is a separator.
+    """
     depth = 0
-    for char in skeleton:
-        if char == "(":
+    in_condition = False
+    for index, char in enumerate(skeleton):
+        word_start = index == 0 or skeleton[index - 1].isspace() or skeleton[index - 1] in _SEPARATORS
+        if skeleton.startswith("[[", index) and word_start:
+            in_condition = True
+        elif skeleton.startswith("]]", index):
+            in_condition = False
+        elif char == "(":
             depth += 1
         elif char == ")":
             depth = max(depth - 1, 0)
-        elif char in _SEGMENT_SEPARATORS and depth > 0:
+        elif char in _SEGMENT_SEPARATORS and (depth > 0 or in_condition):
             return True
     return False
 
 
-def leading_word(segment: str) -> Word | None:
-    """The word in command position, skipping prefix assignments; None if bare."""
-    for word in scan_words(segment):
-        if _is_assignment(word.span):
-            continue
-        return word
-    return None
-
-
 def segments(command: str) -> list[str]:
-    """`command` cut into simple commands at unquoted `;` and `|`.
+    """`command` cut into simple commands at unquoted `;`, `|`, and newline.
 
     The skeleton is index-aligned with the source — quoted regions are masked
     in place, never removed — so a separator found in it slices the original
@@ -695,7 +735,7 @@ def zsh_finds_no_match(
 
 
 def strip_cd_prefix(command: str, cwd: str) -> tuple[str, str]:
-    """`(rest, dir)` for a leading `cd <dir> &&` whose `<dir>` exists, else unchanged.
+    """`(rest, dir)` for a leading `cd <dir>` + `&&`/`;`/newline whose `<dir>` exists, else unchanged.
 
     Only a target zsh cannot redirect is judged: one starting with `/`, `~/`,
     `./`, or `../`, or exactly `~`, `.`, or `..`. A bare relative `<dir>` is
@@ -720,10 +760,93 @@ def strip_cd_prefix(command: str, cwd: str) -> tuple[str, str]:
     joined = os.path.join(cwd, os.path.expanduser(target))
     path = os.path.normpath(joined)
     if not os.path.isdir(path):
-        return command, cwd  # `cd` fails, so the rest never runs
+        return command, cwd  # `cd` fails: the rest never runs, or runs where it is
     if os.path.realpath(joined) != os.path.realpath(path):
         return command, cwd  # `..` after a symlink: `chaselinks` would land elsewhere
     return command[match.end():], path
+
+
+def _command_words(segment: str) -> list[Word]:
+    """The words of `segment` from its real command word on.
+
+    Prefix assignments and precommand words (`!`, `time`, `builtin`, …) are
+    skipped, so what remains starts with the word zsh actually runs.
+    """
+    words = scan_words(segment)
+    index = 0
+    while index < len(words) and (
+        _is_assignment(words[index].span) or words[index].span in _PRECOMMAND_WORDS
+    ):
+        index += 1
+    return words[index:]
+
+
+def _opens_construct(segment: str) -> bool:
+    """True when `segment` opens or continues a compound command or function.
+
+    Its body may run zero times (`while false; do …`), once per item, or only
+    when called (`f() { … }`), so neither it nor anything after it is judged.
+    """
+    words = [w.span for w in _command_words(segment)]
+    if not words:
+        return False
+    return (
+        words[0] in _CONSTRUCT_WORDS
+        or words[0].endswith("()")
+        or "()" in words
+        or "{" in words
+    )
+
+
+def _changes_shell_state(words: list[Word]) -> bool:
+    """True when the command outlives itself: options, aliases, sourced text."""
+    if not words:
+        return False
+    if words[0].span in _STATE_CHANGING_DISABLERS:
+        return True
+    return words[0].span == "set" and _set_may_change_globbing(
+        [w.span for w in words[1:]]
+    )
+
+
+def _set_may_change_globbing(args: list[str]) -> bool:
+    """True unless every option `set` is given is known not to touch globbing.
+
+    `set --` ends the options; what follows only sets positionals.
+    """
+    expects_name = False
+    for arg in args:
+        if expects_name:
+            name = arg.lower().replace("_", "")
+            stripped = name[2:] if name.startswith("no") else name
+            if name not in _SET_SAFE_OPTIONS and stripped not in _SET_SAFE_OPTIONS:
+                return True
+            expects_name = False
+            continue
+        if arg in ("--", "-"):
+            return False
+        if len(arg) < 2 or arg[0] not in "-+":
+            return False  # positionals from here on
+        letters = arg[1:]
+        if not set(letters) <= _SET_SAFE_LETTERS:
+            return True
+        expects_name = "o" in letters
+    return expects_name  # a bare `set -o` lists options; treat as unknown
+
+
+def _before_first_construct(parts: list[str]) -> list[str]:
+    """The segments that run unconditionally, before any compound command.
+
+    Everything ahead of the first construct runs in order, so its globs are
+    judged as before; from the construct on, which segments run depends on
+    conditions and loop lists the hook does not evaluate. Dropping only the
+    keyword segment (`do :`) and judging the next one used to block
+    `while false; do :; echo *.x; done`, which zsh runs without error.
+    """
+    for index, part in enumerate(parts):
+        if _opens_construct(part):
+            return parts[:index]
+    return parts
 
 
 def find_unmatched_globs(command: str, cwd: str) -> list[str]:
@@ -741,20 +864,21 @@ def find_unmatched_globs(command: str, cwd: str) -> list[str]:
     if should_pass_through(command):
         return []
 
-    parts = segments(command)
-    leaders = [leading_word(part) for part in parts]
-    if any(word is not None and word.dynamic for word in leaders):
+    parts = _before_first_construct(segments(command))
+    commands = [_command_words(part) for part in parts]
+    if any(words and words[0].dynamic for words in commands):
         return []  # `$CMD` may resolve to `noglob`, `setopt`, or `cd`
-    if any(word is not None and word.span in _STATE_CHANGING_DISABLERS for word in leaders):
+    if any(_changes_shell_state(words) for words in commands):
         return []  # a later segment expands under options set by an earlier one
-    if any(word is not None and word.span in _CWD_CHANGERS for word in leaders):
+    if any(words and words[0].span in _CWD_CHANGERS for words in commands):
         return []  # a later segment runs in a directory the probe would not use
 
     spans: list[str] = []
     for segment in parts:
         # A segment whose command word disables the failure (`noglob ls *.x`)
-        # or opens a construct returns None, and only that segment is dropped —
-        # its neighbours in the same line still expand under `nomatch`.
+        # returns None, and only that segment is dropped — its neighbours in
+        # the same line still expand under `nomatch`. Constructs never get
+        # here: `_before_first_construct` already cut them off.
         segment_spans = candidate_spans(segment)
         if segment_spans:
             spans.extend(segment_spans)
