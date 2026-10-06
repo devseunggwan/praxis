@@ -73,18 +73,19 @@ segment executes, whether the text is a heredoc body:
 | Metacharacters were quoted (`-name '*.log'`) | Silent — never expanded |
 | Unquoted `$` / `` ` `` (variable, arithmetic, substitution) in a word | That word is skipped — its value is unresolvable; **the other words are still judged** |
 | `$` / `` ` `` in the command word of any segment (`$CMD *.x`) | Silent — `$CMD` may be `noglob`, `setopt`, or `cd` |
+| Quoted or escaped spelling of a word the gate keys on, as the command word of any segment (`\setopt`, `'cd'`) | Silent — zsh unquotes it before the lookup; a quoted path (`"/opt/my tool"`) is judged as usual |
 | Expansion whose end cannot be found (unterminated, newline inside, `case` inside `$(…)`) | Silent — word boundaries unknown |
-| Leading `cd <dir> &&` with a plain-word `<dir>` that starts with `/`, `~/`, `./`, or `../` and exists | **Stripped; the rest is judged with `<dir>` as the cwd** |
-| Unquoted `&&`, `\|\|`, `&`, `\|&`, newline, `<<` | Silent — segment context unknown |
+| Leading `cd <dir>` followed by `&&`, `;`, or a newline, with a plain-word `<dir>` that starts with `/`, `~/`, `./`, or `../` and exists | **Stripped; the rest is judged with `<dir>` as the cwd** |
+| Unquoted `&&`, `\|\|`, `&`, `\|&`, `<<`, `;;`, or a backslash-newline | Silent — segment context unknown |
 | `&` touching a redirect arrow (`2>&1`, `<&0`, `&>out`, `&>>out`, `&>\|out`) | **Not a background marker — the command is judged as if the `&` were absent** |
-| Unquoted `;` or `\|` | **Cut into segments; each simple command judged on its own** |
-| `case` word anywhere, or `;` / `\|` inside `( … )` (case arms, glob groups `(a\|*.c)`, subshells) | Silent — there `\|` and `;` are pattern grammar or nesting, not separators |
-| `setopt` / `unsetopt` **in command position of any segment** | Silent — a later segment expands under options set earlier |
-| Control-flow word **in command position** | Silent — same reason |
+| Unquoted `;`, `\|`, or newline | **Cut into segments; each simple command judged on its own** |
+| `case` word anywhere, or `;` / `\|` / newline inside `( … )` or `[[ … ]]` (case arms, glob groups `(a\|*.c)`, subshells, multi-line conditions) | Silent — there they are pattern grammar, nesting, or whitespace, not separators |
+| `setopt` / `unsetopt` / `emulate` / `eval` / `source` / `.` / `alias`, or `set` with an option flag, **in command position of any segment** (after `builtin`, `command`, `time`, `!`, …) | Silent — a later segment expands under options set earlier |
+| Control-flow word (incl. zsh `foreach`/`end`/`always`/`coproc`) or function definition **in command position**, after any precommand word | **Judging stops there** — earlier segments are still judged; the body may run zero times |
 | Arithmetic command `(( … ))` | Silent — its words are math, not pathnames |
 | `cd` / `pushd` / `popd` **in command position of any segment** (other than the leading `cd <dir> &&` above) | Silent — a later segment runs in a directory the probe would not use |
 | Assignment word **before the command word** (`FOO=*.x cmd`) | Silent — values are not glob-expanded |
-| `noglob` / `setopt` / `unsetopt` / `eval` **in command position** | Silent — failure disabled by the command |
+| `noglob` / `setopt` / `unsetopt` / `eval` **in command position** (also after `time`, `!`, `builtin`, …) | Silent for that segment — failure disabled by the command |
 | Shell-syntax word (`[`, `[[`, `]`, `]]`) | Silent — not a pathname pattern |
 | Pattern inside a `#` comment | Silent — never reaches the shell |
 | zsh expands the pattern successfully | Silent — pass |
@@ -105,9 +106,26 @@ changes how the words around it expand — each side of `a ; b` and `a \| b` is 
 ordinary simple command whose own words expand under the same `nomatch` — so
 each segment is now judged alone. `&&` and `\|\|` stay out: they decide whether
 the next command runs at all, and blocking a command that would never have run
-is the false positive this gate is most careful about. `&`, a newline, and `<<`
-stay out for their own reasons (detaching, arbitrary constructs, heredoc bodies
-that are data rather than words).
+is the false positive this gate is most careful about. `&` and `<<` stay out
+for their own reasons (detaching, heredoc bodies that are data rather than
+words).
+
+A newline joined them until #1559. An agent's multi-line investigation command
+is usually a list of plain lines, so across the local transcript corpus 124 of
+597 `no matches found` aborts since 2026-09-16 passed through on a newline,
+second only to `&&` / `\|\|`. A plain newline is now a separator like `;`. What
+a newline can open is handled by where judging stops, not by passing the line:
+segments are judged up to the first one whose command word — after prefix
+assignments and precommand words such as `!`, `time`, `builtin` — opens a
+compound command (`if`, `for`, `while`, `{`, zsh `foreach`, `repeat`,
+`coproc`, …) or defines a function. Everything before it runs unconditionally;
+from it on, a body may run zero times. That cut also fixes a false block the
+`;` split had: `while false; do :; echo *.x; done` dropped only the `do :`
+segment and judged the next one, which never runs. The cost is that a glob in
+a loop body is never judged even when the loop does run — 4 rows of the corpus
+that the old per-segment rule caught. A backslash-newline, a newline inside
+`( … )` or `[[ … ]]`, and a newline inside an expansion still pass the whole
+command.
 
 One `&&` is the exception, since #1554. In a leading `cd <dir> &&` the text
 decides both questions: the rest runs exactly when `<dir>` is a directory, and
@@ -126,7 +144,10 @@ resolved, matching zsh's logical `cd`. Where `..` follows a symlink,
 whose logical and physical resolutions differ passes through. So does a
 `<dir>` holding `^`, `#`, or a non-leading `~`, which `extendedglob` turns into
 pattern syntax, and so does a missing `<dir>`, because then the rest never
-runs. A second `&&` or any `\|\|` in the rest still passes through whole, and
+runs. Since #1559 the same strip applies when `;` or a newline follows the
+`cd`: the rest then runs either way, but in `<dir>` exactly when `<dir>` is a
+directory, which is the only case stripped — 45 of the 124 newline aborts
+started with such a line. A second `&&` or any `\|\|` in the rest still passes through whole, and
 so does a rest with `cd`, `pushd`, or `popd` in any segment's command
 position. The remaining false positive is a `<dir>` that exists but cannot be
 entered (no search permission), where the gate blocks a command that would not

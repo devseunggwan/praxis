@@ -389,6 +389,109 @@ run_case "pattern grammar: glob group as a word" pass Bash \
 run_case "pattern grammar: a separator outside parens still cuts" block Bash \
   '[[ -d . ]]; ls logs/*.nonexistent-xyz'
 
+# --- newline is a separator; constructs stop the judgement (#1559) ----------
+# Verified against live zsh (`zsh -f`, `setopt nomatch`) in the same layout.
+run_case "newline: second plain line is judged" block Bash \
+  $'echo ok\nls *.nonexistent-xyz'
+run_case "newline: comment line, then a glob line" block Bash \
+  $'# look for logs\nls *.nonexistent-xyz'
+run_case "newline: matching glob on a later line passes" pass Bash \
+  $'echo ok\nls logs/*.log'
+run_case "newline: inside quotes it does not split, glob beside still judged" block Bash \
+  $'echo "a\nb" *.nonexistent-xyz'
+run_case "newline: inside quotes, matching glob passes" pass Bash \
+  $'echo "a\nb" logs/*.log'
+run_case "cd line: rest judged in the cd target" block Bash \
+  $'cd ./logs\nls *.nonexistent-xyz'
+run_case "cd line: glob matching only in the cd target passes" pass Bash \
+  $'cd ./logs\necho *.log'
+run_case "cd ;: rest judged in the cd target" block Bash \
+  'cd ./logs; echo *.nonexistent-xyz'
+run_case "cd ;: glob matching only in the cd target passes" pass Bash \
+  'cd ./logs; echo *.log'
+run_case "cd line: missing target passes" pass Bash \
+  $'cd ./no-such-dir\nls *.nonexistent-xyz'
+run_case "newline: setopt on an earlier line passes" pass Bash \
+  $'echo ok\nsetopt nullglob\nls *.nonexistent-xyz'
+run_case "newline: && still passes through" pass Bash \
+  $'ls *.nonexistent-xyz &&\necho ok'
+run_case "newline: backslash continuation passes" pass Bash \
+  $'ls \\\n  *.nonexistent-xyz'
+run_case "newline: heredoc body passes" pass Bash \
+  $'cat <<EOF\n*.nonexistent-xyz\nEOF'
+run_case "newline: subshell across lines passes" pass Bash \
+  $'(\nls *.nonexistent-xyz\n)'
+# A construct's body may run zero times; everything from it on is skipped.
+# The `;` forms were blocked before #1559 although zsh runs them (rc=0).
+run_case "construct: while false; do …; done passes" pass Bash \
+  'while false; do :; echo *.nonexistent-xyz; done'
+run_case "construct: for over an empty list passes" pass Bash \
+  'for f in; do :; echo *.nonexistent-xyz; done'
+run_case "construct: if false; then …; fi passes" pass Bash \
+  'if false; then :; echo *.nonexistent-xyz; fi'
+run_case "construct: multi-line for loop passes" pass Bash \
+  $'for f in a\ndo\n  echo *.nonexistent-xyz\ndone'
+run_case "construct: multi-line if passes" pass Bash \
+  $'if false\nthen\n  echo *.nonexistent-xyz\nfi'
+run_case "construct: function body (name()) passes" pass Bash \
+  $'f() {\n  ls *.nonexistent-xyz\n}'
+run_case "construct: function body (name ()) passes" pass Bash \
+  'f () { ls *.nonexistent-xyz; }'
+run_case "construct: segments before it are still judged" block Bash \
+  'ls *.nonexistent-xyz; if true; then echo; fi'
+# Review round 1 (#1559): each was blocked here although zsh runs it cleanly.
+run_case "construct: zsh foreach … end passes" pass Bash \
+  $'foreach f ( )\necho *.nonexistent-xyz\nend'
+run_case "construct: precommand time before a short for passes" pass Bash \
+  $'time for f in\necho *.nonexistent-xyz'
+run_case "construct: ! before a short repeat passes" pass Bash \
+  $'! repeat 0\necho *.nonexistent-xyz'
+run_case "construct: coproc before a loop passes" pass Bash \
+  $'coproc for f in\necho *.nonexistent-xyz'
+run_case "state: set -o nullglob on an earlier line passes" pass Bash \
+  $'set -o nullglob\nls *.nonexistent-xyz'
+run_case "state: set +o nomatch passes" pass Bash \
+  'set +o nomatch; ls *.nonexistent-xyz'
+run_case "state: emulate passes" pass Bash \
+  $'emulate sh\nls *.nonexistent-xyz'
+run_case "state: builtin setopt passes" pass Bash \
+  $'builtin setopt nullglob\nls *.nonexistent-xyz'
+run_case "state: eval of setopt passes" pass Bash \
+  "eval 'setopt nullglob'; ls *.nonexistent-xyz"
+run_case "state: set -- (positionals only) is still judged" block Bash \
+  'set -- a b; ls *.nonexistent-xyz'
+run_case "state: set -o pipefail does not touch globbing, still judged" block Bash \
+  $'set -o pipefail\nls *.nonexistent-xyz'
+run_case "state: set -euo pipefail is still judged" block Bash \
+  'set -euo pipefail; ls *.nonexistent-xyz'
+run_case "state: set -G (nullglob letter) passes" pass Bash \
+  'set -G; ls *.nonexistent-xyz'
+run_case "state: set -o null_glob passes" pass Bash \
+  'set -o null_glob; ls *.nonexistent-xyz'
+run_case "condition: newline inside [[ ]] is whitespace" pass Bash \
+  $'[[ a ==\n*.nonexistent-xyz ]] ; echo ok'
+run_case "comment right after ; hides its quote" pass Bash \
+  $'echo a;# it\'s\ntrue; cd logs\nls *.log # \''
+run_case "stray ;; passes (zsh rejects it)" pass Bash \
+  $'echo ok;;\necho *.nonexistent-xyz'
+# Review round 2 (#1559): blocked here although zsh runs each cleanly.
+run_case "construct: f(){ on its own line passes" pass Bash \
+  $'f(){\nls *.nonexistent-xyz\n}'
+run_case "construct: f (){ on its own line passes" pass Bash \
+  $'f (){\nls *.nonexistent-xyz\n}'
+run_case "quoted command word: backslash-escaped setopt passes" pass Bash \
+  $'\\setopt nullglob\nls *.nonexistent-xyz'
+run_case "quoted command word: quoted cd passes" pass Bash \
+  $'\'cd\' logs\nls *.log'
+run_case "quoted command word: a quoted path is still judged" block Bash \
+  '"/bin/ls" *.nonexistent-xyz'
+run_case "precommand: time noglob shields its own segment" pass Bash \
+  'time noglob ls *.nonexistent-xyz'
+run_case "precommand: ! before (( )) is arithmetic" pass Bash \
+  '! (( 2*3 ))'
+run_case "precommand: time before a plain command is still judged" block Bash \
+  'time ls *.nonexistent-xyz'
+
 # The executing shell's glob options must reach the probe: under
 # `setopt extendedglob`, `^<something>` is a negation pattern that DOES match
 # here, so a probe running plain `zsh -f` would wrongly report no matches.
