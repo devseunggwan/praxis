@@ -71,13 +71,17 @@ segment executes, whether the text is a heredoc body:
 | Executing shell (`$SHELL`) is not zsh, or unset | Silent — nothing aborts there |
 | No glob metacharacters in the command | Silent — pass |
 | Metacharacters were quoted (`-name '*.log'`) | Silent — never expanded |
-| Unquoted `$` / `` ` `` (variable, arithmetic, substitution) | Silent — prefix unresolvable |
+| Unquoted `$` / `` ` `` (variable, arithmetic, substitution) in a word | That word is skipped — its value is unresolvable; **the other words are still judged** |
+| `$` / `` ` `` in the command word of any segment (`$CMD *.x`) | Silent — `$CMD` may be `noglob`, `setopt`, or `cd` |
+| Expansion whose end cannot be found (unterminated, newline inside, `case` inside `$(…)`) | Silent — word boundaries unknown |
 | Leading `cd <dir> &&` with a plain-word `<dir>` that starts with `/`, `~/`, `./`, or `../` and exists | **Stripped; the rest is judged with `<dir>` as the cwd** |
 | Unquoted `&&`, `\|\|`, `&`, `\|&`, newline, `<<` | Silent — segment context unknown |
 | `&` touching a redirect arrow (`2>&1`, `<&0`, `&>out`, `&>>out`, `&>\|out`) | **Not a background marker — the command is judged as if the `&` were absent** |
 | Unquoted `;` or `\|` | **Cut into segments; each simple command judged on its own** |
+| `case` word anywhere, or `;` / `\|` inside `( … )` (case arms, glob groups `(a\|*.c)`, subshells) | Silent — there `\|` and `;` are pattern grammar or nesting, not separators |
 | `setopt` / `unsetopt` **in command position of any segment** | Silent — a later segment expands under options set earlier |
 | Control-flow word **in command position** | Silent — same reason |
+| Arithmetic command `(( … ))` | Silent — its words are math, not pathnames |
 | `cd` / `pushd` / `popd` **in command position of any segment** (other than the leading `cd <dir> &&` above) | Silent — a later segment runs in a directory the probe would not use |
 | Assignment word **before the command word** (`FOO=*.x cmd`) | Silent — values are not glob-expanded |
 | `noglob` / `setopt` / `unsetopt` / `eval` **in command position** | Silent — failure disabled by the command |
@@ -137,6 +141,30 @@ directly before `>`, is now masked before the markers are checked. Live zsh
 confirms every such form leaves no background job (`$!` stays `0`) while
 `cmd &`, `&\|`, and `&!` each leave one. `\|&` pipes both streams; its `&` is
 not masked and the command still passes through.
+
+A `$` or backtick used to pass the whole command through. Since #1555 it makes
+only its own word undecidable. zsh performs every substitution before any
+filename generation, and an expanded value never becomes a separator, so the
+other words expand exactly as written: `ls *.x; echo "$?"` and
+`` echo `date` *.x `` abort in zsh and are now caught. Across the local
+transcript corpus that rule was the largest miss: since 2026-09-16, 217 `no
+matches found` aborts passed through on a `$`, 152 of them with a literal glob
+word. The scanners consume an expansion whole — `$(…)`, `$((…))`, `${…}`,
+`$[…]`, backticks, and outside double quotes `$'…'` / `$"…"` — so the
+separators, `cd`, `&&`, quotes, and spaces in its body neither cut the line
+nor pass it through. The word holding the expansion is never probed, so the
+hook never runs a substitution. Two cases still pass the whole command
+through: a dynamic command word in any segment, since `$CMD` may be `noglob`,
+`setopt`, or `cd`; and an expansion whose end the scanner cannot find
+(unterminated, a newline inside, or a `case` inside `$(…)`, whose `pat)`
+breaks paren counting).
+
+Two consequences are accepted. A glob inside an expansion's value
+(`${x:-*.x}`) is a miss: zsh does glob it, but it is part of a dynamic word.
+And a substitution with a filesystem side effect is not modelled:
+`ls $(touch a.x) *.x` runs in zsh, because the substitution creates the match
+before globbing, yet the gate blocks it — the same trade it already makes for
+`touch a.x; ls *.x` across a `;`.
 
 The separator split is index-aligned with the *unquoted skeleton*, so a `;`
 inside quotes is invisible here exactly as it is to the shell. Two disabler

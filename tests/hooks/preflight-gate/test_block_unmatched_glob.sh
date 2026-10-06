@@ -290,12 +290,100 @@ run_case "quoted pipe is not a pipeline" block Bash \
   "grep 'a|b' $FIXTURE/nosuchdir/*.json"
 run_case "single-quoted dollar is not an expansion" block Bash \
   "grep '\$value' $FIXTURE/nosuchdir/*.json"
-run_case "double-quoted dollar still is an expansion" pass Bash \
+# A `$` makes only its own word undecidable (#1555); the literal glob beside it
+# is still judged. Live zsh: `no matches found`, rc=1.
+run_case "double-quoted dollar in another word does not shield the glob" block Bash \
   "grep \"\$value\" $FIXTURE/nosuchdir/*.json"
 run_case "disabler in command position still passes through" pass Bash \
   "noglob print $FIXTURE/nosuchdir/*.json"
 run_case "assignment-only word is still not expanded" pass Bash \
   "FOO=$FIXTURE/nosuchdir/*.json print ok"
+
+# --- dynamic expansion is scoped to its own word (#1555) --------------------
+# Every verdict below was checked against live zsh (`zsh -f`, `setopt nomatch`)
+# in a fixture with the same layout. Single-quoted bash strings keep each
+# command byte-for-byte as zsh sees it; cwd is FIXTURE.
+run_case "dynamic: \$? in a later segment does not shield the glob" block Bash \
+  'ls *.nonexistent-xyz; echo "exit=$?"'
+run_case "dynamic: backtick in another word does not shield the glob" block Bash \
+  'echo `date` *.nonexistent-xyz'
+run_case "dynamic: backtick inside double quotes, glob beside it" block Bash \
+  'echo "`date`" *.nonexistent-xyz'
+run_case "dynamic: prefix assignment with a substitution" block Bash \
+  'X=$(date) ls *.nonexistent-xyz'
+run_case "dynamic: braced parameter in another pipeline segment" block Bash \
+  'echo ${HOME} | ls logs/*.nonexistent-xyz'
+run_case "dynamic: escaped dollar is literal text" block Bash \
+  'echo \$HOME *.nonexistent-xyz'
+# The body of an expansion belongs to its word: its separators, `cd`, `&&`,
+# quotes, and spaces neither cut the line nor pass it through.
+run_case "dynamic: ; and cd inside \$( ) stay inside it" block Bash \
+  'echo $(cd /; true) *.nonexistent-xyz'
+run_case "dynamic: && inside \$( ) stays inside it" block Bash \
+  'echo $(true && true) *.nonexistent-xyz'
+run_case "dynamic: quoted ) inside \$( ) does not end it" block Bash \
+  'echo "$(echo ")")" *.nonexistent-xyz'
+run_case "dynamic: spaces inside \${ } stay inside it" block Bash \
+  'echo ${x:-a b} *.nonexistent-xyz'
+run_case "dynamic: \$'...' with a space and an escaped quote" block Bash \
+  "echo \$'it\\'s a' *.nonexistent-xyz"
+run_case "dynamic: matching glob beside a substitution passes" pass Bash \
+  'echo $(echo; true) logs/*.log'
+# The word holding the expansion is never probed.
+run_case "dynamic: glob word with a quoted variable prefix" pass Bash \
+  'ls "$X"/*.nonexistent-xyz'
+run_case "dynamic: glob word with a variable in the middle" pass Bash \
+  'ls logs/*$X.nonexistent-xyz'
+run_case "dynamic: glob inside \${ } is part of the dynamic word" pass Bash \
+  'echo ${x:-*.nonexistent-xyz}'
+run_case "dynamic: \$'...' body is quoted text" pass Bash \
+  "echo \$'*.nonexistent-xyz'"
+run_case "dynamic: arithmetic body with spaces is one word" pass Bash \
+  'echo $(( 2 *.nonexistent-xyz ))'
+run_case "arithmetic command (( )) is not a pathname context" pass Bash \
+  '(( n *.nonexistent-xyz ))'
+# A dynamic command word may be `noglob`, `setopt`, or `cd`, in any segment.
+run_case "dynamic: command word in the same segment passes" pass Bash \
+  '$CMD *.nonexistent-xyz'
+run_case "dynamic: command word in a later segment passes the line" pass Bash \
+  'echo *.nonexistent-xyz; $CMD x'
+run_case "dynamic: command word after a prefix assignment passes" pass Bash \
+  'X=1 ${CMD} *.nonexistent-xyz'
+# An expansion whose end the scanner cannot find passes the whole line.
+run_case "dynamic: unterminated \$( passes" pass Bash \
+  'echo $(ls *.nonexistent-xyz'
+run_case "dynamic: case inside \$( ) passes (pat) breaks paren counting)" pass Bash \
+  'echo $(case a in a) echo x;; esac) *.nonexistent-xyz'
+# zsh runs every substitution before any filename generation, so `touch` makes
+# the glob match and zsh runs the line (rc=0). The gate judges the glob anyway,
+# the same trade it already makes for `touch made.side; ls *.side`. The hook
+# must still never run the substitution itself.
+run_case "dynamic: substitution side effect is not modelled" block Bash \
+  'ls $(touch made.side) *.side'
+if [ -e "$FIXTURE/made.side" ]; then
+  FAIL=$((FAIL + 1)); FAILED_NAMES+=("substitution executed by the hook")
+  printf '  FAIL %s\n' "substitution executed by the hook ($FIXTURE/made.side created)"
+  rm -f "$FIXTURE/made.side"
+else
+  PASS=$((PASS + 1)); printf '  ok   %s\n' "hook never runs a command substitution"
+fi
+
+# `|` and `;` in a case arm or a glob group are pattern grammar, not
+# separators. The old `$` pass-through used to hide this, since `case $f` and
+# `[[ $f = (…) ]]` nearly always carry a `$`. Live zsh runs each without a
+# `no matches found`.
+run_case "pattern grammar: case arms with | and ;;" pass Bash \
+  'case $x in a) echo;; *.c|*.h) echo hi;; esac'
+run_case "pattern grammar: case inside a for loop" pass Bash \
+  'for f in *.txt; do case $f in *.md|*.rst) echo doc;; *.c|*.h) echo src;; esac; done'
+run_case "pattern grammar: case on a substitution" pass Bash \
+  'case $(uname) in Darwin|Linux) echo unix;; *BSD|*bsd) echo bsd;; esac'
+run_case "pattern grammar: glob group inside [[ ]]" pass Bash \
+  'if [[ $f = (*.c|*.h|*.go) ]]; then echo y; fi'
+run_case "pattern grammar: glob group as a word" pass Bash \
+  'echo $x (logs|*.nonexistent-xyz|nested)'
+run_case "pattern grammar: a separator outside parens still cuts" block Bash \
+  '[[ -d . ]]; ls logs/*.nonexistent-xyz'
 
 # The executing shell's glob options must reach the probe: under
 # `setopt extendedglob`, `^<something>` is a negation pattern that DOES match

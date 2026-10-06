@@ -24,8 +24,11 @@ The gate judges only a **single simple command**. Everything else is passed
 through, because a word's meaning there depends on grammar the hook does not
 model:
 
-  * dynamic expansion (`$var`, `$(...)`, backticks) — the prefix is unknown
-    before the shell resolves it, so the filesystem question is unanswerable
+  * a word holding a dynamic expansion (`$var`, `$(...)`, backticks) — its
+    value is unknown before the shell resolves it, so the filesystem question
+    is unanswerable for that word. Only that word is skipped; a literal glob
+    beside it is still judged. A dynamic word in command position passes the
+    whole command, since `$CMD` may be `noglob` or `cd`.
   * compound structure (`&&`, `||`, `|`, `;`, `&`, newline, heredoc) — a later
     segment may run in a different cwd, or not run at all, and a quoted heredoc
     body is never glob-expanded
@@ -88,10 +91,24 @@ _SEPARATORS = set("&|;\n<>")
 # glob metacharacter but `[ -d . ]` is the test builtin, not a bracket range.
 _SYNTAX_WORDS = {"[", "[[", "]", "]]"}
 
-# Any of these *unquoted* makes the outcome unpredictable from the outside, so
-# the whole command is passed through. Matched against the unquoted skeleton —
-# `grep 'a|b' *.x` is a single simple command, not a pipeline.
+# Either of these outside single quotes makes the word it sits in dynamic: its
+# expanded value is unknown from the text, so that word is never probed. The
+# rest of the command is still judged, because zsh performs every substitution
+# before any filename generation and a substitution cannot turn into a
+# separator — the other words expand exactly as written.
 _DYNAMIC_MARKERS = ("$", "`")
+
+# Openers of an expansion whose body may hold whitespace, quotes, or separators
+# (`$(a; b)`, `${x:-a b}`, `$((1 * 2))`), mapped to the closer that ends it.
+# The body belongs to its word, so the scanners skip over it whole.
+_BRACKETED_EXPANSIONS = {"$(": ")", "${": "}", "$[": "]"}
+
+# Stands in, in the skeleton, for an expansion whose end the scanner cannot
+# find — unterminated, spanning a newline, or holding a `case` whose `pat)`
+# breaks paren counting. Listed among the unsplittable markers below, so such a
+# command passes through whole.
+_OPAQUE = "\x01"
+_CASE_WORD = re.compile(r"(?<![\w-])case(?![\w-])")
 
 # Commands that disable the failure themselves. Only meaningful in command
 # position: `echo noglob *.missing` still aborts, `noglob echo *.missing` does not.
@@ -130,7 +147,7 @@ _GLOB_OPTIONS = {
 # next command runs at all, `&` detaches, a newline can open any construct, and
 # `<<` starts a heredoc whose body is data — none of those survive being cut
 # into pieces and judged piece by piece.
-_UNSPLITTABLE_MARKERS = ("&&", "||", "&", "\n", "<<")
+_UNSPLITTABLE_MARKERS = ("&&", "||", "&", "\n", "<<", _OPAQUE)
 
 # An `&` touching a redirect arrow (`2>&1`, `<&0`, `&>out`, `>&|out`) duplicates
 # or merges a file descriptor; it does not detach anything. Left in the
@@ -168,9 +185,11 @@ class Word:
     Attributes:
       span: the exact source text of the word, quotes and any trailing zsh
         qualifier included — this is what gets replayed to zsh.
-      bare: only the characters written outside quotes. Deciding whether a
-        word is even a glob candidate reads this, because quoted
-        metacharacters are never expanded.
+      bare: only the characters written outside quotes and expansions.
+        Deciding whether a word is even a glob candidate reads this, because
+        quoted metacharacters are never expanded.
+      dynamic: the word holds a `$` or backtick expansion, so its value is
+        unknown until the shell resolves it.
 
     Deliberately a plain class, not a dataclass: the dispatcher (ADR-0002)
     imports member `impl.py` files via `exec_module` without registering them
@@ -179,11 +198,127 @@ class Word:
     which is None there, raising AttributeError at import time.
     """
 
-    __slots__: tuple[str, ...] = ("span", "bare")
+    __slots__: tuple[str, ...] = ("span", "bare", "dynamic")
 
-    def __init__(self, span: str, bare: str) -> None:
+    def __init__(self, span: str, bare: str, dynamic: bool = False) -> None:
         self.span: str = span
         self.bare: str = bare
+        self.dynamic: bool = dynamic
+
+
+def _double_quote_end(command: str, start: int) -> int | None:
+    """Offset just past the `"` region opening at `start`; None if unterminated."""
+    i = start + 1
+    while i < len(command):
+        ch = command[i]
+        if ch == "\\":
+            i += 2
+        elif ch == '"':
+            return i + 1
+        elif ch in _DYNAMIC_MARKERS:
+            end = expansion_end(command, i, in_double_quotes=True)
+            if end is None:
+                return None
+            i = end
+        else:
+            i += 1
+    return None
+
+
+def _bracketed_end(command: str, start: int, opener: str, closer: str) -> int | None:
+    """Offset just past the `closer` that balances the `opener` before `start`.
+
+    Quotes and nested expansions inside the body are skipped whole, so a
+    closer inside them (`$(echo ")")`) does not end the body early.
+    """
+    depth = 1
+    i = start
+    while i < len(command):
+        ch = command[i]
+        if ch == "\n":
+            return None  # a newline can open any construct, comments included
+        if ch == "\\":
+            i += 2
+            continue
+        if ch == "'":
+            close = command.find("'", i + 1)
+            if close < 0:
+                return None
+            i = close + 1
+            continue
+        if ch == '"':
+            end = _double_quote_end(command, i)
+            if end is None:
+                return None
+            i = end
+            continue
+        if ch in _DYNAMIC_MARKERS:
+            end = expansion_end(command, i, in_double_quotes=False)
+            if end is None:
+                return None
+            i = end
+            continue
+        if ch == opener:
+            depth += 1
+        elif ch == closer:
+            depth -= 1
+            if depth == 0:
+                return i + 1
+        i += 1
+    return None
+
+
+def expansion_end(command: str, start: int, in_double_quotes: bool) -> int | None:
+    """Offset just past the `$` / backtick expansion at `start`; None if unknown.
+
+    Bracketed forms (`$(...)`, `$((...))`, `${...}`, `$[...]`), backticks, and
+    outside double quotes `$'...'` / `$"..."` are consumed whole, so their
+    bodies never reach the word or separator split. A plain `$name` consumes
+    only the `$`; the name is ordinary word text. None means the end cannot be
+    found safely, and the caller passes the whole command through.
+    """
+    if command[start] == "`":
+        i = start + 1
+        while i < len(command):
+            ch = command[i]
+            if ch == "\n":
+                return None
+            if ch == "\\":
+                i += 2
+                continue
+            if ch == "`":
+                return i + 1
+            i += 1
+        return None
+    opener = command[start:start + 2]
+    closer = _BRACKETED_EXPANSIONS.get(opener)
+    if closer is not None:
+        end = _bracketed_end(command, start + 2, opener[1], closer)
+        if end is None:
+            return None
+        # `case x in pat) ...` closes no paren it opened, so the count above
+        # may have ended inside the body.
+        if opener == "$(" and _CASE_WORD.search(command[start:end]):
+            return None
+        return end
+    if in_double_quotes:
+        return start + 1  # `$'` and `$"` are literal inside double quotes
+    if opener == "$'":
+        i = start + 2
+        while i < len(command):
+            ch = command[i]
+            if ch == "\n":
+                return None
+            if ch == "\\":
+                i += 2
+                continue
+            if ch == "'":
+                return i + 1
+            i += 1
+        return None
+    if opener == '$"':
+        return _double_quote_end(command, start + 1)
+    return start + 1
 
 
 def scan_words(command: str) -> list[Word]:
@@ -191,23 +326,39 @@ def scan_words(command: str) -> list[Word]:
 
     Comment bodies are dropped: an unquoted `#` that begins a word comments
     out the rest of the line, so `echo ok # *.missing` carries no pattern.
+    An expansion is kept whole inside its word and marks the word dynamic.
     """
     words: list[Word] = []
     span: list[str] = []
     bare: list[str] = []
     quote: str | None = None
+    dynamic = False
     at_word_start = True
     i = 0
 
     def flush() -> None:
+        nonlocal dynamic
         if span:
-            words.append(Word("".join(span), "".join(bare)))
+            words.append(Word("".join(span), "".join(bare), dynamic))
         span.clear()
         bare.clear()
+        dynamic = False
+
+    def take_expansion(in_double_quotes: bool) -> int:
+        """Append the expansion at `i` to the word; return the offset after it."""
+        nonlocal dynamic
+        end = expansion_end(command, i, in_double_quotes)
+        end = len(command) if end is None else end
+        span.append(command[i:end])
+        dynamic = True
+        return end
 
     while i < len(command):
         ch = command[i]
         if quote is not None:
+            if quote == '"' and ch in _DYNAMIC_MARKERS:
+                i = take_expansion(in_double_quotes=True)
+                continue
             span.append(ch)
             if ch == "\\" and quote == '"' and i + 1 < len(command):
                 span.append(command[i + 1])
@@ -224,6 +375,10 @@ def scan_words(command: str) -> list[Word]:
             flush()
             i = newline + 1
             at_word_start = True
+            continue
+        if ch in _DYNAMIC_MARKERS:
+            i = take_expansion(in_double_quotes=False)
+            at_word_start = False
             continue
         if ch in ("'", '"'):
             quote = ch
@@ -274,12 +429,24 @@ def unquoted_skeleton(command: str) -> str:
     pipeline and `grep '$v' *.x` as an expansion — both are single simple
     commands that zsh does abort on. Masking preserves offsets while keeping
     only characters the shell actually interprets: nothing inside single quotes,
-    `$` and backtick inside double quotes, nothing in a comment body.
+    nothing in a comment body, and of an expansion only its leading `$` or
+    backtick — its body, separators included, belongs to one word. An
+    expansion whose end cannot be found masks the rest as `_OPAQUE`.
     """
     out: list[str] = []
     quote: str | None = None
     at_word_start = True
     i = 0
+
+    def mask_expansion(in_double_quotes: bool) -> int:
+        """Append the masked expansion at `i`; return the offset after it."""
+        end = expansion_end(command, i, in_double_quotes)
+        if end is None:
+            out.append(_OPAQUE * (len(command) - i))
+            return len(command)
+        out.append(command[i] + _MASK * (end - i - 1))
+        return end
+
     while i < len(command):
         ch = command[i]
         if quote == "'":
@@ -298,7 +465,10 @@ def unquoted_skeleton(command: str) -> str:
                 out.append('"')
                 i += 1
                 continue
-            out.append(ch if ch in _DYNAMIC_MARKERS else _MASK)
+            if ch in _DYNAMIC_MARKERS:
+                i = mask_expansion(in_double_quotes=True)
+                continue
+            out.append(_MASK)
             i += 1
             continue
         if ch == "#" and at_word_start:
@@ -307,6 +477,10 @@ def unquoted_skeleton(command: str) -> str:
             out.append(_MASK * (end - i))
             i = end
             at_word_start = True
+            continue
+        if ch in _DYNAMIC_MARKERS:
+            i = mask_expansion(in_double_quotes=False)
+            at_word_start = False
             continue
         if ch in ("'", '"'):
             quote = ch
@@ -328,11 +502,13 @@ def unquoted_skeleton(command: str) -> str:
 def should_pass_through(command: str) -> bool:
     """True when the command's glob behaviour is not statically decidable.
 
-    Two reasons, both of which make a word-level verdict unsound: unresolved
-    expansion, and grammar that cutting into segments cannot preserve
-    (branches, backgrounding, heredocs, newlines). Command-position words that
-    disable the failure are handled in `candidate_spans`, where their position
-    is known.
+    The reason is grammar that cutting into segments cannot preserve
+    (branches, backgrounding, heredocs, newlines), or an expansion whose end
+    the scanner cannot find. A resolvable expansion no longer lands here: it
+    makes only its own word undecidable, which `candidate_spans` skips, and a
+    dynamic command word is handled in `find_unmatched_globs`. Command-position
+    words that disable the failure are handled in `candidate_spans`, where
+    their position is known.
 
     Sequencing with `;` and piping with `|` used to land here too, and that is
     what made this gate silent on the shape it most needed to see: measured
@@ -340,19 +516,36 @@ def should_pass_through(command: str) -> bool:
     (90%) came from a compound command, because a chained investigation line is
     exactly what an agent writes. `segments()` now cuts those instead.
     """
-    skeleton = unquoted_skeleton(command)
-    if any(marker in skeleton for marker in _DYNAMIC_MARKERS):
+    skeleton = _REDIRECT_AMPERSAND.sub(_MASK, unquoted_skeleton(command))
+    if any(marker in skeleton for marker in _UNSPLITTABLE_MARKERS):
         return True
-    skeleton = _REDIRECT_AMPERSAND.sub(_MASK, skeleton)
-    return any(marker in skeleton for marker in _UNSPLITTABLE_MARKERS)
+    # A `case` arm (`*.c|*.h) …;;`) and a glob group (`(a|*.c)`) use `|` and
+    # `;` as pattern grammar, not as separators; cutting there probes a
+    # pattern as if it were a command.
+    if any(word.span == "case" for word in scan_words(command)):
+        return True
+    return _separator_inside_parens(skeleton)
 
 
-def leading_command_word(segment: str) -> str | None:
+def _separator_inside_parens(skeleton: str) -> bool:
+    """True when an unquoted `;` or `|` sits inside `( … )` in the skeleton."""
+    depth = 0
+    for char in skeleton:
+        if char == "(":
+            depth += 1
+        elif char == ")":
+            depth = max(depth - 1, 0)
+        elif char in _SEGMENT_SEPARATORS and depth > 0:
+            return True
+    return False
+
+
+def leading_word(segment: str) -> Word | None:
     """The word in command position, skipping prefix assignments; None if bare."""
     for word in scan_words(segment):
         if _is_assignment(word.span):
             continue
-        return word.span
+        return word
     return None
 
 
@@ -403,10 +596,17 @@ def candidate_spans(command: str) -> list[str] | None:
             if _is_assignment(word.span):
                 continue  # prefix assignment — zsh never glob-expands the value
             saw_command_word = True
-            if word.span in _NOMATCH_DISABLERS or word.span in _CONTROL_WORDS:
+            # `(( n * 2 ))` is arithmetic, so its words are never pathnames.
+            if (
+                word.span in _NOMATCH_DISABLERS
+                or word.span in _CONTROL_WORDS
+                or word.span.startswith("((")
+            ):
                 return None
         if word.span in _SYNTAX_WORDS:
             continue
+        if word.dynamic:
+            continue  # its value is unknown until the shell expands it
         if not any(c in word.bare for c in GLOB_CHARS):
             continue  # metacharacters were quoted → the shell never expands them
         if "(" in word.span:
@@ -540,9 +740,12 @@ def find_unmatched_globs(command: str, cwd: str) -> list[str]:
         return []
 
     parts = segments(command)
-    if any(leading_command_word(part) in _STATE_CHANGING_DISABLERS for part in parts):
+    leaders = [leading_word(part) for part in parts]
+    if any(word is not None and word.dynamic for word in leaders):
+        return []  # `$CMD` may resolve to `noglob`, `setopt`, or `cd`
+    if any(word is not None and word.span in _STATE_CHANGING_DISABLERS for word in leaders):
         return []  # a later segment expands under options set by an earlier one
-    if any(leading_command_word(part) in _CWD_CHANGERS for part in parts):
+    if any(word is not None and word.span in _CWD_CHANGERS for word in leaders):
         return []  # a later segment runs in a directory the probe would not use
 
     spans: list[str] = []
