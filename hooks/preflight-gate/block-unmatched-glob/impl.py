@@ -198,6 +198,18 @@ _CONTROL_WORDS = {
 # portable set plus zsh's `foreach … end`, `{ … } always { … }`, and `coproc`.
 _CONSTRUCT_WORDS = (_CONTROL_WORDS - {"cd"}) | {"foreach", "end", "always", "coproc"}
 
+# A function definition's head: `f()`, `f(){`, and the `(){` of `f (){`.
+_FUNCTION_HEAD = re.compile(r".*\(\)\{?")
+
+# Command words whose meaning the gate depends on. Written quoted or escaped
+# (`\setopt`, `'cd'`) they still run as themselves, but the hook compares raw
+# spans, so such a line passes through. A quoted path (`"/opt/my tool"`) is
+# not one of these and is judged as usual.
+_SIGNIFICANT_COMMAND_WORDS = (
+    _NOMATCH_DISABLERS | _STATE_CHANGING_DISABLERS | _PRECOMMAND_WORDS
+    | _CWD_CHANGERS | _CONSTRUCT_WORDS | {"set"}
+)
+
 # `set` flags that cannot change globbing: single letters for errexit,
 # nounset, xtrace, verbose, noclobber, and `-o`/`+o` option names likewise
 # (compared lowercase, `_` dropped, a leading `no` removed). Anything else
@@ -637,7 +649,6 @@ def candidate_spans(command: str) -> list[str] | None:
         if not saw_command_word:
             if _is_assignment(word.span):
                 continue  # prefix assignment — zsh never glob-expands the value
-            saw_command_word = True
             # `(( n * 2 ))` is arithmetic, so its words are never pathnames.
             if (
                 word.span in _NOMATCH_DISABLERS
@@ -645,6 +656,9 @@ def candidate_spans(command: str) -> list[str] | None:
                 or word.span.startswith("((")
             ):
                 return None
+            if word.span in _PRECOMMAND_WORDS:
+                continue  # `time noglob ls *.x` — the next word decides
+            saw_command_word = True
         if word.span in _SYNTAX_WORDS:
             continue
         if word.dynamic:
@@ -766,6 +780,17 @@ def strip_cd_prefix(command: str, cwd: str) -> tuple[str, str]:
     return command[match.end():], path
 
 
+def _unquoted_word(span: str) -> str:
+    """`span` with quote characters and backslashes removed, as zsh looks it up."""
+    return span.translate({ord(c): None for c in "\\'\""})
+
+
+def _quoted_significant(span: str) -> bool:
+    """True for a quoted or escaped spelling of a word the gate keys on."""
+    bare = _unquoted_word(span)
+    return bare != span and bare in _SIGNIFICANT_COMMAND_WORDS
+
+
 def _command_words(segment: str) -> list[Word]:
     """The words of `segment` from its real command word on.
 
@@ -792,8 +817,8 @@ def _opens_construct(segment: str) -> bool:
         return False
     return (
         words[0] in _CONSTRUCT_WORDS
-        or words[0].endswith("()")
-        or "()" in words
+        or _FUNCTION_HEAD.fullmatch(words[0]) is not None
+        or any(w.startswith("()") for w in words)
         or "{" in words
     )
 
@@ -868,6 +893,8 @@ def find_unmatched_globs(command: str, cwd: str) -> list[str]:
     commands = [_command_words(part) for part in parts]
     if any(words and words[0].dynamic for words in commands):
         return []  # `$CMD` may resolve to `noglob`, `setopt`, or `cd`
+    if any(words and _quoted_significant(words[0].span) for words in commands):
+        return []  # zsh unquotes `\setopt` / `'cd'` before the lookup; the hook does not
     if any(_changes_shell_state(words) for words in commands):
         return []  # a later segment expands under options set by an earlier one
     if any(words and words[0].span in _CWD_CHANGERS for words in commands):

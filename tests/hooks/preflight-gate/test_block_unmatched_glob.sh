@@ -474,6 +474,23 @@ run_case "comment right after ; hides its quote" pass Bash \
   $'echo a;# it\'s\ntrue; cd logs\nls *.log # \''
 run_case "stray ;; passes (zsh rejects it)" pass Bash \
   $'echo ok;;\necho *.nonexistent-xyz'
+# Review round 2 (#1559): blocked here although zsh runs each cleanly.
+run_case "construct: f(){ on its own line passes" pass Bash \
+  $'f(){\nls *.nonexistent-xyz\n}'
+run_case "construct: f (){ on its own line passes" pass Bash \
+  $'f (){\nls *.nonexistent-xyz\n}'
+run_case "quoted command word: backslash-escaped setopt passes" pass Bash \
+  $'\\setopt nullglob\nls *.nonexistent-xyz'
+run_case "quoted command word: quoted cd passes" pass Bash \
+  $'\'cd\' logs\nls *.log'
+run_case "quoted command word: a quoted path is still judged" block Bash \
+  '"/bin/ls" *.nonexistent-xyz'
+run_case "precommand: time noglob shields its own segment" pass Bash \
+  'time noglob ls *.nonexistent-xyz'
+run_case "precommand: ! before (( )) is arithmetic" pass Bash \
+  '! (( 2*3 ))'
+run_case "precommand: time before a plain command is still judged" block Bash \
+  'time ls *.nonexistent-xyz'
 
 # The executing shell's glob options must reach the probe: under
 # `setopt extendedglob`, `^<something>` is a negation pattern that DOES match

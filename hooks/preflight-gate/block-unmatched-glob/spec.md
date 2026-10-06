@@ -73,6 +73,7 @@ segment executes, whether the text is a heredoc body:
 | Metacharacters were quoted (`-name '*.log'`) | Silent — never expanded |
 | Unquoted `$` / `` ` `` (variable, arithmetic, substitution) in a word | That word is skipped — its value is unresolvable; **the other words are still judged** |
 | `$` / `` ` `` in the command word of any segment (`$CMD *.x`) | Silent — `$CMD` may be `noglob`, `setopt`, or `cd` |
+| Quoted or escaped spelling of a word the gate keys on, as the command word of any segment (`\setopt`, `'cd'`) | Silent — zsh unquotes it before the lookup; a quoted path (`"/opt/my tool"`) is judged as usual |
 | Expansion whose end cannot be found (unterminated, newline inside, `case` inside `$(…)`) | Silent — word boundaries unknown |
 | Leading `cd <dir>` followed by `&&`, `;`, or a newline, with a plain-word `<dir>` that starts with `/`, `~/`, `./`, or `../` and exists | **Stripped; the rest is judged with `<dir>` as the cwd** |
 | Unquoted `&&`, `\|\|`, `&`, `\|&`, `<<`, `;;`, or a backslash-newline | Silent — segment context unknown |
@@ -84,7 +85,7 @@ segment executes, whether the text is a heredoc body:
 | Arithmetic command `(( … ))` | Silent — its words are math, not pathnames |
 | `cd` / `pushd` / `popd` **in command position of any segment** (other than the leading `cd <dir> &&` above) | Silent — a later segment runs in a directory the probe would not use |
 | Assignment word **before the command word** (`FOO=*.x cmd`) | Silent — values are not glob-expanded |
-| `noglob` / `setopt` / `unsetopt` / `eval` **in command position** | Silent for that segment — failure disabled by the command |
+| `noglob` / `setopt` / `unsetopt` / `eval` **in command position** (also after `time`, `!`, `builtin`, …) | Silent for that segment — failure disabled by the command |
 | Shell-syntax word (`[`, `[[`, `]`, `]]`) | Silent — not a pathname pattern |
 | Pattern inside a `#` comment | Silent — never reaches the shell |
 | zsh expands the pattern successfully | Silent — pass |
