@@ -80,11 +80,13 @@ segment executes, whether the text is a heredoc body:
 | `&` touching a redirect arrow (`2>&1`, `<&0`, `&>out`, `&>>out`, `&>\|out`) | **Not a background marker — the command is judged as if the `&` were absent** |
 | Unquoted `;`, `\|`, or newline | **Cut into segments; each simple command judged on its own** |
 | `case` word anywhere, or `;` / `\|` / newline inside `( … )` or `[[ … ]]` (case arms, glob groups `(a\|*.c)`, subshells, multi-line conditions) | Silent — there they are pattern grammar, nesting, or whitespace, not separators |
-| `setopt` / `unsetopt` / `emulate` / `eval` / `source` / `.` / `alias`, or `set` with an option flag, **in command position of any segment** (after `builtin`, `command`, `time`, `!`, …) | Silent — a later segment expands under options set earlier |
+| `setopt` / `unsetopt` / `emulate` / `disable` / `enable` / `eval` / `source` / `.` / `alias`, `set` with an option flag, or an `options[…]=` assignment, **in any segment** (after `builtin`, `command`, `time`, `!`, …) | Silent — a later segment expands under options set earlier |
 | Control-flow word (incl. zsh `foreach`/`end`/`always`/`coproc`) or function definition **in command position**, after any precommand word | **Judging stops there** — earlier segments are still judged; the body may run zero times |
 | Arithmetic command `(( … ))` | Silent — its words are math, not pathnames |
 | `cd` / `pushd` / `popd` **in command position of any segment** (other than the leading `cd <dir> &&` above) | Silent — a later segment runs in a directory the probe would not use |
-| Assignment word **before the command word** (`FOO=*.x cmd`) | Silent — values are not glob-expanded |
+| Assignment word **before the command word** (`FOO=*.x cmd`, `a+=*.x`, `a[1]=x`, `h[*.x]=v`) | Silent — values and element subscripts are not glob-expanded |
+| `NAME=value` argument of `typeset` / `local` / `export` / `readonly` / `declare` / `integer` / `float` | Silent — zsh treats it as an assignment; other arguments are still judged. After `builtin` / `command` / `exec` the word is an ordinary builtin argument, so it **is** judged |
+| Word split only at space, tab, and newline | `\r`, NBSP, and vertical tab stay inside the word, as in zsh, so `*.x\r(N)` keeps its qualifier |
 | `noglob` / `setopt` / `unsetopt` / `eval` **in command position** (also after `time`, `!`, `builtin`, …) | Silent for that segment — failure disabled by the command |
 | Shell-syntax word (`[`, `[[`, `]`, `]]`) | Silent — not a pathname pattern |
 | Pattern inside a `#` comment | Silent — never reaches the shell |

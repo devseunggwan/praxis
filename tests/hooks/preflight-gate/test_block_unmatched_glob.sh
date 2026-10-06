@@ -492,6 +492,46 @@ run_case "precommand: ! before (( )) is arithmetic" pass Bash \
 run_case "precommand: time before a plain command is still judged" block Bash \
   'time ls *.nonexistent-xyz'
 
+# --- assignment values and shell-state words (#1561) -----------------------
+# Verified against live zsh: each pass case runs with rc=0 and no
+# `no matches found`; each block case aborts.
+run_case "typeset family: local value is an assignment" pass Bash \
+  'local foo=*.nonexistent-xyz'
+run_case "typeset family: export value is an assignment" pass Bash \
+  'export FOO=*.nonexistent-xyz'
+run_case "typeset family: readonly value is an assignment" pass Bash \
+  'readonly R=*.nonexistent-xyz'
+run_case "typeset family: declare bracket value is an assignment" pass Bash \
+  'declare D=[a]'
+run_case "typeset family: integer arithmetic value is an assignment" pass Bash \
+  'integer i=2*3'
+run_case "typeset family: a non-assignment argument is still judged" block Bash \
+  'typeset x=1 *.nonexistent-xyz'
+run_case "typeset family: export then a glob segment is still judged" block Bash \
+  'export FOO=bar; ls *.nonexistent-xyz'
+run_case "typeset family: builtin export globs its arguments" block Bash \
+  'builtin export FOO=*.nonexistent-xyz'
+run_case "typeset family: command export globs its arguments" block Bash \
+  'command export FOO=*.nonexistent-xyz'
+run_case "typeset family: time export keeps assignment semantics" pass Bash \
+  'time export FOO=*.nonexistent-xyz'
+run_case "typeset family: subscript argument is an assignment" pass Bash \
+  'typeset h[*.nonexistent-xyz]=v'
+run_case "assignment: array element" pass Bash \
+  'a[1]=x'
+run_case "assignment: glob in an element subscript" pass Bash \
+  'typeset -A h; h[*.nonexistent-xyz]=v'
+run_case "assignment: append" pass Bash \
+  'a+=*.nonexistent-xyz'
+run_case "state: options[...] assignment passes the line" pass Bash \
+  'options[nullglob]=on; ls *.nonexistent-xyz'
+run_case "state: disable -p passes the line" pass Bash \
+  "disable -p '*'; ls *.nonexistent-xyz"
+run_case "word blanks: CR keeps the (N) qualifier attached" pass Bash \
+  $'echo *.nonexistent-xyz\r(N)'
+run_case "word blanks: NBSP keeps the (N) qualifier attached" pass Bash \
+  $'echo *.nonexistent-xyz\xc2\xa0(N)'
+
 # The executing shell's glob options must reach the probe: under
 # `setopt extendedglob`, `^<something>` is a negation pattern that DOES match
 # here, so a probe running plain `zsh -f` would wrongly report no matches.
