@@ -89,6 +89,11 @@ _MASK = "\x00"
 # the probe as a syntax error, which is not a `no matches found` verdict.
 _SEPARATORS = set("&|;\n<>")
 
+# The characters zsh splits words on. `str.isspace` also accepts `\r`, NBSP,
+# and vertical tab, which zsh keeps inside a word — splitting there cut the
+# `(N)` qualifier off `*.x\r(N)` and probed a bare pattern zsh never sees.
+_WORD_BLANKS = frozenset(" \t\n")
+
 # Words that are shell syntax rather than pathname patterns. `[` carries a
 # glob metacharacter but `[ -d . ]` is the test builtin, not a bracket range.
 _SYNTAX_WORDS = {"[", "[[", "]", "]]"}
@@ -121,13 +126,28 @@ _NOMATCH_DISABLERS = {"noglob", "setopt", "unsetopt", "eval"}
 # is the whole remedy. These change the running shell's options, aliases, or
 # definitions, so `setopt nullglob; print *.x` leaves the second segment
 # expanding under rules this hook cannot see from the text: `setopt` /
-# `unsetopt` / `emulate` directly, `eval` / `source` / `.` through text the
+# `unsetopt` / `emulate` directly, `disable` / `enable` by switching pattern
+# syntax or builtins off, `eval` / `source` / `.` through text the
 # hook does not read, `alias` by rewriting a later command word, and `set`
 # with an option flag (`set -o nullglob`, `set +o nomatch`). A line holding
 # one in any segment's command position passes through whole.
 _STATE_CHANGING_DISABLERS = {
     "setopt", "unsetopt", "emulate", "eval", "source", ".", "alias",
+    "disable", "enable",
 }
+
+# An assignment word: `NAME=`, `NAME+=`, or an array element `NAME[sub]=`. The
+# subscript runs to the first `]` followed by `=` / `+=`.
+_ASSIGNMENT = re.compile(r"[A-Za-z_]\w*(?:\[[^\]]*\])?\+?=")
+
+# Reserved words whose `NAME=value` arguments zsh treats as assignments, so
+# their values are never glob-expanded (`local x=*.log` runs, with no match).
+# Their other arguments still are (`typeset *.x` aborts).
+_TYPESET_WORDS = {"typeset", "local", "export", "readonly", "declare", "integer", "float"}
+
+# Writing `options[name]=…` sets a shell option, so it outlives its segment
+# the same way `setopt` does.
+_OPTIONS_ASSIGNMENT = re.compile(r"options\[")
 
 # Precommand words that leave the real command word after them. Skipped before
 # a command word is classified, so `builtin setopt` and `time for …` read as
@@ -442,7 +462,7 @@ def scan_words(command: str) -> list[Word]:
             at_word_start = False
             i += 2
             continue
-        if ch.isspace():
+        if ch in _WORD_BLANKS:
             flush()
             at_word_start = True
             i += 1
@@ -462,13 +482,12 @@ def scan_words(command: str) -> list[Word]:
 
 
 def _is_assignment(span: str) -> bool:
-    """True for a `NAME=value` word — zsh does not glob-expand assignment values."""
-    name, sep, _ = span.partition("=")
-    if not sep or not name:
-        return False
-    if not (name[0].isalpha() or name[0] == "_"):
-        return False
-    return all(c.isalnum() or c == "_" for c in name)
+    """True for a `NAME=value`, `NAME+=value`, or `NAME[sub]=value` word.
+
+    zsh does not glob-expand an assignment's value, nor the subscript of an
+    array element being assigned (`h[*.x]=v`).
+    """
+    return _ASSIGNMENT.match(span) is not None
 
 
 def unquoted_skeleton(command: str) -> str:
@@ -545,7 +564,7 @@ def unquoted_skeleton(command: str) -> str:
         out.append(ch)
         # Matches `scan_words`: a separator ends the word too, so the `#` in
         # `echo a;# it's` starts a comment, and its `'` opens no quote.
-        at_word_start = ch.isspace() or ch in _SEPARATORS
+        at_word_start = ch in _WORD_BLANKS or ch in _SEPARATORS
         i += 1
     return "".join(out)
 
@@ -589,7 +608,7 @@ def _separator_inside_parens(skeleton: str) -> bool:
     depth = 0
     in_condition = False
     for index, char in enumerate(skeleton):
-        word_start = index == 0 or skeleton[index - 1].isspace() or skeleton[index - 1] in _SEPARATORS
+        word_start = index == 0 or skeleton[index - 1] in _WORD_BLANKS or skeleton[index - 1] in _SEPARATORS
         if skeleton.startswith("[[", index) and word_start:
             in_condition = True
         elif skeleton.startswith("]]", index):
@@ -635,6 +654,7 @@ def candidate_spans(command: str) -> list[str] | None:
     spans: list[str] = []
     in_condition = False
     saw_command_word = False
+    typeset_args = False
     for word in scan_words(command):
         # zsh does not pathname-expand inside `[[ ... ]]`; a pattern there is a
         # match operand, so `[[ x = *.missing ]]` is simply false, not an abort.
@@ -659,8 +679,11 @@ def candidate_spans(command: str) -> list[str] | None:
             if word.span in _PRECOMMAND_WORDS:
                 continue  # `time noglob ls *.x` — the next word decides
             saw_command_word = True
+            typeset_args = word.span in _TYPESET_WORDS
         if word.span in _SYNTAX_WORDS:
             continue
+        if typeset_args and _is_assignment(word.span):
+            continue  # `local x=*.log` — an assignment, not a pathname
         if word.dynamic:
             continue  # its value is unknown until the shell expands it
         if not any(c in word.bare for c in GLOB_CHARS):
@@ -897,6 +920,12 @@ def find_unmatched_globs(command: str, cwd: str) -> list[str]:
         return []  # zsh unquotes `\setopt` / `'cd'` before the lookup; the hook does not
     if any(_changes_shell_state(words) for words in commands):
         return []  # a later segment expands under options set by an earlier one
+    if any(
+        _OPTIONS_ASSIGNMENT.match(word.span) and _is_assignment(word.span)
+        for part in parts
+        for word in scan_words(part)
+    ):
+        return []  # `options[nullglob]=on` is a `setopt` written as an assignment
     if any(words and words[0].span in _CWD_CHANGERS for words in commands):
         return []  # a later segment runs in a directory the probe would not use
 
