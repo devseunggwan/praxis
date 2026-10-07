@@ -270,12 +270,17 @@ test_ac15_jq_missing_guidance() {
     && echo "$err" | grep -q "jq required"
 }
 
-# ---- AC16 (plan AC9): skill files exist + reference strike-counter.sh ------
+# ---- AC16 (plan AC9): skill files exist + the script they call resolves ----
+# Each skill runs `${CLAUDE_PLUGIN_ROOT}/<path>`; the path must be an
+# executable file in the plugin, not just a string in the skill body.
 test_ac16_skill_files_exist() {
-  local ok=1
+  local ok=1 rel
   for s in strike strikes reset-strikes; do
     [ -f "$ROOT_DIR/skills/$s/SKILL.md" ] || ok=0
-    grep -q "strike-counter.sh" "$ROOT_DIR/skills/$s/SKILL.md" 2>/dev/null || ok=0
+    rel=$(grep -o '\${CLAUDE_PLUGIN_ROOT}/[^"]*strike-counter\.sh' \
+      "$ROOT_DIR/skills/$s/SKILL.md" | head -1)
+    rel=${rel#\$\{CLAUDE_PLUGIN_ROOT\}/}
+    if [ -z "$rel" ] || [ ! -x "$ROOT_DIR/$rel" ]; then ok=0; fi
   done
   [ "$ok" -eq 1 ]
 }
