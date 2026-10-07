@@ -419,9 +419,10 @@ manifest's `hosts` field, the same filter the other platforms use.
 | `mcp__*` | unchanged |
 
 **Transcript.** Hermes keeps each session's messages in `state.db` and writes
-the assistant message carrying a tool call before the call runs. The bridge
-appends the session's new rows to a Claude-shaped JSONL under
-`~/.praxis/cache/hermes-transcripts/` and passes it as `transcript_path`, so a
+the assistant message carrying a tool call before the call runs. On every call
+the bridge rewrites a Claude-shaped JSONL under
+`~/.praxis/cache/hermes-transcripts/` from the session's active rows (rows
+Hermes later deactivates drop out) and passes it as `transcript_path`, so a
 gate that reads the text written just before the call (the merge-briefing
 gate) works the same way. A `clarify` answer is written as Claude's
 `"<question>"="<answer>"` result text. `state.db` is Hermes-internal; an

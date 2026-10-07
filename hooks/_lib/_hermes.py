@@ -17,7 +17,7 @@ Three translations:
     Hermes keeps each session's messages in `state.db`, and writes the
     assistant message carrying a tool call before that call runs, so a gate on
     the call can read the text written just before it. `sync_transcript`
-    appends the session's new rows to a Claude-shaped JSONL file.
+    rewrites a Claude-shaped JSONL file from the session's active rows.
   - Decisions. A praxis deny becomes `{"action": "block"}`, an ask becomes
     Hermes's human approval (`{"action": "approve"}`), additionalContext and
     advisory stderr become `{"context": ...}`, and a Bash `updatedInput`
@@ -29,10 +29,12 @@ never block a tool call by itself.
 """
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import os
 import sqlite3
+import tempfile
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple
 
@@ -215,9 +217,8 @@ def _tool_event(row: sqlite3.Row, tool: str) -> dict:
 def transcript_events(rows: List[sqlite3.Row], names: Dict[str, str]) -> Iterator[dict]:
     """Claude transcript events for Hermes message rows, in order.
 
-    `names` maps tool-call id -> Hermes tool name across calls, so a tool row
-    is rendered by the tool that produced it even when its call was synced
-    earlier.
+    `names` collects tool-call id -> Hermes tool name as assistant rows are
+    read, so each tool row is rendered by the tool that produced it.
     """
     for row in rows:
         role = row["role"]
@@ -235,47 +236,46 @@ def transcript_events(rows: List[sqlite3.Row], names: Dict[str, str]) -> Iterato
 
 
 def sync_transcript(session_id: str, out_dir: Path, db_path: Optional[Path] = None) -> Optional[Path]:
-    """Append the session's not-yet-synced Hermes messages to its Claude JSONL.
+    """Write the session's active Hermes messages as a Claude JSONL; return its path.
 
-    Returns the transcript path, or None when nothing usable exists (no
-    session id, no database, an unknown schema). Incremental: a sidecar keeps
-    the last synced row id and the tool-call names seen so far, so each call
-    reads only new rows.
+    None when nothing usable exists (no session id, no database, an unknown
+    schema). The file is rebuilt from the active rows on every call and swapped
+    in with `os.replace`: a row Hermes later deactivates (a rewind, an edit)
+    leaves the transcript, and an interrupted write can neither duplicate nor
+    truncate events. A 469-row session rebuilds in about 5 ms.
     """
     if not session_id:
         return None
     db = db_path or state_db_path()
     if not db.is_file():
         return None
-    safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in session_id)[:120]
-    digest = hashlib.sha256(session_id.encode()).hexdigest()[:8]
-    out = out_dir / f"{safe}-{digest}.jsonl"
-    cursor_file = out.with_suffix(".cursor.json")
-    cursor: Dict[str, Any] = {}
-    if out.is_file() and cursor_file.is_file():
-        cursor = _parse_json(cursor_file.read_text(encoding="utf-8")) or {}
-    last_id = int(cursor.get("last_id") or 0) if out.is_file() else 0
-    names: Dict[str, str] = dict(cursor.get("names") or {})
     try:
         conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=2)
         conn.row_factory = sqlite3.Row
         try:
             rows = conn.execute(
                 "SELECT id, role, content, tool_call_id, tool_calls, tool_name FROM messages "
-                "WHERE session_id = ? AND id > ? AND active = 1 ORDER BY id",
-                (session_id, last_id),
+                "WHERE session_id = ? AND active = 1 ORDER BY id",
+                (session_id,),
             ).fetchall()
         finally:
             conn.close()
     except sqlite3.Error:
-        return out if out.is_file() else None
-    if rows or not out.is_file():
-        out_dir.mkdir(parents=True, exist_ok=True)
-        with open(out, "a", encoding="utf-8") as fh:
-            for event in transcript_events(rows, names):
+        return None
+    safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in session_id)[:120]
+    digest = hashlib.sha256(session_id.encode()).hexdigest()[:8]
+    out = out_dir / f"{safe}-{digest}.jsonl"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=out_dir, prefix=out.name, suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            for event in transcript_events(rows, {}):
                 fh.write(json.dumps(event, ensure_ascii=False) + "\n")
-        last_id = rows[-1]["id"] if rows else last_id
-        cursor_file.write_text(json.dumps({"last_id": last_id, "names": names}), encoding="utf-8")
+        os.replace(tmp, out)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp)
+        raise
     return out
 
 

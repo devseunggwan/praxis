@@ -146,16 +146,24 @@ def test_unanswered_clarify_is_an_error_result(tmp_path):
     assert result["is_error"] is True
 
 
-def test_sync_is_incremental(tmp_path):
+def test_sync_rebuilds_from_active_rows(tmp_path):
     db = _db(tmp_path / "state.db", ROWS[:3])
     out = hermes.sync_transcript("s1", tmp_path / "t", db)
     assert len(out.read_text().splitlines()) == 3
     assert hermes.sync_transcript("s1", tmp_path / "t", db) == out
-    assert len(out.read_text().splitlines()) == 3  # nothing new, nothing appended
+    assert len(out.read_text().splitlines()) == 3  # a re-sync never duplicates events
     _db(db, ROWS[3:5])
     hermes.sync_transcript("s1", tmp_path / "t", db)
     lines = out.read_text().splitlines()
     assert len(lines) == 4 and json.loads(lines[3])["message"]["content"][0]["name"] == "Bash"
+    # A row Hermes deactivates (rewind, edit) leaves the transcript on the next sync.
+    conn = sqlite3.connect(db)
+    conn.execute("UPDATE messages SET active = 0 WHERE id = 4")
+    conn.commit()
+    conn.close()
+    hermes.sync_transcript("s1", tmp_path / "t", db)
+    assert "gh pr merge 7" not in out.read_text()
+    assert [p.name for p in (tmp_path / "t").iterdir()] == [out.name]  # no temp file left
 
 
 def test_sync_fails_open_without_a_usable_database(tmp_path):
