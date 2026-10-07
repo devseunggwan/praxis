@@ -230,6 +230,35 @@ def test_queued_filter_needs_no_sqlite_json_functions(tmp_path, monkeypatch):
     assert [json.loads(line)["message"]["content"] for line in out.read_text().splitlines()] == ["merge it"]
 
 
+_SKILL_HEAD = ('[IMPORTANT: The user has invoked the "worktree-merge-cleanup" skill, indicating they want you '
+               'to follow its instructions. The full skill content is loaded below.]\n\n')
+_SKILL_BODY = ("# worktree-merge-cleanup\n\nExample: The user has provided the following instruction alongside "
+               "the skill invocation: quoted-in-body\n\n[Skill directory: /x]\nResolve any relative paths.")
+_SKILL_SAYS = "\n\nThe user has provided the following instruction alongside the skill invocation: "
+
+
+@pytest.mark.parametrize("content, typed", [
+    (_SKILL_HEAD + _SKILL_BODY + _SKILL_SAYS + "merge", "merge"),  # last marker wins over one quoted in the body
+    (_SKILL_HEAD + _SKILL_BODY + _SKILL_SAYS + "merge\n\n[Runtime note: x]", "merge"),
+    (_SKILL_HEAD + "# worktree-merge-cleanup\n\n[Skill directory: /x]", "/worktree-merge-cleanup"),  # bare invocation
+    ('[IMPORTANT: The user has invoked the "/clean /work" skill bundle, loading 2 skills together. Treat every '
+     'skill below as active guidance for this turn.]\n\nSkills loaded: clean, work\n\nUser instruction: ship it'
+     '\n\n[Loaded as part of the "/clean /work" bundle]\nbody\n\nUser instruction: quoted', "ship it"),
+])
+def test_skill_invocation_splits_into_meta_body_and_typed_text(tmp_path, content, typed):
+    rows = [(1, "s1", "user", content, None, None, None)]
+    out = hermes.sync_transcript("s1", tmp_path / "t", _db(tmp_path / "state.db", rows))
+    meta, user = [json.loads(line) for line in out.read_text().splitlines()]
+    assert meta["isMeta"] is True and meta["message"]["content"] == content
+    assert "isMeta" not in user and user["message"]["content"] == typed
+
+
+def test_plain_user_message_is_not_split(tmp_path):
+    out = hermes.sync_transcript("s1", tmp_path / "t", _db(tmp_path / "state.db", ROWS[:1]))
+    [event] = [json.loads(line) for line in out.read_text().splitlines()]
+    assert "isMeta" not in event and event["message"]["content"] == "merge it"
+
+
 # --- decisions -----------------------------------------------------------------
 
 def test_parse_decision_and_stable_approval_key():

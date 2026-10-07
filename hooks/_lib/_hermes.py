@@ -230,6 +230,58 @@ def _tool_failed(content: str) -> bool:
     return bool(data.get("error")) or (type(exit_code) is int and exit_code != 0)
 
 
+def _user_events(content: str) -> Iterator[dict]:
+    """Claude user events for one Hermes user row.
+
+    Hermes expands a slash-skill invocation into one user message: an activation
+    header, the skill body, then the user's instruction (`agent/skill_commands.py`).
+    Claude Code writes the expanded body as an `isMeta` entry and the typed text
+    as its own message, and the gates count only the latter as the user's turn,
+    so the row is split the same way. The instruction is cut out with Hermes's
+    own markers (`extract_user_instruction_from_skill_message`); with none, the
+    typed text was the bare `/<skill>`.
+    """
+    if not content.startswith(_SKILL_INVOCATION_PREFIX):
+        yield {"type": "user", "message": {"role": "user", "content": content}}
+        return
+    yield {"type": "user", "isMeta": True, "message": {"role": "user", "content": content}}
+    instruction = _skill_instruction(content)
+    if instruction is None:
+        name = content[len(_SKILL_INVOCATION_PREFIX):].split('"', 2)
+        label = name[1].strip() if len(name) == 3 else ""
+        instruction = (label if label.startswith("/") else f"/{label}") if label else None
+    if instruction:
+        yield {"type": "user", "message": {"role": "user", "content": instruction}}
+
+
+# Hermes's skill-invocation scaffold markers, byte-identical to the builders in
+# its `agent/skill_commands.py`.
+_SKILL_INVOCATION_PREFIX = "[IMPORTANT: The user has invoked the "
+_SINGLE_SKILL_MARKER = "The full skill content is loaded below.]"
+_SINGLE_SKILL_INSTRUCTION = "The user has provided the following instruction alongside the skill invocation: "
+_RUNTIME_NOTE = "\n\n[Runtime note:"
+_BUNDLE_MARKER = " skill bundle,"
+_BUNDLE_USER_INSTRUCTION = "\nUser instruction: "
+_BUNDLE_FIRST_SKILL_BLOCK = "\n\n[Loaded as part of the "
+
+
+def _skill_instruction(content: str) -> Optional[str]:
+    """The user's instruction in a skill-invocation scaffold, or None for a bare invocation.
+
+    A bundle states the instruction before the loaded skills (first marker); a
+    single skill states it after the body, which may quote the marker (last one).
+    """
+    if _BUNDLE_MARKER in content:
+        marker, stop, idx = _BUNDLE_USER_INSTRUCTION, _BUNDLE_FIRST_SKILL_BLOCK, content.find(_BUNDLE_USER_INSTRUCTION)
+    elif _SINGLE_SKILL_MARKER in content:
+        marker, stop, idx = _SINGLE_SKILL_INSTRUCTION, _RUNTIME_NOTE, content.rfind(_SINGLE_SKILL_INSTRUCTION)
+    else:
+        return None
+    if idx < 0:
+        return None
+    return content[idx + len(marker):].split(stop, 1)[0].strip() or None
+
+
 def transcript_events(rows: List[sqlite3.Row], names: Dict[str, str]) -> Iterator[dict]:
     """Claude transcript events for Hermes message rows, in order.
 
@@ -239,7 +291,7 @@ def transcript_events(rows: List[sqlite3.Row], names: Dict[str, str]) -> Iterato
     for row in rows:
         role = row["role"]
         if role == "user":
-            yield {"type": "user", "message": {"role": "user", "content": row["content"] or ""}}
+            yield from _user_events(row["content"] or "")
         elif role == "assistant":
             event, ids = _assistant_event(row)
             names.update(ids)
