@@ -230,6 +230,50 @@ def _tool_failed(content: str) -> bool:
     return bool(data.get("error")) or (type(exit_code) is int and exit_code != 0)
 
 
+# Hermes's skill-invocation scaffold markers, byte-identical to the builders in
+# its `agent/skill_commands.py`.
+_SKILL_INVOCATION_PREFIX = "[IMPORTANT: The user has invoked the "
+_SINGLE_SKILL_MARKER = "The full skill content is loaded below.]"
+_SINGLE_SKILL_INSTRUCTION = "The user has provided the following instruction alongside the skill invocation: "
+_RUNTIME_NOTE = "\n\n[Runtime note:"
+_BUNDLE_MARKER = " skill bundle,"
+_BUNDLE_USER_INSTRUCTION = "\nUser instruction: "
+_BUNDLE_FIRST_SKILL_BLOCK = "\n\n[Loaded as part of the "
+
+
+def _user_message(text: str, meta: bool = False) -> dict:
+    event: Dict[str, Any] = {"type": "user", "message": {"role": "user", "content": text}}
+    if meta:
+        event["isMeta"] = True
+    return event
+
+
+def _skill_instruction(content: str) -> Optional[str]:
+    """The user's instruction in a skill-invocation scaffold, or None for a bare invocation."""
+    if _BUNDLE_MARKER in content:
+        # A bundle states the instruction before the loaded skills: the first marker is the user's.
+        marker, stop = _BUNDLE_USER_INSTRUCTION, _BUNDLE_FIRST_SKILL_BLOCK
+        idx = content.find(marker)
+    elif _SINGLE_SKILL_MARKER in content:
+        # A single skill states it after the body, which may quote the marker: the last one is the user's.
+        marker, stop = _SINGLE_SKILL_INSTRUCTION, _RUNTIME_NOTE
+        idx = content.rfind(marker)
+    else:
+        return None
+    if idx < 0:
+        return None
+    return content[idx + len(marker):].split(stop, 1)[0].strip() or None
+
+
+def _bare_invocation(content: str) -> Optional[str]:
+    """The `/<skill>` typed for an invocation with no instruction (the first quoted span names it)."""
+    parts = content[len(_SKILL_INVOCATION_PREFIX):].split('"', 2)
+    name = parts[1].strip() if len(parts) == 3 else ""
+    if not name:
+        return None
+    return name if name.startswith("/") else f"/{name}"
+
+
 def _user_events(content: str) -> Iterator[dict]:
     """Claude user events for one Hermes user row.
 
@@ -242,44 +286,12 @@ def _user_events(content: str) -> Iterator[dict]:
     typed text was the bare `/<skill>`.
     """
     if not content.startswith(_SKILL_INVOCATION_PREFIX):
-        yield {"type": "user", "message": {"role": "user", "content": content}}
+        yield _user_message(content)
         return
-    yield {"type": "user", "isMeta": True, "message": {"role": "user", "content": content}}
-    instruction = _skill_instruction(content)
-    if instruction is None:
-        name = content[len(_SKILL_INVOCATION_PREFIX):].split('"', 2)
-        label = name[1].strip() if len(name) == 3 else ""
-        instruction = (label if label.startswith("/") else f"/{label}") if label else None
-    if instruction:
-        yield {"type": "user", "message": {"role": "user", "content": instruction}}
-
-
-# Hermes's skill-invocation scaffold markers, byte-identical to the builders in
-# its `agent/skill_commands.py`.
-_SKILL_INVOCATION_PREFIX = "[IMPORTANT: The user has invoked the "
-_SINGLE_SKILL_MARKER = "The full skill content is loaded below.]"
-_SINGLE_SKILL_INSTRUCTION = "The user has provided the following instruction alongside the skill invocation: "
-_RUNTIME_NOTE = "\n\n[Runtime note:"
-_BUNDLE_MARKER = " skill bundle,"
-_BUNDLE_USER_INSTRUCTION = "\nUser instruction: "
-_BUNDLE_FIRST_SKILL_BLOCK = "\n\n[Loaded as part of the "
-
-
-def _skill_instruction(content: str) -> Optional[str]:
-    """The user's instruction in a skill-invocation scaffold, or None for a bare invocation.
-
-    A bundle states the instruction before the loaded skills (first marker); a
-    single skill states it after the body, which may quote the marker (last one).
-    """
-    if _BUNDLE_MARKER in content:
-        marker, stop, idx = _BUNDLE_USER_INSTRUCTION, _BUNDLE_FIRST_SKILL_BLOCK, content.find(_BUNDLE_USER_INSTRUCTION)
-    elif _SINGLE_SKILL_MARKER in content:
-        marker, stop, idx = _SINGLE_SKILL_INSTRUCTION, _RUNTIME_NOTE, content.rfind(_SINGLE_SKILL_INSTRUCTION)
-    else:
-        return None
-    if idx < 0:
-        return None
-    return content[idx + len(marker):].split(stop, 1)[0].strip() or None
+    yield _user_message(content, meta=True)
+    typed = _skill_instruction(content) or _bare_invocation(content)
+    if typed:
+        yield _user_message(typed)
 
 
 def transcript_events(rows: List[sqlite3.Row], names: Dict[str, str]) -> Iterator[dict]:
