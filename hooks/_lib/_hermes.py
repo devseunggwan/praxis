@@ -211,7 +211,23 @@ def _tool_event(row: sqlite3.Row, tool: str) -> dict:
             block["content"] = answer
     else:
         block["content"] = content
+        if _tool_failed(content):
+            block["is_error"] = True
     return {"type": "user", "message": {"role": "user", "content": [block]}}
+
+
+def _tool_failed(content: str) -> bool:
+    """A Hermes tool result that reports a failure, as Claude marks one `is_error`.
+
+    A gate block comes back as `{"error": ...}` with no exit code; a command
+    that ran and failed carries a non-zero `exit_code`. Gates that ask whether a
+    call actually ran (the merge gate's executed-merge scan) read `is_error`.
+    """
+    data = _parse_json(content)
+    if not isinstance(data, dict):
+        return False
+    exit_code = data.get("exit_code")
+    return bool(data.get("error")) or (isinstance(exit_code, int) and exit_code != 0)
 
 
 def transcript_events(rows: List[sqlite3.Row], names: Dict[str, str]) -> Iterator[dict]:

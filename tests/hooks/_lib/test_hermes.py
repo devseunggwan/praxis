@@ -174,6 +174,21 @@ def test_sync_fails_open_without_a_usable_database(tmp_path):
     assert hermes.sync_transcript("s1", tmp_path / "t", bad) is None
 
 
+@pytest.mark.parametrize("content, failed", [
+    (json.dumps({"error": "[praxis:merge-gate] blocked"}), True),        # a gate block: no exit code
+    (json.dumps({"output": "", "exit_code": 1, "error": None}), True),   # ran and failed
+    (json.dumps({"output": "merged", "exit_code": 0, "error": None}), False),
+    ("not json", False),
+])
+def test_terminal_failure_is_an_error_result(tmp_path, content, failed):
+    rows = [(1, "s1", "user", "merge", None, None, None),
+            (2, "s1", "assistant", "", None, json.dumps([_call("c1", "terminal", {"command": "gh pr merge 7"})]), None),
+            (3, "s1", "tool", content, "c1", None, "terminal")]
+    out = hermes.sync_transcript("s1", tmp_path / "t", _db(tmp_path / "state.db", rows))
+    result = json.loads(out.read_text().splitlines()[2])["message"]["content"][0]
+    assert result.get("is_error", False) is failed
+
+
 # --- decisions -----------------------------------------------------------------
 
 def test_parse_decision_and_stable_approval_key():
