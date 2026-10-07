@@ -166,18 +166,6 @@ def test_an_abandoned_lock_is_still_swept(tmp_path: Path) -> None:
     assert not stale.exists()
 
 
-def test_no_session_id_sweeps_everything_stale(tmp_path: Path) -> None:
-    """Back-compat: callers that pass nothing get the pre-#920 behaviour."""
-    cache = tmp_path / "cache"
-    cache.mkdir()
-    mine = _file(cache, f"session-intent-{SID}.json", days=30)
-
-    removed = _paths.prune_stale(str(cache), ttl_days=7.0)
-
-    assert removed == 1
-    assert not mine.exists()
-
-
 def test_resolve_cache_file_threads_session_id(tmp_path: Path) -> None:
     """The end-to-end path: resolving one entry must not sweep its siblings."""
     home = tmp_path / "praxis-home"

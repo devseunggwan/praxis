@@ -26,9 +26,8 @@ an opening quote and swallows the genuine command on the next line.
 
 Written as Python rather than appended to `tests/test_hook_utils.sh` for the
 same reason as `test_heredoc_help_tokenizer.py` — every case is itself a shell
-string, so bash literals mean escaping the very quoting under test. The same
-cases are duplicated into that shell suite because it is the one that runs
-without pytest installed.
+string, so bash literals mean escaping the very quoting under test. The shell
+suite keeps only the token streams this file does not pin.
 """
 from __future__ import annotations
 
@@ -89,8 +88,6 @@ def test_heredoc_commit_then_merge_survives() -> None:
     ("single quote", "git commit -m 'line one\nline two' && " + MERGE + " 9 --squash"),
     ("body spanning three lines",
      'git commit -m "a\nb\nc" && ' + MERGE + " 9 --squash"),
-    ("heredoc form", "git commit -m \"$(cat <<'EOF'\nbody\nEOF\n)\" && "
-                     + MERGE + " 9 --squash"),
 ])
 def test_command_after_a_multiline_quote_reaches_the_gates(name: str, command: str) -> None:
     assert _has_merge(command), name

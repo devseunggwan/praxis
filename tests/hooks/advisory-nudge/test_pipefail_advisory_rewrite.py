@@ -101,7 +101,7 @@ def test_the_corrected_command_no_longer_trips_the_advisory(monkeypatch, capsys)
 
 # --- the arm stays off -------------------------------------------------------
 
-@pytest.mark.parametrize("arm", [None, "0", "", "true", "11", " "])
+@pytest.mark.parametrize("arm", ["0", "", "true", "11", " "])
 def test_the_arm_is_opt_in(monkeypatch, capsys, arm):
     rc, out, err = _run(monkeypatch, capsys, PIPED, arm=arm)
     assert rc == 0

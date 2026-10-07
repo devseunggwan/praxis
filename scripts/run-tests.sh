@@ -17,6 +17,13 @@
 #  12. markdownlint — advisory markdown lint (mirrors the ci.yml `markdownlint` job)
 #  13. mypy     — static Python type check (mirrors the ci.yml `mypy` job)
 #
+# Environment:
+#   PRAXIS_TEST_JOBS  shell suites run at once in step 2 (default: core count;
+#                     1 = serial). Suites that take tests/_tree_mutation_lock.sh
+#                     always run one at a time after the rest.
+#   PRAXIS_TEST_PART  all (default) | python (every step but 2) | shell (step 2)
+#                     — lets CI run the two halves as parallel jobs.
+#
 # Steps 10-13 mirror CI jobs that used to have no local equivalent, so a change
 # could pass here and still be flagged on the PR (issue #866). Each skips with
 # an explicit SKIPPED line when its tool is absent, so a contributor without
@@ -219,6 +226,20 @@ unset CLAUDE_CONFIG_DIR
 FAILED=0
 SKIPPED_TOOLS=()
 
+TEST_PART="${PRAXIS_TEST_PART:-all}"
+case "$TEST_PART" in
+  all|python|shell) ;;
+  *) echo "FATAL: PRAXIS_TEST_PART must be all, python or shell (got: $TEST_PART)" >&2
+     exit 1 ;;
+esac
+part_runs() { [[ "$TEST_PART" == all || "$TEST_PART" == "$1" ]]; }
+
+SHELL_JOBS="${PRAXIS_TEST_JOBS:-$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 1)}"
+if ! [[ "$SHELL_JOBS" =~ ^[1-9][0-9]*$ ]]; then
+  echo "FATAL: PRAXIS_TEST_JOBS must be a positive integer (got: $SHELL_JOBS)" >&2
+  exit 1
+fi
+
 # Records a skipped step and prints its SKIPPED line in one place, so the
 # summary can never drift from what the run actually announced.
 skip_step() {
@@ -229,41 +250,41 @@ skip_step() {
 # ---------------------------------------------------------------------------
 # 1. pytest
 # ---------------------------------------------------------------------------
-echo "=== pytest ==="
-# Coverage floor (issue #1303). When coverage.py is importable, pytest runs
-# under `coverage run` and `coverage report` enforces the `fail_under` set in
-# .coveragerc (exit 2 below the floor — counted as a step failure). Only the
-# Python that pytest imports in-process is measured; impl.py executions driven
-# from the shell suites in step 2 are subprocesses and stay uncounted until
-# the follow-up half of #1303. Without the module the tests still run, plain,
-# and the absent floor goes through skip_step() like steps 10-13 so strict
-# mode (CI) fails on it instead of quietly measuring nothing.
-#
-# The data file lands under the throwaway PRAXIS_HOME unless the caller has
-# already chosen a COVERAGE_FILE — ci.yml does, so the report can be re-read
-# into the job summary after this script's EXIT trap has swept the temp dir.
-if python3 -c 'import coverage' 2>/dev/null; then
-  export COVERAGE_FILE="${COVERAGE_FILE:-$PRAXIS_HOME/.coverage}"
-  if ! python3 -m coverage run -m pytest tests/ -q; then
-    FAILED=1
+if part_runs python; then
+  echo "=== pytest ==="
+  # Coverage floor (issue #1303). When coverage.py is importable, pytest runs
+  # under `coverage run` and `coverage report` enforces the `fail_under` set in
+  # .coveragerc (exit 2 below the floor — counted as a step failure). Only the
+  # Python that pytest imports in-process is measured; impl.py executions driven
+  # from the shell suites in step 2 are subprocesses and stay uncounted until
+  # the follow-up half of #1303. Without the module the tests still run, plain,
+  # and the absent floor goes through skip_step() like steps 10-13 so strict
+  # mode (CI) fails on it instead of quietly measuring nothing.
+  #
+  # The data file lands under the throwaway PRAXIS_HOME unless the caller has
+  # already chosen a COVERAGE_FILE — ci.yml does, so the report can be re-read
+  # into the job summary after this script's EXIT trap has swept the temp dir.
+  if python3 -c 'import coverage' 2>/dev/null; then
+    export COVERAGE_FILE="${COVERAGE_FILE:-$PRAXIS_HOME/.coverage}"
+    if ! python3 -m coverage run -m pytest tests/ -q; then
+      FAILED=1
+    fi
+    echo ""
+    echo "=== coverage report (floor: .coveragerc fail_under) ==="
+    if ! python3 -m coverage report; then
+      FAILED=1
+    fi
+  else
+    if ! python3 -m pytest tests/ -q; then
+      FAILED=1
+    fi
+    skip_step coverage "pip install 'coverage==7.16.0'"
   fi
-  echo ""
-  echo "=== coverage report (floor: .coveragerc fail_under) ==="
-  if ! python3 -m coverage report; then
-    FAILED=1
-  fi
-else
-  if ! python3 -m pytest tests/ -q; then
-    FAILED=1
-  fi
-  skip_step coverage "pip install 'coverage==7.16.0'"
 fi
 
 # ---------------------------------------------------------------------------
 # 2. Shell tests
 # ---------------------------------------------------------------------------
-echo ""
-echo "=== shell tests ==="
 SHELL_FAILED=0
 
 # Sub-suite skip protocol (#1170). A test file that must skip entirely because
@@ -284,6 +305,13 @@ run_sh() {
   # stderr is deliberately left out of the pipe: markers are stdout-only, and
   # error output keeps streaming unbuffered.
   bash "$f" | tee "$out" || rc=$?
+  fold_sh_result "$f" "$rc" "$out"
+}
+
+# Folds one finished suite into the run: a non-zero exit fails the step, and
+# each PRAXIS_SUBSKIP marker in its captured stdout becomes a SKIPPED tool.
+fold_sh_result() {
+  local f="$1" rc="$2" out="$3"
   if [[ $rc -ne 0 ]]; then
     echo "FAIL: $f" >&2
     SHELL_FAILED=1
@@ -301,25 +329,65 @@ run_sh() {
   done < <(sed -n "s/^${SUBSKIP_MARKER} \([^ ][^ ]*\) .*/\1/p" "$out" | sort -u)
 }
 
+# Runs the suites in $@ PRAXIS_TEST_JOBS at a time, then replays each one's
+# output and folds its result in file order, so the log reads as a serial run.
+# xargs rather than `wait -n`: macOS ships bash 3.2.
+run_sh_parallel() {
+  local dir="$PRAXIS_HOME/sh-parallel" f n rc
+  mkdir -p "$dir"
+  printf '%s\n' "$@" | xargs -P "$SHELL_JOBS" -I{} bash -c '
+    n=$(printf "%s" "$1" | tr / _)
+    bash "$1" >"$2/$n.out" 2>"$2/$n.err"
+    echo "$?" >"$2/$n.rc"' _ {} "$dir"
+  for f in "$@"; do
+    n=$(printf '%s' "$f" | tr / _)
+    cat "$dir/$n.out"
+    cat "$dir/$n.err" >&2
+    # A missing rc file means the worker never finished: count it as a failure.
+    rc=$(cat "$dir/$n.rc" 2>/dev/null || echo 1)
+    fold_sh_result "$f" "$rc" "$dir/$n.out"
+  done
+}
+
 # nullglob: an unmatched glob expands to nothing instead of the literal pattern,
 # so a missing tests/hooks/ dir does not produce a spurious "No such file" failure.
 shopt -s nullglob
 
-# hook-level shell tests
-for f in tests/hooks/*/test_*.sh; do
-  run_sh "$f"
-done
-
-# top-level shell tests
-for f in tests/test_*.sh; do
-  run_sh "$f"
+# Suites that take the tree-mutation lock edit the working tree, so they cannot
+# share it with any other suite (#1377); they run one at a time after the rest.
+SH_PARALLEL=()
+SH_SERIAL=()
+for f in tests/hooks/*/test_*.sh tests/test_*.sh; do
+  if grep -q '_tree_mutation_lock\.sh' "$f"; then
+    SH_SERIAL+=("$f")
+  else
+    SH_PARALLEL+=("$f")
+  fi
 done
 
 shopt -u nullglob
 
+if part_runs shell; then
+  echo ""
+  echo "=== shell tests ==="
+  if [[ $SHELL_JOBS -gt 1 && ${#SH_PARALLEL[@]} -gt 0 ]]; then
+    run_sh_parallel "${SH_PARALLEL[@]}"
+  else
+    for f in ${SH_PARALLEL[@]+"${SH_PARALLEL[@]}"}; do
+      run_sh "$f"
+    done
+  fi
+  for f in ${SH_SERIAL[@]+"${SH_SERIAL[@]}"}; do
+    run_sh "$f"
+  done
+fi
+
 if [[ $SHELL_FAILED -ne 0 ]]; then
   FAILED=1
 fi
+
+# Steps 3-13 (python part), left unindented to keep their line history.
+if part_runs python; then
 
 # ---------------------------------------------------------------------------
 # 3. Manifest check
@@ -568,6 +636,8 @@ if [[ ${#MYPY[@]} -eq 0 ]]; then
 elif ! "${MYPY[@]}"; then
   FAILED=1
 fi
+
+fi  # end of steps 3-13
 
 # ---------------------------------------------------------------------------
 echo ""

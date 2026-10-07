@@ -3,7 +3,8 @@
 #
 # Regression test for issue #872: assert_present/assert_absent must keep
 # passing when a sentence is re-wrapped at a different column, since that is
-# precisely the failure mode that broke tests/test_worktree_merge_cleanup.sh
+# precisely the failure mode that broke the worktree-merge-cleanup SKILL.md
+# assertions
 # ~8 times in one review round. This test builds three on-disk variants of the
 # same prose — unwrapped, re-wrapped mid-sentence, and wrapped inside an
 # indented list item — and asserts all three produce identical PASS/FAIL results.

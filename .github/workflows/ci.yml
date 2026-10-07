@@ -121,12 +121,12 @@ jobs:
 
   test:
     runs-on: ubuntu-24.04
-    # 15 was not headroom, it was the wall: the suite ran 13m13s and 13m41s on
-    # the two PRs before this one, then hit 15m16s and was cancelled the moment
-    # a branch carried two hooks' tests at once. The shell suite spawns a
-    # process per case, so every added hook buys minutes, not seconds. This
-    # buys room; the fix is to split the shell suite into its own job so it
-    # runs beside the python one instead of after it.
+    # The shell suite is most of the wall time, so it runs as its own leg.
+    strategy:
+      fail-fast: false
+      matrix:
+        part: [python, shell]
+    name: test (${{ matrix.part }})
     timeout-minutes: 25
     steps:
       # fetch-depth:0 — what needs it is run-tests.sh's markdownlint step: it
@@ -206,12 +206,14 @@ jobs:
       - run: bash scripts/run-tests.sh
         env:
           PRAXIS_TESTS_STRICT: "1"
+          PRAXIS_TEST_PART: ${{ matrix.part }}
           COVERAGE_FILE: ${{ github.workspace }}/.coverage
       # Per-file coverage table on the job summary (issue #1303). The floor
       # already gated inside run-tests.sh; this step only renders the same
       # data, so it inherits the pass. coverage 7.16.0 supports
       # --format=markdown (verified against `coverage report --help`).
       - run: python3 -m coverage report --format=markdown >> "$GITHUB_STEP_SUMMARY"
+        if: matrix.part == 'python'
         env:
           COVERAGE_FILE: ${{ github.workspace }}/.coverage
 

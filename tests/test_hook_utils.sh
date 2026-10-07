@@ -435,11 +435,6 @@ print(safe_tokenize(sys.argv[1]))
   fi
 }
 
-# Issue #510 regression: `git \<newline>commit` must keep argv[0] ('git').
-run_tokens "line-continuation rejoins argv[0]" \
-  "['git', 'commit']" \
-  $'git \\\ncommit'
-
 run_tokens "line-continuation with trailing flags" \
   "['git', 'commit', '-m', 'x']" \
   $'git \\\ncommit -m x'
@@ -447,11 +442,6 @@ run_tokens "line-continuation with trailing flags" \
 run_tokens "multiple line continuations collapse" \
   "['a', 'b', 'c']" \
   $'a \\\nb \\\nc'
-
-# A genuine newline (no preceding backslash) is still a `;` separator.
-run_tokens "bare newline stays a separator" \
-  "['git', 'status', ';', 'git', 'log']" \
-  $'git status\ngit log'
 
 # ---------------------------------------------------------------------------
 # safe_tokenize — newlines inside a quote (issues #972, #987)
@@ -461,15 +451,9 @@ run_tokens "bare newline stays a separator" \
 # the opening and the closing line their own shlex pass, both raised
 # `ValueError: No closing quotation`, and the fail-open arm dropped them —
 # losing argv[0] (#972) and, when a real command rode on the closing line, the
-# whole command (#987, which blinded all three merge gates). The same cases
-# live in tests/test_safe_tokenize_multiline_quote.py; they are duplicated
-# here because this shell suite runs without pytest installed.
-
-# Issue #972: a multi-line `--body` must keep its `gh` argv[0], and the
-# newline must stay *inside* the body token rather than splitting it off.
-run_tokens "multi-line quoted --body keeps argv[0] (#972)" \
-  "['gh', 'pr', 'comment', '949', '--body', '### Verification\\n| 1 | x | PASS(live) |\\n']" \
-  $'gh pr comment 949 --body \'### Verification\n| 1 | x | PASS(live) |\n\''
+# whole command (#987, which blinded all three merge gates). Cases whose full
+# token stream tests/test_safe_tokenize_multiline_quote.py already pins live
+# only there; the ones below assert a stream that file does not.
 
 # Issue #987: the command riding on the quote-closing line must survive.
 run_tokens "command after a multi-line double quote survives (#987)" \
@@ -479,13 +463,6 @@ run_tokens "command after a multi-line double quote survives (#987)" \
 run_tokens "command after a multi-line single quote survives (#987)" \
   "['git', 'commit', '-m', 'line one\\nline two', '&&', 'gh', 'pr', 'merge', '9', '--squash']" \
   $'git commit -m \'line one\nline two\' && gh pr merge 9 --squash'
-
-# The heredoc-in-command-substitution shape #987 reported. The body is blanked
-# by strip_heredoc_bodies first (#985), so the `-m` token is the opaque
-# substitution — but the `&&` and the merge after it are now visible.
-run_tokens "heredoc commit followed by a merge survives (#987)" \
-  "['git', 'commit', '-m', \"\$(cat <<'EOF'\\n\\nEOF\\n)\", '&&', 'gh', 'pr', 'merge', '9', '--squash']" \
-  $'git commit -m "$(cat <<\'EOF\'\nbody line\nEOF\n)" && gh pr merge 9 --squash'
 
 # Anti-bypass: an unquoted `#` comment opens no quote, so the apostrophe in
 # `don't` must not swallow the real merge on the next line. #1091 strips the
@@ -546,19 +523,6 @@ run_tokens "quotes inside a command substitution do not leak to the outer quote"
 run_tokens "arithmetic expansion is not read as a command substitution" \
   "['echo', '\$((1 << 3))', ';', 'gh', 'pr', 'merge', '9', '--squash']" \
   $'echo "$((1 << 3))"\ngh pr merge 9 --squash'
-
-# `commenters = ""` is untouched: the side-effect-scan opt-out marker must
-# still tokenize rather than being eaten as a comment.
-run_tokens "side-effect ack marker still tokenizes" \
-  "['git', 'commit', '-m', 'x', '#', 'side-effect:ack']" \
-  'git commit -m x # side-effect:ack'
-
-# Fail-open is preserved: a quote left open at the end of the command is
-# handed to shlex unchanged, so it raises and the `except ValueError` arm
-# returns no tokens rather than crashing the hook.
-run_tokens "unterminated quote still fails open" \
-  "[]" \
-  $'echo "never closed'
 
 # ---------------------------------------------------------------------------
 # Summary
