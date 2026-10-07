@@ -5,6 +5,42 @@ All notable changes to praxis are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.20.0](https://github.com/devseunggwan/praxis/compare/v7.19.0...v7.20.0) (2026-10-07)
+
+
+### Added
+
+* **block-unmatched-glob:** cut plain newlines like ; ([#1560](https://github.com/devseunggwan/praxis/issues/1560)) ([9e3d61c](https://github.com/devseunggwan/praxis/commit/9e3d61c997cc7e1c19eb424d986ddc2a99993eed))
+* **block-unmatched-glob:** judge the rest after a leading cd ([#1556](https://github.com/devseunggwan/praxis/issues/1556)) ([cefe014](https://github.com/devseunggwan/praxis/commit/cefe0143693d0781bb282b3e7f05002b9950ec30))
+* **block-unmatched-glob:** scope a dollar to its own word ([#1558](https://github.com/devseunggwan/praxis/issues/1558)) ([e5e4d84](https://github.com/devseunggwan/praxis/commit/e5e4d840a6cf73426aa2ba98ba7edb12494e38b1))
+* **delegate:** mark claude workers unattended ([#1521](https://github.com/devseunggwan/praxis/issues/1521)) ([5ae346e](https://github.com/devseunggwan/praxis/commit/5ae346e88964d04c55c0f6b0fe5f5f887839c630))
+* **foreground-poll-loop-guard:** flag uncapped waiters ([#1552](https://github.com/devseunggwan/praxis/issues/1552)) ([36fadd0](https://github.com/devseunggwan/praxis/commit/36fadd0a5f7cbc25bea5ffd942e700f8faccfe22))
+* **hooks:** add block-guard-removal-menu gate ([#1529](https://github.com/devseunggwan/praxis/issues/1529)) ([14b56a9](https://github.com/devseunggwan/praxis/commit/14b56a9f36cca3f489ee6161f452fe5ddf106521))
+* **hosts:** add Hermes Agent as a host ([#1564](https://github.com/devseunggwan/praxis/issues/1564)) ([cf80356](https://github.com/devseunggwan/praxis/commit/cf803561bba0dac3ced6889fa58b3f3df0e9d2e1))
+* **zsh-dialect-advisory:** ask on a status assignment ([#1551](https://github.com/devseunggwan/praxis/issues/1551)) ([1485ad9](https://github.com/devseunggwan/praxis/commit/1485ad9a94f122b95793297f7d2da369e73d5d51))
+
+
+### Fixed
+
+* **block-unmatched-glob:** judge commands with a redirect ampersand ([#1553](https://github.com/devseunggwan/praxis/issues/1553)) ([b24c3f1](https://github.com/devseunggwan/praxis/commit/b24c3f1954a90492e316e672c5c35191087f76ce))
+* **block-unmatched-glob:** skip typeset and subscript assignment values ([#1562](https://github.com/devseunggwan/praxis/issues/1562)) ([3898e02](https://github.com/devseunggwan/praxis/commit/3898e02338015b99b4c4bc82541d363532696668))
+* **caller-probe-gate:** narrow scope, accept caller chain line ([#1547](https://github.com/devseunggwan/praxis/issues/1547)) ([d51f032](https://github.com/devseunggwan/praxis/commit/d51f0326f107937cb5548ea0e1f31840ed8f77c1))
+* **composed-command-gate:** match whole pipeline over full session ([#1546](https://github.com/devseunggwan/praxis/issues/1546)) ([4893c19](https://github.com/devseunggwan/praxis/commit/4893c19a44ff709e555260ea6d2fadf1047d8730))
+* **elapsed-time-signal:** stay silent on a zero start ([#1550](https://github.com/devseunggwan/praxis/issues/1550)) ([76f3868](https://github.com/devseunggwan/praxis/commit/76f38684cdcd76299988dc1e4a7885e31ffeafb7))
+* **eval:** run rule-ab-eval jobs without user settings ([#1536](https://github.com/devseunggwan/praxis/issues/1536)) ([2f6881f](https://github.com/devseunggwan/praxis/commit/2f6881f0809c41f4e6e377d09d04e0238f7fcca7)), closes [#1535](https://github.com/devseunggwan/praxis/issues/1535)
+* **hooks:** narrow n1 quantitative claim forms ([#1548](https://github.com/devseunggwan/praxis/issues/1548)) ([2e00407](https://github.com/devseunggwan/praxis/commit/2e00407ad3eeb24711127c52d87cb6e3e9436f9b))
+* **hooks:** read whole session in citation gate ([#1545](https://github.com/devseunggwan/praxis/issues/1545)) ([287d839](https://github.com/devseunggwan/praxis/commit/287d83925979bf233b3249df15db219155bfddaf))
+* **perf-multiplier-evidence-advisory:** require perf context ([#1549](https://github.com/devseunggwan/praxis/issues/1549)) ([e94bbab](https://github.com/devseunggwan/praxis/commit/e94bbabfb72bee6a491cec61ad36dbb8f6e3cc7e))
+
+
+### Changed
+
+* add rule no-op audit for advisory hooks ([#1537](https://github.com/devseunggwan/praxis/issues/1537)) ([70627c1](https://github.com/devseunggwan/praxis/commit/70627c18a84dff91aa3ab02af63b3573a91fb557))
+* bump the codeql-action group with 2 updates ([#1557](https://github.com/devseunggwan/praxis/issues/1557)) ([812fcb3](https://github.com/devseunggwan/praxis/commit/812fcb3cb6a812abfe4d808003a8df50fe971bc0))
+* explain stderr-only unreachable hooks ([#1539](https://github.com/devseunggwan/praxis/issues/1539)) ([533769b](https://github.com/devseunggwan/praxis/commit/533769be46741502034b9f33672ad59d4555e2bf))
+* **skill-authoring:** require a completion criterion per step ([#1533](https://github.com/devseunggwan/praxis/issues/1533)) ([0fd8448](https://github.com/devseunggwan/praxis/commit/0fd84489eb0b936d64efbdbfcf1bf3af763e351a)), closes [#1532](https://github.com/devseunggwan/praxis/issues/1532)
+* **skills:** demote writing-praxis-skill to a docs page ([#1531](https://github.com/devseunggwan/praxis/issues/1531)) ([7f44a62](https://github.com/devseunggwan/praxis/commit/7f44a6222740f85f58519a779b993e2237bdb5af)), closes [#1530](https://github.com/devseunggwan/praxis/issues/1530)
+
 ## [7.19.0](https://github.com/devseunggwan/praxis/compare/v7.18.0...v7.19.0) (2026-09-28)
 
 
