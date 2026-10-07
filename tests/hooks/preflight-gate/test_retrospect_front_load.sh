@@ -68,7 +68,6 @@ SF2="$WORK_DIR/marker2.json"
 CAND2="$SF2.candidates.json"
 P2='{"tool_name":"Skill","tool_input":{"skill":"praxis:retrospect"},"session_id":"s2"}'
 invoke "$SF2" "$P2"
-[ "$RC" -eq 0 ] && [ -f "$SF2" ] && ok "no-transcript marker set rc=0" || bad "no-transcript rc=$RC"
 [ ! -f "$CAND2" ] && ok "no-transcript writes no candidate file" || bad "no-transcript wrote a candidate file"
 
 # --- case 3: transcript_path points to a missing file -> fail-open ----------

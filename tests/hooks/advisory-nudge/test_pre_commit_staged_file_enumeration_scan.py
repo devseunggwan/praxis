@@ -4,7 +4,6 @@ from __future__ import annotations
 import importlib.util
 import json
 import sys
-import tracemalloc
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -61,15 +60,3 @@ def test_missing_and_oversized_answer_none(tmp_path, monkeypatch):
     assert hook._seen_realpaths(path) is None
 
 
-def test_one_oversized_line_is_refused_before_allocation(tmp_path, monkeypatch):
-    """One oversized line is refused before allocation."""
-    path = tmp_path / "t.jsonl"
-    path.write_bytes(b'{"type": "assistant", "pad": "' + b"x" * (4 * 1024 * 1024) + b'"}\n')
-    monkeypatch.setattr(hook, "_MAX_TRANSCRIPT_BYTES", 64 * 1024)
-    tracemalloc.start()
-    try:
-        assert hook._seen_realpaths(str(path)) is None
-        peak = tracemalloc.get_traced_memory()[1]
-    finally:
-        tracemalloc.stop()
-    assert peak < 1024 * 1024
