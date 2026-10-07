@@ -341,6 +341,10 @@ packaging is *generated* from canonical metadata, not hand-edited:
   repository, homepage, category, keywords). `VERSION` is the authoritative
   version string.
 - `manifests/platforms/{claude,codex,cursor}.json` — per-platform output list.
+- `manifests/platforms/hermes.json` — the Hermes Agent host. It declares no
+  outputs: Hermes reads hooks from its own `config.yaml`, which
+  `plugins/hermes/bridge.py --print-config` prints for the running clone (see
+  [Hermes Agent adapter](#hermes-agent-adapter)).
 - `manifests/platforms/agent-plugins.json` — not a host, a *format*: the
   vendor-neutral [Agent Plugins](https://agent-plugins.org/) 1.0.0 manifest.
 - `scripts/build-plugin-manifests.py` — regenerate every artifact. Idempotent.
@@ -389,6 +393,59 @@ Generated (committed) outputs:
 | `.cursor-plugin/plugin.json` | Cursor IDE plugin root |
 | `.cursor-plugin/hooks/hooks.json` | Cursor-compatible hooks (filtered) |
 | `plugin.json` | Agent Plugins 1.0.0 portable manifest |
+
+### Hermes Agent adapter
+
+Hermes Agent runs shell hooks declared in its `config.yaml`: it pipes one JSON
+payload on stdin and reads one JSON object from stdout, in its own event names
+and tool names. `plugins/hermes/bridge.py` is that hook. It translates the
+payload to Claude Code's shape (`hooks/_lib/_hermes.py`), runs every matching
+manifest group through `_dispatch.run_group` with `host="hermes"`, and turns
+the group's decision back into a Hermes response. Which hooks run is the
+manifest's `hosts` field, the same filter the other platforms use.
+
+| Hermes event | praxis event | Response |
+| --- | --- | --- |
+| `pre_tool_call` | `PreToolUse` | deny → `block`, ask → `approve` (human approval), Bash `updatedInput` → `modify`, additionalContext → `context` |
+| `pre_llm_call` | `UserPromptSubmit` | `context`, appended to the user message |
+
+| Hermes tool | Claude tool |
+| --- | --- |
+| `terminal` | `Bash` |
+| `write_file` / `patch` / `read_file` | `Write` / `Edit` / `Read` |
+| `clarify` | `AskUserQuestion` (`choices` → `options[].label`) |
+| `delegate_task` (spawn) | one `Agent` call per task |
+| `skill_view` (no `file_path`) | `Skill` |
+| `mcp__*` | unchanged |
+
+**Transcript.** Hermes keeps each session's messages in `state.db` and writes
+the assistant message carrying a tool call before the call runs. The bridge
+appends the session's new rows to a Claude-shaped JSONL under
+`~/.praxis/cache/hermes-transcripts/` and passes it as `transcript_path`, so a
+gate that reads the text written just before the call (the merge-briefing
+gate) works the same way. A `clarify` answer is written as Claude's
+`"<question>"="<answer>"` result text. `state.db` is Hermes-internal; an
+unreadable or changed schema leaves the transcript empty, which the
+transcript-reading gates already treat as fail-open.
+
+**Install.** `plugins/hermes/bridge.py --print-config` prints the `hooks:`
+entries with this clone's path; merge them into Hermes's `config.yaml`. The
+`pre_tool_call` entry is `fail_closed: true` with a 25 s timeout, under
+Hermes's 30 s `plugins.hook_callback_timeout`, past which the plugin layer
+blocks the call anyway.
+
+**What does not carry over** (Hermes behaviour, read in its source):
+
+- `Stop` / `SubagentStop` hooks have no Hermes event that fires on every turn.
+  `pre_verify` is the nearest and fires only on turns that edited files.
+- `pre_tool_call` responses carrying only `context` are discarded, so
+  PreToolUse advisories do not reach the model under Hermes. The bridge still
+  emits them.
+- `post_tool_call` and `on_session_start` ignore hook output, so `PostToolUse`
+  and `SessionStart` hooks are not bridged.
+- Hooks whose premise is Claude Code's Bash tool are excluded with `hosts`:
+  `zsh-dialect-advisory` (Hermes's `terminal` runs bash) and the two 120 s
+  foreground-ceiling hooks (Hermes defaults to 180 s, up to 600 s).
 
 ### Agent Plugins portable manifest
 

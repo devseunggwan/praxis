@@ -100,6 +100,7 @@ bare names (`opus`, `sonnet`, `haiku`) always resolve to Claude. Details:
 
 Runtime source (`skills/`, `hooks/`, `scripts/`) is shared; per-platform
 manifests (Claude, Codex, Cursor) are generated from canonical metadata.
+Hermes Agent runs the same hooks through `plugins/hermes/bridge.py`.
 Details:
 [`ARCHITECTURE.md → Multi-Platform Packaging`](ARCHITECTURE.md#multi-platform-packaging).
 
