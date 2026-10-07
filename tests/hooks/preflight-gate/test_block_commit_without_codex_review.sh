@@ -454,9 +454,11 @@ unset PRAXIS_CODEX_REVIEW_STRICT
 
 # Controlled no-codex PATH: a dir holding only a python3 symlink (the hook
 # shebang needs it) so these cases hold on machines that DO have a real
-# codex CLI installed — trusting the runner's PATH is env-dependent.
+# codex CLI installed — trusting the runner's PATH is env-dependent. Link the
+# real interpreter (sys.executable): `command -v python3` can be a pyenv/asdf
+# shim (`#!/usr/bin/env bash`) that cannot start under PATH=$SAFE_BIN_DIR.
 SAFE_BIN_DIR=$(mktemp -d) || { echo "FATAL: mktemp -d failed" >&2; exit 1; }
-ln -s "$(command -v python3)" "$SAFE_BIN_DIR/python3"
+ln -s "$(python3 -c 'import sys; print(sys.executable)')" "$SAFE_BIN_DIR/python3"
 
 run_case "1187: no capability (sanitized PATH) → warn (advisory)" warn Bash \
   'git commit -m "feat: x"' "$TX_WITHOUT" "PATH=$SAFE_BIN_DIR"
