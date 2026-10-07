@@ -426,7 +426,11 @@ Hermes later deactivates drop out) and passes it as `transcript_path`, so a
 gate that reads the text written just before the call (the merge-briefing
 gate) works the same way. A prompt the user typed while a turn runs is
 written at once with `display_metadata._queued_prompt` set; it is skipped
-until Hermes delivers it, because the model has not seen it yet. A `clarify`
+until Hermes delivers it, because the model has not seen it yet. A slash-skill
+invocation, which Hermes stores as one row (activation header, skill body, the
+user's instruction), is written as Claude Code writes it: the expanded body as
+an `isMeta` entry and the instruction (or the bare `/<skill>`) as the user's
+message. A `clarify`
 answer is written as Claude's `"<question>"="<answer>"` result text, and any
 other tool result whose JSON carries a truthy `error` (a gate block) or a
 non-zero `exit_code` is marked `is_error`, as Claude Code marks a failed or
