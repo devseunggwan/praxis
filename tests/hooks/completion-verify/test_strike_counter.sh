@@ -275,8 +275,9 @@ test_ac16_skill_files_exist() {
   local ok=1 rel
   for s in strike strikes reset-strikes; do
     [ -f "$ROOT_DIR/skills/$s/SKILL.md" ] || ok=0
-    rel=$(grep -o '\${CLAUDE_PLUGIN_ROOT}/[^"]*strike-counter\.sh' \
+    rel=$(grep -o '\${CLAUDE_PLUGIN_ROOT}/[^"]*strike-counter[^"]*"' \
       "$ROOT_DIR/skills/$s/SKILL.md" | head -1)
+    rel=${rel%\"}
     rel=${rel#\$\{CLAUDE_PLUGIN_ROOT\}/}
     if [ -z "$rel" ] || [ ! -x "$ROOT_DIR/$rel" ]; then ok=0; fi
   done
