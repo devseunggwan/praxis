@@ -689,7 +689,13 @@ an explicit `SKIPPED:` line when the tool is not installed, so a missing
 toolchain does not block you. The corresponding CI job still runs either way,
 so install them if you want local parity.
 
-**One run at a time per checkout.** Eleven suites verify
+**Shell suites run in parallel.** Step 2 runs the shell suites
+`PRAXIS_TEST_JOBS` at a time (default: the core count; `PRAXIS_TEST_JOBS=1`
+restores the serial run) and replays each suite's output in file order.
+`PRAXIS_TEST_PART=python|shell` runs one half of the steps; CI runs the two
+halves as parallel jobs.
+
+**One run at a time per checkout.** Fifteen suites verify
 `check-plugin-manifests.py` by editing a real file in the working tree, running
 the checker, and restoring from a backup on `EXIT`. Two such runs in one
 checkout corrupt each other — the second snapshots the first's mutation as its
@@ -697,7 +703,9 @@ baseline — and the failures that follow name the assertion, never the cause.
 `tests/_tree_mutation_lock.sh` now serializes them: a second run waits, and
 says so, instead of interleaving (issue #1377). Set `PRAXIS_TREE_LOCK_WAIT` to
 change the timeout. Where `flock(1)` is unavailable the lock is skipped with a
-note, so keep the runs serial yourself there.
+note, so keep the runs serial yourself there. The runner keys on the same file:
+a suite that sources it is held out of the parallel batch and runs alone, so a
+new suite that edits the tree must source the lock or it will race the others.
 
 A related trap when writing a suite: assert on what your test *changed*, not on
 global state it does not own. Two cases in this repo graded a path outside

@@ -41,15 +41,17 @@ fail() { FAIL=$((FAIL + 1)); FAILED_NAMES+=("$1"); echo "FAIL  $1: $2" >&2; }
 # --- Extract the shipped marker constant and run_sh() ------------------------
 MARKER_DEF="$(grep '^SUBSKIP_MARKER=' "$RUNNER")"
 RUN_SH_DEF="$(sed -n '/^run_sh() {/,/^}/p' "$RUNNER")"
+FOLD_DEF="$(sed -n '/^fold_sh_result() {/,/^}/p' "$RUNNER")"
 
-if [ -z "$MARKER_DEF" ] || [ -z "$RUN_SH_DEF" ]; then
-  echo "FAIL: could not extract SUBSKIP_MARKER / run_sh() from $RUNNER" >&2
+if [ -z "$MARKER_DEF" ] || [ -z "$RUN_SH_DEF" ] || [ -z "$FOLD_DEF" ]; then
+  echo "FAIL: could not extract SUBSKIP_MARKER / run_sh() / fold_sh_result() from $RUNNER" >&2
   echo "      (the extraction anchors must track any refactor of run-tests.sh)" >&2
   exit 1
 fi
 
 eval "$MARKER_DEF"
 eval "$RUN_SH_DEF"
+eval "$FOLD_DEF"
 
 # --- Environment run_sh() expects --------------------------------------------
 PRAXIS_HOME="$(mktemp -d)" || { echo "FAIL: mktemp -d failed" >&2; exit 1; }
@@ -119,7 +121,37 @@ else
   fail "nonzero sub-suite exit still sets SHELL_FAILED" "SHELL_FAILED=$SHELL_FAILED"
 fi
 
-# --- 6. Every known whole-file skip guard emits the marker -------------------
+# --- 6. The parallel path folds results exactly like run_sh() ----------------
+PAR_DEF="$(sed -n '/^run_sh_parallel() {/,/^}/p' "$RUNNER")"
+if [ -z "$PAR_DEF" ]; then
+  fail "run_sh_parallel() is extractable" "no /^run_sh_parallel() {/ span in $RUNNER"
+else
+  eval "$PAR_DEF"
+  SHELL_FAILED=0
+  SKIPPED_TOOLS=()
+  SHELL_JOBS=2
+  replay="$PRAXIS_HOME/parallel-replay.txt"
+  # Replayed stdout carries the fake marker, so it must not reach this file's
+  # own stdout (see the header).
+  run_sh_parallel "$FAKES/test_skips.sh" "$FAKES/test_fails.sh" \
+    "$FAKES/test_clean.sh" >"$replay" 2>/dev/null
+  if [ "${SKIPPED_TOOLS[*]-}" = "faketool" ] && [ "$SHELL_FAILED" -eq 1 ]; then
+    pass "parallel run folds skips and failures"
+  else
+    fail "parallel run folds skips and failures" \
+      "SKIPPED_TOOLS=(${SKIPPED_TOOLS[*]-}) SHELL_FAILED=$SHELL_FAILED"
+  fi
+  skip_line=$(grep -n 'faketool unavailable' "$replay" | cut -d: -f1)
+  clean_line=$(grep -n 'all good' "$replay" | cut -d: -f1)
+  if [ -n "$skip_line" ] && [ -n "$clean_line" ] && [ "$skip_line" -lt "$clean_line" ]; then
+    pass "parallel output is replayed in file order"
+  else
+    fail "parallel output is replayed in file order" \
+      "skip_line=$skip_line clean_line=$clean_line"
+  fi
+fi
+
+# --- 7. Every known whole-file skip guard emits the marker -------------------
 # Static check (no PATH games): a guard that exits 0 for a missing tool must
 # print the marker first, or the skip is invisible to strict mode again.
 GUARDED_FILES=(
