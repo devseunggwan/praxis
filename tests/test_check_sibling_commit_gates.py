@@ -142,7 +142,7 @@ def test_name_missing_from_spec_table_is_drift(tmp_path):
         tmp_path,
         {
             gates.SPEC: (
-                "| `commit-decomposition-advisory` | `claude` | oversized single "
+                "| `commit-decomposition-advisory` | `claude`, `hermes` | oversized single "
                 "commit |\n",
                 "",
             )
