@@ -5,6 +5,13 @@ All notable changes to praxis are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.20.1](https://github.com/devseunggwan/praxis/compare/v7.20.0...v7.20.1) (2026-10-07)
+
+
+### Fixed
+
+* **hermes:** fix merge gate transcript defects ([#1566](https://github.com/devseunggwan/praxis/issues/1566)) ([1866fc0](https://github.com/devseunggwan/praxis/commit/1866fc0d75a81da4cc21f40f822de9442fd109f7)), closes [#1565](https://github.com/devseunggwan/praxis/issues/1565)
+
 ## [7.20.0](https://github.com/devseunggwan/praxis/compare/v7.19.0...v7.20.0) (2026-10-07)
 
 
