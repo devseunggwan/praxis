@@ -239,6 +239,15 @@ _RUNTIME_NOTE = "\n\n[Runtime note:"
 _BUNDLE_MARKER = " skill bundle,"
 _BUNDLE_USER_INSTRUCTION = "\nUser instruction: "
 _BUNDLE_FIRST_SKILL_BLOCK = "\n\n[Loaded as part of the "
+_SKILL_DIR_NOTE_END = "then run them with the terminal tool using the absolute path."
+
+
+def _is_skill_scaffold(content: str) -> bool:
+    """Whether a user row is Hermes's expansion, not text that merely starts like it."""
+    header = content.split("\n", 1)[0]
+    return content.startswith(_SKILL_INVOCATION_PREFIX) and (
+        _SINGLE_SKILL_MARKER in header or _BUNDLE_MARKER in header
+    )
 
 
 def _user_message(text: str, meta: bool = False) -> dict:
@@ -250,14 +259,17 @@ def _user_message(text: str, meta: bool = False) -> dict:
 
 def _skill_instruction(content: str) -> Optional[str]:
     """The user's instruction in a skill-invocation scaffold, or None for a bare invocation."""
-    if _BUNDLE_MARKER in content:
-        # A bundle states the instruction before the loaded skills: the first marker is the user's.
+    header = content.split("\n", 1)[0]
+    if _BUNDLE_MARKER in header:
+        # A bundle states the instruction before the loaded skills; a body may quote the marker.
         marker, stop = _BUNDLE_USER_INSTRUCTION, _BUNDLE_FIRST_SKILL_BLOCK
-        idx = content.find(marker)
-    elif _SINGLE_SKILL_MARKER in content:
-        # A single skill states it after the body, which may quote the marker: the last one is the user's.
+        end = content.find(stop)
+        idx = content.find(marker, 0, end if end >= 0 else len(content))
+    elif _SINGLE_SKILL_MARKER in header:
+        # A single skill states it after the body's footer; a body may quote the marker.
         marker, stop = _SINGLE_SKILL_INSTRUCTION, _RUNTIME_NOTE
-        idx = content.rfind(marker)
+        footer = content.rfind(_SKILL_DIR_NOTE_END)
+        idx = content.rfind(marker, footer + len(_SKILL_DIR_NOTE_END) if footer >= 0 else 0)
     else:
         return None
     if idx < 0:
@@ -282,10 +294,11 @@ def _user_events(content: str) -> Iterator[dict]:
     Claude Code writes the expanded body as an `isMeta` entry and the typed text
     as its own message, and the gates count only the latter as the user's turn,
     so the row is split the same way. The instruction is cut out with Hermes's
-    own markers (`extract_user_instruction_from_skill_message`); with none, the
-    typed text was the bare `/<skill>`.
+    own markers, searched only where Hermes writes it (after the body's footer,
+    or before a bundle's first skill) so a body quoting a marker is not read as
+    one; with none, the typed text was the bare `/<skill>`.
     """
-    if not content.startswith(_SKILL_INVOCATION_PREFIX):
+    if not _is_skill_scaffold(content):
         yield _user_message(content)
         return
     yield _user_message(content, meta=True)
