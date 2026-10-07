@@ -99,12 +99,12 @@ derived from the `"gates": ["git-commit"]` field each carries in
 | Sibling hook | Hosts | What it gates |
 | -------------- | ------- | --------------- |
 | `block-commit-without-codex-review` | `claude` | commit before the review step |
-| `commit-decomposition-advisory` | `claude` | oversized single commit |
+| `commit-decomposition-advisory` | `claude`, `hermes` | oversized single commit |
 | `commit-message-paren-check` | all | a message line release-please's parser rejects |
 | `commit-title-format-check` | all | Conventional Commits title format |
 | `commit-title-length-check` | all | title length |
 | `internal-token-leak-gate` | all | an internal identifier headed for a public repo |
-| `pre-commit-staged-file-enumeration` | `claude` | staging without enumerating files |
+| `pre-commit-staged-file-enumeration` | `claude`, `hermes` | staging without enumerating files |
 | `verify-commit-flag-override` | all | `-n` / `--no-verify` flag override |
 
 Four of the eight siblings are the checklist `verify-commit-flag-override`

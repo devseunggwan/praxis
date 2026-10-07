@@ -1,6 +1,9 @@
 # PreToolUse zsh Dialect Advisory
 
-Supported hosts: all
+Supported hosts: agent-plugins, claude, codex, cursor
+
+Not Hermes: its `terminal` tool runs bash, where the shapes this hook asks
+about are correct.
 
 `hooks/advisory-nudge/zsh-dialect-advisory/impl.py` fires on PreToolUse for
 `Bash` tool calls and reports five shapes that behave differently under zsh

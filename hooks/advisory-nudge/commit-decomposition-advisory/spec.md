@@ -1,6 +1,6 @@
 # PreToolUse Commit-Decomposition Advisory
 
-Supported hosts: claude
+Supported hosts: claude, hermes
 
 `hooks/advisory-nudge/commit-decomposition-advisory/impl.py` intercepts `Bash`
 tool calls containing a fresh `git commit` whose message is readable from argv,

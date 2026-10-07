@@ -1,6 +1,6 @@
 # PreToolUse Pre-Commit Staged-File Enumeration Advisory
 
-Supported hosts: claude
+Supported hosts: claude, hermes
 
 `hooks/advisory-nudge/pre-commit-staged-file-enumeration/impl.py` intercepts
 `Bash` tool calls containing a fresh `git commit` and emits a **stderr

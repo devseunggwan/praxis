@@ -1,6 +1,9 @@
 # PreToolUse Foreground Poll-Loop Guard
 
-Supported hosts: all
+Supported hosts: agent-plugins, claude, codex, cursor
+
+Not Hermes: the 120 s ceiling below is Claude Code's Bash default; Hermes's
+`terminal` defaults to 180 s and accepts up to 600 s in the foreground.
 
 `hooks/preflight-gate/foreground-poll-loop-guard/impl.py` intercepts every Bash
 tool call and blocks foreground poll-loops that will hit the Bash default
