@@ -191,6 +191,12 @@
       "role": "preflight-gate",
       "event": "PreToolUse",
       "matcher": "Bash",
+      "hosts": [
+        "agent-plugins",
+        "claude",
+        "codex",
+        "cursor"
+      ],
       "timeout": 5,
       "review_by": "2026-12-04",
       "mode": {
@@ -330,7 +336,8 @@
       "matcher": "Bash",
       "hosts": [
         "claude",
-        "codex"
+        "codex",
+        "hermes"
       ],
       "timeout": 5,
       "review_by": "2026-12-04",
@@ -345,7 +352,8 @@
       "matcher": "Bash",
       "hosts": [
         "claude",
-        "codex"
+        "codex",
+        "hermes"
       ],
       "timeout": 5,
       "review_by": "2026-12-04",
@@ -644,6 +652,12 @@
       "role": "advisory-nudge",
       "event": "PreToolUse",
       "matcher": "Bash",
+      "hosts": [
+        "agent-plugins",
+        "claude",
+        "codex",
+        "cursor"
+      ],
       "timeout": 5,
       "review_by": "2026-12-04"
     },
@@ -742,6 +756,12 @@
       "role": "advisory-nudge",
       "event": "PreToolUse",
       "matcher": "Bash",
+      "hosts": [
+        "agent-plugins",
+        "claude",
+        "codex",
+        "cursor"
+      ],
       "timeout": 5,
       "review_by": "2026-12-04"
     },
@@ -770,7 +790,8 @@
         "git-commit"
       ],
       "hosts": [
-        "claude"
+        "claude",
+        "hermes"
       ],
       "timeout": 10,
       "review_by": "2026-12-04",
@@ -789,7 +810,8 @@
         "git-commit"
       ],
       "hosts": [
-        "claude"
+        "claude",
+        "hermes"
       ],
       "timeout": 10,
       "review_by": "2026-12-04",
@@ -935,7 +957,8 @@
       "matcher": "Bash",
       "hosts": [
         "claude",
-        "codex"
+        "codex",
+        "hermes"
       ],
       "timeout": 5,
       "review_by": "2026-12-04",

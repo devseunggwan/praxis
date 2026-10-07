@@ -1,6 +1,9 @@
 # long-foreground-call-advisory
 
-Supported hosts: all
+Supported hosts: agent-plugins, claude, codex, cursor
+
+Not Hermes: the 120 s ceiling below is Claude Code's Bash default; Hermes's
+`terminal` defaults to 180 s and accepts up to 600 s in the foreground.
 
 `hooks/advisory-nudge/long-foreground-call-advisory/impl.py` runs on
 `PreToolUse(Bash)`. It writes a stderr advisory when a **foreground** Bash call

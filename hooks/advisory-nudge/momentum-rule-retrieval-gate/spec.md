@@ -1,6 +1,6 @@
 # PreToolUse Bash Momentum Rule Retrieval Gate
 
-Supported hosts: claude, codex
+Supported hosts: claude, codex, hermes
 
 Reference: [Autonomy vs Convention — ETHOS.md](../../../ETHOS.md#autonomy-vs-convention)
 

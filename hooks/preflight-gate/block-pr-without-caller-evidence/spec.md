@@ -1,6 +1,6 @@
 # PreToolUse Block PR Without Caller-Chain Evidence
 
-Supported hosts: claude, codex
+Supported hosts: claude, codex, hermes
 
 `hooks/preflight-gate/block-pr-without-caller-evidence/impl.py` fires on every PreToolUse(Bash)
 event and inspects the command for `gh pr create` / `gh pr new` invocations.
