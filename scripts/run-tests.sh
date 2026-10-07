@@ -226,9 +226,6 @@ unset CLAUDE_CONFIG_DIR
 FAILED=0
 SKIPPED_TOOLS=()
 
-# PRAXIS_TEST_PART splits the run so CI can run the halves as parallel jobs:
-# `shell` runs step 2 only, `python` runs every other step, and `all` (the
-# default) runs everything.
 TEST_PART="${PRAXIS_TEST_PART:-all}"
 case "$TEST_PART" in
   all|python|shell) ;;
@@ -237,8 +234,6 @@ case "$TEST_PART" in
 esac
 part_runs() { [[ "$TEST_PART" == all || "$TEST_PART" == "$1" ]]; }
 
-# Shell suites run this many at a time (step 2). Defaults to the core count;
-# PRAXIS_TEST_JOBS=1 restores the serial run.
 SHELL_JOBS="${PRAXIS_TEST_JOBS:-$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 1)}"
 if ! [[ "$SHELL_JOBS" =~ ^[1-9][0-9]*$ ]]; then
   echo "FATAL: PRAXIS_TEST_JOBS must be a positive integer (got: $SHELL_JOBS)" >&2
@@ -391,8 +386,7 @@ if [[ $SHELL_FAILED -ne 0 ]]; then
   FAILED=1
 fi
 
-# Steps 3-13 belong to the python part (PRAXIS_TEST_PART). Their bodies stay
-# unindented so each step keeps its line history.
+# Steps 3-13 (python part), left unindented to keep their line history.
 if part_runs python; then
 
 # ---------------------------------------------------------------------------

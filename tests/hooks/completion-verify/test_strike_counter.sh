@@ -271,8 +271,6 @@ test_ac15_jq_missing_guidance() {
 }
 
 # ---- AC16 (plan AC9): skill files exist + the script they call resolves ----
-# Each skill runs `${CLAUDE_PLUGIN_ROOT}/<path>`; the path must be an
-# executable file in the plugin, not just a string in the skill body.
 test_ac16_skill_files_exist() {
   local ok=1 rel
   for s in strike strikes reset-strikes; do

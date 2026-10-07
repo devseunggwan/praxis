@@ -5,7 +5,6 @@
 # under a PTY and pins its stdio behaviour. The guards below live in the same
 # SKILL.md wrapper template but outside what that run reaches (rc gating, the
 # prompt-file and argv-size guards, the trap), so their shape is pinned here.
-# The rationale prose around them is not pinned: no code reads it.
 #
 # Run:  bash tests/test_wrapper_stdout_contract.sh
 # Exit: 0 = all pass; 1 = at least one fail

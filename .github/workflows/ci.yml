@@ -121,10 +121,7 @@ jobs:
 
   test:
     runs-on: ubuntu-24.04
-    # The shell suite spawns a process per case, so every added hook buys
-    # minutes, not seconds: serial, it alone ran ~14m of a ~18m job. It now
-    # runs as its own leg beside the python one, and run-tests.sh fans its
-    # files out across the runner's cores (PRAXIS_TEST_JOBS).
+    # The shell suite is most of the wall time, so it runs as its own leg.
     strategy:
       fail-fast: false
       matrix:
@@ -206,8 +203,6 @@ jobs:
       # runner's throwaway PRAXIS_HOME (its default location, swept by an EXIT
       # trap) and the summary step below can re-read it. .coverage is
       # gitignored; the runner never pushes, so nothing here can commit it.
-      # PRAXIS_TEST_PART picks this leg's half of run-tests.sh: `shell` runs
-      # step 2 only, `python` runs everything else.
       - run: bash scripts/run-tests.sh
         env:
           PRAXIS_TESTS_STRICT: "1"
