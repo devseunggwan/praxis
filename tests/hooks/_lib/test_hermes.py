@@ -178,6 +178,7 @@ def test_sync_fails_open_without_a_usable_database(tmp_path):
     (json.dumps({"error": "[praxis:merge-gate] blocked"}), True),        # a gate block: no exit code
     (json.dumps({"output": "", "exit_code": 1, "error": None}), True),   # ran and failed
     (json.dumps({"output": "merged", "exit_code": 0, "error": None}), False),
+    (json.dumps({"output": "", "exit_code": True}), False),               # a bool is not an exit status
     ("not json", False),
 ])
 def test_terminal_failure_is_an_error_result(tmp_path, content, failed):

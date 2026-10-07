@@ -227,7 +227,7 @@ def _tool_failed(content: str) -> bool:
     if not isinstance(data, dict):
         return False
     exit_code = data.get("exit_code")
-    return bool(data.get("error")) or (isinstance(exit_code, int) and exit_code != 0)
+    return bool(data.get("error")) or (type(exit_code) is int and exit_code != 0)
 
 
 def transcript_events(rows: List[sqlite3.Row], names: Dict[str, str]) -> Iterator[dict]:
