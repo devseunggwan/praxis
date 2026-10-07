@@ -424,7 +424,9 @@ the bridge rewrites a Claude-shaped JSONL under
 `~/.praxis/cache/hermes-transcripts/` from the session's active rows (rows
 Hermes later deactivates drop out) and passes it as `transcript_path`, so a
 gate that reads the text written just before the call (the merge-briefing
-gate) works the same way. A `clarify`
+gate) works the same way. A prompt the user typed while a turn runs is
+written at once with `display_metadata._queued_prompt` set; it is skipped
+until Hermes delivers it, because the model has not seen it yet. A `clarify`
 answer is written as Claude's `"<question>"="<answer>"` result text, and any
 other tool result whose JSON carries a truthy `error` (a gate block) or a
 non-zero `exit_code` is marked `is_error`, as Claude Code marks a failed or

@@ -189,6 +189,22 @@ def test_terminal_failure_is_an_error_result(tmp_path, content, failed):
     assert result.get("is_error", False) is failed
 
 
+def test_queued_prompt_is_not_a_user_message_yet(tmp_path):
+    db = _db(tmp_path / "state.db", ROWS[:3])
+    conn = sqlite3.connect(db)
+    conn.execute("ALTER TABLE messages ADD COLUMN display_metadata TEXT")
+    conn.execute("INSERT INTO messages (id, session_id, role, content, display_metadata) "
+                 "VALUES (4, 's1', 'user', ']', '{\"_queued_prompt\": true}')")
+    conn.execute("INSERT INTO messages (id, session_id, role, content, display_metadata) "
+                 "VALUES (5, 's1', 'user', 'later', 'not json')")
+    conn.commit()
+    conn.close()
+    out = hermes.sync_transcript("s1", tmp_path / "t", db)
+    users = [e["message"]["content"] for e in map(json.loads, out.read_text().splitlines())
+             if e["type"] == "user" and isinstance(e["message"]["content"], str)]
+    assert users == ["merge it", "later"]  # the undelivered queue row is skipped; bad metadata is not
+
+
 # --- decisions -----------------------------------------------------------------
 
 def test_parse_decision_and_stable_approval_key():
