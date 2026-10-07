@@ -2,8 +2,8 @@
 
 The #1044 rule is the one class that cannot have a hook: an evidence claim
 whose only carrier is a sentence emits no tool call, so the prose is not merely
-the current containment (as in `test_bypass_delegation_clause.py`) but the
-whole remedy by construction. That makes the prose the artifact under test.
+the current containment but the whole remedy by construction. That makes the
+prose the artifact under test.
 
 Its content is three-part — the class must be *named as unreachable*, the two
 compose-time questions must survive, and question 1 must keep the self-induced
