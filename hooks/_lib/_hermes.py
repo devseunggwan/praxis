@@ -211,7 +211,23 @@ def _tool_event(row: sqlite3.Row, tool: str) -> dict:
             block["content"] = answer
     else:
         block["content"] = content
+        if _tool_failed(content):
+            block["is_error"] = True
     return {"type": "user", "message": {"role": "user", "content": [block]}}
+
+
+def _tool_failed(content: str) -> bool:
+    """A Hermes tool result that reports a failure, as Claude marks one `is_error`.
+
+    A gate block comes back as `{"error": ...}` with no exit code; a command
+    that ran and failed carries a non-zero `exit_code`. Gates that ask whether a
+    call actually ran (the merge gate's executed-merge scan) read `is_error`.
+    """
+    data = _parse_json(content)
+    if not isinstance(data, dict):
+        return False
+    exit_code = data.get("exit_code")
+    return bool(data.get("error")) or (type(exit_code) is int and exit_code != 0)
 
 
 def transcript_events(rows: List[sqlite3.Row], names: Dict[str, str]) -> Iterator[dict]:
@@ -235,6 +251,21 @@ def transcript_events(rows: List[sqlite3.Row], names: Dict[str, str]) -> Iterato
                 yield _tool_event(row, tool)
 
 
+def _is_queued(row: sqlite3.Row) -> bool:
+    """A user row Hermes accepted into its busy queue but has not delivered.
+
+    A prompt typed while a turn runs is written at once with
+    `display_metadata._queued_prompt` set, then re-placed unmarked when the queue
+    drains and the marked row deactivated. Until then the model has not seen it,
+    so it is not the last user message of the running turn. Parsed here, not in
+    SQL, so an SQLite built without JSON functions reads the same transcript.
+    """
+    if "display_metadata" not in row.keys():  # older databases have no column
+        return False
+    meta = _parse_json(row["display_metadata"])
+    return isinstance(meta, dict) and meta.get("_queued_prompt") == 1
+
+
 def sync_transcript(session_id: str, out_dir: Path, db_path: Optional[Path] = None) -> Optional[Path]:
     """Write the session's active Hermes messages as a Claude JSONL; return its path.
 
@@ -253,8 +284,10 @@ def sync_transcript(session_id: str, out_dir: Path, db_path: Optional[Path] = No
         conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=2)
         conn.row_factory = sqlite3.Row
         try:
+            columns = {row[1] for row in conn.execute("PRAGMA table_info(messages)")}
+            meta = ", display_metadata" if "display_metadata" in columns else ""
             rows = conn.execute(
-                "SELECT id, role, content, tool_call_id, tool_calls, tool_name FROM messages "
+                f"SELECT id, role, content, tool_call_id, tool_calls, tool_name{meta} FROM messages "
                 "WHERE session_id = ? AND active = 1 ORDER BY id",
                 (session_id,),
             ).fetchall()
@@ -262,6 +295,7 @@ def sync_transcript(session_id: str, out_dir: Path, db_path: Optional[Path] = No
             conn.close()
     except sqlite3.Error:
         return None
+    rows = [row for row in rows if not _is_queued(row)]
     safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in session_id)[:120]
     digest = hashlib.sha256(session_id.encode()).hexdigest()[:8]
     out = out_dir / f"{safe}-{digest}.jsonl"

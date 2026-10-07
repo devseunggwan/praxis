@@ -328,9 +328,11 @@ assert_silent "fail-open on missing cwd"
 
 new_case_dir
 # Run with PATH pointing ONLY at a dir that has python3 but no git/gh, so
-# both lookups fail with ENOENT rather than reaching a real binary.
+# both lookups fail with ENOENT rather than reaching a real binary. Link the
+# real interpreter (sys.executable), not `command -v python3`: that can be a
+# pyenv/asdf shim (`#!/usr/bin/env bash`) that cannot start under this PATH.
 mkdir -p "$T/onlypy"
-ln -s "$(command -v python3)" "$T/onlypy/python3"
+ln -s "$(python3 -c 'import sys; print(sys.executable)')" "$T/onlypy/python3"
 PAYLOAD=$(payload_for "compact")
 run_hook "export PATH='$T/onlypy'" "$PAYLOAD"
 assert_emit "emit with git and gh absent from PATH (fields degrade, still exits 0)"

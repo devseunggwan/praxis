@@ -174,6 +174,62 @@ def test_sync_fails_open_without_a_usable_database(tmp_path):
     assert hermes.sync_transcript("s1", tmp_path / "t", bad) is None
 
 
+@pytest.mark.parametrize("content, failed", [
+    (json.dumps({"error": "[praxis:merge-gate] blocked"}), True),        # a gate block: no exit code
+    (json.dumps({"output": "", "exit_code": 1, "error": None}), True),   # ran and failed
+    (json.dumps({"output": "merged", "exit_code": 0, "error": None}), False),
+    (json.dumps({"output": "", "exit_code": True}), False),               # a bool is not an exit status
+    ("not json", False),
+])
+def test_terminal_failure_is_an_error_result(tmp_path, content, failed):
+    rows = [(1, "s1", "user", "merge", None, None, None),
+            (2, "s1", "assistant", "", None, json.dumps([_call("c1", "terminal", {"command": "gh pr merge 7"})]), None),
+            (3, "s1", "tool", content, "c1", None, "terminal")]
+    out = hermes.sync_transcript("s1", tmp_path / "t", _db(tmp_path / "state.db", rows))
+    result = json.loads(out.read_text().splitlines()[2])["message"]["content"][0]
+    assert result.get("is_error", False) is failed
+
+
+def test_queued_prompt_is_not_a_user_message_yet(tmp_path):
+    db = _db(tmp_path / "state.db", ROWS[:3])
+    conn = sqlite3.connect(db)
+    conn.execute("ALTER TABLE messages ADD COLUMN display_metadata TEXT")
+    conn.execute("INSERT INTO messages (id, session_id, role, content, display_metadata) "
+                 "VALUES (4, 's1', 'user', ']', '{\"_queued_prompt\": true}')")
+    conn.execute("INSERT INTO messages (id, session_id, role, content, display_metadata) "
+                 "VALUES (5, 's1', 'user', 'later', 'not json')")
+    conn.commit()
+    conn.close()
+    out = hermes.sync_transcript("s1", tmp_path / "t", db)
+    users = [e["message"]["content"] for e in map(json.loads, out.read_text().splitlines())
+             if e["type"] == "user" and isinstance(e["message"]["content"], str)]
+    assert users == ["merge it", "later"]  # the undelivered queue row is skipped; bad metadata is not
+
+
+def test_queued_filter_needs_no_sqlite_json_functions(tmp_path, monkeypatch):
+    # An SQLite built without JSON functions: any SQL-side json_* call raises,
+    # which sync_transcript would swallow into an empty (fail-open) transcript.
+    real_connect = sqlite3.connect
+
+    def no_json(*args, **kwargs):
+        conn = real_connect(*args, **kwargs)
+        for name in ("json_extract", "json_valid"):
+            conn.create_function(name, -1, lambda *_: 1 / 0)
+        return conn
+
+    db = _db(tmp_path / "state.db", ROWS[:1])
+    conn = real_connect(db)
+    conn.execute("ALTER TABLE messages ADD COLUMN display_metadata TEXT")
+    conn.execute("INSERT INTO messages (id, session_id, role, content, display_metadata) "
+                 "VALUES (2, 's1', 'user', ']', '{\"_queued_prompt\": true}')")
+    conn.commit()
+    conn.close()
+    monkeypatch.setattr(hermes.sqlite3, "connect", no_json)
+    out = hermes.sync_transcript("s1", tmp_path / "t", db)
+    assert out is not None
+    assert [json.loads(line)["message"]["content"] for line in out.read_text().splitlines()] == ["merge it"]
+
+
 # --- decisions -----------------------------------------------------------------
 
 def test_parse_decision_and_stable_approval_key():
