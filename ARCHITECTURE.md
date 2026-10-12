@@ -443,6 +443,15 @@ denied call. `state.db` is Hermes-internal; an
 unreadable or changed schema leaves the transcript empty, which the
 transcript-reading gates already treat as fail-open.
 
+**Approval.** Hermes remembers an "always" answer by the response's
+`rule_key`. The dispatcher emits only the first ask of a group, so the bridge
+collects every gate that asked through `run_group(asked_by=...)` and lists
+them all in the approval message. Gates in `GROUPED_APPROVAL_HOOKS`
+(`hooks/_lib/_hermes.py`) are keyed by gate plus the bracketed category tags in
+the reason (`praxis:side-effect-scan[git-push]`), so one "always" covers that
+category. If any other gate asked, the key hashes the reasons with the tool
+call's arguments and never repeats: an "always" there covers only the same call.
+
 **Install.** `plugins/hermes/bridge.py --print-config` prints the `hooks:`
 entries with this clone's path; merge them into Hermes's `config.yaml`. The
 `pre_tool_call` entry is `fail_closed: true` with a 25 s timeout, under
