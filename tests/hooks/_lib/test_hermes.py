@@ -279,8 +279,61 @@ def test_parse_decision_and_stable_approval_key():
                                              "updatedInput": {"command": "x"}}})
     assert hermes.parse_decision(out) == ("ask", "why", "", {"command": "x"})
     assert hermes.parse_decision("not json") == ("", "", "", {})
-    assert hermes.approve_response(["a"]) == hermes.approve_response(["a"])
-    assert hermes.approve_response(["a"])["rule_key"] != hermes.approve_response(["b"])["rule_key"]
+    assert hermes.approve_response([("", "a")]) == hermes.approve_response([("", "a")])
+    assert hermes.approve_response([("", "a")])["rule_key"] != hermes.approve_response([("", "b")])["rule_key"]
+
+
+def test_approval_key_is_the_gate_and_category_not_the_call():
+    """The same gate and category share one "always" key across calls."""
+    title = "Commit title too long: {n} chars (max 50). Title: '{t}'"
+    a = hermes.approval_rule_key([("commit-title-length-check", title.format(n=52, t="x" * 52))])
+    b = hermes.approval_rule_key([("commit-title-length-check", title.format(n=71, t="y" * 71))])
+    assert a == b == "praxis:commit-title-length-check"
+    push = "[git-push] remote trigger (git push) — target. If this run is intended, re-invoke."
+    assert hermes.approval_rule_key([("side-effect-scan", push)]) == "praxis:side-effect-scan[git-push]"
+
+
+def test_approval_key_separates_categories_and_prod():
+    push = hermes.approval_rule_key([("side-effect-scan", "[git-push] remote trigger.")])
+    merge = hermes.approval_rule_key([("side-effect-scan", "[gh-merge] remote trigger via gh.")])
+    prod = hermes.approval_rule_key([("side-effect-scan", "[prod] PROD scope — [git-push] remote trigger.")])
+    assert len({push, merge, prod}) == 3
+    both = hermes.approval_rule_key([("side-effect-scan", "[git-push] a. [gh-merge] b."),
+                                     ("commit-title-length-check", "too long")])
+    assert both == "praxis:commit-title-length-check+side-effect-scan[gh-merge][git-push]"
+
+
+PER_CALL_GATES = [
+    "approval-premise-reread-gate", "cross-boundary-preflight", "destructive-bash-guard",
+    "fan-out-scope-gate", "pre-merge-approval-gate", "rejected-mutation-reconsent-gate",
+    "session-intent", "a-gate-added-later",
+]
+
+
+@pytest.mark.parametrize("hook", PER_CALL_GATES)
+def test_per_call_gates_keep_a_call_specific_key(hook):
+    """An "always" on a merge or external write must not cover the next one,
+    even when the gate's reason is the same text both times."""
+    first = hermes.approval_rule_key([(hook, "same reason")], {"command": "gh pr merge 1"})
+    second = hermes.approval_rule_key([(hook, "same reason")], {"command": "gh pr merge 2"})
+    assert first != second
+    # A per-call gate behind another gate's ask still makes the key per-call.
+    behind = [("commit-title-length-check", "too long"), (hook, "same reason")]
+    assert hermes.approval_rule_key(behind, {"command": "a"}) != hermes.approval_rule_key(behind, {"command": "b"})
+
+
+def test_per_call_reason_leads_the_message():
+    asks = [("commit-title-length-check", "x" * 1600), ("destructive-bash-guard", "rm -rf")]
+    assert hermes.approve_response(asks)["message"].startswith("[praxis] [praxis:destructive-bash-guard] rm -rf")
+
+
+def test_unattributed_ask_keeps_a_call_specific_key():
+    assert hermes.approval_rule_key([("", "why 1")]) != hermes.approval_rule_key([("", "why 2")])
+
+
+def test_approval_message_names_the_gate():
+    response = hermes.approve_response([("side-effect-scan", "[git-push] remote trigger.")])
+    assert response["message"] == "[praxis] [praxis:side-effect-scan] [git-push] remote trigger."
 
 
 def test_bridge_turns_a_bash_rewrite_into_modify(monkeypatch, tmp_path):
@@ -289,7 +342,7 @@ def test_bridge_turns_a_bash_rewrite_into_modify(monkeypatch, tmp_path):
     rewrite = json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse",
                                                  "updatedInput": {"command": "ls -a"}}})
     monkeypatch.setattr(bridge, "_groups", lambda event, tool: ["Bash"])
-    monkeypatch.setattr(bridge, "_run", lambda event, matcher, payload: (0, rewrite, ""))
+    monkeypatch.setattr(bridge, "_run", lambda event, matcher, payload: (0, rewrite, "", ""))
     response = bridge.pre_tool_call({"tool_name": "terminal", "tool_input": {"command": "ls"},
                                      "cwd": str(tmp_path), "session_id": ""})
     assert response == {"action": "modify", "args": {"command": "ls -a"}}
@@ -297,9 +350,10 @@ def test_bridge_turns_a_bash_rewrite_into_modify(monkeypatch, tmp_path):
 
 # --- end to end through the real manifest --------------------------------------
 
-def _bridge(payload: dict, tmp_path: Path) -> dict:
+def _bridge(payload: dict, tmp_path: Path, extra_env: dict[str, str] | None = None) -> dict:
     env = {"HERMES_HOME": str(tmp_path), "PRAXIS_HOME": str(tmp_path / "praxis"),
-           "PATH": "/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin", "HOME": str(Path.home())}
+           "PATH": "/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin", "HOME": str(Path.home()),
+           **(extra_env or {})}
     proc = subprocess.run([sys.executable, str(BRIDGE)], input=json.dumps(payload), capture_output=True,
                           text=True, timeout=60, env=env, cwd=str(tmp_path))
     assert proc.returncode == 0, proc.stderr
@@ -318,7 +372,24 @@ def test_deny_becomes_block(tmp_path):
 
 def test_ask_becomes_human_approval(tmp_path):
     response = _bridge(_terminal("git push origin main", tmp_path), tmp_path)
-    assert response["action"] == "approve" and response["rule_key"].startswith("praxis:")
+    assert response["action"] == "approve"
+    assert response["rule_key"] == "praxis:side-effect-scan[git-push]"
+    again = _bridge(_terminal("git push origin issue-1-fix-other", tmp_path), tmp_path)
+    assert again["rule_key"] == response["rule_key"]
+
+
+def test_a_later_per_call_ask_is_not_hidden_by_an_earlier_one(tmp_path):
+    """commit-title-length-check runs before destructive-bash-guard; both ask,
+    and the key must stay per-call rather than the title gate's."""
+    strict = {"PRAXIS_DESTRUCTIVE_BASH_STRICT": "1"}
+    title = "fix: an intentionally long commit title well over fifty characters"
+    first = _bridge(_terminal(f'git commit -m "{title}" && rm -rf ~/a', tmp_path), tmp_path, strict)
+    second = _bridge(_terminal(f'git commit -m "{title}" && rm -rf ~/b', tmp_path), tmp_path, strict)
+    assert first["action"] == "approve"
+    assert "[praxis:destructive-bash-guard]" in first["message"]
+    assert "[praxis:commit-title-length-check]" in first["message"]
+    assert first["rule_key"] != second["rule_key"]
+    assert not first["rule_key"].startswith("praxis:commit-title-length-check")
 
 
 def test_advisory_becomes_context(tmp_path):

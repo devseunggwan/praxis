@@ -64,6 +64,11 @@ print(json.dumps({
           echo "FAIL  [$name] expected prod emphasis, got: $out"
           FAIL=$((FAIL + 1)); FAILED_NAMES+=("$name"); return
         fi
+        # The tag is the category Hermes keys an "always" approval on.
+        if ! echo "$out" | grep -q '\[prod\]'; then
+          echo "FAIL  [$name] expected [prod] tag on the ask, got: $out"
+          FAIL=$((FAIL + 1)); FAILED_NAMES+=("$name"); return
+        fi
       fi
       ;;
     advise)

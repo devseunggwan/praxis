@@ -238,6 +238,11 @@ If any token on the command line matches `prod`, `production`,
 rides whichever channel the tier selected — a prod-scoped `git commit` still
 carries it, on stderr.
 
+An ask reason also starts with a `[prod]` tag. Hermes keys its "always"
+approval on the gate plus the bracketed tags in the reason
+(`hooks/_lib/_hermes.py` `approval_rule_key`), so the tag keeps an "always"
+given to a non-prod `git push` from covering a prod one.
+
 ### Compound cascade advisory (issue #229)
 
 When the `ask` is raised on a compound Bash command (`&&`, `||`, `;`, `|`,
