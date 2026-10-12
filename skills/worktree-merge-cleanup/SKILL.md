@@ -67,7 +67,9 @@ fatal: 'main' is already used by worktree at /Users/.../<main-worktree>
      or removed`. Use `git worktree remove --force <path>` **only after
      confirming the worktree is clean** (`git -C <path> status --porcelain`
      empty). `--force` destroys uncommitted changes in a dirty worktree, so
-     never make it the default.
+     never make it the default. `git submodule deinit -f --all` first does not
+     lift the rejection — the check looks at the registered submodule, not its
+     checkout — so skip that detour and go straight to the clean-check + `--force`.
 3. `cd <base-worktree-path>` or chain `cd <path> && gh pr merge ...` in the same
    Bash call (avoid cwd-reset trap between Bash calls).
 4. Even if the call fails on a worktree conflict, the PR may already be merged
@@ -85,6 +87,50 @@ fatal: 'main' is already used by worktree at /Users/.../<main-worktree>
    (`warning: deleting branch 'X' that has been merged to 'refs/remotes/origin/X',
    but not yet merged to HEAD`). Distinct from item 4's worktree case — only
    `git pull` fixes it, not `git worktree remove`.
+
+## When the user merged out-of-band
+
+When the user reports "merged" after merging themselves (a `/merge` PR-comment
+slash command, the web UI), confirm before touching anything:
+
+1. `gh pr view <N> --json state,mergedAt,mergeCommit` — a slash-command merge
+   runs as a workflow, so the PR still reads `OPEN` for tens of seconds. If it
+   is `OPEN`, find that run (`gh run list --workflow <merge-workflow> --limit 3`)
+   and `gh run watch <id> --exit-status`, then re-read the state. Never start
+   cleanup on `OPEN`.
+2. Confirm the merge commit is on the base: `git fetch origin --prune` then
+   `git merge-base --is-ancestor <mergeCommit> origin/<base>`.
+3. Remove the head worktree and local branch as separate calls (checklist item 2).
+4. The remote head branch survives when the repo has
+   `delete_branch_on_merge: false` (`gh api repos/<o>/<r> --jq .delete_branch_on_merge`)
+   and nobody passed `--delete-branch`. Deleting it is a push to a shared ref:
+   report it as remaining and delete (`git -C <repo> push origin --delete <branch>`)
+   only once the user approves. Run it with `-C <repo>` — the session cwd may be
+   the worktree you just removed.
+
+## When the base worktree has uncommitted edits
+
+A base worktree shared with other sessions can hold their uncommitted edits.
+Then `git pull origin <base>` refuses (`Your local changes to the following
+files would be overwritten by merge`, or the same for untracked files), and `gh pr merge` run from that worktree
+fails its local sync. Those edits are not yours to stash, discard, or commit.
+
+1. Run the merge remotely only: `cd` somewhere outside the repository and call
+   `gh pr merge <N> --repo <owner>/<repo> --squash --delete-branch`. Outside a
+   repository gh has no local checkout to sync, so it merges and deletes the
+   remote head branch only. Remove the head worktree first, as above.
+2. Confirm the local base has no commits of its own:
+   `git -C <base-worktree> fetch origin --prune`, then
+   `git -C <base-worktree> merge-base --is-ancestor HEAD origin/<base>`
+   (exit `0`). On any other exit, stop and surface it.
+3. Move the ref without touching the working tree:
+   `git -C <base-worktree> reset --mixed origin/<base>`. Files whose content
+   equals the merged content drop out of `git status`; everything else stays
+   as an uncommitted edit. `--mixed` resets the index, so anything staged is
+   unstaged (the content stays in the working tree). Never use `--hard` here.
+4. Delete the local head branch (`git branch -D <branch>`, after checking its
+   tip equals the PR's `headRefOid`) and read `git status` to report which
+   edits remain.
 
 ## Unified post-merge cleanup sequence
 
