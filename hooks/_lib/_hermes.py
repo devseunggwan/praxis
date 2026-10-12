@@ -296,11 +296,13 @@ def _user_events(content: str) -> Iterator[dict]:
 
     Hermes expands a slash-skill invocation into one user message: an activation
     header, the skill body, then the user's instruction (`agent/skill_commands.py`).
-    Claude Code writes the expanded body as an `isMeta` entry and the typed text
-    as its own message, and the gates count only the latter as the user's turn,
-    so the row is split the same way. The instruction is cut out with Hermes's
-    own markers, searched only where Hermes writes it (after the body's footer,
-    or before a bundle's first skill) so a body quoting a marker is not read as
+    The row becomes the body as an `isMeta` entry, which the gates skip as
+    Claude Code's own skill bodies are skipped, then the instruction as plain
+    text. Claude Code writes the typed command first, tag-wrapped; the plain text
+    last is deliberate, so a reader that does not skip `isMeta` also gets the
+    instruction. The instruction is cut out with Hermes's
+    own markers, searched only where Hermes writes it (after the body's skill-directory
+    line, or before a bundle's first skill) so a body quoting a marker is not read as
     one; with none, the typed text was the bare `/<skill>`.
     """
     if not _is_skill_scaffold(content):

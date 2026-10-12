@@ -428,9 +428,14 @@ gate) works the same way. A prompt the user typed while a turn runs is
 written at once with `display_metadata._queued_prompt` set; it is skipped
 until Hermes delivers it, because the model has not seen it yet. A slash-skill
 invocation, which Hermes stores as one row (activation header, skill body, the
-user's instruction), is written as Claude Code writes it: the expanded body as
-an `isMeta` entry and the instruction (or the bare `/<skill>`) as the user's
-message. A `clarify`
+user's instruction), is split into two user entries: the expanded body as an
+`isMeta` entry, then the instruction (or the bare `/<skill>`) as plain text.
+Claude Code also marks the body `isMeta`, so gates that skip injected entries
+read the same message on both hosts. It differs in two ways: it writes the
+typed command first, wrapped in `<command-name>` / `<command-args>` tags, and
+the body after it. A gate reading the last user entry without skipping
+`isMeta` therefore gets the instruction under Hermes and the skill body under
+Claude Code. A `clarify`
 answer is written as Claude's `"<question>"="<answer>"` result text, and any
 other tool result whose JSON carries a truthy `error` (a gate block) or a
 non-zero `exit_code` is marked `is_error`, as Claude Code marks a failed or
