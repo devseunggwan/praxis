@@ -128,7 +128,7 @@ fails its local sync. Those edits are not yours to stash, discard, or commit.
    equals the merged content drop out of `git status`; everything else stays
    as an uncommitted edit. `--mixed` resets the index, so anything staged is
    unstaged (the content stays in the working tree). Never use `--hard` here.
-4. Delete the local head branch (`git branch -D <branch>`, after checking its
+4. Delete the local head branch (`git -C <base-worktree> branch -D <branch>`, after checking its
    tip equals the PR's `headRefOid`) and read `git status` to report which
    edits remain.
 
