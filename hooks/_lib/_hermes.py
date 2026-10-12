@@ -239,7 +239,7 @@ _RUNTIME_NOTE = "\n\n[Runtime note:"
 _BUNDLE_MARKER = " skill bundle,"
 _BUNDLE_USER_INSTRUCTION = "\nUser instruction: "
 _BUNDLE_FIRST_SKILL_BLOCK = "\n\n[Loaded as part of the "
-_SKILL_DIR_NOTE_END = "then run them with the terminal tool using the absolute path."
+_SKILL_DIR_LINE = "\n\n[Skill directory: "
 
 
 def _is_skill_scaffold(content: str) -> bool:
@@ -266,10 +266,15 @@ def _skill_instruction(content: str) -> Optional[str]:
         end = content.find(stop)
         idx = content.find(marker, 0, end if end >= 0 else len(content))
     elif _SINGLE_SKILL_MARKER in header:
-        # A single skill states it after the body's footer; a body may quote the marker.
+        # A single skill states it last, after the body's skill-directory line: a marker
+        # with that line still after it was quoted by the body. The user's text may quote
+        # the footer sentence, so the line, not the sentence, is the anchor. A skill
+        # loaded without a directory has no anchor; then the last marker is taken, as
+        # Hermes's own extractor does.
         marker, stop = _SINGLE_SKILL_INSTRUCTION, _RUNTIME_NOTE
-        footer = content.rfind(_SKILL_DIR_NOTE_END)
-        idx = content.rfind(marker, footer + len(_SKILL_DIR_NOTE_END) if footer >= 0 else 0)
+        idx = content.rfind(marker)
+        if idx >= 0 and content.find(_SKILL_DIR_LINE, idx) >= 0:
+            idx = -1
     else:
         return None
     if idx < 0:

@@ -245,6 +245,11 @@ _BUNDLE_SKILLS = '\n\n[Loaded as part of the "/clean /work" bundle]\nbody\n\nUse
     (_SKILL_HEAD + _SKILL_BODY + _SKILL_SAYS + "merge", "merge"),  # a marker quoted in the body is skipped
     (_SKILL_HEAD + _SKILL_BODY + _SKILL_SAYS + "merge\n\n[Runtime note: x]", "merge"),
     (_SKILL_HEAD + _SKILL_BODY, "/worktree-merge-cleanup"),  # bare, body still quotes the marker
+    # the user's text quotes the footer sentence; the directory line still anchors the marker
+    (_SKILL_HEAD + _SKILL_BODY + _SKILL_SAYS + "why: then run them with the terminal tool using the absolute path.",
+     "why: then run them with the terminal tool using the absolute path."),
+    # no skill directory, so no anchor: the last marker is taken, as Hermes's extractor does
+    (_SKILL_HEAD + "# s" + _SKILL_SAYS + "quoted-in-body", "quoted-in-body"),
     (_BUNDLE_HEAD + "\n\nUser instruction: ship it" + _BUNDLE_SKILLS, "ship it"),
     (_BUNDLE_HEAD + _BUNDLE_SKILLS, "/clean /work"),  # bare bundle, a skill body quotes the marker
 ])
