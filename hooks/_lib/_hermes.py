@@ -421,9 +421,16 @@ def parse_decision(stdout: str) -> Tuple[str, str, str, dict]:
 # Opt-in: most asks are per-action consent (a merge, an external write, a
 # public mutation in a read-only session), and a gate added later must not
 # start sharing one permanent answer across calls by default. Every other
-# gate's ask gets a key that changes with the call.
+# gate's ask gets a key that changes with the call. The advisory nudges here
+# ask about how a call or question is shaped, not for consent to an action,
+# so one "always" may retire the nudge. `destructive-bash-guard` stays per-call:
+# its strict-mode ask is consent to a destructive command.
 GROUPED_APPROVAL_HOOKS = frozenset({
     "commit-title-length-check",
+    "cwd-relative-exec-advisory",
+    "menu-mutation-tier-advisory",
+    "negation-answer-quote-advisory",
+    "output-block-falsify-advisory",
     "side-effect-scan",
 })
 

@@ -309,6 +309,23 @@ PER_CALL_GATES = [
     "session-intent", "a-gate-added-later",
 ]
 
+ADVISORY_GROUPED_GATES = [
+    "cwd-relative-exec-advisory", "menu-mutation-tier-advisory",
+    "negation-answer-quote-advisory", "output-block-falsify-advisory",
+]
+
+
+@pytest.mark.parametrize("hook", ADVISORY_GROUPED_GATES)
+def test_advisory_nudges_share_one_key_across_calls(hook):
+    """An advisory nudge asks about the call's shape, not for consent, so one
+    "always" retires it instead of prompting again on every call."""
+    first = hermes.approval_rule_key([(hook, f"[{hook}] nudge about call one")], {"command": "./a.sh"})
+    second = hermes.approval_rule_key([(hook, f"[{hook}] nudge about call two")], {"command": "./b.sh"})
+    assert first == second == f"praxis:{hook}[{hook}]"
+    # Behind a per-call gate the key is still per-call.
+    behind = [(hook, "nudge"), ("session-intent", "same reason")]
+    assert hermes.approval_rule_key(behind, {"command": "a"}) != hermes.approval_rule_key(behind, {"command": "b"})
+
 
 @pytest.mark.parametrize("hook", PER_CALL_GATES)
 def test_per_call_gates_keep_a_call_specific_key(hook):
