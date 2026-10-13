@@ -33,6 +33,7 @@ is not retrieved.
 | Scenario | Action |
 | ---------- | -------- |
 | Any session, any `gh pr merge` | `permissionDecision: "ask"` |
+| A single numbered merge the user approved in a bulk answer (see below) | silent pass-through |
 | Any env-var prefix (`env FOO=1 gh pr merge`) | `ask` — no environment variable exempts a merge |
 | `# merge-approval:ack` marker (or any comment text) | `ask` — no agent-attachable bypass exists by design |
 | Non-merge gh commands (`gh pr view`, `gh pr list`, etc.) | silent pass-through |
@@ -51,6 +52,24 @@ is not retrieved.
    Heredoc bodies are blanked by `safe_tokenize` for the same reason: a commit
    message quoting `gh pr merge` is prose, not a merge.
 5. Emit `permissionDecision: "ask"`.
+
+### Bulk-approved merges (issue #1583)
+
+The prompt stands in for the user's per-PR consent. When the user has already
+given it in chat — one briefing turn with a section per PR, one ask listing
+them, and an answer approving the set (`momentum-rule-retrieval-gate` spec →
+*One answer can approve a listed set*) — asking again per merge adds N clicks
+that decide nothing, which is the blind-approval pattern the briefing gate was
+built against (#795). The hook therefore loads
+`hooks/advisory-nudge/momentum-rule-retrieval-gate/impl.py` and calls its
+`bulk_merge_approved(payload)`: one parser decides for both gates.
+
+This is not an agent-attachable bypass. Nothing in the command releases it;
+it reads the user's own message (or `AskUserQuestion` answer) from the
+transcript. It fails closed: an import error, an exception, or an unreadable
+transcript leaves the `ask` in place. A chained or looped merge, a numberless
+merge, a PR outside the approved set, or a second merge of the same PR still
+asks.
 
 ### No opt-out marker (deliberate)
 
@@ -98,4 +117,6 @@ but is not executed), inline-env ASK, non-Bash tool SILENT, malformed-JSON
 SILENT, `gh -R/--repo/--hostname/--color` global-flag handling, and
 regression tests confirming the previously-shipped `# merge-approval:ack`
 marker no longer bypasses (round 4 finding — agent-attachable bypass
-removed by design).
+removed by design), and the bulk-approval cases: silent for a listed PR after
+a typed or `AskUserQuestion` bulk answer; ask for a PR outside the set, a
+combined briefing block, a chained merge, and an unreadable transcript.

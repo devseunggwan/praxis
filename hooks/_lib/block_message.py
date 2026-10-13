@@ -140,7 +140,8 @@ Unconditional — fire on every `gh pr merge`, whatever the flags:
     ONLY from the session environment — the hook is spawned by the harness,
     so an inline `VAR=1 gh pr merge …` prefix never reaches it.
   Explicit per-PR user approval             ← pre-merge-approval-gate
-    Always asks. No agent-attachable bypass exists, by design.
+    Asks unless the user approved this PR in a bulk answer (one section
+    per PR, one listed ask). No agent-attachable bypass exists, by design.
   Intentional-side-effect acknowledgement   ← side-effect-scan
     Opt out in-band: `# side-effect:ack`.
 

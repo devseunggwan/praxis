@@ -40,7 +40,8 @@ implements these principles live in [`DESIGN.md`](DESIGN.md).
   JSON stdin, unreadable transcript, unknown tool name → exit 0. The hook
   never breaks Claude Code; it only nudges.
 - **No agent-attachable bypass for high-stakes gates.** `pre-merge-approval-gate`
-  intentionally has no marker; `completion-verify` and `retrospect-mix-check`
+  intentionally has no marker (it stays silent only for a PR the user approved
+  in a bulk answer, read from the user's own message); `completion-verify` and `retrospect-mix-check`
   same. Bypass marker (`# side-effect:ack`, `# title-length:ack`) exists only
   where the false-positive cost outweighs the silent-bypass risk.
 - **Every hook has a sunset date.** `review_by` in the manifest fails CI once
