@@ -304,7 +304,7 @@ def build_reason(categories: list[str], prod: bool, command: str) -> str:
     msg = " ".join(parts)
     if prod:
         msg = (
-            "⚠️  PROD scope detected / PROD scope 감지 — " + msg
+            "[prod] ⚠️  PROD scope detected / PROD scope 감지 — " + msg
             + " Re-confirm the deploy/ops impact. 배포/운영 영향 재확인 필수."
         )
     msg += (

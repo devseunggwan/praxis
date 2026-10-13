@@ -33,6 +33,7 @@ import contextlib
 import hashlib
 import json
 import os
+import re
 import sqlite3
 import tempfile
 from pathlib import Path
@@ -416,12 +417,49 @@ def parse_decision(stdout: str) -> Tuple[str, str, str, dict]:
     )
 
 
-def approve_response(asks: List[str]) -> dict:
-    """Hermes human-approval request for praxis asks.
+# Gates whose "always" answer may cover later calls of the same category.
+# Opt-in: most asks are per-action consent (a merge, an external write, a
+# public mutation in a read-only session), and a gate added later must not
+# start sharing one permanent answer across calls by default. Every other
+# gate's ask gets a key that changes with the call.
+GROUPED_APPROVAL_HOOKS = frozenset({
+    "commit-title-length-check",
+    "side-effect-scan",
+})
 
-    `rule_key` is stable across processes, so an "always" answer keeps
-    matching the same gate and reason on later calls.
+_CATEGORY_TAG = re.compile(r"\[([a-z][a-z0-9-]*)\]")
+
+
+def approval_rule_key(asks: List[Tuple[str, str]], call: Optional[dict] = None) -> str:
+    """Hermes "always" grain for a set of `(hook, reason)` asks.
+
+    Hermes remembers an "always" answer by `rule_key`. A key hashed from the
+    reason never matches again, because reasons quote the call (commit title,
+    repo, character count), so every call prompted anew. The key is the gate
+    plus the bracketed category tags its reason carries (`[git-push]`,
+    `[prod]`): one "always" covers that gate and category, and a category the
+    user has not seen still asks. An ask from any gate outside
+    `GROUPED_APPROVAL_HOOKS`, or from an unknown gate, makes the whole key a
+    hash of the reasons and the tool call's arguments, since such a gate's
+    reason alone can repeat across calls.
     """
-    message = " | ".join(asks)
-    rule_key = "praxis:" + hashlib.sha256(message.encode("utf-8")).hexdigest()[:12]
-    return {"action": "approve", "message": f"[praxis] {message}"[:1500], "rule_key": rule_key}
+    hooks = [hook for hook, _ in asks]
+    if not all(hook in GROUPED_APPROVAL_HOOKS for hook in hooks):
+        material = json.dumps([asks, call], sort_keys=True, ensure_ascii=False, default=str)
+        return "praxis:" + hashlib.sha256(material.encode("utf-8")).hexdigest()[:12]
+    grains = set()
+    for hook, reason in asks:
+        tags = sorted(set(_CATEGORY_TAG.findall(reason)))
+        grains.add(hook + "".join(f"[{tag}]" for tag in tags))
+    return "praxis:" + "+".join(sorted(grains))
+
+
+def approve_response(asks: List[Tuple[str, str]], call: Optional[dict] = None) -> dict:
+    """Hermes human-approval request for praxis `(hook, reason)` asks on one tool call.
+
+    Per-call gates go first so the message cap never cuts their reason off.
+    """
+    asks = sorted(asks, key=lambda ask: ask[0] in GROUPED_APPROVAL_HOOKS)
+    message = " | ".join(f"[praxis:{hook}] {reason}" if hook else reason for hook, reason in asks)
+    return {"action": "approve", "message": f"[praxis] {message}"[:1500],
+            "rule_key": approval_rule_key(asks, call)}

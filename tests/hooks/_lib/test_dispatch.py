@@ -822,6 +822,30 @@ def test_ask_path_unchanged_with_no_context_siblings(tmp_path, monkeypatch, caps
     }
 
 
+def test_asked_by_names_every_member_that_asked(tmp_path, monkeypatch, capsys):
+    members = [
+        ("preflight-gate", "pass", _write_fake(tmp_path, "pass", _FAKE_PASS)),
+        ("preflight-gate", "first-ask", _write_fake(tmp_path, "first-ask", _FAKE_ASK)),
+        ("preflight-gate", "second-ask", _write_fake(tmp_path, "second-ask", _FAKE_ASK)),
+    ]
+    _patch_members(monkeypatch, members)
+    asked_by: list[tuple[str, str]] = []
+    rc = _dispatch.run_group("PreToolUse", "Bash", NOOP_PAYLOAD, asked_by=asked_by)
+    out = capsys.readouterr().out
+    assert rc == 0 and '"permissionDecision": "ask"' in out
+    # The second ask is not in the emitted JSON; asked_by still reports it.
+    assert [name for name, _ in asked_by] == ["first-ask", "second-ask"]
+    assert all('"permissionDecision": "ask"' in so for _, so in asked_by)
+
+
+def test_asked_by_stays_empty_without_an_ask(tmp_path, monkeypatch, capsys):
+    members = [("preflight-gate", "pass", _write_fake(tmp_path, "pass", _FAKE_PASS))]
+    _patch_members(monkeypatch, members)
+    asked_by: list[tuple[str, str]] = []
+    assert _dispatch.run_group("PreToolUse", "Bash", NOOP_PAYLOAD, asked_by=asked_by) == 0
+    assert asked_by == []
+
+
 def test_ask_merge_ignores_mismatched_event_sibling(tmp_path, monkeypatch, capsys):
     # Same guard as the plain additionalContext lane (issue #1199 review): a
     # sibling naming the wrong event must not be adopted into the ask's object.

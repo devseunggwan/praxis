@@ -485,8 +485,15 @@ def run_group(
     payload_raw: str,
     host: Optional[str] = None,
     if_pattern: Optional[str] = None,
+    asked_by: Optional[list[tuple[str, str]]] = None,
 ) -> int:
     """Run the whole (event, matcher) group; emit one decision; return its exit code.
+
+    `asked_by`, when given, receives `(member name, stdout)` for every member
+    that asked, in manifest order. The emitted JSON carries only the first ask
+    and names no member; a host that keys its own approval memory per gate
+    (Hermes) needs every gate that asked, or a later gate's ask would be
+    approved under an earlier gate's key.
 
     The transcript turn memo (issue #1281) is enabled for exactly this call:
     members that read the current turn share one parse, and the memo is
@@ -504,7 +511,7 @@ def run_group(
         except Exception:
             pass
     try:
-        return _run_group(event, matcher, payload_raw, host, if_pattern)
+        return _run_group(event, matcher, payload_raw, host, if_pattern, asked_by)
     finally:
         if _transcript is not None:
             try:
@@ -519,6 +526,7 @@ def _run_group(
     payload_raw: str,
     host: Optional[str] = None,
     if_pattern: Optional[str] = None,
+    asked_by: Optional[list[tuple[str, str]]] = None,
 ) -> int:
     # Mark this process as the dispatcher so the fail_open-level coarse recorder
     # (issue #710 coverage expansion) skips the Bash-group members run below —
@@ -669,6 +677,12 @@ def _run_group(
                 and _DENY_MARKER not in so
                 and _ASK_MARKER not in so
             ]
+            if asked_by is not None:
+                asked_by.extend(
+                    (members[i][1], so)
+                    for i, (_rc, so, _se) in enumerate(results)
+                    if _ASK_MARKER in so
+                )
             sys.stdout.write(_merge_ask_with_context(ask_so, siblings, event))
             return 0
 

@@ -60,11 +60,14 @@ def _groups(event: str, tool: Optional[str]) -> List[Optional[str]]:
     return out
 
 
-def _run(event: str, matcher: Optional[str], payload: dict) -> Tuple[int, str, str]:
+def _run(event: str, matcher: Optional[str], payload: dict) -> Tuple[int, str, str, List[Tuple[str, str]]]:
+    """-> (rc, stdout, stderr, `(gate, reason)` of every member that asked)."""
     out, err = io.StringIO(), io.StringIO()
+    asked_by: List[Tuple[str, str]] = []
     with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-        rc = run_group(event, matcher, json.dumps(payload), _hermes.HOST_ID)
-    return rc, out.getvalue(), err.getvalue()
+        rc = run_group(event, matcher, json.dumps(payload), _hermes.HOST_ID, asked_by=asked_by)
+    asks = [(name, _hermes.parse_decision(so)[1] or "requires confirmation") for name, so in asked_by]
+    return rc, out.getvalue(), err.getvalue(), asks
 
 
 def _transcript(session_id: str) -> str:
@@ -98,20 +101,20 @@ def pre_tool_call(hermes: dict) -> dict:
         base["cwd"] = os.path.expanduser(str(args["workdir"]))
     if os.path.isdir(base["cwd"]):
         os.chdir(base["cwd"])  # gates read git state relative to the process cwd
-    asks: List[str] = []
+    asks: List[Tuple[str, str]] = []
     contexts: List[str] = []
     command_rewrite: Optional[str] = None
     for i, (claude_tool, claude_input) in enumerate(calls):
         payload = dict(base, tool_name=claude_tool, tool_input=claude_input,
                        tool_use_id=f"{extra.get('tool_call_id') or 'hermes'}#{i}")
         for matcher in _groups("PreToolUse", claude_tool):
-            rc, out, err = _run("PreToolUse", matcher, payload)
+            rc, out, err, group_asks = _run("PreToolUse", matcher, payload)
             decision, reason, context, updated = _hermes.parse_decision(out)
             if rc == 2 or decision == "deny":
                 message = reason or err.strip()[:800] or "Blocked by a praxis gate."
                 return {"action": "block", "message": message}
             if decision == "ask":
-                asks.append(reason or "requires confirmation")
+                asks.extend(group_asks or [("", reason or "requires confirmation")])
             if context:
                 contexts.append(context)
             elif err.strip() and rc == 0 and not decision:
@@ -120,7 +123,7 @@ def pre_tool_call(hermes: dict) -> dict:
                 command_rewrite = updated["command"]
                 payload["tool_input"] = dict(claude_input, command=command_rewrite)
     if asks:
-        return _hermes.approve_response(asks)
+        return _hermes.approve_response(asks, args)
     response: Dict[str, object] = {}
     if command_rewrite is not None and command_rewrite != args.get("command"):
         response.update(action="modify", args={"command": command_rewrite})
@@ -137,7 +140,7 @@ def pre_llm_call(hermes: dict) -> dict:
     payload = dict(_base(hermes, "UserPromptSubmit"), prompt=prompt)
     contexts: List[str] = []
     for matcher in _groups("UserPromptSubmit", None):
-        rc, out, err = _run("UserPromptSubmit", matcher, payload)
+        rc, out, err, _ = _run("UserPromptSubmit", matcher, payload)
         _decision, reason, context, _updated = _hermes.parse_decision(out)
         # Hermes cannot reject a prompt from here; a praxis block reaches the
         # model as context instead of being dropped.
