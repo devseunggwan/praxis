@@ -1377,7 +1377,7 @@ _REPLY_PR_RE = re.compile(r"(?:#|/pull/|(?<![A-Za-z])pr\s*(?:#\s*)?)?(?<![A-Za-z
 # A heading line: a markdown heading, or a line that is bold from end to end.
 # A bold lead inside a bullet (`- **리스크**: …`) is an item, not a heading.
 _HEADING_RE = re.compile(r"^\s{0,3}(?:(?P<hashes>#{1,6})\s+\S|\*\*[^*\n]+\*\*\s*:?\s*$)")
-_FENCE_LINE_RE = re.compile(r"^\s{0,3}(?:```|~~~)")
+_FENCE_LINE_RE = re.compile(r"^\s{0,3}(?P<fence>`{3,}|~{3,})(?P<rest>.*)$")
 # A whole-line bold heading ranks below every markdown heading.
 _BOLD_HEADING_LEVEL = 7
 # A reply longer than this is not a bare approval; capping it also bounds the
@@ -1460,11 +1460,18 @@ def _pr_sections(text: str, prs: set[str]) -> dict[str, str]:
     seen: set[str] = set()
     level: int | None = None
     owner: str | None = None
-    in_fence = False
+    fence: str | None = None
     for line in text.splitlines():
-        if _FENCE_LINE_RE.match(line):
-            in_fence = not in_fence
-        m = None if in_fence else _HEADING_RE.match(line)
+        f = _FENCE_LINE_RE.match(line)
+        if f is not None:
+            run = f.group("fence")
+            if fence is None:
+                fence = run
+            elif run[0] == fence[0] and len(run) >= len(fence) and not f.group("rest").strip():
+                # CommonMark: only a bare run of the opener's character, at
+                # least as long, closes the block; "```bash" inside it does not.
+                fence = None
+        m = None if fence is not None else _HEADING_RE.match(line)
         if m is not None:
             this = len(m.group("hashes")) if m.group("hashes") else _BOLD_HEADING_LEVEL
             refs = set(_PR_REF_RE.findall(line)) & prs
@@ -1501,10 +1508,13 @@ def _merge_pr_number(command: str) -> str | None:
 
 def _latest_ask_answer(entries: list[dict], after: int) -> tuple[int, list[tuple[str, str]]] | None:
     """(index, every question/label pair) of the last answered AskUserQuestion
-    result after entry `after`, or None. A declined question carries no pair."""
+    result after entry `after`, or None. A declined question carries no pair.
+
+    Only a result whose `tool_use_id` belongs to an AskUserQuestion call counts:
+    a Bash or Read output that happens to print `"q"="a"` is not the user."""
     found: tuple[int, list[tuple[str, str]]] | None = None
-    for i in range(after + 1, len(entries)):
-        ev = entries[i]
+    asks: set[str] = set()
+    for i, ev in enumerate(entries):
         msg = ev.get("message")
         if not isinstance(msg, dict) or ev.get("isSidechain"):
             continue
@@ -1512,8 +1522,14 @@ def _latest_ask_answer(entries: list[dict], after: int) -> tuple[int, list[tuple
         if not isinstance(content, list):
             continue
         for b in content:
-            if (isinstance(b, dict) and b.get("type") == "tool_result"
-                    and not b.get("is_error")):
+            if not isinstance(b, dict):
+                continue
+            if b.get("type") == "tool_use" and b.get("name") == "AskUserQuestion":
+                if isinstance(b.get("id"), str):
+                    asks.add(b["id"])
+                continue
+            if (i > after and b.get("type") == "tool_result"
+                    and b.get("tool_use_id") in asks and not b.get("is_error")):
                 pairs = _ASK_ANSWER_RE.findall(_user_message_text(b.get("content")))
                 if pairs:
                     found = (i, pairs)

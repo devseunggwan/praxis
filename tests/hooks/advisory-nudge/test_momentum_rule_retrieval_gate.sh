@@ -889,6 +889,12 @@ run_merge_escalation_case "merge_bulk_separate_cd_bare_denies" \
   "yes" "" "momentum-merge-bulk-separate-cd.jsonl" "gh pr merge 999 --squash"
 run_merge_escalation_case "merge_bulk_separate_cd_repo_passes" \
   "no" "" "momentum-merge-bulk-separate-cd.jsonl" "gh pr merge 999 --repo o/r --squash"
+# CodeRabbit on #1584: a shorter fence line does not close a longer fence, and
+# only an AskUserQuestion result is an answer, not a Bash output printing one.
+run_merge_escalation_case "merge_bulk_nested_fence_denies" \
+  "yes" "" "momentum-merge-bulk-nested-fence.jsonl" "gh pr merge 999 --squash"
+run_merge_escalation_case "merge_bulk_bash_pair_denies" \
+  "yes" "" "momentum-merge-bulk-bash-pair.jsonl" "gh pr merge 999 --squash"
 
 # An AskUserQuestion answer is a tool_result, not a typed message. Replayed over
 # local transcripts, 13 of the merges this check first denied were answered this
