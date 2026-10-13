@@ -52,7 +52,10 @@ in it is probed at compose time — not recalled from when the PR was opened.
 
 ## The Iron Law
 
-- **One PR, one briefing, one answer.** Approving PR X approves only X.
+- **One PR, one briefing, one answer.** Approving PR X approves only X. The
+  one exception is the [bulk merge](#bulk-merge-several-prs-one-answer): one
+  turn with a separate briefing section per PR, one ask that lists them, and
+  an answer that approves the listed set.
 - **Compose the briefing from this turn's probe output.** An entry-time `CLEAN`
   status is not permanent; a stale anchor makes the user discover a conflict
   you should have caught.
@@ -249,7 +252,8 @@ is readable as an approval at all:
 The tool is the surface, not a softer gate. Everything the prose ask carried
 still binds:
 
-- **One PR per question.** Do not put two PRs in one question and do not read a
+- **One PR per question**, except a bulk ask (below) that lists every PR it
+  covers and follows one briefing section per PR. Do not read a
   neighbouring approval as covering this one — a companion PR, a
   dependency-completing half, a regenerated or mechanical PR, and a hotfix
   blocker each need their own briefing and their own answer. A cluster
@@ -290,6 +294,44 @@ The turn closes on three items, not one: **approval answered · cleanup skill
 loaded · merge executed through it.** If approval does not come, stop — there
 is nothing to clean up.
 
+### Bulk merge (several PRs, one answer)
+
+When several PRs are ready at once, brief them all in one turn and ask once.
+Each PR still gets its own probe (Step 1–3) and its own six-part section; what
+is shared is the question and the answer. The gate reads a fixed shape, so keep
+to it:
+
+```text
+### PR #833 — <title>
+- 변경 사항 / What changed: …
+- 검증 / Verified: …
+- 미검증 / NOT verified: …
+- 리스크 / Risk: …
+- 남은 항목 / Open items: …
+
+### PR #999 — <title>
+- …
+
+#833, #999 를 머지할까요?
+```
+
+| Part | Rule | Why |
+| --- | --- | --- |
+| section heading | a markdown heading (or bold lead line) naming **exactly one** of the PRs | a heading naming two PRs belongs to neither, so a combined block cannot pass as two briefings |
+| section body | at least 4 of the 6 items inside that PR's own section | the shared ask counts as every section's approve-ask item; the rest must be per PR |
+| ask | one merge question whose object lists the PRs (`#833, #999 를 머지할까요?`, `Approve merging #833 and #999?`) | an unlisted ask (`Approve merge?`) leaves "ok" ambiguous; then only a reply that names the PRs counts |
+| answer | `모두 머지`, `둘다 승인`, `ok`, `#833 #999 머지`, `98, 1118 머지`, or an `AskUserQuestion` pick leading with an approval (`승인 — 모두 머지`) | a refusal word anywhere (`#999는 보류`) or a trailing `?` voids the whole answer; `#833만 머지` approves only #833 |
+
+Then merge the approved PRs **one command per PR**, back to back, without
+waiting for another answer — `gh pr merge 833 --squash`, then
+`gh pr merge 999 --squash`. Each command must name its PR number. A chained
+`&&` command, a loop, or a numberless merge is not released by a bulk answer.
+Stop at the first failed merge and report; the rest of the set stays approved
+only until a merge outside the set runs.
+
+Step 6 still applies to each PR: merge from the base worktree after removing
+that PR's head worktree, and report every PR with its URL.
+
 ## Relationship to enforcement
 
 Three hooks fire on `gh pr merge` unconditionally, whatever the flags; a fourth
@@ -300,7 +342,7 @@ user is already looking at a prompt you should have preceded with a briefing.
 | Hook | Fires | What it catches | Relation to this skill |
 | --- | --- | --- | --- |
 | `momentum-rule-retrieval-gate` | always | Fewer than 4 of the 6 briefing items present in the turn | Step 4 is what satisfies it |
-| `pre-merge-approval-gate` | always | Any direct-session merge → `ask`, no agent-attachable bypass | Step 5 is the answer it demands |
+| `pre-merge-approval-gate` | always | Any direct-session merge → `ask`, no agent-attachable bypass; silent for a PR the user approved in a bulk answer | Step 5 (or the bulk answer) is the answer it demands |
 | `side-effect-scan` | always | Unacknowledged intentional side effect | Opt in-band with `# side-effect:ack` |
 | `gh-merge-worktree-precondition` | `--delete-branch` / `-d` only | Deleting a head branch from the wrong worktree | Owned by `worktree-merge-cleanup` (Step 6) |
 
