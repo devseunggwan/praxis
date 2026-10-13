@@ -406,7 +406,7 @@ manifest's `hosts` field, the same filter the other platforms use.
 
 | Hermes event | praxis event | Response |
 | --- | --- | --- |
-| `pre_tool_call` | `PreToolUse` | deny → `block`, ask → `approve` (human approval), Bash `updatedInput` → `modify`, additionalContext → `context` |
+| `pre_tool_call` | `PreToolUse` | deny → `block`, ask → `block` self-check for the agent (`approve`, human approval, only for `HUMAN_APPROVAL_HOOKS`), Bash `updatedInput` → `modify`, additionalContext → `context` |
 | `pre_llm_call` | `UserPromptSubmit` | `context`, appended to the user message |
 
 | Hermes tool | Claude tool |
@@ -443,17 +443,25 @@ denied call. `state.db` is Hermes-internal; an
 unreadable or changed schema leaves the transcript empty, which the
 transcript-reading gates already treat as fail-open.
 
-**Approval.** Hermes remembers an "always" answer by the response's
-`rule_key`. The dispatcher emits only the first ask of a group, so the bridge
-collects every gate that asked through `run_group(asked_by=...)` and lists
-them all in the approval message. Gates in `GROUPED_APPROVAL_HOOKS`
-(`hooks/_lib/_hermes.py`) are keyed by gate plus the bracketed category tags in
-the reason (`praxis:side-effect-scan[git-push]`), so one "always" covers that
-category. The advisory nudges in that list (`cwd-relative-exec-advisory`,
-`menu-mutation-tier-advisory`, `negation-answer-quote-advisory`,
-`output-block-falsify-advisory`) ask about a call's shape rather than for
-consent, so one "always" retires the nudge. If any other gate asked, the key hashes the reasons with the tool
-call's arguments and never repeats: an "always" there covers only the same call.
+**Asks.** A praxis `ask` tells the agent to stop and re-check the call; it is
+not a question for the human. The dispatcher emits only the first ask of a
+group, so the bridge collects every gate that asked through
+`run_group(asked_by=...)` and splits them. Asks from gates outside
+`HUMAN_APPROVAL_HOOKS` (`hooks/_lib/_hermes.py`: `pre-merge-approval-gate`,
+`fan-out-scope-gate`) block the call and return each gate's checklist to the
+agent as a `[praxis self-check]` message. The bridge records the call (tool +
+arguments) per session under `~/.praxis/cache/hermes-self-check/`, under
+`state_lock`; when the agent re-issues the same call within an hour, the
+record is consumed and the call goes on. A changed call is checked again.
+When a consent gate asked too, the re-issued call then goes to the human with
+only the consent asks.
+
+**Approval.** Only asks from `HUMAN_APPROVAL_HOOKS` become a Hermes approval.
+Hermes remembers an "always" answer by the response's `rule_key`. Gates in
+`GROUPED_APPROVAL_HOOKS` are keyed by gate plus the bracketed category tags in
+the reason (`praxis:side-effect-scan[git-push]`); if any other gate asked, the
+key hashes the reasons with the tool call's arguments and never repeats, so an
+"always" there covers only the same call.
 
 **Install.** `plugins/hermes/bridge.py --print-config` prints the `hooks:`
 entries with this clone's path; merge them into Hermes's `config.yaml`. The

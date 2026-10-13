@@ -387,26 +387,110 @@ def test_deny_becomes_block(tmp_path):
     assert response["action"] == "block" and "--state" in response["message"]
 
 
-def test_ask_becomes_human_approval(tmp_path):
-    response = _bridge(_terminal("git push origin main", tmp_path), tmp_path)
-    assert response["action"] == "approve"
-    assert response["rule_key"] == "praxis:side-effect-scan[git-push]"
-    again = _bridge(_terminal("git push origin issue-1-fix-other", tmp_path), tmp_path)
-    assert again["rule_key"] == response["rule_key"]
+def test_ask_becomes_an_agent_self_check_not_a_human_approval(tmp_path):
+    """A praxis ask sends the call back to the agent; re-issuing the same call runs it."""
+    first = _bridge(_terminal("git push origin main", tmp_path), tmp_path)
+    assert first["action"] == "block"
+    assert first["message"].startswith("[praxis self-check]")
+    assert "[praxis:side-effect-scan]" in first["message"]
+    again = _bridge(_terminal("git push origin main", tmp_path), tmp_path)
+    assert again.get("action") is None
+    # The acknowledgement is consumed: a third identical call is checked again.
+    assert _bridge(_terminal("git push origin main", tmp_path), tmp_path)["action"] == "block"
 
 
-def test_a_later_per_call_ask_is_not_hidden_by_an_earlier_one(tmp_path):
-    """commit-title-length-check runs before destructive-bash-guard; both ask,
-    and the key must stay per-call rather than the title gate's."""
+def test_self_check_is_per_call(tmp_path):
+    """Re-checking one call does not let a different call through."""
+    assert _bridge(_terminal("git push origin main", tmp_path), tmp_path)["action"] == "block"
+    other = _bridge(_terminal("git push origin issue-1-fix-other", tmp_path), tmp_path)
+    assert other["action"] == "block"
+
+
+def test_self_check_lists_every_gate_that_asked(tmp_path):
+    """commit-title-length-check runs before destructive-bash-guard; both asks reach the agent."""
     strict = {"PRAXIS_DESTRUCTIVE_BASH_STRICT": "1"}
     title = "fix: an intentionally long commit title well over fifty characters"
     first = _bridge(_terminal(f'git commit -m "{title}" && rm -rf ~/a', tmp_path), tmp_path, strict)
-    second = _bridge(_terminal(f'git commit -m "{title}" && rm -rf ~/b', tmp_path), tmp_path, strict)
-    assert first["action"] == "approve"
+    assert first["action"] == "block"
     assert "[praxis:destructive-bash-guard]" in first["message"]
     assert "[praxis:commit-title-length-check]" in first["message"]
-    assert first["rule_key"] != second["rule_key"]
-    assert not first["rule_key"].startswith("praxis:commit-title-length-check")
+
+
+def test_merge_consent_still_asks_the_human(tmp_path):
+    """pre-merge-approval-gate is consent, not a self-check: it stays a Hermes approval,
+    and re-issuing the call does not get past it."""
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    payload = _terminal("gh pr merge 11 --squash # briefing-surfaced: test # side-effect:ack", tmp_path)
+    first = _bridge(payload, tmp_path)
+    assert first["action"] == "approve", first
+    assert "[praxis:pre-merge-approval-gate]" in first["message"]
+    assert _bridge(payload, tmp_path)["action"] == "approve"
+
+
+def test_take_self_check_expires_and_separates_sessions(tmp_path):
+    take = hermes.take_self_check
+    assert take(tmp_path, "s1", "k", 1000.0) is False
+    assert take(tmp_path, "s2", "k", 1001.0) is False      # another session has its own record
+    assert take(tmp_path, "s1", "k", 1002.0) is True
+    assert take(tmp_path, "s2", "k", 1001.0 + hermes.SELF_CHECK_TTL_SEC) is False  # expired: checked again
+    (tmp_path / "s1.json").write_text("not json", encoding="utf-8")
+    assert take(tmp_path, "s1", "k", 2000.0) is False      # a corrupt record is a first sight
+
+
+def test_split_asks_separates_consent_from_self_check():
+    human, self_check = hermes.split_asks(
+        [("side-effect-scan", "x"), ("pre-merge-approval-gate", "y"), ("", "z")])
+    assert human == [("pre-merge-approval-gate", "y")]
+    assert self_check == [("side-effect-scan", "x"), ("", "z")]
+
+
+def test_mixed_asks_self_check_first_then_human_consent(monkeypatch, tmp_path):
+    """When a consent gate and a self-check gate both ask, the agent re-checks first;
+    only the re-issued call goes to the human, with the consent ask alone."""
+    bridge = _load("hermes_bridge_mixed", BRIDGE)
+    monkeypatch.setenv("PRAXIS_HOME", str(tmp_path / "praxis"))
+    monkeypatch.setattr(bridge, "_groups", lambda event, tool: ["Bash"])
+    ask = json.dumps({"hookSpecificOutput": {"permissionDecision": "ask", "permissionDecisionReason": "r"}})
+    asked = [("pre-merge-approval-gate", "merge consent"), ("cross-boundary-preflight", "checklist")]
+    monkeypatch.setattr(bridge, "_run", lambda event, matcher, payload: (0, ask, "", asked))
+    call = {"tool_name": "terminal", "tool_input": {"command": "gh pr merge 1"}, "session_id": "s",
+            "cwd": str(tmp_path), "extra": {"tool_call_id": "t"}}
+    first = bridge.pre_tool_call(call)
+    assert first["action"] == "block" and "[praxis:cross-boundary-preflight]" in first["message"]
+    assert "pre-merge-approval-gate" not in first["message"]
+    second = bridge.pre_tool_call(call)
+    assert second["action"] == "approve"
+    assert second["message"] == "[praxis] [praxis:pre-merge-approval-gate] merge consent"
+
+
+def test_self_check_keeps_every_gate_when_a_reason_is_long():
+    response = hermes.self_check_response([("gate-a", "x" * 5000), ("gate-b", "short checklist")])
+    assert "[praxis:gate-b] short checklist" in response["message"]
+
+
+def test_parallel_reissues_consume_one_record(tmp_path):
+    """Racing identical re-issues behave as if run one after another: each record is
+    consumed by exactly one call (8 calls on one record -> pass, record, pass, ... = 4 passes)."""
+    import multiprocessing as mp
+    _with_lib_path().take_self_check(tmp_path, "s", "k", 1000.0)
+    ctx = mp.get_context("spawn")
+    with ctx.Pool(8) as pool:
+        results = pool.starmap(_take_in_child, [(str(tmp_path),)] * 8)
+    assert results.count(True) == 4
+    # The 8th call (a first sight after the 7th consumed) leaves one record.
+    assert json.loads((tmp_path / "s.json").read_text(encoding="utf-8")) == {"k": 1001.0}
+
+
+def _with_lib_path():
+    """_hermes loaded the way the bridge loads it: with `hooks/_lib` importable, so the real lock applies."""
+    lib = str(REPO_ROOT / "hooks" / "_lib")
+    if lib not in sys.path:
+        sys.path.insert(0, lib)
+    return _load("hermes_with_lib", REPO_ROOT / "hooks" / "_lib" / "_hermes.py")
+
+
+def _take_in_child(state_dir: str) -> bool:
+    return _with_lib_path().take_self_check(Path(state_dir), "s", "k", 1001.0)
 
 
 def test_advisory_becomes_context(tmp_path):
