@@ -5,6 +5,21 @@ All notable changes to praxis are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.20.1](https://github.com/devseunggwan/praxis/compare/v7.20.0...v7.20.1) (2026-10-13)
+
+
+### Fixed
+
+* **hermes:** fix merge gate transcript defects ([#1566](https://github.com/devseunggwan/praxis/issues/1566)) ([1866fc0](https://github.com/devseunggwan/praxis/commit/1866fc0d75a81da4cc21f40f822de9442fd109f7)), closes [#1565](https://github.com/devseunggwan/praxis/issues/1565)
+* **hermes:** key always-approvals by gate ([#1576](https://github.com/devseunggwan/praxis/issues/1576)) ([08e80d3](https://github.com/devseunggwan/praxis/commit/08e80d3a6a2c3b0a1050ac176e8f3c4e3b859ec4))
+* **hermes:** split skill invocations in transcript ([#1569](https://github.com/devseunggwan/praxis/issues/1569)) ([4f26ca6](https://github.com/devseunggwan/praxis/commit/4f26ca694e8ea076a196266bc649518e0744da6f))
+
+
+### Changed
+
+* bump reviewdog/action-actionlint from 1.77.0 to 1.79.1 ([#1572](https://github.com/devseunggwan/praxis/issues/1572)) ([a370259](https://github.com/devseunggwan/praxis/commit/a370259bf557b936df861e8a9c85cf5a639db8c0))
+* **skills:** add Hermes merge-gate failure modes and dirty-base cleanup ([#1574](https://github.com/devseunggwan/praxis/issues/1574)) ([1e2fc38](https://github.com/devseunggwan/praxis/commit/1e2fc38d4d76ac96f035c3b8afff63e9fe3fbb40)), closes [#1573](https://github.com/devseunggwan/praxis/issues/1573)
+
 ## [7.20.0](https://github.com/devseunggwan/praxis/compare/v7.19.0...v7.20.0) (2026-10-07)
 
 
