@@ -470,3 +470,66 @@ def approve_response(asks: List[Tuple[str, str]], call: Optional[dict] = None) -
     message = " | ".join(f"[praxis:{hook}] {reason}" if hook else reason for hook, reason in asks)
     return {"action": "approve", "message": f"[praxis] {message}"[:1500],
             "rule_key": approval_rule_key(asks, call)}
+
+
+# --- asks: agent self-check vs human approval ----------------------------------
+
+# A praxis `ask` tells the agent to stop and re-check the call against the
+# gate's checklist; it is not a question for the human. Only these gates ask
+# for the human's consent, and only their asks become a Hermes approval.
+HUMAN_APPROVAL_HOOKS = frozenset({
+    "fan-out-scope-gate",
+    "pre-merge-approval-gate",
+})
+
+SELF_CHECK_TTL_SEC = 3600
+
+
+def needs_human(asks: List[Tuple[str, str]]) -> bool:
+    return any(hook in HUMAN_APPROVAL_HOOKS for hook, _ in asks)
+
+
+def self_check_key(tool: str, args: dict) -> str:
+    material = json.dumps([tool, args], sort_keys=True, ensure_ascii=False, default=str)
+    return hashlib.sha256(material.encode("utf-8")).hexdigest()[:16]
+
+
+def _self_check_file(state_dir: Path, session_id: str) -> Path:
+    name = re.sub(r"[^A-Za-z0-9_.-]", "_", session_id) or "no-session"
+    return state_dir / f"{name}.json"
+
+
+def take_self_check(state_dir: Path, session_id: str, key: str, now: float) -> bool:
+    """Record a self-check for this call, or consume one already recorded.
+
+    -> True when the same call was already sent back for a self-check in this
+    session: the agent has seen the checklist and re-issued it, so it passes.
+    -> False on the first sight: the call is recorded and must be blocked.
+    """
+    path = _self_check_file(state_dir, session_id)
+    try:
+        seen = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        seen = {}
+    if not isinstance(seen, dict):
+        seen = {}
+    seen = {k: t for k, t in seen.items() if isinstance(t, (int, float)) and now - t < SELF_CHECK_TTL_SEC}
+    passed = seen.pop(key, None) is not None
+    if not passed:
+        seen[key] = now
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(seen), encoding="utf-8")
+    tmp.replace(path)
+    return passed
+
+
+def self_check_response(asks: List[Tuple[str, str]]) -> dict:
+    """Send the call back to the agent with the gates' checklists instead of asking the human."""
+    reasons = "\n\n".join(f"[praxis:{hook}] {reason}" if hook else reason for hook, reason in asks)
+    message = (
+        "[praxis self-check] Not run yet. Re-check this call against the points below. "
+        "If they hold, re-issue the same call unchanged (or with the gate's ack marker) and it runs; "
+        "if not, change the call. This is a check for you, not a question for the user.\n\n" + reasons
+    )
+    return {"action": "block", "message": message[:3000]}

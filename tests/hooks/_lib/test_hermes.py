@@ -387,26 +387,60 @@ def test_deny_becomes_block(tmp_path):
     assert response["action"] == "block" and "--state" in response["message"]
 
 
-def test_ask_becomes_human_approval(tmp_path):
-    response = _bridge(_terminal("git push origin main", tmp_path), tmp_path)
-    assert response["action"] == "approve"
-    assert response["rule_key"] == "praxis:side-effect-scan[git-push]"
-    again = _bridge(_terminal("git push origin issue-1-fix-other", tmp_path), tmp_path)
-    assert again["rule_key"] == response["rule_key"]
+def test_ask_becomes_an_agent_self_check_not_a_human_approval(tmp_path):
+    """A praxis ask sends the call back to the agent; re-issuing the same call runs it."""
+    first = _bridge(_terminal("git push origin main", tmp_path), tmp_path)
+    assert first["action"] == "block"
+    assert first["message"].startswith("[praxis self-check]")
+    assert "[praxis:side-effect-scan]" in first["message"]
+    again = _bridge(_terminal("git push origin main", tmp_path), tmp_path)
+    assert again.get("action") is None
+    assert "self-check acknowledged on re-issue: side-effect-scan" in again["context"]
+    # The acknowledgement is consumed: a third identical call is checked again.
+    assert _bridge(_terminal("git push origin main", tmp_path), tmp_path)["action"] == "block"
 
 
-def test_a_later_per_call_ask_is_not_hidden_by_an_earlier_one(tmp_path):
-    """commit-title-length-check runs before destructive-bash-guard; both ask,
-    and the key must stay per-call rather than the title gate's."""
+def test_self_check_is_per_call(tmp_path):
+    """Re-checking one call does not let a different call through."""
+    assert _bridge(_terminal("git push origin main", tmp_path), tmp_path)["action"] == "block"
+    other = _bridge(_terminal("git push origin issue-1-fix-other", tmp_path), tmp_path)
+    assert other["action"] == "block"
+
+
+def test_self_check_lists_every_gate_that_asked(tmp_path):
+    """commit-title-length-check runs before destructive-bash-guard; both asks reach the agent."""
     strict = {"PRAXIS_DESTRUCTIVE_BASH_STRICT": "1"}
     title = "fix: an intentionally long commit title well over fifty characters"
     first = _bridge(_terminal(f'git commit -m "{title}" && rm -rf ~/a', tmp_path), tmp_path, strict)
-    second = _bridge(_terminal(f'git commit -m "{title}" && rm -rf ~/b', tmp_path), tmp_path, strict)
-    assert first["action"] == "approve"
+    assert first["action"] == "block"
     assert "[praxis:destructive-bash-guard]" in first["message"]
     assert "[praxis:commit-title-length-check]" in first["message"]
-    assert first["rule_key"] != second["rule_key"]
-    assert not first["rule_key"].startswith("praxis:commit-title-length-check")
+
+
+def test_merge_consent_still_asks_the_human(tmp_path):
+    """pre-merge-approval-gate is consent, not a self-check: it stays a Hermes approval,
+    and re-issuing the call does not get past it."""
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    payload = _terminal("gh pr merge 11 --squash # briefing-surfaced: test # side-effect:ack", tmp_path)
+    first = _bridge(payload, tmp_path)
+    assert first["action"] == "approve", first
+    assert "[praxis:pre-merge-approval-gate]" in first["message"]
+    assert _bridge(payload, tmp_path)["action"] == "approve"
+
+
+def test_take_self_check_expires_and_separates_sessions(tmp_path):
+    take = hermes.take_self_check
+    assert take(tmp_path, "s1", "k", 1000.0) is False
+    assert take(tmp_path, "s2", "k", 1001.0) is False      # another session has its own record
+    assert take(tmp_path, "s1", "k", 1002.0) is True
+    assert take(tmp_path, "s2", "k", 1001.0 + hermes.SELF_CHECK_TTL_SEC) is False  # expired: checked again
+    (tmp_path / "s1.json").write_text("not json", encoding="utf-8")
+    assert take(tmp_path, "s1", "k", 2000.0) is False      # a corrupt record is a first sight
+
+
+def test_needs_human_only_for_consent_gates():
+    assert hermes.needs_human([("side-effect-scan", "x"), ("pre-merge-approval-gate", "y")])
+    assert not hermes.needs_human([("cross-boundary-preflight", "x"), ("session-intent", "y"), ("", "z")])
 
 
 def test_advisory_becomes_context(tmp_path):
