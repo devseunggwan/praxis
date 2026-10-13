@@ -124,14 +124,14 @@ def pre_tool_call(hermes: dict) -> dict:
                 command_rewrite = updated["command"]
                 payload["tool_input"] = dict(claude_input, command=command_rewrite)
     if asks:
-        if _hermes.needs_human(asks):
-            return _hermes.approve_response(asks, args)
-        state_dir = Path(praxis_cache_dir()) / "hermes-self-check"
-        key = _hermes.self_check_key(tool, args)
-        if not _hermes.take_self_check(state_dir, str(hermes.get("session_id") or ""), key, time.time()):
-            return _hermes.self_check_response(asks)
-        gates = ", ".join(sorted({hook for hook, _ in asks if hook})) or "praxis"
-        contexts.append(f"self-check acknowledged on re-issue: {gates}")
+        human, self_check = _hermes.split_asks(asks)
+        if self_check:
+            state_dir = Path(praxis_cache_dir()) / "hermes-self-check"
+            key = _hermes.self_check_key(tool, args)
+            if not _hermes.take_self_check(state_dir, str(hermes.get("session_id") or ""), key, time.time()):
+                return _hermes.self_check_response(self_check)
+        if human:
+            return _hermes.approve_response(human, args)
     response: Dict[str, object] = {}
     if command_rewrite is not None and command_rewrite != args.get("command"):
         response.update(action="modify", args={"command": command_rewrite})

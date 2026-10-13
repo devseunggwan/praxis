@@ -395,7 +395,6 @@ def test_ask_becomes_an_agent_self_check_not_a_human_approval(tmp_path):
     assert "[praxis:side-effect-scan]" in first["message"]
     again = _bridge(_terminal("git push origin main", tmp_path), tmp_path)
     assert again.get("action") is None
-    assert "self-check acknowledged on re-issue: side-effect-scan" in again["context"]
     # The acknowledgement is consumed: a third identical call is checked again.
     assert _bridge(_terminal("git push origin main", tmp_path), tmp_path)["action"] == "block"
 
@@ -438,9 +437,60 @@ def test_take_self_check_expires_and_separates_sessions(tmp_path):
     assert take(tmp_path, "s1", "k", 2000.0) is False      # a corrupt record is a first sight
 
 
-def test_needs_human_only_for_consent_gates():
-    assert hermes.needs_human([("side-effect-scan", "x"), ("pre-merge-approval-gate", "y")])
-    assert not hermes.needs_human([("cross-boundary-preflight", "x"), ("session-intent", "y"), ("", "z")])
+def test_split_asks_separates_consent_from_self_check():
+    human, self_check = hermes.split_asks(
+        [("side-effect-scan", "x"), ("pre-merge-approval-gate", "y"), ("", "z")])
+    assert human == [("pre-merge-approval-gate", "y")]
+    assert self_check == [("side-effect-scan", "x"), ("", "z")]
+
+
+def test_mixed_asks_self_check_first_then_human_consent(monkeypatch, tmp_path):
+    """When a consent gate and a self-check gate both ask, the agent re-checks first;
+    only the re-issued call goes to the human, with the consent ask alone."""
+    bridge = _load("hermes_bridge_mixed", BRIDGE)
+    monkeypatch.setenv("PRAXIS_HOME", str(tmp_path / "praxis"))
+    monkeypatch.setattr(bridge, "_groups", lambda event, tool: ["Bash"])
+    ask = json.dumps({"hookSpecificOutput": {"permissionDecision": "ask", "permissionDecisionReason": "r"}})
+    asked = [("pre-merge-approval-gate", "merge consent"), ("cross-boundary-preflight", "checklist")]
+    monkeypatch.setattr(bridge, "_run", lambda event, matcher, payload: (0, ask, "", asked))
+    call = {"tool_name": "terminal", "tool_input": {"command": "gh pr merge 1"}, "session_id": "s",
+            "cwd": str(tmp_path), "extra": {"tool_call_id": "t"}}
+    first = bridge.pre_tool_call(call)
+    assert first["action"] == "block" and "[praxis:cross-boundary-preflight]" in first["message"]
+    assert "pre-merge-approval-gate" not in first["message"]
+    second = bridge.pre_tool_call(call)
+    assert second["action"] == "approve"
+    assert second["message"] == "[praxis] [praxis:pre-merge-approval-gate] merge consent"
+
+
+def test_self_check_keeps_every_gate_when_a_reason_is_long():
+    response = hermes.self_check_response([("gate-a", "x" * 5000), ("gate-b", "short checklist")])
+    assert "[praxis:gate-b] short checklist" in response["message"]
+
+
+def test_parallel_reissues_consume_one_record(tmp_path):
+    """Racing identical re-issues behave as if run one after another: each record is
+    consumed by exactly one call (8 calls on one record -> pass, record, pass, ... = 4 passes)."""
+    import multiprocessing as mp
+    _with_lib_path().take_self_check(tmp_path, "s", "k", 1000.0)
+    ctx = mp.get_context("spawn")
+    with ctx.Pool(8) as pool:
+        results = pool.starmap(_take_in_child, [(str(tmp_path),)] * 8)
+    assert results.count(True) == 4
+    # The 8th call (a first sight after the 7th consumed) leaves one record.
+    assert json.loads((tmp_path / "s.json").read_text(encoding="utf-8")) == {"k": 1001.0}
+
+
+def _with_lib_path():
+    """_hermes loaded the way the bridge loads it: with `hooks/_lib` importable, so the real lock applies."""
+    lib = str(REPO_ROOT / "hooks" / "_lib")
+    if lib not in sys.path:
+        sys.path.insert(0, lib)
+    return _load("hermes_with_lib", REPO_ROOT / "hooks" / "_lib" / "_hermes.py")
+
+
+def _take_in_child(state_dir: str) -> bool:
+    return _with_lib_path().take_self_check(Path(state_dir), "s", "k", 1001.0)
 
 
 def test_advisory_becomes_context(tmp_path):

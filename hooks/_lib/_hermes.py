@@ -484,9 +484,20 @@ HUMAN_APPROVAL_HOOKS = frozenset({
 
 SELF_CHECK_TTL_SEC = 3600
 
+try:
+    from _state_lock import state_lock  # type: ignore[import-not-found]
+except ImportError:  # pragma: no cover - `_lib` not on sys.path
+    # Same degradation `_fire_ledger` applies: without the lock the record is
+    # racy, never a blocked call.
+    @contextlib.contextmanager
+    def state_lock(path: str, timeout: Optional[float] = None) -> Iterator[bool]:  # type: ignore[misc]
+        yield False
 
-def needs_human(asks: List[Tuple[str, str]]) -> bool:
-    return any(hook in HUMAN_APPROVAL_HOOKS for hook, _ in asks)
+
+def split_asks(asks: List[Tuple[str, str]]) -> Tuple[List[Tuple[str, str]], List[Tuple[str, str]]]:
+    """-> (asks for the human's consent, asks for the agent's self-check)."""
+    human = [ask for ask in asks if ask[0] in HUMAN_APPROVAL_HOOKS]
+    return human, [ask for ask in asks if ask[0] not in HUMAN_APPROVAL_HOOKS]
 
 
 def self_check_key(tool: str, args: dict) -> str:
@@ -505,31 +516,44 @@ def take_self_check(state_dir: Path, session_id: str, key: str, now: float) -> b
     -> True when the same call was already sent back for a self-check in this
     session: the agent has seen the checklist and re-issued it, so it passes.
     -> False on the first sight: the call is recorded and must be blocked.
+
+    The read-modify-write runs under `state_lock`: Hermes can run tool calls in
+    parallel, and two identical re-issues must not both consume one record.
     """
     path = _self_check_file(state_dir, session_id)
-    try:
-        seen = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        seen = {}
-    if not isinstance(seen, dict):
-        seen = {}
-    seen = {k: t for k, t in seen.items() if isinstance(t, (int, float)) and now - t < SELF_CHECK_TTL_SEC}
-    passed = seen.pop(key, None) is not None
-    if not passed:
-        seen[key] = now
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(seen), encoding="utf-8")
-    tmp.replace(path)
+    with state_lock(str(path)):
+        try:
+            seen = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            seen = {}
+        if not isinstance(seen, dict):
+            seen = {}
+        seen = {k: t for k, t in seen.items() if isinstance(t, (int, float)) and now - t < SELF_CHECK_TTL_SEC}
+        passed = seen.pop(key, None) is not None
+        if not passed:
+            seen[key] = now
+        with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=path.parent, prefix=path.name,
+                                         suffix=".tmp", delete=False) as tmp:
+            tmp.write(json.dumps(seen))
+        os.replace(tmp.name, path)
     return passed
 
 
+SELF_CHECK_REASON_CAP = 1500
+
+
 def self_check_response(asks: List[Tuple[str, str]]) -> dict:
-    """Send the call back to the agent with the gates' checklists instead of asking the human."""
-    reasons = "\n\n".join(f"[praxis:{hook}] {reason}" if hook else reason for hook, reason in asks)
+    """Send the call back to the agent with the gates' checklists instead of asking the human.
+
+    Each reason is capped on its own, so a long checklist never pushes a later
+    gate's checklist out of the message.
+    """
+    reasons = "\n\n".join(
+        (f"[praxis:{hook}] {reason}" if hook else reason)[:SELF_CHECK_REASON_CAP] for hook, reason in asks)
     message = (
         "[praxis self-check] Not run yet. Re-check this call against the points below. "
         "If they hold, re-issue the same call unchanged (or with the gate's ack marker) and it runs; "
         "if not, change the call. This is a check for you, not a question for the user.\n\n" + reasons
     )
-    return {"action": "block", "message": message[:3000]}
+    return {"action": "block", "message": message}
