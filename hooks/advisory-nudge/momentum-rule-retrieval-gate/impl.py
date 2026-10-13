@@ -1372,11 +1372,19 @@ _BULK_FILLERS = frozenset({"만", "은", "는", "을", "를", "도", "과", "와
 # join a PR list ("#833, #999 머지").
 _SENTENCE_TAIL_RE = re.compile(r"[.!?。…\n;·]+")
 # In a short approval reply a bare number is a PR: users type "98, 1118 머지".
-_REPLY_PR_RE = re.compile(r"(?:#|/pull/|(?<![A-Za-z])pr\s*#?\s*)?(?<![A-Za-z0-9_])(\d+)(?![A-Za-z0-9_])",
+_REPLY_PR_RE = re.compile(r"(?:#|/pull/|(?<![A-Za-z])pr\s*(?:#\s*)?)?(?<![A-Za-z0-9_])(\d+)(?![A-Za-z0-9_])",
                           re.IGNORECASE)
 # A heading line: a markdown heading, or a line that is bold from end to end.
 # A bold lead inside a bullet (`- **리스크**: …`) is an item, not a heading.
-_HEADING_RE = re.compile(r"^\s{0,3}(?:#{1,6}\s+\S|\*\*[^*\n]+\*\*\s*:?\s*$)")
+_HEADING_RE = re.compile(r"^\s{0,3}(?:(?P<hashes>#{1,6})\s+\S|\*\*[^*\n]+\*\*\s*:?\s*$)")
+_FENCE_LINE_RE = re.compile(r"^\s{0,3}(?:```|~~~)")
+# A whole-line bold heading ranks below every markdown heading.
+_BOLD_HEADING_LEVEL = 7
+# A reply longer than this is not a bare approval; capping it also bounds the
+# regex work a pasted wall of text could cost.
+_BULK_REPLY_MAX_CHARS = 300
+# Commands that move the working directory for every later Bash call.
+_CHDIR_COMMANDS = frozenset({"cd", "pushd", "popd"})
 # A listed merge ask: the PR list is the object of the merge verb, and the
 # verb is the sentence's predicate — the ask ending follows it directly
 # ("#833, #999 를 머지할까요?", "Approve merging #833 and #999?"). A list
@@ -1396,27 +1404,29 @@ def _bulk_reply_prs(text: str) -> set[str] | None:
     text is not an approval at all.
 
     Conservative on purpose — a miss costs one ask, a false read releases a
-    merge. A refusal word anywhere, a trailing `?`, or an earlier sentence that
-    names a PR ("#999는 내일 다시 보자. 모두 머지") voids the reply: a split
-    decision is not read. The last sentence must be PR references plus
-    approval words only, so a condition ("머지, 근데 #999는 확인 후") voids it too.
+    merge. Every sentence must be PR references plus approval words only, so
+    a deferral ("두 번째 건 내일 다시 보자. 모두 머지"), a precondition ("CI
+    한번 더 돌려보고. ok"), or a condition after a comma voids the reply, as
+    do a refusal word anywhere and a trailing `?`.
     """
     raw = text.strip()
-    if not raw or raw.endswith(("?", "？")) or _LABEL_NEGATION_RE.search(raw):
+    if (not raw or len(raw) > _BULK_REPLY_MAX_CHARS or raw.endswith(("?", "？"))
+            or _LABEL_NEGATION_RE.search(raw)):
         return None
-    sentences = [s for s in _SENTENCE_TAIL_RE.split(raw) if s.strip()]
-    if not sentences or any(_REPLY_PR_RE.search(s) for s in sentences[:-1]):
-        return None
-    last = re.sub(r"\s*[—–:]\s*", " ", sentences[-1].lower())
-    named = set(_REPLY_PR_RE.findall(last))
-    rest = _REPLY_PR_RE.sub(" ", last)
-    words = [w for w in re.split(r"[\s,()]+", rest)
-             if w and w not in _BULK_FILLERS and w not in _BULK_QUANTIFIERS]
-    remainder = " ".join(words).strip(" .!~,·")
-    if (remainder in _APPROVAL_TOKENS or remainder in _BULK_EXTRA_TOKENS
-            or (words and all(w in _BULK_APPROVAL_WORDS for w in words))):
-        return named
-    return None
+    named: set[str] = set()
+    for sentence in _SENTENCE_TAIL_RE.split(raw):
+        if not sentence.strip():
+            continue
+        flat = re.sub(r"\s*[—–:]\s*", " ", sentence.lower())
+        named |= set(_REPLY_PR_RE.findall(flat))
+        rest = _REPLY_PR_RE.sub(" ", flat)
+        words = [w for w in re.split(r"[\s,()]+", rest)
+                 if w and w not in _BULK_FILLERS and w not in _BULK_QUANTIFIERS]
+        remainder = " ".join(words).strip(" .!~,·")
+        if not (remainder in _APPROVAL_TOKENS or remainder in _BULK_EXTRA_TOKENS
+                or (words and all(w in _BULK_APPROVAL_WORDS for w in words))):
+            return None
+    return named
 
 
 def _listed_merge_ask(text: str) -> tuple[set[str], str]:
@@ -1436,17 +1446,35 @@ def _listed_merge_ask(text: str) -> tuple[set[str], str]:
 
 
 def _pr_sections(text: str, prs: set[str]) -> dict[str, str]:
-    """Per-PR briefing sections: each runs from a heading line that names
-    exactly one PR of `prs` to the next heading of any kind. A heading naming
-    two of them belongs to neither, so a combined block cannot pass as two
-    briefings, and a shared block after the last section is nobody's."""
-    lines = text.splitlines()
+    """Per-PR briefing sections.
+
+    The first heading that names exactly one PR of `prs` fixes the section
+    level. A section runs from such a heading to the next heading at that
+    level or above; a deeper heading (`#### #999 와의 관계`) is content of the
+    section it sits in, and so is a `#` comment inside a code fence. A heading
+    naming two PRs belongs to neither, a shared block after the last section
+    is nobody's, and only a PR's first section counts — a second heading
+    naming it is not a second briefing.
+    """
     sections: dict[str, str] = {}
+    seen: set[str] = set()
+    level: int | None = None
     owner: str | None = None
-    for line in lines:
-        if _HEADING_RE.match(line):
+    in_fence = False
+    for line in text.splitlines():
+        if _FENCE_LINE_RE.match(line):
+            in_fence = not in_fence
+        m = None if in_fence else _HEADING_RE.match(line)
+        if m is not None:
+            this = len(m.group("hashes")) if m.group("hashes") else _BOLD_HEADING_LEVEL
             refs = set(_PR_REF_RE.findall(line)) & prs
-            owner = refs.pop() if len(refs) == 1 else None
+            if level is None and len(refs) == 1:
+                level = this
+            if level is not None and this <= level:
+                pr = refs.pop() if len(refs) == 1 else None
+                owner = pr if pr is not None and pr not in seen else None
+                if owner is not None:
+                    seen.add(owner)
         if owner is not None:
             sections[owner] = sections.get(owner, "") + line + "\n"
     return sections
@@ -1511,6 +1539,33 @@ def _ask_decision(pairs: list[tuple[str, str]]) -> tuple[set[str], set[str], str
     return None
 
 
+def _changed_directory_after(entries: list[dict], index: int) -> bool:
+    """True when a Bash call after entry `index` changed directory or exported
+    GH_REPO/GH_HOST — state that outlives the call and retargets a later merge."""
+    for ev in entries[index + 1:]:
+        msg = ev.get("message")
+        if not isinstance(msg, dict) or msg.get("role") != "assistant" or ev.get("isSidechain"):
+            continue
+        content = msg.get("content")
+        if not isinstance(content, list):
+            continue
+        for b in content:
+            if not (isinstance(b, dict) and b.get("type") == "tool_use"
+                    and b.get("name") == "Bash"):
+                continue
+            cmd = (b.get("input") or {}).get("command")
+            if not isinstance(cmd, str):
+                continue
+            for argv in iter_command_starts(safe_tokenize(cmd)):
+                if not argv:
+                    continue
+                if argv[0] in _CHDIR_COMMANDS:
+                    return True
+                if argv[0] == "export" and any(_REPO_ENV_RE.match(t) for t in argv[1:]):
+                    return True
+    return False
+
+
 def _bulk_released(entries: list[dict], idxs: list[int], command: object) -> bool:
     """True when this merge is one of a set the user approved in one answer.
 
@@ -1545,7 +1600,13 @@ def _bulk_released(entries: list[dict], idxs: list[int], command: object) -> boo
         named = reply
         brief_lo = idxs[-2] + 1 if len(idxs) >= 2 else 0
         brief_hi = last_human
-        listed, ask_text = _listed_merge_ask(_assistant_text(entries, brief_lo, brief_hi))
+        briefing_text = _assistant_text(entries, brief_lo, brief_hi)
+        listed, ask_text = _listed_merge_ask(briefing_text)
+        # A bare "ok" answers the turn's LAST question; a later "Or just #833?"
+        # or "그 전에 리베이스해 둘까요?" is what it may be answering.
+        asks = _ASK_SENTENCE_RE.findall(briefing_text)
+        if not named and (not asks or asks[-1] != ask_text):
+            return False
     approved = named or listed
     if pr not in approved or len(approved) < 2:
         return False
@@ -1556,8 +1617,14 @@ def _bulk_released(entries: list[dict], idxs: list[int], command: object) -> boo
     # The one shared ask is every section's approve-ask item.
     if _briefing_item_count(section + "\n" + ask_text) < MERGE_BRIEFING_MIN_ITEMS:
         return False
-    if _repo_conflict(_merge_target_repo(command),
-                      _context_repo_from_window(entries, brief_lo, len(entries))):
+    merge_repo = _merge_target_repo(command)
+    window_repo = _context_repo_from_window(entries, brief_lo, len(entries))
+    if _repo_conflict(merge_repo, window_repo):
+        return False
+    # After a `cd` the shell may sit in another checkout, where a bare number
+    # names a different PR; only a merge naming the briefed repo is safe then.
+    if _changed_directory_after(entries, answer_idx) and (
+            merge_repo is None or merge_repo != window_repo):
         return False
     spent: set[str] = set()
     for i, cmd in _executed_merges(entries):

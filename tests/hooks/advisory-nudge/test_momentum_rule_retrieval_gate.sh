@@ -872,6 +872,23 @@ run_merge_escalation_case "merge_bulk_cd_chain_denies" \
   "yes" "" "momentum-merge-bulk-all-second.jsonl" "cd ../other && gh pr merge 999 --squash"
 run_merge_escalation_case "merge_bulk_gh_repo_env_denies" \
   "yes" "" "momentum-merge-bulk-all-second.jsonl" "GH_REPO=x/y gh pr merge 999 --squash"
+# Review round 2 — each was released before the second fix: a code-fence
+# comment or a deeper heading is content of the section it sits in; a bare ok
+# answers the turn's last question, not an earlier listed ask; every sentence
+# of the reply must approve; after a separate `cd`, only a merge naming the
+# briefed repo is released.
+run_merge_escalation_case "merge_bulk_fence_comment_denies" \
+  "yes" "" "momentum-merge-bulk-fence-comment.jsonl" "gh pr merge 999 --squash"
+run_merge_escalation_case "merge_bulk_subheading_denies" \
+  "yes" "" "momentum-merge-bulk-subheading.jsonl" "gh pr merge 999 --squash"
+run_merge_escalation_case "merge_bulk_later_question_denies" \
+  "yes" "" "momentum-merge-bulk-later-question.jsonl" "gh pr merge 999 --squash"
+run_merge_escalation_case "merge_bulk_precondition_denies" \
+  "yes" "" "momentum-merge-bulk-precondition.jsonl" "gh pr merge 999 --squash"
+run_merge_escalation_case "merge_bulk_separate_cd_bare_denies" \
+  "yes" "" "momentum-merge-bulk-separate-cd.jsonl" "gh pr merge 999 --squash"
+run_merge_escalation_case "merge_bulk_separate_cd_repo_passes" \
+  "no" "" "momentum-merge-bulk-separate-cd.jsonl" "gh pr merge 999 --repo o/r --squash"
 
 # An AskUserQuestion answer is a tool_result, not a typed message. Replayed over
 # local transcripts, 13 of the merges this check first denied were answered this

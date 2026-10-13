@@ -435,11 +435,11 @@ approve blindly.
   | Condition | Check |
   | --------- | ----- |
   | the command is that merge and nothing else, with an explicit PR number: no other command chained before or after it (`cd other && …`), no loop, no `GH_REPO`/`GH_HOST` prefix, not numberless | `_merge_pr_number` |
-  | the latest decision is an approval: the last typed message, or the `AskUserQuestion` answer after it. Its last sentence holds only PR references and approval words; a refusal word anywhere, a trailing `?`, a condition after a comma, or an earlier sentence naming a PR voids it. In an `AskUserQuestion` answer every pair is read — a refusal on any question voids it — and the deciding pair must be a listed merge ask or a label naming the PRs | `_bulk_reply_prs`, `_ask_decision` |
-  | the approved set has two or more PRs: the PRs the answer names (`#833 #999 머지`, `98, 1118 머지`), else the PRs the last listed merge ask names — the PR list is the object of 머지/merge and the ask ending follows the verb directly (`#833, #999 를 머지할까요?`, `Approve merging #833 and #999?`); `#833, #999 머지 전에 CI 를 다시 돌릴까요?` is not one | `_listed_merge_ask` |
-  | this PR is in the set and has its own section in the briefing turn — from a heading line (a markdown heading, or a line bold end to end) naming exactly this PR of the set, to the next heading of any kind — with 4 of 6 items inside it, the shared ask counting as its approve-ask item. A bold lead inside a bullet is an item, and a shared block after the last section belongs to no PR | `_pr_sections`, `_briefing_item_count` |
+  | the latest decision is an approval: the last typed message, or the `AskUserQuestion` answer after it. Every sentence holds only PR references and approval words, so a deferral or precondition in any sentence (`CI 한번 더 돌려보고. ok`), a condition after a comma, a refusal word, or a trailing `?` voids it; a reply over 300 characters is not read. In an `AskUserQuestion` answer every pair is read — a refusal on any question voids it — and the deciding pair must be a listed merge ask or a label naming the PRs | `_bulk_reply_prs`, `_ask_decision` |
+  | the approved set has two or more PRs: the PRs the answer names (`#833 #999 머지`, `98, 1118 머지`), else the PRs the listed merge ask names — the PR list is the object of 머지/merge and the ask ending follows the verb directly (`#833, #999 를 머지할까요?`, `Approve merging #833 and #999?`); `#833, #999 머지 전에 CI 를 다시 돌릴까요?` is not one. A reply naming no PR answers the turn's last question, so the listed ask must be that last question (`… 머지할까요? 그 전에 리베이스해 둘까요?` voids a bare `ok`) | `_listed_merge_ask` |
+  | this PR is in the set and has its own section in the briefing turn — from a heading line (a markdown heading, or a line bold end to end) naming exactly this PR of the set, to the next heading at the same level or above — with 4 of 6 items inside it, the shared ask counting as its approve-ask item. The first such heading fixes the level; a deeper heading or a `#` comment inside a code fence is content of the section it sits in, a bold lead inside a bullet is an item, a shared block after the last section belongs to no PR, and only a PR's first section counts | `_pr_sections`, `_briefing_item_count` |
   | no merge since the answer targeted a PR outside the set or repeated one, and this PR has not merged since | `_executed_merges` |
-  | no repo conflict (as in **Repo scoping**) and no later `AskUserQuestion` hold | `_repo_conflict`, `_ask_held_after` |
+  | no repo conflict (as in **Repo scoping**) and no later `AskUserQuestion` hold; after a Bash call since the answer that changed directory (`cd`, `pushd`, `popd`) or exported `GH_REPO`/`GH_HOST`, the merge must name the briefed repo with `--repo` | `_repo_conflict`, `_changed_directory_after`, `_ask_held_after` |
 
   The section rule is the part that keeps *No Approval Transfer*: a combined
   paragraph about two PRs (`momentum-merge-serial-unanswered-prior.jsonl`)
@@ -454,8 +454,8 @@ approve blindly.
   closed: any exception or unreadable transcript returns False and the sibling
   keeps asking.
 
-  Replayed over every recorded `gh pr merge` in local transcripts (337 calls
-  across 810 Claude Code and Hermes transcripts, each cut right before the
+  Replayed over every recorded `gh pr merge` in local transcripts (339 calls
+  across 813 Claude Code and Hermes transcripts, each cut right before the
   merge and fed to the main and branch builds): 0 decision changes, 0
   sibling prompts skipped, 0 errors. No recorded briefing used per-PR
   headings with a listed ask, so the path opens only for briefings written to
@@ -469,7 +469,14 @@ approve blindly.
   승인 to an unrelated question counted, a clarify condition after the comma
   dropped, an earlier deferral sentence ignored, and a merge chained after `cd`
   or retargeted by `GH_REPO`. Each is a `merge_bulk_*_denies` case now; all nine
-  fail against that first version and pass against this one.
+  fail against that first version and pass against this one. A second round
+  found five more — a `#` comment in a code fence or a deeper heading taken as
+  the other PR's section, a bare `ok` credited to an earlier listed ask when the
+  turn ended on another question, a deferral sentence with no PR number, and a
+  `cd` issued as its own call before the merge — and those five cases fail
+  against the round-one version and pass now. The fix after round two had no
+  independent review round of its own; the round-two probes were re-run on it
+  and every shape they flagged now denies.
 
   **A deny says why a briefing the user saw was not scored (issue #1433).**
   Message-only; no decision moves. When the two deny paths above fire —
