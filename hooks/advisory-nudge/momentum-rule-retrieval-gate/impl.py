@@ -961,7 +961,12 @@ _AND_TOKEN = "&&"
 
 
 def _executed_merge_indices(entries: list[dict]) -> list[int]:
-    """Entry indices of `gh pr merge` calls that actually RAN, oldest first.
+    """Entry indices of `gh pr merge` calls that actually RAN, oldest first."""
+    return [i for i, _ in _executed_merges(entries)]
+
+
+def _executed_merges(entries: list[dict]) -> list[tuple[int, str]]:
+    """`(entry index, command)` of `gh pr merge` calls that actually RAN, oldest first.
 
     A merge whose tool_result is `is_error` never executed — the gate itself, a
     sibling gate, or a declined approval stopped it — so counting it would make
@@ -975,8 +980,8 @@ def _executed_merge_indices(entries: list[dict]) -> list[int]:
     briefing was real. Both directions therefore fail open: the guard declines to
     fire rather than spend a window it cannot confirm.
     """
-    pending: dict[str, int] = {}
-    executed: list[int] = []
+    pending: dict[str, tuple[int, str]] = {}
+    executed: list[tuple[int, str]] = []
     for i, ev in enumerate(entries):
         msg = ev.get("message")
         if not isinstance(msg, dict) or ev.get("isSidechain"):
@@ -1001,12 +1006,12 @@ def _executed_merge_indices(entries: list[dict]) -> list[int]:
                     continue
                 if _AND_TOKEN in tokens and not _is_gh_pr_merge(starts[-1]):
                     continue
-                pending[tid] = i
+                pending[tid] = (i, cmd)
             elif b.get("type") == "tool_result":
                 tid = b.get("tool_use_id")
-                idx = pending.pop(tid, None) if isinstance(tid, str) else None
-                if idx is not None and not b.get("is_error"):
-                    executed.append(idx)
+                hit = pending.pop(tid, None) if isinstance(tid, str) else None
+                if hit is not None and not b.get("is_error"):
+                    executed.append(hit)
     return sorted(executed)
 
 
