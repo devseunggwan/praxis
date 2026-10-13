@@ -803,6 +803,50 @@ run_merge_escalation_case "merge_serial_answered_current_passes" \
 run_merge_escalation_case "merge_serial_unrelated_message_denies" \
   "yes" "" "momentum-merge-serial-unrelated-message.jsonl" "gh pr merge 999 --squash --delete-branch"
 
+# Bulk approval: one turn briefs each PR in its own headed section and asks
+# once, listing the PRs; one answer then releases each listed PR once, as its
+# own single-merge command. Fixtures: momentum-merge-bulk-*.jsonl.
+run_merge_escalation_case "merge_bulk_all_first_passes" \
+  "no" "" "momentum-merge-bulk-all-first.jsonl" "gh pr merge 833 --squash --delete-branch"
+run_merge_escalation_case "merge_bulk_all_second_passes" \
+  "no" "" "momentum-merge-bulk-all-second.jsonl" "gh pr merge 999 --squash --delete-branch"
+run_merge_escalation_case "merge_bulk_named_reply_passes" \
+  "no" "" "momentum-merge-bulk-named.jsonl" "gh pr merge 999 --squash"
+run_merge_escalation_case "merge_bulk_ok_to_listed_ask_passes" \
+  "no" "" "momentum-merge-bulk-ok-listed.jsonl" "gh pr merge 999 --squash"
+run_merge_escalation_case "merge_bulk_ask_answer_passes" \
+  "no" "" "momentum-merge-bulk-ask-answer.jsonl" "gh pr merge 999 --squash"
+# Outside the set, or not a single numbered merge: the bulk path does not apply.
+run_merge_escalation_case "merge_bulk_unlisted_pr_denies" \
+  "yes" "" "momentum-merge-bulk-all-second.jsonl" "gh pr merge 1001 --squash"
+run_merge_escalation_case "merge_bulk_numberless_denies" \
+  "yes" "" "momentum-merge-bulk-all-second.jsonl" "gh pr merge --squash"
+run_merge_escalation_case "merge_bulk_chained_denies" \
+  "yes" "" "momentum-merge-bulk-all-first.jsonl" "gh pr merge 833 --squash && gh pr merge 999 --squash"
+run_merge_escalation_case "merge_bulk_loop_denies" \
+  "yes" "" "momentum-merge-bulk-all-first.jsonl" 'for p in 833 999; do gh pr merge $p --squash; done'
+run_merge_escalation_case "merge_bulk_other_repo_denies" \
+  "yes" "" "momentum-merge-bulk-repo-probed.jsonl" "gh pr merge 999 --repo x/y --squash"
+run_merge_escalation_case "merge_bulk_same_repo_passes" \
+  "no" "" "momentum-merge-bulk-repo-probed.jsonl" "gh pr merge 999 --repo o/r --squash"
+# The answer, the briefing, or the run does not support this PR.
+run_merge_escalation_case "merge_bulk_partial_pick_denies" \
+  "yes" "" "momentum-merge-bulk-partial.jsonl" "gh pr merge 999 --squash"
+run_merge_escalation_case "merge_bulk_combined_block_denies" \
+  "yes" "" "momentum-merge-bulk-combined.jsonl" "gh pr merge 999 --squash"
+run_merge_escalation_case "merge_bulk_thin_section_denies" \
+  "yes" "" "momentum-merge-bulk-thin-section.jsonl" "gh pr merge 999 --squash"
+run_merge_escalation_case "merge_bulk_repeat_denies" \
+  "yes" "" "momentum-merge-bulk-repeat.jsonl" "gh pr merge 999 --squash"
+run_merge_escalation_case "merge_bulk_outsider_ran_denies" \
+  "yes" "" "momentum-merge-bulk-outsider.jsonl" "gh pr merge 999 --squash"
+run_merge_escalation_case "merge_bulk_hold_word_denies" \
+  "yes" "" "momentum-merge-bulk-hold-word.jsonl" "gh pr merge 999 --squash"
+run_merge_escalation_case "merge_bulk_question_reply_denies" \
+  "yes" "" "momentum-merge-bulk-question.jsonl" "gh pr merge 999 --squash"
+run_merge_escalation_case "merge_bulk_ask_hold_denies" \
+  "yes" "" "momentum-merge-bulk-ask-hold.jsonl" "gh pr merge 999 --squash"
+
 # An AskUserQuestion answer is a tool_result, not a typed message. Replayed over
 # local transcripts, 13 of the merges this check first denied were answered this
 # way, so it must count — and neither a declined question (`is_error`) nor a

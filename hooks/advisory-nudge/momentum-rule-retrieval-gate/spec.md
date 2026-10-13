@@ -425,6 +425,43 @@ approve blindly.
   written after the first merge re-arms the marker on its own — so a marked
   merge is the one release this check does not reach.
 
+  **One answer can approve a listed set (bulk merge, issue #1583).** The
+  serial check above made every merge after the first wait for its own
+  round trip, so N ready PRs cost N briefing → answer cycles even when the
+  user had read all N briefings and answered `둘다 머지하세요` — a reply the
+  #1402 replay already lists as denied. `_bulk_released` is a second release
+  path, checked before the others, and every condition below must hold:
+
+  | Condition | Check |
+  | --------- | ----- |
+  | the merge is one command with one explicit PR number (no `&&` chain, loop, or numberless merge) | `_merge_pr_number` |
+  | the latest decision is an approval: the last typed message, or an `AskUserQuestion` answer after it whose label leads with one; a refusal word anywhere or a trailing `?` voids it | `_bulk_reply_prs`, `_LABEL_NEGATION_RE` |
+  | the approved set has two or more PRs: the PRs the answer names (`#833 #999 머지`, `98, 1118 머지`), else the PRs the briefing turn's last merge ask lists as its object (`#833, #999 를 머지할까요?`) | `_listed_merge_ask` |
+  | this PR is in the set and has its own section in the briefing turn — a heading line naming exactly this PR of the set — with 4 of 6 items inside it, the shared ask counting as its approve-ask item | `_pr_sections`, `_briefing_item_count` |
+  | no merge since the answer targeted a PR outside the set or repeated one, and this PR has not merged since | `_executed_merges` |
+  | no repo conflict (as in **Repo scoping**) and no later `AskUserQuestion` hold | `_repo_conflict`, `_ask_held_after` |
+
+  The section rule is the part that keeps *No Approval Transfer*: a combined
+  paragraph about two PRs (`momentum-merge-serial-unanswered-prior.jsonl`)
+  still denies the second merge, because no heading names one PR alone, so
+  no PR has a briefing of its own. The answer rule keeps the user's choice
+  partial: `#833만 머지` approves a set of one, which this path does not
+  release.
+
+  `pre-merge-approval-gate` asks the same question through
+  `bulk_merge_approved(payload)` (loaded from this file), so the two gates
+  cannot disagree about which merges the user approved. That function fails
+  closed: any exception or unreadable transcript returns False and the sibling
+  keeps asking.
+
+  Replayed over every recorded `gh pr merge` in local transcripts (332 calls
+  across 809 Claude Code and Hermes transcripts, each cut right before the
+  merge and fed to the main and branch builds): 0 decision changes, 0
+  sibling prompts skipped, 0 errors. No recorded briefing used per-PR
+  headings with a listed ask, so the path opens only for briefings written to
+  the new shape (`skills/merge-briefing/SKILL.md` → *Bulk merge*); the
+  release cases are pinned by the `momentum-merge-bulk-*.jsonl` fixtures.
+
   **A deny says why a briefing the user saw was not scored (issue #1433).**
   Message-only; no decision moves. When the two deny paths above fire —
   "fewer than 4 of 6 items" and the marker with no briefing — and the latest

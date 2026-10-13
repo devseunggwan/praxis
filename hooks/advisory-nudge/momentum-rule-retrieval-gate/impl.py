@@ -1347,6 +1347,203 @@ def _with_exclusion(why: str, reason: str | None) -> str:
     return f"{why}. A briefing was shown earlier but not scored: {reason}"
 
 
+# ---------------------------------------------------------------------------
+# Bulk approval: one briefing turn, one answer, several merges.
+# ---------------------------------------------------------------------------
+
+# Words that make one approval cover a listed set ("모두 머지", "approve both").
+# They are dropped before the remainder is matched against the approval tokens.
+_BULK_QUANTIFIERS = frozenset({
+    "모두", "전부", "다", "둘다", "셋다", "넷다", "다섯다", "둘", "셋", "넷", "다섯",
+    "all", "both", "each", "every", "everything", "them", "of",
+})
+# Polite or sentence-final approvals the bare-token set does not carry; read
+# only on the bulk path, where the reply must also name or answer a listed set.
+_BULK_EXTRA_TOKENS = frozenset({
+    "머지하세요", "머지해주세요", "머지 해주세요", "머지 해줘", "머지합시다",
+    "승인합니다", "진행하세요", "진행해주세요", "merge them", "merge all",
+})
+# Particles and list joiners left behind once the PR references are removed.
+_BULK_FILLERS = frozenset({"만", "은", "는", "을", "를", "도", "과", "와", "및", "and", "&", "pr"})
+# Only the last sentence of a reply is its decision; commas stay inside it
+# because they join a PR list ("#833, #999 머지").
+_SENTENCE_TAIL_RE = re.compile(r"[.!?。…\n;·]+")
+# In a short approval reply a bare number is a PR: users type "98, 1118 머지".
+_REPLY_PR_RE = re.compile(r"(?:#|/pull/|(?<![A-Za-z])pr\s*#?\s*)?(?<![A-Za-z0-9_])(\d+)(?![A-Za-z0-9_])",
+                          re.IGNORECASE)
+# A briefing section starts at a markdown heading or a bold lead line.
+_SECTION_HEAD_RE = re.compile(r"^\s{0,3}(?:#{1,6}\s|\*\*|[-*]\s+\*\*|\d+[.)]\s+\*\*)")
+
+
+def _bulk_reply_prs(text: str) -> set[str] | None:
+    """PRs a bulk approval names (empty when it names none), or None when the
+    text is not an approval at all.
+
+    Any refusal word anywhere disqualifies it: "#1001 보류, #833 #999 머지" is
+    a split decision this parser does not try to read, so it costs one ask.
+    """
+    raw = text.strip()
+    if not raw or raw.endswith(("?", "？")) or _LABEL_NEGATION_RE.search(raw):
+        return None
+    sentences = [s for s in _SENTENCE_TAIL_RE.split(raw) if s.strip()]
+    if not sentences:
+        return None
+    last = sentences[-1].lower()
+    named = set(_REPLY_PR_RE.findall(last))
+    rest = _REPLY_PR_RE.sub(" ", last)
+    words = [w for w in re.split(r"[\s,]+", rest)
+             if w and w not in _BULK_FILLERS and w not in _BULK_QUANTIFIERS]
+    remainder = " ".join(words).strip(" .!~,·")
+    if remainder in _APPROVAL_TOKENS or remainder in _BULK_EXTRA_TOKENS:
+        return named
+    return None
+
+
+def _listed_merge_ask(text: str) -> tuple[set[str], str]:
+    """(PRs, sentence) of the LAST merge ask in `text` that lists two or more
+    PRs as its object (`#833, #999 를 머지할까요?`), else (empty set, "")."""
+    listed: tuple[set[str], str] = (set(), "")
+    for s in _ASK_SENTENCE_RE.findall(text):
+        if not _MERGE_WORD_RE.search(s) or _NOT_MERGE_ASK_RE.search(s):
+            continue
+        objects = {n for m in _MERGE_OBJECT_RE.finditer(s)
+                   for n in re.findall(r"\d+", m.group(1) or m.group(2))}
+        if len(objects) >= 2:
+            listed = (objects, s)
+    return listed
+
+
+def _pr_sections(text: str, prs: set[str]) -> dict[str, str]:
+    """Per-PR briefing sections: each runs from a heading line that names
+    exactly one PR of `prs` to the next such heading. A heading naming two of
+    them belongs to neither, so a combined block cannot pass as two briefings."""
+    lines = text.splitlines()
+    heads: list[tuple[int, str]] = []
+    for i, line in enumerate(lines):
+        if not _SECTION_HEAD_RE.match(line):
+            continue
+        refs = set(_PR_REF_RE.findall(line)) & prs
+        if len(refs) == 1:
+            heads.append((i, refs.pop()))
+    sections: dict[str, str] = {}
+    for k, (start, pr) in enumerate(heads):
+        end = heads[k + 1][0] if k + 1 < len(heads) else len(lines)
+        sections[pr] = sections.get(pr, "") + "\n".join(lines[start:end]) + "\n"
+    return sections
+
+
+def _merge_pr_number(command: str) -> str | None:
+    """Explicit PR number of a single-segment merge, else None."""
+    segments = _merge_segments(command)
+    if len(segments) != 1 or segments[0] is None or _has_repetition(command):
+        return None
+    m = _PULL_TOKEN_RE.match(segments[0])
+    return (m.group(1) or m.group(2)) if m else None
+
+
+def _latest_ask_answer(entries: list[dict], after: int) -> tuple[int, str, str] | None:
+    """(index, question, picked label) of the last answered AskUserQuestion
+    result after entry `after`, or None. A declined question carries no pair."""
+    found: tuple[int, str, str] | None = None
+    for i in range(after + 1, len(entries)):
+        ev = entries[i]
+        msg = ev.get("message")
+        if not isinstance(msg, dict) or ev.get("isSidechain"):
+            continue
+        content = msg.get("content")
+        if not isinstance(content, list):
+            continue
+        for b in content:
+            if (isinstance(b, dict) and b.get("type") == "tool_result"
+                    and not b.get("is_error")):
+                pairs = _ASK_ANSWER_RE.findall(_user_message_text(b.get("content")))
+                if pairs:
+                    found = (i, pairs[-1][0], pairs[-1][1])
+    return found
+
+
+def _bulk_released(entries: list[dict], idxs: list[int], command: object) -> bool:
+    """True when this merge is one of a set the user approved in one answer.
+
+    The flow: one assistant turn briefs every PR in its own section (a heading
+    naming that PR, 4 of 6 items inside it) and asks once, listing the PRs; the
+    user's next answer approves the set — naming the PRs (`#833 #999 머지`) or
+    answering the listed ask (`모두 머지`, `ok`). Each merge then has to be one
+    of that set, run as its own single command, and the set is spent in order:
+    any merge since the answer that targets a PR outside the set, or repeats one,
+    ends it. Numberless merges never ride this path — the set names numbers.
+    """
+    if not isinstance(command, str) or not idxs:
+        return False
+    pr = _merge_pr_number(command)
+    if pr is None:
+        return False
+    last_human = idxs[-1]
+    ask = _latest_ask_answer(entries, last_human)
+    if ask is not None:
+        answer_idx, question, label = ask
+        if _LABEL_NEGATION_RE.search(label):
+            return False
+        named = _bulk_reply_prs(_LABEL_LEAD_RE.split(label.strip(), maxsplit=1)[0])
+        if named is None:
+            return False
+        named |= set(_PR_REF_RE.findall(label))
+        brief_lo, brief_hi = last_human + 1, answer_idx
+        listed, ask_text = _listed_merge_ask(question)
+        if not listed:
+            listed, ask_text = _listed_merge_ask(_assistant_text(entries, brief_lo, brief_hi))
+    else:
+        answer_idx = last_human
+        named = _bulk_reply_prs(_user_message_text(
+            entries[last_human].get("message", {}).get("content")))
+        if named is None:
+            return False
+        brief_lo = idxs[-2] + 1 if len(idxs) >= 2 else 0
+        brief_hi = last_human
+        listed, ask_text = _listed_merge_ask(_assistant_text(entries, brief_lo, brief_hi))
+    approved = named or listed
+    if pr not in approved or len(approved) < 2:
+        return False
+    briefing = _assistant_text(entries, brief_lo, brief_hi)
+    section = _pr_sections(briefing, approved).get(pr)
+    if section is None:
+        return False
+    # The one shared ask is every section's approve-ask item.
+    if _briefing_item_count(section + "\n" + ask_text) < MERGE_BRIEFING_MIN_ITEMS:
+        return False
+    if _repo_conflict(_merge_target_repo(command),
+                      _context_repo_from_window(entries, brief_lo, len(entries))):
+        return False
+    spent: set[str] = set()
+    for i, cmd in _executed_merges(entries):
+        if i <= answer_idx:
+            continue
+        done = _merge_pr_number(cmd)
+        if done is None or done not in approved or done in spent:
+            return False
+        spent.add(done)
+    if pr in spent:
+        return False
+    return not _ask_held_after(entries, answer_idx, pr)
+
+
+def bulk_merge_approved(payload: dict) -> bool:
+    """Public entry for `pre-merge-approval-gate`: True when the merge in
+    `payload` is released by a bulk approval. Fails closed (False) on any
+    unreadable input, so the sibling gate keeps asking."""
+    try:
+        command = (payload.get("tool_input") or {}).get("command")
+        if not isinstance(command, str):
+            return False
+        code = _split_shell_comment(command)[0]
+        entries = _load_turn_entries(payload.get("transcript_path", "") or "")
+        if entries is None:
+            return False
+        return _bulk_released(entries, _human_user_indices(entries), code)
+    except Exception:
+        return False
+
+
 def _merge_escalation_reason(payload: dict) -> str | None:
     """Return a deny reason when the pre-merge briefing is incomplete, else None."""
     # Demote-to-advisory escape hatch (false-positive relief without full bypass).
@@ -1382,6 +1579,8 @@ def _merge_escalation_reason(payload: dict) -> str | None:
     lo = (idxs[-1] + 1) if idxs else 0
     current_text = _assistant_text(entries, lo, len(entries))
     if _is_trivial_merge(current_text):
+        return None
+    if _bulk_released(entries, idxs, code):
         return None
 
     # A complete briefing is half of the flow; the user's answer is the other
