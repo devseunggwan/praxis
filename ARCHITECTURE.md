@@ -449,7 +449,10 @@ collects every gate that asked through `run_group(asked_by=...)` and lists
 them all in the approval message. Gates in `GROUPED_APPROVAL_HOOKS`
 (`hooks/_lib/_hermes.py`) are keyed by gate plus the bracketed category tags in
 the reason (`praxis:side-effect-scan[git-push]`), so one "always" covers that
-category. If any other gate asked, the key hashes the reasons with the tool
+category. The advisory nudges in that list (`cwd-relative-exec-advisory`,
+`menu-mutation-tier-advisory`, `negation-answer-quote-advisory`,
+`output-block-falsify-advisory`) ask about a call's shape rather than for
+consent, so one "always" retires the nudge. If any other gate asked, the key hashes the reasons with the tool
 call's arguments and never repeats: an "always" there covers only the same call.
 
 **Install.** `plugins/hermes/bridge.py --print-config` prints the `hooks:`
