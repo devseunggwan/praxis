@@ -317,15 +317,17 @@ to it:
 
 | Part | Rule | Why |
 | --- | --- | --- |
-| section heading | a markdown heading (or bold lead line) naming **exactly one** of the PRs | a heading naming two PRs belongs to neither, so a combined block cannot pass as two briefings |
-| section body | at least 4 of the 6 items inside that PR's own section | the shared ask counts as every section's approve-ask item; the rest must be per PR |
-| ask | one merge question whose object lists the PRs (`#833, #999 를 머지할까요?`, `Approve merging #833 and #999?`) | an unlisted ask (`Approve merge?`) leaves "ok" ambiguous; then only a reply that names the PRs counts |
-| answer | `모두 머지`, `둘다 승인`, `ok`, `#833 #999 머지`, `98, 1118 머지`, or an `AskUserQuestion` pick leading with an approval (`승인 — 모두 머지`) | a refusal word anywhere (`#999는 보류`) or a trailing `?` voids the whole answer; `#833만 머지` approves only #833 |
+| section heading | a markdown heading, or a line bold end to end, naming **exactly one** of the PRs | a heading naming two PRs belongs to neither; a bold lead inside a bullet (`- **리스크**: #999 …`) is an item, not a heading |
+| section body | at least 4 of the 6 items inside that PR's own section, before the next heading of any kind | the shared ask counts as every section's approve-ask item; a shared block after the last section belongs to no PR |
+| ask | one merge question whose object is the PR list and whose ask ending follows the verb (`#833, #999 를 머지할까요?`, `Approve merging #833 and #999?`) | a question that only mentions the PRs (`#833, #999 머지 전에 CI 를 돌릴까요?`) or an unlisted `Approve merge?` is not a listed ask; then only a reply naming the PRs counts |
+| answer | `모두 머지`, `둘다 승인`, `ok`, `#833 #999 머지`, `98, 1118 머지`, or an `AskUserQuestion` pick on the listed question (`승인 — 모두 머지`) | a refusal word anywhere, a trailing `?`, a condition (`머지, 근데 #999는 …`), or an earlier sentence about one PR voids the whole answer; a 보류 on any question in the same `AskUserQuestion` voids it; `#833만 머지` approves only #833 |
 
 Then merge the approved PRs **one command per PR**, back to back, without
 waiting for another answer — `gh pr merge 833 --squash`, then
-`gh pr merge 999 --squash`. Each command must name its PR number. A chained
-`&&` command, a loop, or a numberless merge is not released by a bulk answer.
+`gh pr merge 999 --squash`. Each command must be the merge alone and name its
+PR number. Anything chained to it (`cd <repo> && …`), a loop, a `GH_REPO=`
+prefix, or a numberless merge is not released by a bulk answer — run the
+merge from the base worktree's directory instead of `cd`-chaining into it.
 Stop at the first failed merge and report; the rest of the set stays approved
 only until a merge outside the set runs.
 
