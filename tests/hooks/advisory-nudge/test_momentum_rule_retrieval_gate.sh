@@ -846,6 +846,32 @@ run_merge_escalation_case "merge_bulk_question_reply_denies" \
   "yes" "" "momentum-merge-bulk-question.jsonl" "gh pr merge 999 --squash"
 run_merge_escalation_case "merge_bulk_ask_hold_denies" \
   "yes" "" "momentum-merge-bulk-ask-hold.jsonl" "gh pr merge 999 --squash"
+run_merge_escalation_case "merge_bulk_bold_heading_passes" \
+  "no" "" "momentum-merge-bulk-bold-heading.jsonl" "gh pr merge 999 --squash"
+# Review round 1 — each was released before the fix: a bold bullet naming #999
+# in passing is not #999's heading; a shared block after the last section is
+# nobody's; a prep question listing PRs before 머지 is not a merge ask; every
+# AskUserQuestion pair is read, and only a merge question decides; a clarify
+# condition or an earlier deferral voids the answer; a merge chained after
+# `cd` or retargeted by GH_REPO is not the briefed merge.
+run_merge_escalation_case "merge_bulk_bold_bullet_denies" \
+  "yes" "" "momentum-merge-bulk-bold-bullet.jsonl" "gh pr merge 999 --squash"
+run_merge_escalation_case "merge_bulk_trailing_shared_denies" \
+  "yes" "" "momentum-merge-bulk-trailing-shared.jsonl" "gh pr merge 999 --squash"
+run_merge_escalation_case "merge_bulk_status_ask_denies" \
+  "yes" "" "momentum-merge-bulk-status-ask.jsonl" "gh pr merge 999 --squash"
+run_merge_escalation_case "merge_bulk_ask_multi_held_denies" \
+  "yes" "" "momentum-merge-bulk-ask-multi-held.jsonl" "gh pr merge 999 --squash"
+run_merge_escalation_case "merge_bulk_ask_unrelated_denies" \
+  "yes" "" "momentum-merge-bulk-ask-unrelated.jsonl" "gh pr merge 999 --squash"
+run_merge_escalation_case "merge_bulk_ask_conditional_denies" \
+  "yes" "" "momentum-merge-bulk-ask-conditional.jsonl" "gh pr merge 999 --squash"
+run_merge_escalation_case "merge_bulk_defer_then_all_denies" \
+  "yes" "" "momentum-merge-bulk-defer-then-all.jsonl" "gh pr merge 999 --squash"
+run_merge_escalation_case "merge_bulk_cd_chain_denies" \
+  "yes" "" "momentum-merge-bulk-all-second.jsonl" "cd ../other && gh pr merge 999 --squash"
+run_merge_escalation_case "merge_bulk_gh_repo_env_denies" \
+  "yes" "" "momentum-merge-bulk-all-second.jsonl" "GH_REPO=x/y gh pr merge 999 --squash"
 
 # An AskUserQuestion answer is a tool_result, not a typed message. Replayed over
 # local transcripts, 13 of the merges this check first denied were answered this

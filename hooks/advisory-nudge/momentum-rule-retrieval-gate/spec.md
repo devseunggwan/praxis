@@ -434,10 +434,10 @@ approve blindly.
 
   | Condition | Check |
   | --------- | ----- |
-  | the merge is one command with one explicit PR number (no `&&` chain, loop, or numberless merge) | `_merge_pr_number` |
-  | the latest decision is an approval: the last typed message, or an `AskUserQuestion` answer after it whose label leads with one; a refusal word anywhere or a trailing `?` voids it | `_bulk_reply_prs`, `_LABEL_NEGATION_RE` |
-  | the approved set has two or more PRs: the PRs the answer names (`#833 #999 머지`, `98, 1118 머지`), else the PRs the briefing turn's last merge ask lists as its object (`#833, #999 를 머지할까요?`) | `_listed_merge_ask` |
-  | this PR is in the set and has its own section in the briefing turn — a heading line naming exactly this PR of the set — with 4 of 6 items inside it, the shared ask counting as its approve-ask item | `_pr_sections`, `_briefing_item_count` |
+  | the command is that merge and nothing else, with an explicit PR number: no other command chained before or after it (`cd other && …`), no loop, no `GH_REPO`/`GH_HOST` prefix, not numberless | `_merge_pr_number` |
+  | the latest decision is an approval: the last typed message, or the `AskUserQuestion` answer after it. Its last sentence holds only PR references and approval words; a refusal word anywhere, a trailing `?`, a condition after a comma, or an earlier sentence naming a PR voids it. In an `AskUserQuestion` answer every pair is read — a refusal on any question voids it — and the deciding pair must be a listed merge ask or a label naming the PRs | `_bulk_reply_prs`, `_ask_decision` |
+  | the approved set has two or more PRs: the PRs the answer names (`#833 #999 머지`, `98, 1118 머지`), else the PRs the last listed merge ask names — the PR list is the object of 머지/merge and the ask ending follows the verb directly (`#833, #999 를 머지할까요?`, `Approve merging #833 and #999?`); `#833, #999 머지 전에 CI 를 다시 돌릴까요?` is not one | `_listed_merge_ask` |
+  | this PR is in the set and has its own section in the briefing turn — from a heading line (a markdown heading, or a line bold end to end) naming exactly this PR of the set, to the next heading of any kind — with 4 of 6 items inside it, the shared ask counting as its approve-ask item. A bold lead inside a bullet is an item, and a shared block after the last section belongs to no PR | `_pr_sections`, `_briefing_item_count` |
   | no merge since the answer targeted a PR outside the set or repeated one, and this PR has not merged since | `_executed_merges` |
   | no repo conflict (as in **Repo scoping**) and no later `AskUserQuestion` hold | `_repo_conflict`, `_ask_held_after` |
 
@@ -454,13 +454,22 @@ approve blindly.
   closed: any exception or unreadable transcript returns False and the sibling
   keeps asking.
 
-  Replayed over every recorded `gh pr merge` in local transcripts (332 calls
-  across 809 Claude Code and Hermes transcripts, each cut right before the
+  Replayed over every recorded `gh pr merge` in local transcripts (337 calls
+  across 810 Claude Code and Hermes transcripts, each cut right before the
   merge and fed to the main and branch builds): 0 decision changes, 0
   sibling prompts skipped, 0 errors. No recorded briefing used per-PR
   headings with a listed ask, so the path opens only for briefings written to
   the new shape (`skills/merge-briefing/SKILL.md` → *Bulk merge*); the
   release cases are pinned by the `momentum-merge-bulk-*.jsonl` fixtures.
+
+  An adversarial review round found nine shapes the first version released
+  wrongly — a bold bullet naming the other PR in passing taken as its heading, a
+  shared trailing block credited to the last PR, a prep question (`… 머지 전에 …
+  돌릴까요?`) read as the merge ask, only the last `AskUserQuestion` pair read, a
+  승인 to an unrelated question counted, a clarify condition after the comma
+  dropped, an earlier deferral sentence ignored, and a merge chained after `cd`
+  or retargeted by `GH_REPO`. Each is a `merge_bulk_*_denies` case now; all nine
+  fail against that first version and pass against this one.
 
   **A deny says why a briefing the user saw was not scored (issue #1433).**
   Message-only; no decision moves. When the two deny paths above fire —

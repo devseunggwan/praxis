@@ -1363,51 +1363,73 @@ _BULK_EXTRA_TOKENS = frozenset({
     "머지하세요", "머지해주세요", "머지 해주세요", "머지 해줘", "머지합시다",
     "승인합니다", "진행하세요", "진행해주세요", "merge them", "merge all",
 })
+# Single words that each approve, so "승인 — 모두 머지" reads as approve + merge.
+_BULK_APPROVAL_WORDS = frozenset(
+    t for t in _APPROVAL_TOKENS | _BULK_EXTRA_TOKENS if " " not in t)
 # Particles and list joiners left behind once the PR references are removed.
 _BULK_FILLERS = frozenset({"만", "은", "는", "을", "를", "도", "과", "와", "및", "and", "&", "pr"})
-# Only the last sentence of a reply is its decision; commas stay inside it
-# because they join a PR list ("#833, #999 머지").
+# Sentence boundaries of a reply; commas stay inside a sentence because they
+# join a PR list ("#833, #999 머지").
 _SENTENCE_TAIL_RE = re.compile(r"[.!?。…\n;·]+")
 # In a short approval reply a bare number is a PR: users type "98, 1118 머지".
 _REPLY_PR_RE = re.compile(r"(?:#|/pull/|(?<![A-Za-z])pr\s*#?\s*)?(?<![A-Za-z0-9_])(\d+)(?![A-Za-z0-9_])",
                           re.IGNORECASE)
-# A briefing section starts at a markdown heading or a bold lead line.
-_SECTION_HEAD_RE = re.compile(r"^\s{0,3}(?:#{1,6}\s|\*\*|[-*]\s+\*\*|\d+[.)]\s+\*\*)")
+# A heading line: a markdown heading, or a line that is bold from end to end.
+# A bold lead inside a bullet (`- **리스크**: …`) is an item, not a heading.
+_HEADING_RE = re.compile(r"^\s{0,3}(?:#{1,6}\s+\S|\*\*[^*\n]+\*\*\s*:?\s*$)")
+# A listed merge ask: the PR list is the object of the merge verb, and the
+# verb is the sentence's predicate — the ask ending follows it directly
+# ("#833, #999 를 머지할까요?", "Approve merging #833 and #999?"). A list
+# before "머지 전에 … 돌릴까요?" or "머지 큐에 올려둘까요?" asks something else.
+_LISTED_ASK_RE = re.compile(
+    rf"(?P<ko>{_REF_LIST})\s*(?:을|를|은|는|도)?\s*(?:모두\s*|전부\s*|다\s*)?(?:머지|병합)\s*"
+    r"(?:할까요|해도\s*될까요|해도\s*되나요|진행할까요|하시겠(?:어요|습니까)?|해\s*드릴까요|해드릴까요)\s*\??\s*$"
+    rf"|^\s*(?:(?:shall|should|can|may)\s+i\s+|approve\s+|ok\s+to\s+)?merg(?:e|ing)\s*:?\s*(?:pr\s*)?"
+    rf"(?P<en>{_REF_LIST})\s*\?\s*$",
+    re.IGNORECASE)
+# Env assignments that move a `gh` call to another repo without a flag.
+_REPO_ENV_RE = re.compile(r"^(?:GH_REPO|GH_HOST)=")
 
 
 def _bulk_reply_prs(text: str) -> set[str] | None:
     """PRs a bulk approval names (empty when it names none), or None when the
     text is not an approval at all.
 
-    Any refusal word anywhere disqualifies it: "#1001 보류, #833 #999 머지" is
-    a split decision this parser does not try to read, so it costs one ask.
+    Conservative on purpose — a miss costs one ask, a false read releases a
+    merge. A refusal word anywhere, a trailing `?`, or an earlier sentence that
+    names a PR ("#999는 내일 다시 보자. 모두 머지") voids the reply: a split
+    decision is not read. The last sentence must be PR references plus
+    approval words only, so a condition ("머지, 근데 #999는 확인 후") voids it too.
     """
     raw = text.strip()
     if not raw or raw.endswith(("?", "？")) or _LABEL_NEGATION_RE.search(raw):
         return None
     sentences = [s for s in _SENTENCE_TAIL_RE.split(raw) if s.strip()]
-    if not sentences:
+    if not sentences or any(_REPLY_PR_RE.search(s) for s in sentences[:-1]):
         return None
-    last = sentences[-1].lower()
+    last = re.sub(r"\s*[—–:]\s*", " ", sentences[-1].lower())
     named = set(_REPLY_PR_RE.findall(last))
     rest = _REPLY_PR_RE.sub(" ", last)
-    words = [w for w in re.split(r"[\s,]+", rest)
+    words = [w for w in re.split(r"[\s,()]+", rest)
              if w and w not in _BULK_FILLERS and w not in _BULK_QUANTIFIERS]
     remainder = " ".join(words).strip(" .!~,·")
-    if remainder in _APPROVAL_TOKENS or remainder in _BULK_EXTRA_TOKENS:
+    if (remainder in _APPROVAL_TOKENS or remainder in _BULK_EXTRA_TOKENS
+            or (words and all(w in _BULK_APPROVAL_WORDS for w in words))):
         return named
     return None
 
 
 def _listed_merge_ask(text: str) -> tuple[set[str], str]:
-    """(PRs, sentence) of the LAST merge ask in `text` that lists two or more
-    PRs as its object (`#833, #999 를 머지할까요?`), else (empty set, "")."""
+    """(PRs, sentence) of the LAST listed merge ask in `text` naming two or
+    more PRs, else (empty set, "")."""
     listed: tuple[set[str], str] = (set(), "")
     for s in _ASK_SENTENCE_RE.findall(text):
-        if not _MERGE_WORD_RE.search(s) or _NOT_MERGE_ASK_RE.search(s):
+        if _NOT_MERGE_ASK_RE.search(s):
             continue
-        objects = {n for m in _MERGE_OBJECT_RE.finditer(s)
-                   for n in re.findall(r"\d+", m.group(1) or m.group(2))}
+        m = _LISTED_ASK_RE.search(s.strip())
+        if m is None:
+            continue
+        objects = set(re.findall(r"\d+", m.group("ko") or m.group("en")))
         if len(objects) >= 2:
             listed = (objects, s)
     return listed
@@ -1415,36 +1437,44 @@ def _listed_merge_ask(text: str) -> tuple[set[str], str]:
 
 def _pr_sections(text: str, prs: set[str]) -> dict[str, str]:
     """Per-PR briefing sections: each runs from a heading line that names
-    exactly one PR of `prs` to the next such heading. A heading naming two of
-    them belongs to neither, so a combined block cannot pass as two briefings."""
+    exactly one PR of `prs` to the next heading of any kind. A heading naming
+    two of them belongs to neither, so a combined block cannot pass as two
+    briefings, and a shared block after the last section is nobody's."""
     lines = text.splitlines()
-    heads: list[tuple[int, str]] = []
-    for i, line in enumerate(lines):
-        if not _SECTION_HEAD_RE.match(line):
-            continue
-        refs = set(_PR_REF_RE.findall(line)) & prs
-        if len(refs) == 1:
-            heads.append((i, refs.pop()))
     sections: dict[str, str] = {}
-    for k, (start, pr) in enumerate(heads):
-        end = heads[k + 1][0] if k + 1 < len(heads) else len(lines)
-        sections[pr] = sections.get(pr, "") + "\n".join(lines[start:end]) + "\n"
+    owner: str | None = None
+    for line in lines:
+        if _HEADING_RE.match(line):
+            refs = set(_PR_REF_RE.findall(line)) & prs
+            owner = refs.pop() if len(refs) == 1 else None
+        if owner is not None:
+            sections[owner] = sections.get(owner, "") + line + "\n"
     return sections
 
 
 def _merge_pr_number(command: str) -> str | None:
-    """Explicit PR number of a single-segment merge, else None."""
+    """Explicit PR number of a command that is one merge and nothing else.
+
+    Anything chained before or after it (`cd other && …`, `git fetch; …`) or an
+    env prefix that retargets the repo (`GH_REPO=x/y …`) is refused: either can
+    move the merge somewhere the briefing never looked."""
+    tokens = safe_tokenize(command)
+    starts = list(iter_command_starts(tokens))
+    if len(starts) != 1 or _has_repetition(command):
+        return None
+    if any(_REPO_ENV_RE.match(tok) for tok in starts[0]):
+        return None
     segments = _merge_segments(command)
-    if len(segments) != 1 or segments[0] is None or _has_repetition(command):
+    if len(segments) != 1 or segments[0] is None:
         return None
     m = _PULL_TOKEN_RE.match(segments[0])
     return (m.group(1) or m.group(2)) if m else None
 
 
-def _latest_ask_answer(entries: list[dict], after: int) -> tuple[int, str, str] | None:
-    """(index, question, picked label) of the last answered AskUserQuestion
+def _latest_ask_answer(entries: list[dict], after: int) -> tuple[int, list[tuple[str, str]]] | None:
+    """(index, every question/label pair) of the last answered AskUserQuestion
     result after entry `after`, or None. A declined question carries no pair."""
-    found: tuple[int, str, str] | None = None
+    found: tuple[int, list[tuple[str, str]]] | None = None
     for i in range(after + 1, len(entries)):
         ev = entries[i]
         msg = ev.get("message")
@@ -1458,8 +1488,27 @@ def _latest_ask_answer(entries: list[dict], after: int) -> tuple[int, str, str] 
                     and not b.get("is_error")):
                 pairs = _ASK_ANSWER_RE.findall(_user_message_text(b.get("content")))
                 if pairs:
-                    found = (i, pairs[-1][0], pairs[-1][1])
+                    found = (i, pairs)
     return found
+
+
+def _ask_decision(pairs: list[tuple[str, str]]) -> tuple[set[str], set[str], str] | None:
+    """(named, listed, ask sentence) from one AskUserQuestion result, else None.
+
+    Every pair is read: a refusal picked on any question voids the result. The
+    deciding pair is the one whose question is a listed merge ask, or whose
+    label names the PRs; a 승인 picked for an unrelated question approves no
+    merge, whatever the prose around it asked."""
+    if any(_LABEL_NEGATION_RE.search(a) for _, a in pairs):
+        return None
+    for question, label in pairs:
+        named = _bulk_reply_prs(label)
+        if named is None:
+            continue
+        listed, ask_text = _listed_merge_ask(question)
+        if listed or len(named) >= 2:
+            return named, listed, ask_text
+    return None
 
 
 def _bulk_released(entries: list[dict], idxs: list[int], command: object) -> bool:
@@ -1469,9 +1518,9 @@ def _bulk_released(entries: list[dict], idxs: list[int], command: object) -> boo
     naming that PR, 4 of 6 items inside it) and asks once, listing the PRs; the
     user's next answer approves the set — naming the PRs (`#833 #999 머지`) or
     answering the listed ask (`모두 머지`, `ok`). Each merge then has to be one
-    of that set, run as its own single command, and the set is spent in order:
-    any merge since the answer that targets a PR outside the set, or repeats one,
-    ends it. Numberless merges never ride this path — the set names numbers.
+    of that set, run as a command that is that merge alone, and the set is spent
+    in order: any merge since the answer that targets a PR outside the set, or
+    repeats one, ends it. Numberless merges never ride this path.
     """
     if not isinstance(command, str) or not idxs:
         return False
@@ -1481,23 +1530,19 @@ def _bulk_released(entries: list[dict], idxs: list[int], command: object) -> boo
     last_human = idxs[-1]
     ask = _latest_ask_answer(entries, last_human)
     if ask is not None:
-        answer_idx, question, label = ask
-        if _LABEL_NEGATION_RE.search(label):
+        answer_idx, pairs = ask
+        decision = _ask_decision(pairs)
+        if decision is None:
             return False
-        named = _bulk_reply_prs(_LABEL_LEAD_RE.split(label.strip(), maxsplit=1)[0])
-        if named is None:
-            return False
-        named |= set(_PR_REF_RE.findall(label))
+        named, listed, ask_text = decision
         brief_lo, brief_hi = last_human + 1, answer_idx
-        listed, ask_text = _listed_merge_ask(question)
-        if not listed:
-            listed, ask_text = _listed_merge_ask(_assistant_text(entries, brief_lo, brief_hi))
     else:
         answer_idx = last_human
-        named = _bulk_reply_prs(_user_message_text(
+        reply = _bulk_reply_prs(_user_message_text(
             entries[last_human].get("message", {}).get("content")))
-        if named is None:
+        if reply is None:
             return False
+        named = reply
         brief_lo = idxs[-2] + 1 if len(idxs) >= 2 else 0
         brief_hi = last_human
         listed, ask_text = _listed_merge_ask(_assistant_text(entries, brief_lo, brief_hi))
