@@ -384,10 +384,10 @@ rule stays as written.
 | Written for Claude Code | Under Hermes |
 | --- | --- |
 | `AskUserQuestion` (Steps 2, 4a, 5d-i, 5i, 5j) | `clarify` — same 4-choice cap, and Hermes appends its own `Other` row |
-| `Bash(..., run_in_background: true)` (Step 4b) | `terminal(background=true, notify=true)`, then end the turn; Step 5 starts when the completion notification arrives |
+| `Bash(..., run_in_background: true)` (Step 4b) | `terminal(background=true, notify_on_complete=true)` (some builds name the flag `notify`), then end the turn; Step 5 starts when the completion notification arrives |
 | `Skill("oh-my-claudecode:code-reviewer")` fallback (Step 4a) | not available — offer `delegate_task` with a reviewer goal, `Manual`, or `Cancel` |
 | `${CLAUDE_PLUGIN_ROOT}/skills/codex-review-wrap/…` (Step 6) | the `[Skill directory: …]` path Hermes prints with the skill |
-| companion state under `$CLAUDE_PLUGIN_DATA/state/` | `$TMPDIR/codex-companion/<workspace-slug>-<hash>/` — `CLAUDE_PLUGIN_DATA` is unset, so the companion uses its own fallback root; the reaper reads that root too |
+| companion state under `$CLAUDE_PLUGIN_DATA/state/` | `$TMPDIR/codex-companion/<workspace-slug>-<hash>/` — `CLAUDE_PLUGIN_DATA` is unset, so the companion uses its own fallback root (`os.tmpdir()`). The reaper reads that root too, from `TMPDIR`, or from `getconf DARWIN_USER_TEMP_DIR` when a macOS launchd run has no `TMPDIR` |
 
 Step 4a's companion resolution is unchanged: the manifest stays at
 `~/.claude/plugins/installed_plugins.json` (`codex@openai-codex`) whichever

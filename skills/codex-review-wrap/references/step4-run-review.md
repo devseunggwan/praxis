@@ -59,7 +59,8 @@ never read, so neither changes anything; `options.wait` is consumed only by
 `status`, `options.background` only by `task`.
 
 **Always run this via `Bash(..., run_in_background: true)`** (Hermes:
-`terminal(background=true, notify=true)`, then end the turn). A review
+`terminal(background=true, notify_on_complete=true)` — some builds name the flag `notify` — then
+end the turn). A review
 routinely runs past a foreground tool timeout, and a timed-out call kills
 it mid-run: the round then ends with no findings, which is
 indistinguishable from a clean review. There is no flag that avoids this —
@@ -82,7 +83,9 @@ node "{resolved_companion_path}" review "{{ARGUMENTS}}"
 
 A backgrounded call hands back a task id, not the review, so there is
 nothing to return yet — say so in one line: "Codex review started in the
-background. Check `/codex:status` for progress." Once the run completes,
+background. Check `/codex:status` for progress." (Hermes has no
+`/codex:status`: point at the background process's session id, and run the
+companion's `status --cwd` from the Liveness section below for job state.) Once the run completes,
 return the script's stdout **verbatim** — do not paraphrase, summarize, or
 add commentary. This matches `/codex:review`'s contract.
 
@@ -126,7 +129,8 @@ the next paragraph turns "no matching process" into a cancel.
 
 `.logFile` is an absolute path under the companion's own state directory
 (`$CLAUDE_PLUGIN_DATA/state/<workspace-slug>-<hash>/jobs/`, falling back to
-`$TMPDIR/codex-companion/…` — always the fallback under Hermes, where
+`$TMPDIR/codex-companion/…`, i.e. `os.tmpdir()`, which is `/tmp` when
+`TMPDIR` is unset — always the fallback under Hermes, where
 `CLAUDE_PLUGIN_DATA` is unset) — it is not relative to the worktree, so use
 the value the command prints rather than constructing one. Then:
 

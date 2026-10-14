@@ -820,7 +820,8 @@ echo ""
 if ! command -v jq >/dev/null 2>&1; then
   skip "gate 5c companion fallback root (needs jq)"
 else
-TMPD5C="$(mktemp -d "${TMPDIR:-/tmp}/pxtmproot.XXXXXX")" || { echo "FATAL: mktemp -d failed" >&2; exit 1; }
+TMPROOT5C="${TMPDIR:-/tmp}"; TMPROOT5C="${TMPROOT5C%/}"
+TMPD5C="$(mktemp -d "$TMPROOT5C/pxtmproot.XXXXXX")" || { echo "FATAL: mktemp -d failed" >&2; exit 1; }
 FIXTURE5C="$TMPD5C/broker-fixture.sh"
 REAPER5C="$TMPD5C/reaper-copy.sh"
 SD5C_REAP="$TMPD5C/cxc-REAP5C"
