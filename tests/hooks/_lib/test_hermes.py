@@ -539,3 +539,67 @@ def test_bash_dialect_and_ceiling_hooks_exclude_hermes(name):
     manifest = json.loads((REPO_ROOT / "hooks" / "manifest.json").read_text(encoding="utf-8"))
     [hook] = [h for h in manifest["hooks"] if h["name"] == name]
     assert "hermes" not in hook["hosts"] and "claude" in hook["hosts"]
+
+
+# --- host notifications --------------------------------------------------------
+
+_BRIEF_7 = ("### PR #7 머지 브리핑\n\n1. **무엇이 바뀌는지**: parser fix\n2. **검증한 것**: 테스트 통과\n"
+            "3. **미검증 항목**: prod 경로 미확인\n4. **리스크와 영향 범위**: downstream 없음\n"
+            "5. **열린 항목**: 없음\n6. **승인 요청**: Approve merge? PR #7 을 머지할까요?")
+_NOTICE = ("[IMPORTANT: Background process proc_1 completed normally (exit code 0).\n"
+           "Command: scripts/run-tests.sh\nOutput:\nok]")
+
+
+def _notified_db(path: Path, kind) -> Path:
+    """briefing -> Hermes notification -> one-line reply -> `merge` -> the merge call."""
+    rows = [(1, "s1", "user", "브리핑 해줘", None, None, None),
+            (2, "s1", "assistant", _BRIEF_7, None, None, None),
+            (3, "s1", "user", _NOTICE, None, None, None),
+            (4, "s1", "assistant", "테스트 통과, 바뀐 것 없음. PR #7 을 머지할까요?", None, None, None),
+            (5, "s1", "user", "merge", None, None, None),
+            (6, "s1", "assistant", "", None,
+             json.dumps([_call("m1", "terminal", {"command": "gh pr merge 7 --squash"})]), None)]
+    _db(path, rows)
+    conn = sqlite3.connect(path)
+    conn.execute("ALTER TABLE messages ADD COLUMN display_kind TEXT")
+    conn.execute("UPDATE messages SET display_kind = ? WHERE id = 3", (kind,))
+    conn.commit()
+    conn.close()
+    return path
+
+
+@pytest.mark.parametrize("kind", ["process_complete", "async_delegation_complete", "internal_notification"])
+def test_host_notification_row_is_not_a_human_message(tmp_path, kind):
+    out = hermes.sync_transcript("s1", tmp_path / "t", _notified_db(tmp_path / "state.db", kind))
+    [notice] = [e for e in map(json.loads, out.read_text().splitlines())
+                if e["type"] == "user" and e["message"]["content"] == _NOTICE]
+    assert notice["origin"] == {"kind": kind}
+
+
+@pytest.mark.parametrize("kind", [None, "steer", "hidden"])
+def test_other_user_rows_stay_human(tmp_path, kind):
+    # `steer` is the user's own out-of-band message; an unknown kind stays human (fails closed).
+    out = hermes.sync_transcript("s1", tmp_path / "t", _notified_db(tmp_path / "state.db", kind))
+    users = [e for e in map(json.loads, out.read_text().splitlines()) if e["type"] == "user"]
+    assert all("origin" not in e for e in users)
+
+
+def _merge_gate(transcript: Path) -> str:
+    gate = REPO_ROOT / "hooks" / "advisory-nudge" / "momentum-rule-retrieval-gate" / "impl.py"
+    payload = {"tool_name": "Bash", "tool_input": {"command": "gh pr merge 7 --squash"},
+               "transcript_path": str(transcript)}
+    proc = subprocess.run([sys.executable, str(gate)], input=json.dumps(payload),
+                          capture_output=True, text=True, timeout=30)
+    return proc.stdout
+
+
+def test_notification_between_briefing_and_approval_keeps_the_briefing(tmp_path):
+    """The merge gate reads past a Hermes notification, as it does past Claude Code's (#1410)."""
+    db = _notified_db(tmp_path / "state.db", "process_complete")
+    assert '"deny"' not in _merge_gate(hermes.sync_transcript("s1", tmp_path / "t", db))
+
+
+def test_untagged_notification_still_closes_the_window(tmp_path):
+    """Positive control: the same rows without the kind deny, as they did before the tag."""
+    db = _notified_db(tmp_path / "state.db", None)
+    assert '"deny"' in _merge_gate(hermes.sync_transcript("s1", tmp_path / "t", db))

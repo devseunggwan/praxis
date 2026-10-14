@@ -258,6 +258,24 @@ def _user_message(text: str, meta: bool = False) -> dict:
     return event
 
 
+# `display_kind` values Hermes stamps on user rows it wrote itself, not the user:
+# a background process finishing (`tools/process_registry_notifications.py`
+# PROCESS_COMPLETE_DISPLAY_KIND), a background subagent finishing, and an
+# internal notice. `steer` is absent on purpose: it is the user's own
+# out-of-band message.
+_HOST_NOTIFICATION_KINDS = frozenset({
+    "process_complete", "async_delegation_complete", "internal_notification",
+})
+
+
+def _host_notification(row: sqlite3.Row) -> Optional[str]:
+    """The row's display_kind when Hermes, not the user, wrote this user row."""
+    if "display_kind" not in row.keys():  # older databases have no column
+        return None
+    kind = row["display_kind"]
+    return kind if kind in _HOST_NOTIFICATION_KINDS else None
+
+
 def _skill_instruction(content: str) -> Optional[str]:
     """The user's instruction in a skill-invocation scaffold, or None for a bare invocation."""
     header = content.split("\n", 1)[0]
@@ -324,6 +342,14 @@ def transcript_events(rows: List[sqlite3.Row], names: Dict[str, str]) -> Iterato
     for row in rows:
         role = row["role"]
         if role == "user":
+            notice = _host_notification(row)
+            if notice is not None:
+                # Claude Code tags its own notifications with `origin.kind`
+                # (#1410), and the gates skip any kind but `human`.
+                event = _user_message(row["content"] or "")
+                event["origin"] = {"kind": notice}
+                yield event
+                continue
             yield from _user_events(row["content"] or "")
         elif role == "assistant":
             event, ids = _assistant_event(row)
@@ -370,7 +396,7 @@ def sync_transcript(session_id: str, out_dir: Path, db_path: Optional[Path] = No
         conn.row_factory = sqlite3.Row
         try:
             columns = {row[1] for row in conn.execute("PRAGMA table_info(messages)")}
-            meta = ", display_metadata" if "display_metadata" in columns else ""
+            meta = "".join(f", {c}" for c in ("display_metadata", "display_kind") if c in columns)
             rows = conn.execute(
                 f"SELECT id, role, content, tool_call_id, tool_calls, tool_name{meta} FROM messages "
                 "WHERE session_id = ? AND active = 1 ORDER BY id",
