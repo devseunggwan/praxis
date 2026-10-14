@@ -222,7 +222,7 @@ declaration would turn every tier below into a hard requirement; see
 | Tier | What works | What you need |
 | ------ | ----------- | --------------- |
 | **Standalone** | recover-sessions, strike / strikes / reset-strikes, debt | `gh` CLI, `jq`; `recover-sessions` also needs `tmux`; `debt` needs only `git` |
-| **Enhanced** | + retrospect, codex-review-wrap | + oh-my-claudecode (codex-review-wrap needs the openai-codex plugin instead; omc only backs its fallback) |
+| **Enhanced** | + retrospect, codex-review-wrap | + oh-my-claudecode |
 | **Full** | + all cmux-* skills | + cmux |
 | **Multi-provider** | + codex/gemini routing in cmux-delegate | + codex-cli, gemini-cli |
 
