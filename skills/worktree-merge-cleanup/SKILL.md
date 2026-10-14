@@ -141,16 +141,20 @@ fails its local sync. Those edits are not yours to stash, discard, or commit.
    `git -C <base-worktree> fetch origin --prune`, then
    `git -C <base-worktree> merge-base --is-ancestor HEAD origin/<base>`
    (exit `0`). On any other exit, stop and surface it.
-3. Move the ref without touching the working tree:
-   `git -C <base-worktree> reset --mixed origin/<base>`. Files whose content
-   equals the merged content drop out of `git status`; everything else stays
-   as an uncommitted edit. `--mixed` resets the index, so anything staged is
-   unstaged (the content stays in the working tree). Never use `--hard` here.
-   When the dirty base checkout is also a live load path (an agent's skills or
-   plugin directory), skip this step if any dirty file overlaps the merged
-   diff, and report instead that the checkout stays behind `origin/<base>` by
-   N commits — whatever loads from it keeps the pre-merge version until the
-   owner of those edits syncs it.
+3. Move the ref and bring in the merged files, keeping their edits:
+   `git -C <base-worktree> reset --keep origin/<base>`. It updates every file
+   the merge changed and leaves every other uncommitted edit where it is; a
+   staged edit stays as an unstaged one. It refuses as a whole, changing
+   nothing, when a dirty file is one the merge changed or an untracked file
+   sits where the merge adds one (`error: Entry '<file>' not uptodate` /
+   `Untracked working tree file '<file>' would be overwritten`, exit 128).
+   On that refusal, stop: report the file it named and that the checkout
+   stays behind `origin/<base>` by N commits. When that checkout is also a
+   live load path (an agent's skills or plugin directory), whatever loads
+   from it keeps the pre-merge version until the owner of those edits syncs
+   it. Never fall back to `--mixed` (it moves the ref but leaves every merged
+   file at its pre-merge content, which then shows as an edit reverting the
+   merge) or to `--hard` (it discards their edits).
 4. Delete the local head branch (`git -C <base-worktree> branch -D <branch>`, after checking its
    tip equals the PR's `headRefOid`) and read `git status` to report which
    edits remain.
