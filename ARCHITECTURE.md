@@ -426,7 +426,12 @@ Hermes later deactivates drop out) and passes it as `transcript_path`, so a
 gate that reads the text written just before the call (the merge-briefing
 gate) works the same way. A prompt the user typed while a turn runs is
 written at once with `display_metadata._queued_prompt` set; it is skipped
-until Hermes delivers it, because the model has not seen it yet. A slash-skill
+until Hermes delivers it, because the model has not seen it yet. A user row
+Hermes wrote itself (`display_kind` `process_complete`,
+`async_delegation_complete`, or `internal_notification`: a background process
+or subagent finishing) gets `origin.kind` set to that kind, the field Claude
+Code puts on its own notifications, so the gates skip it as a human message
+on both hosts; `steer`, the user's out-of-band message, stays human. A slash-skill
 invocation, which Hermes stores as one row (activation header, skill body, the
 user's instruction), is split into two user entries: the expanded body as an
 `isMeta` entry, then the instruction (or the bare `/<skill>`) as plain text.
