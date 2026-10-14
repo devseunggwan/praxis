@@ -5,6 +5,19 @@ All notable changes to praxis are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.21.0](https://github.com/devseunggwan/praxis/compare/v7.20.3...v7.21.0) (2026-10-14)
+
+
+### Added
+
+* **hooks:** approve several merges with one answer ([#1584](https://github.com/devseunggwan/praxis/issues/1584)) ([dfd10ca](https://github.com/devseunggwan/praxis/commit/dfd10caaee846e3849cc18799123506985abf435))
+
+
+### Fixed
+
+* **hermes:** skip host notifications as human turns ([#1589](https://github.com/devseunggwan/praxis/issues/1589)) ([702d946](https://github.com/devseunggwan/praxis/commit/702d9464b43076f186af7dd8213ca10b0fd96159)), closes [#1588](https://github.com/devseunggwan/praxis/issues/1588)
+* **skills:** make codex-review-wrap run under Hermes ([#1587](https://github.com/devseunggwan/praxis/issues/1587)) ([d36a37b](https://github.com/devseunggwan/praxis/commit/d36a37bf9513fabb586031c5c942682a93abaca1)), closes [#1586](https://github.com/devseunggwan/praxis/issues/1586)
+
 ## [7.20.3](https://github.com/devseunggwan/praxis/compare/v7.20.2...v7.20.3) (2026-10-13)
 
 
