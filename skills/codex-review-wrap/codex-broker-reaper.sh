@@ -73,7 +73,17 @@ STATE_SUFFIX="plugins/data/codex-openai-codex/state"
 # the same roots; widening the records alone would let it delete a dir a sibling
 # config's live broker still claims — #921 on a new axis.
 state_roots() {
-  local d saved
+  local d saved tmp_root
+  # The companion's own fallback root, used whenever CLAUDE_PLUGIN_DATA is
+  # unset -- every broker started outside Claude Code (Hermes, a plain shell)
+  # records there: lib/state.mjs FALLBACK_STATE_ROOT_DIR = os.tmpdir() +
+  # "/codex-companion". os.tmpdir() reads TMPDIR, so this does too; a launchd
+  # job may run without TMPDIR, where macOS still has the per-user temp dir.
+  tmp_root="${TMPDIR:-}"
+  if [[ -z "$tmp_root" && "$(uname -s)" == Darwin ]]; then
+    tmp_root="$(getconf DARWIN_USER_TEMP_DIR 2>/dev/null || true)"
+  fi
+  tmp_root="${tmp_root:-/tmp}"
   # `shopt -p` exits 1 when the option is UNSET, and `set -e` would kill the
   # subshell this runs in before a single path was emitted.
   saved="$(shopt -p nullglob dotglob || true)"
@@ -82,6 +92,9 @@ state_roots() {
     for d in "$(dirname "$CONFIG_DIR")"/*/"$STATE_SUFFIX"; do
       [[ -d "$d" ]] && printf '%s\n' "$d"
     done
+    if [[ -d "${tmp_root%/}/codex-companion" ]]; then
+      printf '%s\n' "${tmp_root%/}/codex-companion"
+    fi
   } | while IFS= read -r d; do
         # Physical paths: a symlinked config dir must not be swept twice.
         (cd "$d" 2>/dev/null && pwd -P) || printf '%s\n' "$d"
