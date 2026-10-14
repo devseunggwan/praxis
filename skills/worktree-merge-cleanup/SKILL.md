@@ -98,7 +98,7 @@ every repository, and treats "shall I clean up?" as a wasted round trip. Stop
 and report instead only when a precondition below fails. Confirm before
 touching anything:
 
-1. `gh pr view <N> --json state,mergedAt,mergeCommit` — a slash-command merge
+1. `gh pr view <N> --json state,mergedAt,mergeCommit,headRefOid` — a slash-command merge
    runs as a workflow, so the PR still reads `OPEN` for tens of seconds. If it
    is `OPEN`, find that run (`gh run list --workflow <merge-workflow> --limit 3`)
    and `gh run watch <id> --exit-status`, then re-read the state. Never start
