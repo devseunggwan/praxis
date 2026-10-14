@@ -93,17 +93,15 @@ fatal: 'main' is already used by worktree at /Users/.../<main-worktree>
 ## When the user merged out-of-band
 
 When the user reports "merged" after merging themselves (a `/merge` PR-comment
-slash command, the web UI), run the **local** cleanup (steps 1–3 and 5) on your
-own judgment, without asking — the user expects a merged PR's worktree and
-local branch to be gone, and "shall I clean up?" is a wasted round trip. Stop
-and report instead only when a precondition below fails.
-
-The **shared** steps — deleting the remote head branch (step 4) and the issue
-close-out (step 6) — run without asking only when the user's own instructions
-(CLAUDE.md, AGENTS.md, or agent memory) record a standing approval for them
-after a merge. Without one, ask once for both together after the local
-cleanup, naming the branch and the close-out action. Confirm before touching
-anything:
+slash command, the web UI), the cleanup below deletes things: the head
+worktree, the local branch, scratch files, the remote head branch, and it may
+post an issue close-out. A merge report is not an instruction to delete. Run
+the whole sequence without asking only when the user's own instructions
+(CLAUDE.md, AGENTS.md, or agent memory) record a standing approval for
+post-merge cleanup. Without one, run the read-only checks (steps 1–2), then
+ask once for the whole set, naming the worktree path, the branch, and the
+close-out action. Either way, stop and report when a precondition below fails.
+Confirm before touching anything:
 
 1. `gh pr view <N> --json state,mergedAt,mergeCommit,headRefOid,isCrossRepository`
    — a slash-command merge
