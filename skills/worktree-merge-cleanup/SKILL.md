@@ -8,11 +8,12 @@ description: >
 when_to_use: >
   Triggers on "merge cleanup", "post-merge cleanup", "worktree cleanup",
   "delete-branch merge", "squash-ancestry", "pre-merge worktree", "머지 후 정리",
-  "worktree 정리". Do NOT activate on "merge conflict resolution" or a plain
+  "worktree 정리", "PR merged", "머지했습니다" (the user reporting a merge).
+  Do NOT activate on "merge conflict resolution" or a plain
   feature-branch "git merge".
 verified-against-runtime: true
-runtime-verified-at: 2026-07-17
-runtime-verified-note: "gh 2.93.0 + git 2.50.1 — `gh pr merge -s/--squash`, `-d/--delete-branch`, and `git worktree remove -f/--force` confirmed present via --help."
+runtime-verified-at: 2026-10-14
+runtime-verified-note: "gh 2.102.0 + git 2.50.1 — out-of-band path run live: `git worktree remove --force` on a clean submodule worktree, `git branch -D`, `git push origin --delete`, then `git ls-remote origin refs/heads/<branch>` empty; earlier: `gh pr merge -s/-d` confirmed via --help."
 ---
 
 # worktree-merge-cleanup
@@ -66,7 +67,8 @@ fatal: 'main' is already used by worktree at /Users/.../<main-worktree>
      rejected with `fatal: working trees containing submodules cannot be moved
      or removed`. Use `git worktree remove --force <path>` **only after
      confirming the worktree is clean** (`git -C <path> status --porcelain`
-     empty). `--force` destroys uncommitted changes in a dirty worktree, so
+     empty, and no `!!` line from `--porcelain --ignored` other than a
+     regenerable dependency or build cache — `remove` deletes ignored files too). `--force` destroys uncommitted changes in a dirty worktree, so
      never make it the default. `git submodule deinit -f --all` first does not
      lift the rejection — the check looks at the registered submodule, not its
      checkout — so skip that detour and go straight to the clean-check + `--force`.
@@ -91,22 +93,55 @@ fatal: 'main' is already used by worktree at /Users/.../<main-worktree>
 ## When the user merged out-of-band
 
 When the user reports "merged" after merging themselves (a `/merge` PR-comment
-slash command, the web UI), confirm before touching anything:
+slash command, the web UI), the cleanup below deletes things: the head
+worktree, the local branch, scratch files, the remote head branch, and it may
+post an issue close-out. A merge report is not an instruction to delete. Run
+the whole sequence without asking only when the user's own instructions
+(CLAUDE.md, AGENTS.md, or agent memory) record a standing approval for
+post-merge cleanup. Without one, run the read-only checks (steps 1–2), then
+ask once for the whole set, naming the worktree path, the branch, and the
+close-out action. Either way, stop and report when a precondition below fails.
+Confirm before touching anything:
 
-1. `gh pr view <N> --json state,mergedAt,mergeCommit` — a slash-command merge
+1. `gh pr view <N> --json state,mergedAt,mergeCommit,headRefOid,isCrossRepository`
+   — a slash-command merge
    runs as a workflow, so the PR still reads `OPEN` for tens of seconds. If it
    is `OPEN`, find that run (`gh run list --workflow <merge-workflow> --limit 3`)
    and `gh run watch <id> --exit-status`, then re-read the state. Never start
    cleanup on `OPEN`.
 2. Confirm the merge commit is on the base: `git fetch origin --prune` then
    `git merge-base --is-ancestor <mergeCommit> origin/<base>`.
-3. Remove the head worktree and local branch as separate calls (checklist item 2).
+3. Remove the head worktree and local branch as separate calls (checklist item 2),
+   deleting the local branch only when its tip (`git rev-parse <branch>`)
+   equals `headRefOid`.
+   A dirty worktree (`git -C <path> status --porcelain` non-empty) or a tip
+   mismatch is the stop condition: report it and leave it. `--porcelain`
+   alone does not list ignored files, and `git worktree remove` deletes them
+   with the directory (a `.env`, local config, a scratch dataset). Also run
+   `git -C <path> status --porcelain --ignored` and read its `!!` lines: when
+   any of them is not a regenerable dependency or build cache
+   (`node_modules/`, `.venv/`, `__pycache__/`, `.pytest_cache/`, `dist/`,
+   `build/` and the like), stop and report the list instead of removing. When
+   `git worktree remove` succeeded,
+   skip `git worktree prune` — there is nothing of yours left to prune, and the
+   prune is repository-wide (see below).
 4. The remote head branch survives when the repo has
    `delete_branch_on_merge: false` (`gh api repos/<o>/<r> --jq .delete_branch_on_merge`)
-   and nobody passed `--delete-branch`. Deleting it is a push to a shared ref:
-   report it as remaining and delete (`git -C <repo> push origin --delete <branch>`)
-   only once the user approves. Run it with `-C <repo>` — the session cwd may be
-   the worktree you just removed.
+   and nobody passed `--delete-branch`. When `isCrossRepository` is `true` the
+   head branch lives in a fork, not in `origin`: delete nothing and report the
+   fork branch as remaining. Otherwise, under a standing approval or the
+   user's answer, run `git -C <repo> push origin --delete <branch>` after
+   steps 1–2 passed and the remote tip equals `headRefOid`
+   (`git ls-remote origin refs/heads/<branch>`). Never delete any other ref,
+   and stop on a tip mismatch. Run it with `-C <repo>` — the session cwd may
+   be the worktree you just removed.
+5. Delete the scratch files you wrote for that PR (body drafts, anchor drafts).
+6. Run the repository's issue close-out convention if it has one (a tracker
+   overlay skill may define it, e.g. a release comment on the parent issue),
+   under the same approval rule as step 4.
+7. Verify and report in one status: `git worktree list` no longer shows the
+   path, `git branch --list <branch>` is empty, and — when step 4 ran —
+   `git ls-remote origin refs/heads/<branch>` is empty.
 
 ## When the base worktree has uncommitted edits
 
@@ -123,11 +158,20 @@ fails its local sync. Those edits are not yours to stash, discard, or commit.
    `git -C <base-worktree> fetch origin --prune`, then
    `git -C <base-worktree> merge-base --is-ancestor HEAD origin/<base>`
    (exit `0`). On any other exit, stop and surface it.
-3. Move the ref without touching the working tree:
-   `git -C <base-worktree> reset --mixed origin/<base>`. Files whose content
-   equals the merged content drop out of `git status`; everything else stays
-   as an uncommitted edit. `--mixed` resets the index, so anything staged is
-   unstaged (the content stays in the working tree). Never use `--hard` here.
+3. Move the ref and bring in the merged files, keeping their edits:
+   `git -C <base-worktree> reset --keep origin/<base>`. It updates every file
+   the merge changed and leaves every other uncommitted edit where it is; a
+   staged edit stays as an unstaged one. It refuses as a whole, changing
+   nothing, when a dirty file is one the merge changed or an untracked file
+   sits where the merge adds one (`error: Entry '<file>' not uptodate` /
+   `Untracked working tree file '<file>' would be overwritten`, exit 128).
+   On that refusal, stop: report the file it named and that the checkout
+   stays behind `origin/<base>` by N commits. When that checkout is also a
+   live load path (an agent's skills or plugin directory), whatever loads
+   from it keeps the pre-merge version until the owner of those edits syncs
+   it. Never fall back to `--mixed` (it moves the ref but leaves every merged
+   file at its pre-merge content, which then shows as an edit reverting the
+   merge) or to `--hard` (it discards their edits).
 4. Delete the local head branch (`git -C <base-worktree> branch -D <branch>`, after checking its
    tip equals the PR's `headRefOid`) and read `git status` to report which
    edits remain.
