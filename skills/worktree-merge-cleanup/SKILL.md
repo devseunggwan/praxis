@@ -67,7 +67,8 @@ fatal: 'main' is already used by worktree at /Users/.../<main-worktree>
      rejected with `fatal: working trees containing submodules cannot be moved
      or removed`. Use `git worktree remove --force <path>` **only after
      confirming the worktree is clean** (`git -C <path> status --porcelain`
-     empty). `--force` destroys uncommitted changes in a dirty worktree, so
+     empty, and no `!!` line from `--porcelain --ignored` other than a
+     regenerable dependency or build cache — `remove` deletes ignored files too). `--force` destroys uncommitted changes in a dirty worktree, so
      never make it the default. `git submodule deinit -f --all` first does not
      lift the rejection — the check looks at the registered submodule, not its
      checkout — so skip that detour and go straight to the clean-check + `--force`.
@@ -116,7 +117,13 @@ anything:
    deleting the local branch only when its tip (`git rev-parse <branch>`)
    equals `headRefOid`.
    A dirty worktree (`git -C <path> status --porcelain` non-empty) or a tip
-   mismatch is the stop condition: report it and leave it. When
+   mismatch is the stop condition: report it and leave it. `--porcelain`
+   alone does not list ignored files, and `git worktree remove` deletes them
+   with the directory (a `.env`, local config, a scratch dataset). Also run
+   `git -C <path> status --porcelain --ignored` and read its `!!` lines: when
+   any of them is not a regenerable dependency or build cache
+   (`node_modules/`, `.venv/`, `__pycache__/`, `.pytest_cache/`, `dist/`,
+   `build/` and the like), stop and report the list instead of removing. When
    `git worktree remove` succeeded,
    skip `git worktree prune` — there is nothing of yours left to prune, and the
    prune is repository-wide (see below).
