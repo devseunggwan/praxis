@@ -28,6 +28,11 @@ If `$companion` is empty or the file does not exist:
    - `Manual` → run `git diff origin/<base-branch>..HEAD` in `{selected_path}` and exit
    - `Cancel` → abort silently with one-line message
 
+   Under Hermes the first alternative does not exist; offer `delegate_task`
+   with a reviewer goal (cwd `{selected_path}`, diff against
+   `origin/<base-branch>`) in its place, alongside `Manual` and `Cancel`.
+   Record it as `path=code-reviewer` in the ledger row below.
+
 **Record the resolved path in the ledger, on every first round of a
 target** — including the ordinary case where `codex-companion.mjs`
 resolved and no question was asked:
@@ -53,7 +58,9 @@ path reads `--model`, `--base`, `--scope`, and `--json`. It also *accepts*
 never read, so neither changes anything; `options.wait` is consumed only by
 `status`, `options.background` only by `task`.
 
-**Always run this via `Bash(..., run_in_background: true)`.** A review
+**Always run this via `Bash(..., run_in_background: true)`** (Hermes:
+`terminal(background=true, notify_on_complete=true)` — some builds name the flag `notify` — then
+end the turn). A review
 routinely runs past a foreground tool timeout, and a timed-out call kills
 it mid-run: the round then ends with no findings, which is
 indistinguishable from a clean review. There is no flag that avoids this —
@@ -76,7 +83,9 @@ node "{resolved_companion_path}" review "{{ARGUMENTS}}"
 
 A backgrounded call hands back a task id, not the review, so there is
 nothing to return yet — say so in one line: "Codex review started in the
-background. Check `/codex:status` for progress." Once the run completes,
+background. Check `/codex:status` for progress." (Hermes has no
+`/codex:status`: point at the background process's session id, and run the
+companion's `status --cwd` from the Liveness section below for job state.) Once the run completes,
 return the script's stdout **verbatim** — do not paraphrase, summarize, or
 add commentary. This matches `/codex:review`'s contract.
 
@@ -120,7 +129,9 @@ the next paragraph turns "no matching process" into a cancel.
 
 `.logFile` is an absolute path under the companion's own state directory
 (`$CLAUDE_PLUGIN_DATA/state/<workspace-slug>-<hash>/jobs/`, falling back to
-`$TMPDIR/codex-companion/…`) — it is not relative to the worktree, so use
+`$TMPDIR/codex-companion/…`, i.e. `os.tmpdir()`, which is `/tmp` when
+`TMPDIR` is unset — always the fallback under Hermes, where
+`CLAUDE_PLUGIN_DATA` is unset) — it is not relative to the worktree, so use
 the value the command prints rather than constructing one. Then:
 
 ```bash

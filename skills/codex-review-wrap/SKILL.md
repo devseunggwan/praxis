@@ -69,6 +69,7 @@ threshold). See **Step 6** for the reaper and its safety gate.
 - Error-handling table + limitations: [`references/appendices.md`](references/appendices.md)
 - Worked end-to-end example: [`references/example-flow.md`](references/example-flow.md)
 - Runtime verification log: [`references/verification-log.md`](references/verification-log.md)
+- Running under Hermes Agent: [Running under Hermes](#running-under-hermes) below
 
 ## Invocation Model
 
@@ -190,7 +191,9 @@ companion script in 4a/4b on every invocation, including the first.
 
 The only `Skill(...)` call legitimately reachable from Step 4 is the
 `oh-my-claudecode:code-reviewer` fallback in 4a — and only when the
-codex-companion.mjs path does not resolve.
+codex-companion.mjs path does not resolve. Under Hermes there is no
+`/codex:review` and no omc; the companion is the only Codex path (see
+[Running under Hermes](#running-under-hermes)).
 
 #### 4a. Resolve the codex-companion.mjs path — summary
 
@@ -234,8 +237,8 @@ Sub-sections below are numbered for cross-reference, not execution order.
 The execution order each round is:
 
 0. **Interactivity check** — if the run cannot reach a user
-   (`claude -p`, background worker, any context where `AskUserQuestion` has
-   no recipient), skip every question step (5d-i and 5i) and take the
+   (`claude -p`, background worker, a Hermes cron job or kanban worker, any
+   context where `AskUserQuestion` / `clarify` has no recipient), skip every question step (5d-i and 5i) and take the
    non-interactive path in *Error Handling*: classify and verify findings
    (5a–5c) but apply nothing, deferring the survivors. Doing this first is
    what keeps the unconditional 5d-i question from stalling the round before
@@ -341,7 +344,10 @@ only**: the leak is a launchd/`/var/folders` mechanism and the script uses BSD
 `stat`, so on other platforms skip this step entirely. It is the
 single source of truth for safe reaping, shared with the launchd job (see
 `LAUNCHD.md`). Resolve it via the plugin root, mirroring the strike-counter
-convention used by the `strike` / `reset-strikes` skills:
+convention used by the `strike` / `reset-strikes` skills. Under Hermes
+`CLAUDE_PLUGIN_ROOT` is unset in the agent's shell, so substitute the
+skill directory Hermes prints with the loaded skill (`[Skill directory: …]`)
+for `${CLAUDE_PLUGIN_ROOT}/skills/codex-review-wrap`:
 
 **Default — GC only (zero risk).** Removes the stale tmp sessionDirs of brokers
 whose pid is already dead. Never signals a running process.
@@ -368,6 +374,36 @@ in-flight reviews. The reaper's per-broker idle gate is the only sanctioned
 path. The heavy, session-independent reclaim of running orphans belongs to the
 launchd job (`LAUNCHD.md`), not to a per-review phase end — phase end only
 keeps the count below the compressor threshold.
+
+## Running under Hermes
+
+Hermes Agent loads this skill from the same checkout and runs the same
+procedure. Substitute the host tools; every gate, ledger row, and decision
+rule stays as written.
+
+| Written for Claude Code | Under Hermes |
+| --- | --- |
+| `AskUserQuestion` (Steps 2, 4a, 5d-i, 5i, 5j) | `clarify` — same 4-choice cap, and Hermes appends its own `Other` row |
+| `Bash(..., run_in_background: true)` (Step 4b) | `terminal(background=true, notify_on_complete=true)` (some builds name the flag `notify`), then end the turn; Step 5 starts when the completion notification arrives |
+| `Skill("oh-my-claudecode:code-reviewer")` fallback (Step 4a) | not available — offer `delegate_task` with a reviewer goal, `Manual`, or `Cancel` |
+| `${CLAUDE_PLUGIN_ROOT}/skills/codex-review-wrap/…` (Step 6) | the `[Skill directory: …]` path Hermes prints with the skill |
+| companion state under `$CLAUDE_PLUGIN_DATA/state/` | `$TMPDIR/codex-companion/<workspace-slug>-<hash>/` — `CLAUDE_PLUGIN_DATA` is unset, so the companion uses its own fallback root (`os.tmpdir()`). The reaper reads that root too, from `TMPDIR`, or from `getconf DARWIN_USER_TEMP_DIR` when a macOS launchd run has no `TMPDIR` |
+
+Step 4a's companion resolution is unchanged: the manifest stays at
+`~/.claude/plugins/installed_plugins.json` (`codex@openai-codex`) whichever
+host runs the skill.
+
+Two traps seen under Hermes:
+
+- **Do not call the bare Codex CLI with a review brief.** `codex review
+  --base <ref>` refuses a prompt argument (`the argument '--base <BRANCH>'
+  cannot be used with '[PROMPT]'`) and exits 2 before reviewing anything.
+  Run the companion as Step 4b says.
+- **A killed background run leaves its job reading `running`.** A Hermes
+  background process can end with exit 143 (SIGTERM) and no completion
+  notification while the companion's job record still says `running`.
+  Apply Step 4b's liveness rule: check the pid with `ps`, and on a dead pid
+  `cancel` the job and re-launch — never read the silence as a clean round.
 
 ## Error Handling and Limitations
 

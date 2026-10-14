@@ -32,7 +32,7 @@ of the listed situations; the limitations are known gaps, not defects.
 | SoT audit (5h) — sibling document not locatable | Emit unresolved advisory; do not block review completion |
 | SoT audit (5h) — parent citation site ambiguous (multiple tables at same heading) | Use all tables at the heading as candidate SoT sources; report each comparison separately |
 | Reaper (Step 6) — running broker has no readable `broker.log` | Idle is indeterminate → broker is KEPT (logged as `SKIP ... no logFile`); never reaped on a guess |
-| Reaper (Step 6) — `CLAUDE_PLUGIN_ROOT` unset (skill run outside plugin context) | Resolve the script via the installed-plugins manifest, same as Step 4a; if still unresolved, skip Step 6 with a one-line note — reaping is best-effort hygiene, not a gate |
+| Reaper (Step 6) — `CLAUDE_PLUGIN_ROOT` unset (skill run outside plugin context) | Under Hermes, use the `[Skill directory: …]` path printed with the skill — it is the checkout this SKILL.md was read from. Otherwise resolve the script via the installed-plugins manifest, same as Step 4a; if still unresolved, skip Step 6 with a one-line note — reaping is best-effort hygiene, not a gate |
 | Reaper (Step 6) — agent considers `pkill -f codex` / `pkill node` | Forbidden: aborts sibling sessions' in-flight reviews. Use only the reaper's per-broker idle gate |
 
 ## Limitations

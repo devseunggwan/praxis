@@ -811,6 +811,75 @@ fi   # jq gate (gate 5)
 
 echo ""
 
+# --- Gate 5c: the companion's TMPDIR fallback state root ---------------------
+# Outside Claude Code (Hermes, a plain shell) CLAUDE_PLUGIN_DATA is unset and
+# the companion records broker.json under os.tmpdir()/codex-companion instead
+# of any config dir (lib/state.mjs FALLBACK_STATE_ROOT_DIR). A reaper reading
+# only config dirs reads those brokers as `owner unknown` and keeps them
+# forever. Same fixture shape as 5b, with the record moved to that root.
+if ! command -v jq >/dev/null 2>&1; then
+  skip "gate 5c companion fallback root (needs jq)"
+else
+TMPROOT5C="${TMPDIR:-/tmp}"; TMPROOT5C="${TMPROOT5C%/}"
+TMPD5C="$(mktemp -d "$TMPROOT5C/pxtmproot.XXXXXX")" || { echo "FATAL: mktemp -d failed" >&2; exit 1; }
+FIXTURE5C="$TMPD5C/broker-fixture.sh"
+REAPER5C="$TMPD5C/reaper-copy.sh"
+SD5C_REAP="$TMPD5C/cxc-REAP5C"
+WS5C_GONE="$TMPD5C/workspace-deleted"
+BROKER5C_PID=""
+cleanup_gate5c() {
+  local kid
+  if [ -n "$BROKER5C_PID" ]; then
+    for kid in $(pgrep -P "$BROKER5C_PID" 2>/dev/null); do kill -KILL "$kid" 2>/dev/null; done
+    kill -KILL "$BROKER5C_PID" 2>/dev/null
+  fi
+  rm -rf "$TMPD5C"
+  declare -F cleanup_gate5 >/dev/null && cleanup_gate5
+  return 0
+}
+trap cleanup_gate5c EXIT INT TERM
+
+cat > "$FIXTURE5C" <<'FIX5C'
+#!/bin/bash
+exec 3<> "$PX5C_FIFO"
+read -r -u 3
+FIX5C
+sed "s|^BROKER_PATTERN=.*|BROKER_PATTERN='$FIXTURE5C'|" "$REAPER" > "$REAPER5C"
+mkdir -p "$SD5C_REAP" "$TMPD5C/config"
+FIFO5C="$TMPD5C/broker5c.fifo"
+mkfifo "$FIFO5C"
+touch -t 202001010000 "$SD5C_REAP/broker.log"
+PX5C_FIFO="$FIFO5C" bash "$FIXTURE5C" serve --endpoint "unix:$SD5C_REAP/broker.sock" >/dev/null 2>&1 &
+BROKER5C_PID=$!
+SD5C_STATE="$TMPD5C/codex-companion/reapme-0123456789abcdef"
+mkdir -p "$SD5C_STATE/jobs"
+printf '{"sessionDir":"%s","pid":%s}\n' "$SD5C_REAP" "$BROKER5C_PID" > "$SD5C_STATE/broker.json"
+printf '{"workspaceRoot":"%s"}\n' "$WS5C_GONE" > "$SD5C_STATE/jobs/job.json"
+
+broker5c_ready=false
+for _ in $(seq 1 30); do
+  if kill -0 "$BROKER5C_PID" 2>/dev/null; then broker5c_ready=true; break; fi
+  sleep 0.1
+done
+if [ "$broker5c_ready" != true ]; then
+  fail "gate 5c fixture broker did not come up"
+elif [ "$MTIME_OK" != true ]; then
+  skip "gate 5c companion fallback root ($NO_MTIME_REASON)"
+else
+  # CLAUDE_CONFIG_DIR names an empty sandbox: the TMPDIR root is the only
+  # place this record exists.
+  DRY5C_OUT="$(TMPDIR="$TMPD5C" CLAUDE_CONFIG_DIR="$TMPD5C/config" bash "$REAPER5C" --reap --max-age 5 --dry-run 2>&1)"
+  case "$DRY5C_OUT" in
+    *"WOULD REAP pid=$BROKER5C_PID"*)
+      pass "reap resolves a broker recorded under \$TMPDIR/codex-companion" ;;
+    *)
+      fail "TMPDIR-root broker not resolved (output: $DRY5C_OUT)" ;;
+  esac
+fi
+fi   # jq gate (gate 5c)
+
+echo ""
+
 # --- Gate 6: an unusable broker index must not read as an empty sweep --------
 # The GC pass iterates the per-pass index rather than re-parsing every
 # broker.json (two jq spawns per record was the script's whole runtime). That
@@ -829,7 +898,7 @@ TMPD6="$(mktemp -d "$TMPROOT6/px1056g6.XXXXXX")" || { echo "FATAL: mktemp -d fai
 # about $TMPD5.
 cleanup_gate6() {
   rm -rf "$TMPD6"
-  declare -F cleanup_gate5 >/dev/null && cleanup_gate5
+  declare -F cleanup_gate5c >/dev/null && cleanup_gate5c
   return 0
 }
 trap cleanup_gate6 EXIT INT TERM
