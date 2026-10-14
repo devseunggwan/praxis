@@ -1414,12 +1414,16 @@ def _bulk_reply_prs(text: str) -> set[str] | None:
             or _LABEL_NEGATION_RE.search(raw)):
         return None
     named: set[str] = set()
+    # "98, 1118 머지" names PRs by bare number; once any `#N`/`PR N` appears,
+    # a bare number is something else ("1 — #833, #999 머지" is an ordinal),
+    # so it stays in the text and voids the reply instead of naming PR 1.
+    ref_re = _PR_REF_RE if _PR_REF_RE.search(raw) else _REPLY_PR_RE
     for sentence in _SENTENCE_TAIL_RE.split(raw):
         if not sentence.strip():
             continue
         flat = re.sub(r"\s*[—–:]\s*", " ", sentence.lower())
-        named |= set(_REPLY_PR_RE.findall(flat))
-        rest = _REPLY_PR_RE.sub(" ", flat)
+        named |= set(ref_re.findall(flat))
+        rest = ref_re.sub(" ", flat)
         words = [w for w in re.split(r"[\s,()]+", rest)
                  if w and w not in _BULK_FILLERS and w not in _BULK_QUANTIFIERS]
         remainder = " ".join(words).strip(" .!~,·")
@@ -1474,11 +1478,14 @@ def _pr_sections(text: str, prs: set[str]) -> dict[str, str]:
         m = None if fence is not None else _HEADING_RE.match(line)
         if m is not None:
             this = len(m.group("hashes")) if m.group("hashes") else _BOLD_HEADING_LEVEL
-            refs = set(_PR_REF_RE.findall(line)) & prs
-            if level is None and len(refs) == 1:
+            # Every PR the heading names counts, not only the listed ones:
+            # "### PR #833 / PR #1001" is a joint heading, nobody's section.
+            named = set(_PR_REF_RE.findall(line))
+            refs = named if len(named) == 1 and named <= prs else set()
+            if level is None and refs:
                 level = this
             if level is not None and this <= level:
-                pr = refs.pop() if len(refs) == 1 else None
+                pr = refs.pop() if refs else None
                 owner = pr if pr is not None and pr not in seen else None
                 if owner is not None:
                     seen.add(owner)

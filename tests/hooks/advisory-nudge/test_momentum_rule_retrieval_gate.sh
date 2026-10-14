@@ -895,6 +895,12 @@ run_merge_escalation_case "merge_bulk_nested_fence_denies" \
   "yes" "" "momentum-merge-bulk-nested-fence.jsonl" "gh pr merge 999 --squash"
 run_merge_escalation_case "merge_bulk_bash_pair_denies" \
   "yes" "" "momentum-merge-bulk-bash-pair.jsonl" "gh pr merge 999 --squash"
+# Codex review round 1: a heading naming any second PR is a joint heading, and
+# a bare number beside prefixed refs is an ordinal, not a PR.
+run_merge_escalation_case "merge_bulk_joint_heading_denies" \
+  "yes" "" "momentum-merge-bulk-joint-heading.jsonl" "gh pr merge 833 --squash --delete-branch"
+run_merge_escalation_case "merge_bulk_ordinal_reply_denies" \
+  "yes" "" "momentum-merge-bulk-ordinal-reply.jsonl" "gh pr merge 1 --squash --delete-branch"
 
 # An AskUserQuestion answer is a tool_result, not a typed message. Replayed over
 # local transcripts, 13 of the merges this check first denied were answered this
