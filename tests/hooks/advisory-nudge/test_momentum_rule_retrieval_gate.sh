@@ -803,6 +803,113 @@ run_merge_escalation_case "merge_serial_answered_current_passes" \
 run_merge_escalation_case "merge_serial_unrelated_message_denies" \
   "yes" "" "momentum-merge-serial-unrelated-message.jsonl" "gh pr merge 999 --squash --delete-branch"
 
+# Bulk approval: one turn briefs each PR in its own headed section and asks
+# once, listing the PRs; one answer then releases each listed PR once, as its
+# own single-merge command. Fixtures: momentum-merge-bulk-*.jsonl.
+run_merge_escalation_case "merge_bulk_all_first_passes" \
+  "no" "" "momentum-merge-bulk-all-first.jsonl" "gh pr merge 833 --squash --delete-branch"
+run_merge_escalation_case "merge_bulk_all_second_passes" \
+  "no" "" "momentum-merge-bulk-all-second.jsonl" "gh pr merge 999 --squash --delete-branch"
+run_merge_escalation_case "merge_bulk_named_reply_passes" \
+  "no" "" "momentum-merge-bulk-named.jsonl" "gh pr merge 999 --squash"
+run_merge_escalation_case "merge_bulk_ok_to_listed_ask_passes" \
+  "no" "" "momentum-merge-bulk-ok-listed.jsonl" "gh pr merge 999 --squash"
+run_merge_escalation_case "merge_bulk_ask_answer_passes" \
+  "no" "" "momentum-merge-bulk-ask-answer.jsonl" "gh pr merge 999 --squash"
+# Outside the set, or not a single numbered merge: the bulk path does not apply.
+run_merge_escalation_case "merge_bulk_unlisted_pr_denies" \
+  "yes" "" "momentum-merge-bulk-all-second.jsonl" "gh pr merge 1001 --squash"
+run_merge_escalation_case "merge_bulk_numberless_denies" \
+  "yes" "" "momentum-merge-bulk-all-second.jsonl" "gh pr merge --squash"
+run_merge_escalation_case "merge_bulk_chained_denies" \
+  "yes" "" "momentum-merge-bulk-all-first.jsonl" "gh pr merge 833 --squash && gh pr merge 999 --squash"
+run_merge_escalation_case "merge_bulk_loop_denies" \
+  "yes" "" "momentum-merge-bulk-all-first.jsonl" 'for p in 833 999; do gh pr merge $p --squash; done'
+run_merge_escalation_case "merge_bulk_other_repo_denies" \
+  "yes" "" "momentum-merge-bulk-repo-probed.jsonl" "gh pr merge 999 --repo x/y --squash"
+run_merge_escalation_case "merge_bulk_same_repo_passes" \
+  "no" "" "momentum-merge-bulk-repo-probed.jsonl" "gh pr merge 999 --repo o/r --squash"
+# The answer, the briefing, or the run does not support this PR.
+run_merge_escalation_case "merge_bulk_partial_pick_denies" \
+  "yes" "" "momentum-merge-bulk-partial.jsonl" "gh pr merge 999 --squash"
+run_merge_escalation_case "merge_bulk_combined_block_denies" \
+  "yes" "" "momentum-merge-bulk-combined.jsonl" "gh pr merge 999 --squash"
+run_merge_escalation_case "merge_bulk_thin_section_denies" \
+  "yes" "" "momentum-merge-bulk-thin-section.jsonl" "gh pr merge 999 --squash"
+run_merge_escalation_case "merge_bulk_repeat_denies" \
+  "yes" "" "momentum-merge-bulk-repeat.jsonl" "gh pr merge 999 --squash"
+run_merge_escalation_case "merge_bulk_outsider_ran_denies" \
+  "yes" "" "momentum-merge-bulk-outsider.jsonl" "gh pr merge 999 --squash"
+run_merge_escalation_case "merge_bulk_hold_word_denies" \
+  "yes" "" "momentum-merge-bulk-hold-word.jsonl" "gh pr merge 999 --squash"
+run_merge_escalation_case "merge_bulk_question_reply_denies" \
+  "yes" "" "momentum-merge-bulk-question.jsonl" "gh pr merge 999 --squash"
+run_merge_escalation_case "merge_bulk_ask_hold_denies" \
+  "yes" "" "momentum-merge-bulk-ask-hold.jsonl" "gh pr merge 999 --squash"
+run_merge_escalation_case "merge_bulk_bold_heading_passes" \
+  "no" "" "momentum-merge-bulk-bold-heading.jsonl" "gh pr merge 999 --squash"
+# Review round 1 — each was released before the fix: a bold bullet naming #999
+# in passing is not #999's heading; a shared block after the last section is
+# nobody's; a prep question listing PRs before 머지 is not a merge ask; every
+# AskUserQuestion pair is read, and only a merge question decides; a clarify
+# condition or an earlier deferral voids the answer; a merge chained after
+# `cd` or retargeted by GH_REPO is not the briefed merge.
+run_merge_escalation_case "merge_bulk_bold_bullet_denies" \
+  "yes" "" "momentum-merge-bulk-bold-bullet.jsonl" "gh pr merge 999 --squash"
+run_merge_escalation_case "merge_bulk_trailing_shared_denies" \
+  "yes" "" "momentum-merge-bulk-trailing-shared.jsonl" "gh pr merge 999 --squash"
+run_merge_escalation_case "merge_bulk_status_ask_denies" \
+  "yes" "" "momentum-merge-bulk-status-ask.jsonl" "gh pr merge 999 --squash"
+run_merge_escalation_case "merge_bulk_ask_multi_held_denies" \
+  "yes" "" "momentum-merge-bulk-ask-multi-held.jsonl" "gh pr merge 999 --squash"
+run_merge_escalation_case "merge_bulk_ask_unrelated_denies" \
+  "yes" "" "momentum-merge-bulk-ask-unrelated.jsonl" "gh pr merge 999 --squash"
+run_merge_escalation_case "merge_bulk_ask_conditional_denies" \
+  "yes" "" "momentum-merge-bulk-ask-conditional.jsonl" "gh pr merge 999 --squash"
+run_merge_escalation_case "merge_bulk_defer_then_all_denies" \
+  "yes" "" "momentum-merge-bulk-defer-then-all.jsonl" "gh pr merge 999 --squash"
+run_merge_escalation_case "merge_bulk_cd_chain_denies" \
+  "yes" "" "momentum-merge-bulk-all-second.jsonl" "cd ../other && gh pr merge 999 --squash"
+run_merge_escalation_case "merge_bulk_gh_repo_env_denies" \
+  "yes" "" "momentum-merge-bulk-all-second.jsonl" "GH_REPO=x/y gh pr merge 999 --squash"
+# Review round 2 — each was released before the second fix: a code-fence
+# comment or a deeper heading is content of the section it sits in; a bare ok
+# answers the turn's last question, not an earlier listed ask; every sentence
+# of the reply must approve; after a separate `cd`, only a merge naming the
+# briefed repo is released.
+run_merge_escalation_case "merge_bulk_fence_comment_denies" \
+  "yes" "" "momentum-merge-bulk-fence-comment.jsonl" "gh pr merge 999 --squash"
+run_merge_escalation_case "merge_bulk_subheading_denies" \
+  "yes" "" "momentum-merge-bulk-subheading.jsonl" "gh pr merge 999 --squash"
+run_merge_escalation_case "merge_bulk_later_question_denies" \
+  "yes" "" "momentum-merge-bulk-later-question.jsonl" "gh pr merge 999 --squash"
+run_merge_escalation_case "merge_bulk_precondition_denies" \
+  "yes" "" "momentum-merge-bulk-precondition.jsonl" "gh pr merge 999 --squash"
+run_merge_escalation_case "merge_bulk_separate_cd_bare_denies" \
+  "yes" "" "momentum-merge-bulk-separate-cd.jsonl" "gh pr merge 999 --squash"
+run_merge_escalation_case "merge_bulk_separate_cd_repo_passes" \
+  "no" "" "momentum-merge-bulk-separate-cd.jsonl" "gh pr merge 999 --repo o/r --squash"
+# CodeRabbit on #1584: a shorter fence line does not close a longer fence, and
+# only an AskUserQuestion result is an answer, not a Bash output printing one.
+run_merge_escalation_case "merge_bulk_nested_fence_denies" \
+  "yes" "" "momentum-merge-bulk-nested-fence.jsonl" "gh pr merge 999 --squash"
+run_merge_escalation_case "merge_bulk_bash_pair_denies" \
+  "yes" "" "momentum-merge-bulk-bash-pair.jsonl" "gh pr merge 999 --squash"
+# Codex review round 1: a heading naming any second PR is a joint heading, and
+# a bare number beside prefixed refs is an ordinal, not a PR.
+run_merge_escalation_case "merge_bulk_joint_heading_denies" \
+  "yes" "" "momentum-merge-bulk-joint-heading.jsonl" "gh pr merge 833 --squash --delete-branch"
+run_merge_escalation_case "merge_bulk_ordinal_reply_denies" \
+  "yes" "" "momentum-merge-bulk-ordinal-reply.jsonl" "gh pr merge 1 --squash --delete-branch"
+# Codex review round 2: a cd anywhere after the briefing window opens needs
+# --repo, and a clean merge chained before another command still spends the set.
+run_merge_escalation_case "merge_bulk_cd_before_answer_bare_denies" \
+  "yes" "" "momentum-merge-bulk-cd-before-answer.jsonl" "gh pr merge 999 --squash"
+run_merge_escalation_case "merge_bulk_cd_before_answer_repo_allows" \
+  "no" "" "momentum-merge-bulk-cd-before-answer.jsonl" "gh pr merge 999 --repo o/r --squash"
+run_merge_escalation_case "merge_bulk_chained_outside_denies" \
+  "yes" "" "momentum-merge-bulk-chained-outside.jsonl" "gh pr merge 999 --squash"
+
 # An AskUserQuestion answer is a tool_result, not a typed message. Replayed over
 # local transcripts, 13 of the merges this check first denied were answered this
 # way, so it must count — and neither a declined question (`is_error`) nor a

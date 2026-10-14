@@ -96,6 +96,31 @@ def emit_ask(reason: str) -> None:
     emit_decision("ask", reason)
 
 
+_MOMENTUM_IMPL = (_Path(__file__).resolve().parent.parent.parent
+                  / "advisory-nudge" / "momentum-rule-retrieval-gate" / "impl.py")
+
+
+def bulk_approved(payload: dict) -> bool:
+    """True when the user already approved this merge in chat as one of a
+    bulk-approved set (momentum-rule-retrieval-gate decides; one parser, so the
+    two gates cannot disagree about what was approved).
+
+    Any failure returns False, so a broken lookup keeps the prompt.
+    """
+    try:
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location(
+            "_praxis_momentum_bulk_merge", _MOMENTUM_IMPL)
+        if spec is None or spec.loader is None:
+            return False
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return bool(module.bulk_merge_approved(payload))
+    except Exception:
+        return False
+
+
 def main() -> int:
     parsed = read_bash_payload()
     if parsed is None:
@@ -110,6 +135,11 @@ def main() -> int:
 
     found = any(is_gh_pr_merge(argv) for argv in iter_command_starts(tokens))
     if not found:
+        return 0
+    # The chat answer to a bulk briefing is the per-PR consent this prompt
+    # stands in for; asking again per merge only invites the blind click the
+    # briefing gate was built against.
+    if bulk_approved(payload):
         return 0
 
     emit_ask(REASON + compound_cascade_hint(command))

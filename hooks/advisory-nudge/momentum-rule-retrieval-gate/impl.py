@@ -961,7 +961,13 @@ _AND_TOKEN = "&&"
 
 
 def _executed_merge_indices(entries: list[dict]) -> list[int]:
-    """Entry indices of `gh pr merge` calls that actually RAN, oldest first.
+    """Entry indices of `gh pr merge` calls that actually RAN, oldest first."""
+    return [i for i, _ in _executed_merges(entries)]
+
+
+def _executed_merges(entries: list[dict], *,
+                     include_skippable: bool = False) -> list[tuple[int, str]]:
+    """`(entry index, command)` of `gh pr merge` calls that actually RAN, oldest first.
 
     A merge whose tool_result is `is_error` never executed — the gate itself, a
     sibling gate, or a declined approval stopped it — so counting it would make
@@ -974,9 +980,13 @@ def _executed_merge_indices(entries: list[dict]) -> list[int]:
     past a briefing nothing consumed — denying the next marked merge whose
     briefing was real. Both directions therefore fail open: the guard declines to
     fire rather than spend a window it cannot confirm.
+
+    `include_skippable=True` keeps those calls: the bulk release must fail
+    closed, so a clean `gh pr merge 1001 && echo done` counts as a merge that
+    may have run.
     """
-    pending: dict[str, int] = {}
-    executed: list[int] = []
+    pending: dict[str, tuple[int, str]] = {}
+    executed: list[tuple[int, str]] = []
     for i, ev in enumerate(entries):
         msg = ev.get("message")
         if not isinstance(msg, dict) or ev.get("isSidechain"):
@@ -994,19 +1004,20 @@ def _executed_merge_indices(entries: list[dict]) -> list[int]:
                 if not (isinstance(cmd, str) and isinstance(tid, str)):
                     continue
                 tokens = safe_tokenize(cmd)
-                if any(tok in _SKIPPABLE_KEYWORDS for tok in tokens):
+                if not include_skippable and any(tok in _SKIPPABLE_KEYWORDS for tok in tokens):
                     continue
                 starts = list(iter_command_starts(tokens))
                 if not any(_is_gh_pr_merge(argv) for argv in starts):
                     continue
-                if _AND_TOKEN in tokens and not _is_gh_pr_merge(starts[-1]):
+                if (not include_skippable and _AND_TOKEN in tokens
+                        and not _is_gh_pr_merge(starts[-1])):
                     continue
-                pending[tid] = i
+                pending[tid] = (i, cmd)
             elif b.get("type") == "tool_result":
                 tid = b.get("tool_use_id")
-                idx = pending.pop(tid, None) if isinstance(tid, str) else None
-                if idx is not None and not b.get("is_error"):
-                    executed.append(idx)
+                hit = pending.pop(tid, None) if isinstance(tid, str) else None
+                if hit is not None and not b.get("is_error"):
+                    executed.append(hit)
     return sorted(executed)
 
 
@@ -1342,6 +1353,341 @@ def _with_exclusion(why: str, reason: str | None) -> str:
     return f"{why}. A briefing was shown earlier but not scored: {reason}"
 
 
+# ---------------------------------------------------------------------------
+# Bulk approval: one briefing turn, one answer, several merges.
+# ---------------------------------------------------------------------------
+
+# Words that make one approval cover a listed set ("모두 머지", "approve both").
+# They are dropped before the remainder is matched against the approval tokens.
+_BULK_QUANTIFIERS = frozenset({
+    "모두", "전부", "다", "둘다", "셋다", "넷다", "다섯다", "둘", "셋", "넷", "다섯",
+    "all", "both", "each", "every", "everything", "them", "of",
+})
+# Polite or sentence-final approvals the bare-token set does not carry; read
+# only on the bulk path, where the reply must also name or answer a listed set.
+_BULK_EXTRA_TOKENS = frozenset({
+    "머지하세요", "머지해주세요", "머지 해주세요", "머지 해줘", "머지합시다",
+    "승인합니다", "진행하세요", "진행해주세요", "merge them", "merge all",
+})
+# Single words that each approve, so "승인 — 모두 머지" reads as approve + merge.
+_BULK_APPROVAL_WORDS = frozenset(
+    t for t in _APPROVAL_TOKENS | _BULK_EXTRA_TOKENS if " " not in t)
+# Particles and list joiners left behind once the PR references are removed.
+_BULK_FILLERS = frozenset({"만", "은", "는", "을", "를", "도", "과", "와", "및", "and", "&", "pr"})
+# Sentence boundaries of a reply; commas stay inside a sentence because they
+# join a PR list ("#833, #999 머지").
+_SENTENCE_TAIL_RE = re.compile(r"[.!?。…\n;·]+")
+# In a short approval reply a bare number is a PR: users type "98, 1118 머지".
+_REPLY_PR_RE = re.compile(r"(?:#|/pull/|(?<![A-Za-z])pr\s*(?:#\s*)?)?(?<![A-Za-z0-9_])(\d+)(?![A-Za-z0-9_])",
+                          re.IGNORECASE)
+# A heading line: a markdown heading, or a line that is bold from end to end.
+# A bold lead inside a bullet (`- **리스크**: …`) is an item, not a heading.
+_HEADING_RE = re.compile(r"^\s{0,3}(?:(?P<hashes>#{1,6})\s+\S|\*\*[^*\n]+\*\*\s*:?\s*$)")
+_FENCE_LINE_RE = re.compile(r"^\s{0,3}(?P<fence>`{3,}|~{3,})(?P<rest>.*)$")
+# A whole-line bold heading ranks below every markdown heading.
+_BOLD_HEADING_LEVEL = 7
+# A reply longer than this is not a bare approval; capping it also bounds the
+# regex work a pasted wall of text could cost.
+_BULK_REPLY_MAX_CHARS = 300
+# Commands that move the working directory for every later Bash call.
+_CHDIR_COMMANDS = frozenset({"cd", "pushd", "popd"})
+# A listed merge ask: the PR list is the object of the merge verb, and the
+# verb is the sentence's predicate — the ask ending follows it directly
+# ("#833, #999 를 머지할까요?", "Approve merging #833 and #999?"). A list
+# before "머지 전에 … 돌릴까요?" or "머지 큐에 올려둘까요?" asks something else.
+_LISTED_ASK_RE = re.compile(
+    rf"(?P<ko>{_REF_LIST})\s*(?:을|를|은|는|도)?\s*(?:모두\s*|전부\s*|다\s*)?(?:머지|병합)\s*"
+    r"(?:할까요|해도\s*될까요|해도\s*되나요|진행할까요|하시겠(?:어요|습니까)?|해\s*드릴까요|해드릴까요)\s*\??\s*$"
+    rf"|^\s*(?:(?:shall|should|can|may)\s+i\s+|approve\s+|ok\s+to\s+)?merg(?:e|ing)\s*:?\s*(?:pr\s*)?"
+    rf"(?P<en>{_REF_LIST})\s*\?\s*$",
+    re.IGNORECASE)
+# Env assignments that move a `gh` call to another repo without a flag.
+_REPO_ENV_RE = re.compile(r"^(?:GH_REPO|GH_HOST)=")
+
+
+def _bulk_reply_prs(text: str) -> set[str] | None:
+    """PRs a bulk approval names (empty when it names none), or None when the
+    text is not an approval at all.
+
+    Conservative on purpose — a miss costs one ask, a false read releases a
+    merge. Every sentence must be PR references plus approval words only, so
+    a deferral ("두 번째 건 내일 다시 보자. 모두 머지"), a precondition ("CI
+    한번 더 돌려보고. ok"), or a condition after a comma voids the reply, as
+    do a refusal word anywhere and a trailing `?`.
+    """
+    raw = text.strip()
+    if (not raw or len(raw) > _BULK_REPLY_MAX_CHARS or raw.endswith(("?", "？"))
+            or _LABEL_NEGATION_RE.search(raw)):
+        return None
+    named: set[str] = set()
+    # "98, 1118 머지" names PRs by bare number; once any `#N`/`PR N` appears,
+    # a bare number is something else ("1 — #833, #999 머지" is an ordinal),
+    # so it stays in the text and voids the reply instead of naming PR 1.
+    ref_re = _PR_REF_RE if _PR_REF_RE.search(raw) else _REPLY_PR_RE
+    for sentence in _SENTENCE_TAIL_RE.split(raw):
+        if not sentence.strip():
+            continue
+        flat = re.sub(r"\s*[—–:]\s*", " ", sentence.lower())
+        named |= set(ref_re.findall(flat))
+        rest = ref_re.sub(" ", flat)
+        words = [w for w in re.split(r"[\s,()]+", rest)
+                 if w and w not in _BULK_FILLERS and w not in _BULK_QUANTIFIERS]
+        remainder = " ".join(words).strip(" .!~,·")
+        if not (remainder in _APPROVAL_TOKENS or remainder in _BULK_EXTRA_TOKENS
+                or (words and all(w in _BULK_APPROVAL_WORDS for w in words))):
+            return None
+    return named
+
+
+def _listed_merge_ask(text: str) -> tuple[set[str], str]:
+    """(PRs, sentence) of the LAST listed merge ask in `text` naming two or
+    more PRs, else (empty set, "")."""
+    listed: tuple[set[str], str] = (set(), "")
+    for s in _ASK_SENTENCE_RE.findall(text):
+        if _NOT_MERGE_ASK_RE.search(s):
+            continue
+        m = _LISTED_ASK_RE.search(s.strip())
+        if m is None:
+            continue
+        objects = set(re.findall(r"\d+", m.group("ko") or m.group("en")))
+        if len(objects) >= 2:
+            listed = (objects, s)
+    return listed
+
+
+def _pr_sections(text: str, prs: set[str]) -> dict[str, str]:
+    """Per-PR briefing sections.
+
+    The first heading that names exactly one PR of `prs` fixes the section
+    level. A section runs from such a heading to the next heading at that
+    level or above; a deeper heading (`#### #999 와의 관계`) is content of the
+    section it sits in, and so is a `#` comment inside a code fence. A heading
+    naming two PRs belongs to neither, a shared block after the last section
+    is nobody's, and only a PR's first section counts — a second heading
+    naming it is not a second briefing.
+    """
+    sections: dict[str, str] = {}
+    seen: set[str] = set()
+    level: int | None = None
+    owner: str | None = None
+    fence: str | None = None
+    for line in text.splitlines():
+        f = _FENCE_LINE_RE.match(line)
+        if f is not None:
+            run = f.group("fence")
+            if fence is None:
+                fence = run
+            elif run[0] == fence[0] and len(run) >= len(fence) and not f.group("rest").strip():
+                # CommonMark: only a bare run of the opener's character, at
+                # least as long, closes the block; "```bash" inside it does not.
+                fence = None
+        m = None if fence is not None else _HEADING_RE.match(line)
+        if m is not None:
+            this = len(m.group("hashes")) if m.group("hashes") else _BOLD_HEADING_LEVEL
+            # Every PR the heading names counts, not only the listed ones:
+            # "### PR #833 / PR #1001" is a joint heading, nobody's section.
+            named = set(_PR_REF_RE.findall(line))
+            refs = named if len(named) == 1 and named <= prs else set()
+            if level is None and refs:
+                level = this
+            if level is not None and this <= level:
+                pr = refs.pop() if refs else None
+                owner = pr if pr is not None and pr not in seen else None
+                if owner is not None:
+                    seen.add(owner)
+        if owner is not None:
+            sections[owner] = sections.get(owner, "") + line + "\n"
+    return sections
+
+
+def _merge_pr_number(command: str) -> str | None:
+    """Explicit PR number of a command that is one merge and nothing else.
+
+    Anything chained before or after it (`cd other && …`, `git fetch; …`) or an
+    env prefix that retargets the repo (`GH_REPO=x/y …`) is refused: either can
+    move the merge somewhere the briefing never looked."""
+    tokens = safe_tokenize(command)
+    starts = list(iter_command_starts(tokens))
+    if len(starts) != 1 or _has_repetition(command):
+        return None
+    if any(_REPO_ENV_RE.match(tok) for tok in starts[0]):
+        return None
+    segments = _merge_segments(command)
+    if len(segments) != 1 or segments[0] is None:
+        return None
+    m = _PULL_TOKEN_RE.match(segments[0])
+    return (m.group(1) or m.group(2)) if m else None
+
+
+def _latest_ask_answer(entries: list[dict], after: int) -> tuple[int, list[tuple[str, str]]] | None:
+    """(index, every question/label pair) of the last answered AskUserQuestion
+    result after entry `after`, or None. A declined question carries no pair.
+
+    Only a result whose `tool_use_id` belongs to an AskUserQuestion call counts:
+    a Bash or Read output that happens to print `"q"="a"` is not the user."""
+    found: tuple[int, list[tuple[str, str]]] | None = None
+    asks: set[str] = set()
+    for i, ev in enumerate(entries):
+        msg = ev.get("message")
+        if not isinstance(msg, dict) or ev.get("isSidechain"):
+            continue
+        content = msg.get("content")
+        if not isinstance(content, list):
+            continue
+        for b in content:
+            if not isinstance(b, dict):
+                continue
+            if b.get("type") == "tool_use" and b.get("name") == "AskUserQuestion":
+                if isinstance(b.get("id"), str):
+                    asks.add(b["id"])
+                continue
+            if (i > after and b.get("type") == "tool_result"
+                    and b.get("tool_use_id") in asks and not b.get("is_error")):
+                pairs = _ASK_ANSWER_RE.findall(_user_message_text(b.get("content")))
+                if pairs:
+                    found = (i, pairs)
+    return found
+
+
+def _ask_decision(pairs: list[tuple[str, str]]) -> tuple[set[str], set[str], str] | None:
+    """(named, listed, ask sentence) from one AskUserQuestion result, else None.
+
+    Every pair is read: a refusal picked on any question voids the result. The
+    deciding pair is the one whose question is a listed merge ask, or whose
+    label names the PRs; a 승인 picked for an unrelated question approves no
+    merge, whatever the prose around it asked."""
+    if any(_LABEL_NEGATION_RE.search(a) for _, a in pairs):
+        return None
+    for question, label in pairs:
+        named = _bulk_reply_prs(label)
+        if named is None:
+            continue
+        listed, ask_text = _listed_merge_ask(question)
+        if listed or len(named) >= 2:
+            return named, listed, ask_text
+    return None
+
+
+def _changed_directory_after(entries: list[dict], index: int) -> bool:
+    """True when a Bash call after entry `index` changed directory or exported
+    GH_REPO/GH_HOST — state that outlives the call and retargets a later merge."""
+    for ev in entries[index + 1:]:
+        msg = ev.get("message")
+        if not isinstance(msg, dict) or msg.get("role") != "assistant" or ev.get("isSidechain"):
+            continue
+        content = msg.get("content")
+        if not isinstance(content, list):
+            continue
+        for b in content:
+            if not (isinstance(b, dict) and b.get("type") == "tool_use"
+                    and b.get("name") == "Bash"):
+                continue
+            cmd = (b.get("input") or {}).get("command")
+            if not isinstance(cmd, str):
+                continue
+            for argv in iter_command_starts(safe_tokenize(cmd)):
+                if not argv:
+                    continue
+                if argv[0] in _CHDIR_COMMANDS:
+                    return True
+                if argv[0] == "export" and any(_REPO_ENV_RE.match(t) for t in argv[1:]):
+                    return True
+    return False
+
+
+def _bulk_released(entries: list[dict], idxs: list[int], command: object) -> bool:
+    """True when this merge is one of a set the user approved in one answer.
+
+    The flow: one assistant turn briefs every PR in its own section (a heading
+    naming that PR, 4 of 6 items inside it) and asks once, listing the PRs; the
+    user's next answer approves the set — naming the PRs (`#833 #999 머지`) or
+    answering the listed ask (`모두 머지`, `ok`). Each merge then has to be one
+    of that set, run as a command that is that merge alone, and the set is spent
+    in order: any merge since the answer that targets a PR outside the set, or
+    repeats one, ends it. Numberless merges never ride this path.
+    """
+    if not isinstance(command, str) or not idxs:
+        return False
+    pr = _merge_pr_number(command)
+    if pr is None:
+        return False
+    last_human = idxs[-1]
+    ask = _latest_ask_answer(entries, last_human)
+    if ask is not None:
+        answer_idx, pairs = ask
+        decision = _ask_decision(pairs)
+        if decision is None:
+            return False
+        named, listed, ask_text = decision
+        brief_lo, brief_hi = last_human + 1, answer_idx
+    else:
+        answer_idx = last_human
+        reply = _bulk_reply_prs(_user_message_text(
+            entries[last_human].get("message", {}).get("content")))
+        if reply is None:
+            return False
+        named = reply
+        brief_lo = idxs[-2] + 1 if len(idxs) >= 2 else 0
+        brief_hi = last_human
+        briefing_text = _assistant_text(entries, brief_lo, brief_hi)
+        listed, ask_text = _listed_merge_ask(briefing_text)
+        # A bare "ok" answers the turn's LAST question; a later "Or just #833?"
+        # or "그 전에 리베이스해 둘까요?" is what it may be answering.
+        asks = _ASK_SENTENCE_RE.findall(briefing_text)
+        if not named and (not asks or asks[-1] != ask_text):
+            return False
+    approved = named or listed
+    if pr not in approved or len(approved) < 2:
+        return False
+    briefing = _assistant_text(entries, brief_lo, brief_hi)
+    section = _pr_sections(briefing, approved).get(pr)
+    if section is None:
+        return False
+    # The one shared ask is every section's approve-ask item.
+    if _briefing_item_count(section + "\n" + ask_text) < MERGE_BRIEFING_MIN_ITEMS:
+        return False
+    merge_repo = _merge_target_repo(command)
+    window_repo = _context_repo_from_window(entries, brief_lo, len(entries))
+    if _repo_conflict(merge_repo, window_repo):
+        return False
+    # After a `cd` the shell may sit in another checkout, where a bare number
+    # names a different PR; only a merge naming the briefed repo is safe then.
+    # The window opens at the briefing, not the answer: a cd between the repo
+    # probe and the answer moves the shell just the same.
+    if _changed_directory_after(entries, brief_lo - 1) and (
+            merge_repo is None or merge_repo != window_repo):
+        return False
+    spent: set[str] = set()
+    for i, cmd in _executed_merges(entries, include_skippable=True):
+        if i <= answer_idx:
+            continue
+        # A chained or conditional merge has no single PR number: it ends the set.
+        done = _merge_pr_number(cmd)
+        if done is None or done not in approved or done in spent:
+            return False
+        spent.add(done)
+    if pr in spent:
+        return False
+    return not _ask_held_after(entries, answer_idx, pr)
+
+
+def bulk_merge_approved(payload: dict) -> bool:
+    """Public entry for `pre-merge-approval-gate`: True when the merge in
+    `payload` is released by a bulk approval. Fails closed (False) on any
+    unreadable input, so the sibling gate keeps asking."""
+    try:
+        command = (payload.get("tool_input") or {}).get("command")
+        if not isinstance(command, str):
+            return False
+        code = _split_shell_comment(command)[0]
+        entries = _load_turn_entries(payload.get("transcript_path", "") or "")
+        if entries is None:
+            return False
+        return _bulk_released(entries, _human_user_indices(entries), code)
+    except Exception:
+        return False
+
+
 def _merge_escalation_reason(payload: dict) -> str | None:
     """Return a deny reason when the pre-merge briefing is incomplete, else None."""
     # Demote-to-advisory escape hatch (false-positive relief without full bypass).
@@ -1377,6 +1723,8 @@ def _merge_escalation_reason(payload: dict) -> str | None:
     lo = (idxs[-1] + 1) if idxs else 0
     current_text = _assistant_text(entries, lo, len(entries))
     if _is_trivial_merge(current_text):
+        return None
+    if _bulk_released(entries, idxs, code):
         return None
 
     # A complete briefing is half of the flow; the user's answer is the other

@@ -258,6 +258,33 @@ run_case "direct session: merge after a heredoc terminator (still a merge, ask)"
   "ask" "no-delegate" \
   '{"tool_name": "Bash", "tool_input": {"command": "cat <<'EOF'\nbody\nEOF\ngh pr merge 985 --squash"}}'
 
+# Bulk approval: the chat answer to a per-PR-sectioned briefing replaces the
+# prompt for each listed PR (momentum-rule-retrieval-gate's bulk_merge_approved
+# decides). Anything it does not release still asks.
+FIXTURES_DIR="$ROOT_DIR/tests/fixtures"
+bulk_payload() {
+  python3 -c 'import json, sys; print(json.dumps({"tool_name": "Bash", "tool_input": {"command": sys.argv[2]}, "transcript_path": sys.argv[1]}))' \
+    "$FIXTURES_DIR/$1" "$2"
+}
+run_case "bulk: listed PR after a bulk answer (silent)" \
+  "silent" "no-delegate" \
+  "$(bulk_payload momentum-merge-bulk-all-second.jsonl 'gh pr merge 999 --squash')"
+run_case "bulk: AskUserQuestion bulk answer (silent)" \
+  "silent" "no-delegate" \
+  "$(bulk_payload momentum-merge-bulk-ask-answer.jsonl 'gh pr merge 999 --squash')"
+run_case "bulk: PR outside the approved set (ask)" \
+  "ask" "no-delegate" \
+  "$(bulk_payload momentum-merge-bulk-all-second.jsonl 'gh pr merge 1001 --squash')"
+run_case "bulk: combined block without per-PR sections (ask)" \
+  "ask" "no-delegate" \
+  "$(bulk_payload momentum-merge-bulk-combined.jsonl 'gh pr merge 999 --squash')"
+run_case "bulk: chained merges (ask)" \
+  "ask" "no-delegate" \
+  "$(bulk_payload momentum-merge-bulk-all-first.jsonl 'gh pr merge 833 --squash && gh pr merge 999 --squash')"
+run_case "bulk: unreadable transcript (ask)" \
+  "ask" "no-delegate" \
+  '{"tool_name": "Bash", "tool_input": {"command": "gh pr merge 999 --squash"}, "transcript_path": "/nonexistent/t.jsonl"}'
+
 
 echo ""
 echo "Result: $PASS passed, $FAIL failed"
