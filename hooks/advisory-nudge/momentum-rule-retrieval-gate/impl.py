@@ -965,7 +965,8 @@ def _executed_merge_indices(entries: list[dict]) -> list[int]:
     return [i for i, _ in _executed_merges(entries)]
 
 
-def _executed_merges(entries: list[dict]) -> list[tuple[int, str]]:
+def _executed_merges(entries: list[dict], *,
+                     include_skippable: bool = False) -> list[tuple[int, str]]:
     """`(entry index, command)` of `gh pr merge` calls that actually RAN, oldest first.
 
     A merge whose tool_result is `is_error` never executed — the gate itself, a
@@ -979,6 +980,10 @@ def _executed_merges(entries: list[dict]) -> list[tuple[int, str]]:
     past a briefing nothing consumed — denying the next marked merge whose
     briefing was real. Both directions therefore fail open: the guard declines to
     fire rather than spend a window it cannot confirm.
+
+    `include_skippable=True` keeps those calls: the bulk release must fail
+    closed, so a clean `gh pr merge 1001 && echo done` counts as a merge that
+    may have run.
     """
     pending: dict[str, tuple[int, str]] = {}
     executed: list[tuple[int, str]] = []
@@ -999,12 +1004,13 @@ def _executed_merges(entries: list[dict]) -> list[tuple[int, str]]:
                 if not (isinstance(cmd, str) and isinstance(tid, str)):
                     continue
                 tokens = safe_tokenize(cmd)
-                if any(tok in _SKIPPABLE_KEYWORDS for tok in tokens):
+                if not include_skippable and any(tok in _SKIPPABLE_KEYWORDS for tok in tokens):
                     continue
                 starts = list(iter_command_starts(tokens))
                 if not any(_is_gh_pr_merge(argv) for argv in starts):
                     continue
-                if _AND_TOKEN in tokens and not _is_gh_pr_merge(starts[-1]):
+                if (not include_skippable and _AND_TOKEN in tokens
+                        and not _is_gh_pr_merge(starts[-1])):
                     continue
                 pending[tid] = (i, cmd)
             elif b.get("type") == "tool_result":
@@ -1646,13 +1652,16 @@ def _bulk_released(entries: list[dict], idxs: list[int], command: object) -> boo
         return False
     # After a `cd` the shell may sit in another checkout, where a bare number
     # names a different PR; only a merge naming the briefed repo is safe then.
-    if _changed_directory_after(entries, answer_idx) and (
+    # The window opens at the briefing, not the answer: a cd between the repo
+    # probe and the answer moves the shell just the same.
+    if _changed_directory_after(entries, brief_lo - 1) and (
             merge_repo is None or merge_repo != window_repo):
         return False
     spent: set[str] = set()
-    for i, cmd in _executed_merges(entries):
+    for i, cmd in _executed_merges(entries, include_skippable=True):
         if i <= answer_idx:
             continue
+        # A chained or conditional merge has no single PR number: it ends the set.
         done = _merge_pr_number(cmd)
         if done is None or done not in approved or done in spent:
             return False

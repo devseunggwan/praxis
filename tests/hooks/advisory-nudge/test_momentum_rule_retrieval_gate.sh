@@ -901,6 +901,14 @@ run_merge_escalation_case "merge_bulk_joint_heading_denies" \
   "yes" "" "momentum-merge-bulk-joint-heading.jsonl" "gh pr merge 833 --squash --delete-branch"
 run_merge_escalation_case "merge_bulk_ordinal_reply_denies" \
   "yes" "" "momentum-merge-bulk-ordinal-reply.jsonl" "gh pr merge 1 --squash --delete-branch"
+# Codex review round 2: a cd anywhere after the briefing window opens needs
+# --repo, and a clean merge chained before another command still spends the set.
+run_merge_escalation_case "merge_bulk_cd_before_answer_bare_denies" \
+  "yes" "" "momentum-merge-bulk-cd-before-answer.jsonl" "gh pr merge 999 --squash"
+run_merge_escalation_case "merge_bulk_cd_before_answer_repo_allows" \
+  "no" "" "momentum-merge-bulk-cd-before-answer.jsonl" "gh pr merge 999 --repo o/r --squash"
+run_merge_escalation_case "merge_bulk_chained_outside_denies" \
+  "yes" "" "momentum-merge-bulk-chained-outside.jsonl" "gh pr merge 999 --squash"
 
 # An AskUserQuestion answer is a tool_result, not a typed message. Replayed over
 # local transcripts, 13 of the merges this check first denied were answered this
