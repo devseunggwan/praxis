@@ -92,39 +92,51 @@ fatal: 'main' is already used by worktree at /Users/.../<main-worktree>
 ## When the user merged out-of-band
 
 When the user reports "merged" after merging themselves (a `/merge` PR-comment
-slash command, the web UI), run this cleanup **on your own judgment, without
-asking** — the user expects a merged PR's worktree and branches to be gone, in
-every repository, and treats "shall I clean up?" as a wasted round trip. Stop
-and report instead only when a precondition below fails. Confirm before
-touching anything:
+slash command, the web UI), run the **local** cleanup (steps 1–3 and 5) on your
+own judgment, without asking — the user expects a merged PR's worktree and
+local branch to be gone, and "shall I clean up?" is a wasted round trip. Stop
+and report instead only when a precondition below fails.
 
-1. `gh pr view <N> --json state,mergedAt,mergeCommit,headRefOid` — a slash-command merge
+The **shared** steps — deleting the remote head branch (step 4) and the issue
+close-out (step 6) — run without asking only when the user's own instructions
+(CLAUDE.md, AGENTS.md, or agent memory) record a standing approval for them
+after a merge. Without one, ask once for both together after the local
+cleanup, naming the branch and the close-out action. Confirm before touching
+anything:
+
+1. `gh pr view <N> --json state,mergedAt,mergeCommit,headRefOid,isCrossRepository`
+   — a slash-command merge
    runs as a workflow, so the PR still reads `OPEN` for tens of seconds. If it
    is `OPEN`, find that run (`gh run list --workflow <merge-workflow> --limit 3`)
    and `gh run watch <id> --exit-status`, then re-read the state. Never start
    cleanup on `OPEN`.
 2. Confirm the merge commit is on the base: `git fetch origin --prune` then
    `git merge-base --is-ancestor <mergeCommit> origin/<base>`.
-3. Remove the head worktree and local branch as separate calls (checklist item 2).
-   A dirty worktree (`git -C <path> status --porcelain` non-empty) is the stop
-   condition: report it and leave it. When `git worktree remove` succeeded,
+3. Remove the head worktree and local branch as separate calls (checklist item 2),
+   deleting the local branch only when its tip (`git rev-parse <branch>`)
+   equals `headRefOid`.
+   A dirty worktree (`git -C <path> status --porcelain` non-empty) or a tip
+   mismatch is the stop condition: report it and leave it. When
+   `git worktree remove` succeeded,
    skip `git worktree prune` — there is nothing of yours left to prune, and the
    prune is repository-wide (see below).
 4. The remote head branch survives when the repo has
    `delete_branch_on_merge: false` (`gh api repos/<o>/<r> --jq .delete_branch_on_merge`)
-   and nobody passed `--delete-branch`. The user has given standing approval
-   to delete **the merged PR's own head branch** on an own-org repo: run
-   `git -C <repo> push origin --delete <branch>` after steps 1–2 passed and the
-   remote tip equals the PR's `headRefOid` (`git ls-remote origin refs/heads/<branch>`).
-   Any other ref, a tip mismatch, or a repo outside the user's org still needs
-   approval. Run it with `-C <repo>` — the session cwd may be the worktree you
-   just removed.
+   and nobody passed `--delete-branch`. When `isCrossRepository` is `true` the
+   head branch lives in a fork, not in `origin`: delete nothing and report the
+   fork branch as remaining. Otherwise, under a standing approval or the
+   user's answer, run `git -C <repo> push origin --delete <branch>` after
+   steps 1–2 passed and the remote tip equals `headRefOid`
+   (`git ls-remote origin refs/heads/<branch>`). Never delete any other ref,
+   and stop on a tip mismatch. Run it with `-C <repo>` — the session cwd may
+   be the worktree you just removed.
 5. Delete the scratch files you wrote for that PR (body drafts, anchor drafts).
 6. Run the repository's issue close-out convention if it has one (a tracker
-   overlay skill may define it, e.g. a release comment on the parent issue).
+   overlay skill may define it, e.g. a release comment on the parent issue),
+   under the same approval rule as step 4.
 7. Verify and report in one status: `git worktree list` no longer shows the
-   path, `git branch --list <branch>` and
-   `git ls-remote origin refs/heads/<branch>` are both empty.
+   path, `git branch --list <branch>` is empty, and — when step 4 ran —
+   `git ls-remote origin refs/heads/<branch>` is empty.
 
 ## When the base worktree has uncommitted edits
 
