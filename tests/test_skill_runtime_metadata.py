@@ -614,6 +614,9 @@ def test_current_repo_runtime_sensitive_skill_set_is_stable():
         # resolve the review's inputs; helper-executable from the envelope
         # validator, which is the one place the closed contract is enforced.
         "perf-leak-review": ("external-cli-wrapper", "helper-executable"),
+        # external-cli-wrapper from the git snapshot and the project test
+        # runner (`npx vitest run --config ...`) the probes execute under.
+        "perf-leak-verify": ("external-cli-wrapper",),
         "recover-sessions": (
             "AskUserQuestion",
             "external-cli-wrapper",
@@ -625,7 +628,14 @@ def test_current_repo_runtime_sensitive_skill_set_is_stable():
             "helper-executable",
         ),
         "spec-drift": ("helper-executable",),
+        # external-cli-wrapper from the gh review/PR reads and the git merge.
+        "stale-pr-revival": ("external-cli-wrapper",),
         "surface-enumeration": ("external-cli-wrapper",),
+        "test-suite-consolidation": ("external-cli-wrapper",),
+        "test-suite-speedup": ("external-cli-wrapper",),
         "tradeoff": ("external-cli-wrapper",),
+        # AskUserQuestion since its introduction: the issue is posted only
+        # after the user approves the shown title and body.
+        "upstream-bug-report": ("AskUserQuestion", "external-cli-wrapper"),
         "worktree-merge-cleanup": ("external-cli-wrapper",),
     }

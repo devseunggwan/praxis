@@ -10,7 +10,7 @@ Skills are orchestrators with pluggable steps; external integrations (issue trac
 | ---- | ------- |
 | [`ETHOS.md`](ETHOS.md) | Why praxis exists; [Autonomy vs Convention](ETHOS.md#autonomy-vs-convention) boundary |
 | [`DESIGN.md`](DESIGN.md) | How hooks are built; add-a-new-hook flow |
-| [`ARCHITECTURE.md`](ARCHITECTURE.md) | Skill/hook/manifest graph; provider routing |
+| [`ARCHITECTURE.md`](ARCHITECTURE.md) | Skill/hook/manifest graph; provider routing; multi-platform packaging |
 | [`RUNTIME_CONSTRAINTS.md`](RUNTIME_CONSTRAINTS.md) | Claude Code runtime limits |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | Contribution conventions; local setup |
 | [`docs/skill-authoring.md`](docs/skill-authoring.md) | How to write a new SKILL.md |
@@ -33,7 +33,7 @@ Skills are orchestrators with pluggable steps; external integrations (issue trac
 > [`CONTRIBUTING.md` → Anchor revision without `gh`](CONTRIBUTING.md#anchor-revision-without-gh)
 > (issue #1211).
 
-## Skills (20)
+## Skills (25)
 
 > **Invocation**: praxis entries are *skills*, not subagents. Call them
 > via `Skill(skill="praxis:<name>")` — `Agent(subagent_type="praxis:<name>")`
@@ -47,18 +47,23 @@ Skills are orchestrators with pluggable steps; external integrations (issue trac
 
 ### Development
 
-| Skill                    | Purpose                                                                                                                                                                                                  |
-| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `retrospect`             | Session retrospect — find friction root causes, propose improvements                                                                                                                                     |
-| `codex-review-wrap`      | Worktree-aware wrapper for `/codex:review` — explicit target selection, premise-verification gate, flip detection                                                                                        |
-| `debt`                   | Deferred-decision ledger — commit-trailer markers (`Not-tested:`, `Confidence: low`, `Rejected:`, `Directive:`, `Scope-risk:`) plus `# [PR #N]` comments; report-only                                    |
-| `surface-enumeration`    | Input-surface enumeration before writing a parser/validator/sanitizer/classifier — every variant becomes a required test case                                                                            |
-| `bypass-report`          | Bypass-telemetry and hook fire-rate viewer — runs the `bypass-review` CLI over local event ledgers; user-invoked, report-only                                                                            |
-| `spec-drift`             | Spec↔code drift report — runs each requirement's `Verify:` command, reports `implemented` / `missing` / `UNKNOWN`; report-only                                                                           |
-| `merge-briefing`         | Pre-merge approval procedure — three-surface probe, blocking-decoration grading, anchor-gap carry, six-part approve-ask; chains into `worktree-merge-cleanup`                                            |
-| `worktree-merge-cleanup` | Pre-merge worktree precondition + post-merge cleanup — base-worktree call site, submodule `--force` caveat, squash-ancestry stale-HEAD guard, no-`&&`-chain rule                                         |
-| `perf-leak-review`       | Perf/leak review — a read-only reviewer reads a diff and the repo for five closed classes: N+1, unreleased resource, unbounded container, load-then-filter, leaked listener or timer; report-only        |
-| `tradeoff`               | Tradeoff report — options at a fork, or whether a finding blocks; reversibility / blast radius / cost-if-wrong / process cost, graded by source; report-only                                             |
+| Skill                      | Purpose                                                                                                                                                                                           |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `retrospect`               | Session retrospect — find friction root causes, propose improvements                                                                                                                              |
+| `codex-review-wrap`        | Worktree-aware wrapper for `/codex:review` — explicit target selection, premise-verification gate, flip detection                                                                                 |
+| `debt`                     | Deferred-decision ledger — commit-trailer markers (`Not-tested:`, `Confidence: low`, `Rejected:`, `Directive:`, `Scope-risk:`) plus `# [PR #N]` comments; report-only                             |
+| `surface-enumeration`      | Input-surface enumeration before writing a parser/validator/sanitizer/classifier — every variant becomes a required test case                                                                     |
+| `bypass-report`            | Bypass-telemetry and hook fire-rate viewer — runs the `bypass-review` CLI over local event ledgers; user-invoked, report-only                                                                     |
+| `spec-drift`               | Spec↔code drift report — runs each requirement's `Verify:` command, reports `implemented` / `missing` / `UNKNOWN`; report-only                                                                    |
+| `merge-briefing`           | Pre-merge approval procedure — three-surface probe, blocking-decoration grading, anchor-gap carry, six-part approve-ask; chains into `worktree-merge-cleanup`                                     |
+| `worktree-merge-cleanup`   | Pre-merge worktree precondition + post-merge cleanup — base-worktree call site, submodule `--force` caveat, squash-ancestry stale-HEAD guard, no-`&&`-chain rule                                  |
+| `perf-leak-review`         | Perf/leak review — a read-only reviewer reads a diff and the repo for five closed classes: N+1, unreleased resource, unbounded container, load-then-filter, leaked listener or timer; report-only |
+| `tradeoff`                 | Tradeoff report — options at a fork, or whether a finding blocks; reversibility / blast radius / cost-if-wrong / process cost, graded by source; report-only                                      |
+| `perf-leak-verify`         | Run `perf-leak-review` candidates to prove or refute them                                                                                                                                         |
+| `test-suite-speedup`       | Speed up slow CI tests; measured before/after                                                                                                                                                     |
+| `test-suite-consolidation` | Share copied fixtures; prune approved tests                                                                                                                                                       |
+| `stale-pr-revival`         | Revive a stalled or bot PR without rebasing                                                                                                                                                       |
+| `upstream-bug-report`      | Reproduce, file an approved upstream bug; vet fix PRs                                                                                                                                             |
 
 ### Discipline
 
@@ -92,23 +97,8 @@ hosts, and strict/bypass knobs per hook. Host-aware filtering (`hosts`):
 
 ## Provider Routing
 
-`cmux-delegate` routes external CLI workers via `--model <provider>:<model>`;
-bare names (`opus`, `sonnet`, `haiku`) always resolve to Claude. Details:
-[`ARCHITECTURE.md → Provider Routing`](ARCHITECTURE.md#provider-routing).
-
-## Multi-Platform Packaging
-
-Runtime source (`skills/`, `hooks/`, `scripts/`) is shared; per-platform
-manifests (Claude, Codex, Cursor) are generated from canonical metadata.
-Hermes Agent runs the same hooks through `plugins/hermes/bridge.py`.
-Details:
-[`ARCHITECTURE.md → Multi-Platform Packaging`](ARCHITECTURE.md#multi-platform-packaging).
-
-## Local Development
-
-Clone path, `~/.local/bin` symlink install/verify, CLI-tools table
-(`bypass-review`):
-[`CONTRIBUTING.md` → Local development](CONTRIBUTING.md#local-development).
+`cmux-delegate` takes `--model <provider>:<model>`; bare names resolve to Claude
+([details](ARCHITECTURE.md#provider-routing)).
 
 ## Issue & PR Conventions
 

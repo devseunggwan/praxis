@@ -15,9 +15,11 @@ allowed-tools:
   - Grep
   - Glob
   - Bash(git rev-parse *)
+  - Bash(git ls-files *)
+  - Bash(git status *)
 verified-against-runtime: true
-runtime-verified-at: 2026-09-16
-runtime-verified-note: "Claude Code Agent(general-purpose) — 7 read-only delegations over the fixture corpus returned schema-valid envelopes, 5/5 planted classes recalled, both clean controls empty, every prepared tree still porcelain-clean; a third of envelopes arrived inside a ```json fence"
+runtime-verified-at: 2026-10-16
+runtime-verified-note: "Claude Code Agent(general-purpose) — 7 read-only delegations over the fixture corpus returned schema-valid envelopes, 5/5 planted classes recalled, both clean controls empty, every prepared tree still porcelain-clean; a third of envelopes arrived inside a ```json fence; git 2.50.1 (2026-10-16) — the repo-wide sweep's sizing reads (`git ls-files | wc -l`, `git ls-files -z <area> | xargs -0 cat | wc -l`) and its `rev-parse` / `status --porcelain` snapshot ran on a scratch repo — forcing two-file batches, `xargs wc -l | tail -1` printed one batch's count while the `-0 cat | wc -l` form printed the full 50/60 lines, a path with a space included; the inside-the-repo scratch guard rejected `<repo>/sub` (exit 1) and accepted an outside path, with the repo reached through a symlink; the sweep's AskUserQuestion not round-tripped"
 ---
 
 # perf-leak-review
@@ -42,6 +44,12 @@ project's code, writes nothing into the repository, and grades every finding
 **Core principle:** a reader can point at a candidate; only an execution can
 prove a defect — so the output says `candidate` and never more.
 
+**References:** [`references/reviewer-brief.md`](references/reviewer-brief.md)
+is the delegated reviewer's prompt (Step 3);
+[`references/repo-wide-sweep.md`](references/repo-wide-sweep.md) is the
+area fan-out for a request with no diff. Proving a candidate by execution is
+the sibling skill [`perf-leak-verify`](../perf-leak-verify/SKILL.md).
+
 ## When to Use
 
 - A change touches loops, I/O, handles, subscriptions, caches, or query paths
@@ -50,6 +58,13 @@ prove a defect — so the output says `candidate` and never more.
   candidates listed with file and line.
 - Do **not** use it to measure anything. No profiler, no benchmark, no
   before/after comparison — those need execution, which this skill refuses.
+  To prove or refute candidates by running them, use
+  [`perf-leak-verify`](../perf-leak-verify/SKILL.md).
+- No diff — the user wants the whole repository swept. That changes this
+  skill's contract (Step 1 requires `--diff`); follow
+  [`references/repo-wide-sweep.md`](references/repo-wide-sweep.md), which
+  reuses the reviewer brief per area and reports area sampling, not
+  exhaustive coverage.
 
 ## The closed list
 
@@ -158,6 +173,11 @@ Zero findings is a result, not a failure — say `0 candidates` plainly. Every
 finding carries `file`, `line`, and the quoted `evidence`, so the reader can go
 to the line without re-deriving anything.
 
+When the user wants a candidate proven, offer
+[`perf-leak-verify`](../perf-leak-verify/SKILL.md) with the validated
+envelope as its input. Offering it is the whole action — this skill runs
+nothing.
+
 ## Error Handling
 
 | Error                                                                              | Recovery                                                                                                                                                                                               |
@@ -173,6 +193,8 @@ to the line without re-deriving anything.
 
 - **Candidates, not defects.** Nothing is executed, so a finding is a reading of
   the code, and a false positive is expected rather than exceptional.
+  [`perf-leak-verify`](../perf-leak-verify/SKILL.md) is where a candidate is
+  driven and measured.
 - **Read-only is an instruction, not a structure.** `allowed-tools` does not
   constrain the delegated reviewer. A harness that needs proof runs the review
   against a write-protected copy and checks `git status --porcelain` afterwards
