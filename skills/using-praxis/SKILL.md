@@ -20,18 +20,23 @@ resilient development workflow.
 
 Tools for code quality and review workflow.
 
-| Skill                    | When to call                                                                             |
-| ------------------------ | ---------------------------------------------------------------------------------------- |
-| `retrospect`             | End of session — find friction root causes and create lasting fixes                      |
-| `codex-review-wrap`      | Before running `/codex:review` in a multi-worktree repo                                  |
-| `surface-enumeration`    | Before writing a parser/validator/sanitizer — every input variant becomes a test case    |
-| `spec-drift`             | Wondering what a spec still needs — runs each requirement's `Verify:` command, reports   |
-| `debt`                   | Audit deferred markers (commit trailers, `# [PR #N]`) before "later" becomes "never"     |
-| `bypass-report`          | Reading the bypass-telemetry / hook fire-rate ledgers — which hooks fire, which never do |
-| `merge-briefing`         | Before asking to merge a PR — probe all three finding surfaces, grade, brief, then ask   |
-| `worktree-merge-cleanup` | Merging from a worktree and cleaning up after — right call site, safe teardown           |
-| `perf-leak-review`       | Before a change with loops, handles, caches, or subscriptions merges                     |
-| `tradeoff`               | Tradeoff between implementation options, or whether a review finding blocks              |
+| Skill                      | When to call                                                                             |
+| -------------------------- | ---------------------------------------------------------------------------------------- |
+| `retrospect`               | End of session — find friction root causes and create lasting fixes                      |
+| `codex-review-wrap`        | Before running `/codex:review` in a multi-worktree repo                                  |
+| `surface-enumeration`      | Before writing a parser/validator/sanitizer — every input variant becomes a test case    |
+| `spec-drift`               | Wondering what a spec still needs — runs each requirement's `Verify:` command, reports   |
+| `debt`                     | Audit deferred markers (commit trailers, `# [PR #N]`) before "later" becomes "never"     |
+| `bypass-report`            | Reading the bypass-telemetry / hook fire-rate ledgers — which hooks fire, which never do |
+| `merge-briefing`           | Before asking to merge a PR — probe all three finding surfaces, grade, brief, then ask   |
+| `worktree-merge-cleanup`   | Merging from a worktree and cleaning up after — right call site, safe teardown           |
+| `perf-leak-review`         | Before a change with loops, handles, caches, or subscriptions merges                     |
+| `tradeoff`                 | Tradeoff between implementation options, or whether a review finding blocks              |
+| `perf-leak-verify`         | Proving or refuting `perf-leak-review` candidates by running each one                    |
+| `test-suite-speedup`       | A slow test suite or CI test job — measure, fix structurally, re-measure on CI           |
+| `test-suite-consolidation` | Fixtures/helpers copied across test files, or tests that may be unnecessary              |
+| `stale-pr-revival`         | An open PR that stalled, or a bot version bump that needs bringing current               |
+| `upstream-bug-report`      | A bug in a third-party plugin/library to file upstream, or a fix PR to vet               |
 
 ### Discipline
 
@@ -64,19 +69,24 @@ Recover, save, and orchestrate Claude Code sessions.
 
 ## Common Scenarios
 
-| Situation                                                              | Skill to call                                               |
-| ---------------------------------------------------------------------- | ----------------------------------------------------------- |
-| "Claude Code sessions died after a crash or power-off"                 | `cmux-recover-sessions` (cmux) or `recover-sessions` (tmux) |
-| "I want to record that a workflow rule was broken"                     | `strike`                                                    |
-| "There are too many Codex review comments — where to start?"           | `codex-review-wrap`                                         |
-| "Is this PR ready to merge? What's still open on it?"                  | `merge-briefing`                                            |
-| "The PR merged — remove the worktree and branch safely"                | `worktree-merge-cleanup`                                    |
-| "I'm about to write a parser / validator / input classifier"           | `surface-enumeration`                                       |
-| "Which requirements in the spec store are still unimplemented?"        | `spec-drift`                                                |
-| "What did we mark 'later' in commit trailers and never revisit?"       | `debt`                                                      |
-| "Several ways to build this — what's the tradeoff between them?"       | `tradeoff`                                                  |
-| "Should I act on this review finding, and does it block the merge?"    | `tradeoff`                                                  |
-| "Does this diff leak a handle or add an N+1 query?"                    | `perf-leak-review`                                          |
+| Situation                                                           | Skill to call                                               |
+| ------------------------------------------------------------------- | ----------------------------------------------------------- |
+| "Claude Code sessions died after a crash or power-off"              | `cmux-recover-sessions` (cmux) or `recover-sessions` (tmux) |
+| "I want to record that a workflow rule was broken"                  | `strike`                                                    |
+| "There are too many Codex review comments — where to start?"        | `codex-review-wrap`                                         |
+| "Is this PR ready to merge? What's still open on it?"               | `merge-briefing`                                            |
+| "The PR merged — remove the worktree and branch safely"             | `worktree-merge-cleanup`                                    |
+| "I'm about to write a parser / validator / input classifier"        | `surface-enumeration`                                       |
+| "Which requirements in the spec store are still unimplemented?"     | `spec-drift`                                                |
+| "What did we mark 'later' in commit trailers and never revisit?"    | `debt`                                                      |
+| "Several ways to build this — what's the tradeoff between them?"    | `tradeoff`                                                  |
+| "Should I act on this review finding, and does it block the merge?" | `tradeoff`                                                  |
+| "Does this diff leak a handle or add an N+1 query?"                 | `perf-leak-review`                                          |
+| "Is that leak candidate real? Prove it by running it"               | `perf-leak-verify`                                          |
+| "The CI test job takes too long"                                    | `test-suite-speedup`                                        |
+| "The same fixture is copied into five test files"                   | `test-suite-consolidation`                                  |
+| "This dependabot PR has been sitting for weeks"                     | `stale-pr-revival`                                          |
+| "The bug is in a library we use — report it upstream"               | `upstream-bug-report`                                       |
 
 To add a new skill to praxis, read
 [`docs/skill-authoring.md`](../../docs/skill-authoring.md); it is a guide,
