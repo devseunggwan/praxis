@@ -5,6 +5,18 @@ All notable changes to praxis are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.22.0](https://github.com/devseunggwan/praxis/compare/v7.21.0...v7.22.0) (2026-10-16)
+
+
+### Added
+
+* **skills:** add five engineering skills ([#1594](https://github.com/devseunggwan/praxis/issues/1594)) ([3f808c6](https://github.com/devseunggwan/praxis/commit/3f808c6346ce54bece7d4f62fed4d926793d0175)), closes [#1593](https://github.com/devseunggwan/praxis/issues/1593)
+
+
+### Changed
+
+* **skills:** harden post-merge worktree cleanup ([#1591](https://github.com/devseunggwan/praxis/issues/1591)) ([ff69e2a](https://github.com/devseunggwan/praxis/commit/ff69e2ab8991a48112a28bf70f97e72b2e3b027d))
+
 ## [7.21.0](https://github.com/devseunggwan/praxis/compare/v7.20.3...v7.21.0) (2026-10-14)
 
 
