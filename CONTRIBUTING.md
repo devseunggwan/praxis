@@ -302,6 +302,14 @@ and the canonical registry is `hooks/manifest.json` (not `hooks.json`).
    [Verifying a hook change at runtime](#verifying-a-hook-change-at-runtime-canary)
    below. A green test suite does not tell you what the runtime is executing.
 
+A change to how a hook decides its verdict also needs evidence that the new
+decision is precise: input-surface enumeration, real-shell checks, a corpus
+replay against `main`, and — for gates that read the transcript — the
+adversarial checklist for approval parsing. The procedure is in
+[`docs/hook-development.md`](docs/hook-development.md). Changes to
+`hooks/_lib/_hermes.py` or `plugins/hermes/bridge.py` follow
+[`docs/hermes-adapter-dev.md`](docs/hermes-adapter-dev.md).
+
 ### Evidence and sunset review
 
 The roster only grows: [`docs/hook-prune-audit.md`](docs/hook-prune-audit.md)
