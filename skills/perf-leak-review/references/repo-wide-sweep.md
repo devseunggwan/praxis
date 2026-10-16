@@ -14,8 +14,13 @@ merged envelope to [`perf-leak-verify`](../../perf-leak-verify/SKILL.md).
 
 ```bash
 git ls-files | wc -l
-git ls-files <area> | xargs wc -l | tail -1     # per candidate area
+git ls-files -z <area> | xargs -0 cat | wc -l     # per candidate area
 ```
+
+The per-area count concatenates every file into one `wc`, so it stays a
+single total however many batches `xargs` splits the list into, and `-z` /
+`-0` keep paths with spaces whole. (`xargs wc -l | tail -1` reports only the
+last batch's subtotal on a large area.)
 
 Then one `AskUserQuestion`:
 
@@ -30,12 +35,20 @@ written down.
 
 ## Step 2: Snapshot for the no-write check
 
+Every artifact of the sweep (snapshots, brief, envelopes) goes under a scratch
+directory **outside** the checkout. Refuse a scratch path inside it before
+writing anything:
+
 ```bash
-git rev-parse HEAD > <scratch>/<run>/HEAD.before
-git status --porcelain > <scratch>/<run>/status.before
+repo=$(git -C <repo> rev-parse --show-toplevel)
+mkdir -p <scratch>/<run> && run_dir=$(cd <scratch>/<run> && pwd -P)
+case "$run_dir/" in "$repo"/*) echo "scratch is inside the repo" >&2; exit 1;; esac
+git -C <repo> rev-parse HEAD > "$run_dir/HEAD.before"
+git -C <repo> status --porcelain > "$run_dir/status.before"
 ```
 
-Done when: both files exist in the run's scratch directory.
+Done when: the scratch directory is confirmed outside the checkout and both
+files exist in it.
 
 ## Step 3: Write the sweep brief to a file
 
@@ -102,7 +115,10 @@ areas are named.
 3. For the top candidates, re-grep the container or handle repo-wide
    (excluding tests) for `delete` / `pop` / `clear` / `close` / unregister
    yourself, and record the grep scope.
-4. Diff `git status --porcelain` against the Step 2 snapshot.
+4. No-write check against the Step 2 snapshot — both must hold:
+   `git -C <repo> status --porcelain | diff <scratch>/<run>/status.before -` is
+   empty, and `git -C <repo> rev-parse HEAD | diff <scratch>/<run>/HEAD.before -`
+   is empty (a delegate that commits leaves a clean status but moves `HEAD`).
 
 Done when: the validator result, the evidence check, the re-grep scope for
 each top candidate, and the no-write diff are all recorded.

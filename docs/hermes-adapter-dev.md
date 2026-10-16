@@ -244,6 +244,11 @@ measure a new menu gate's precision on them (the stop rule in
 5. Print `questions=N fired=M (p%)`, then one line per fire with the
    question tail, labels and answer, and hand-label each.
 
+That per-fire output quotes real conversations and can carry private data or
+secrets: keep it local (a scratch file outside the repository). A PR or report
+gets the aggregate counts and labels, or examples rewritten with synthetic
+text — never the raw question tails or answers.
+
 Decode `function.arguments` before searching: non-ASCII text is escaped
 inside it, so a SQL `LIKE '%<text>%'` on `tool_calls` silently matches
 nothing. Count distinct questions; retries repeat rows.
@@ -256,10 +261,15 @@ into the configured bridge and expect `block-ask-end-option`'s block.
 
 - **Registration.** `hermes hooks list` must show `plugins/hermes/bridge.py`
   under `pre_tool_call` as allowed.
-- **Firing.** The bridge rewrites the session transcript on every call, so
-  `ls -lt ~/.praxis/cache/hermes-transcripts | head` shows the current
-  session's file with a fresh mtime. No fresh file means the bridge is not
-  firing.
+- **Firing.** When the session has an id and `$HERMES_HOME/state.db` exists
+  with a readable `messages` table, the bridge rewrites the session transcript
+  on every call, so `ls -lt ~/.praxis/cache/hermes-transcripts | head` shows
+  the current session's file with a fresh mtime. `sync_transcript` returns
+  `None` without writing when any of those is missing or unreadable, and the
+  bridge still runs the gates with an empty `transcript_path`. So no fresh
+  file means "not firing" only after those prerequisites are confirmed; when
+  one fails, report "transcript unavailable" and lean on Registration plus the
+  positive control above (a payload the bridge must block) instead.
 - **Which gates can ask.**
   `grep -rln '"ask"' hooks --include=*.py | grep -v test`; say the list is by
   grep (a file may only block in practice).

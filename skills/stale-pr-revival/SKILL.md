@@ -13,7 +13,7 @@ when_to_use: >
   someone else's PR without pushing to it.
 verified-against-runtime: true
 runtime-verified-at: 2026-10-16
-runtime-verified-note: "gh 2.102.0 — against a public repo's merged dependabot PR: `pr view --json body,baseRefName,headRefName,isCrossRepository` and `headRefOid,mergeable,mergeStateStatus,reviewDecision`, `pr diff` (one -/+ `uses:` pair), `pr checks`, `run list --commit`, paginated reviews and the `reviewThreads` GraphQL (3 threads on a positive-control PR), release-tag body, `contents/action.yml` base64 decode, check-run annotations — all returned live data. The run log's download line carried the pinned SHA, not the tag, so the bot reference now greps the ref the `uses:` line pins. `--help` confirmed `pr edit --base/--body-file`, `pr comment --body-file`, `pr review --approve`, `pr checks --watch`, `run watch --exit-status`, `pr update-branch` (merge by default, `--rebase` opt-in). git 2.50.1 (scratch repo) — `rev-list --count`, conflicting `git merge` exit 1, `git stash` mid-merge printed `error: could not write index`, `checkout --theirs` took the merged-in base side. No push, edit, comment or review was sent"
+runtime-verified-note: "gh 2.102.0 — against a public repo's merged dependabot PR: `pr view --json body,baseRefName,headRefName,isCrossRepository` and `isCrossRepository,headRepositoryOwner,headRepository,headRefName,maintainerCanModify`, `api repos/<r> --jq .permissions.push` (true on a writable repo, false on one without access) and `headRefOid,mergeable,mergeStateStatus,reviewDecision`, `pr diff` (one -/+ `uses:` pair), `pr checks`, `run list --commit`, paginated reviews and the `reviewThreads` GraphQL (3 threads on a positive-control PR), release-tag body, `contents/action.yml` base64 decode, check-run annotations — all returned live data. The run log's download line carried the pinned SHA, not the tag, so the bot reference now greps the ref the `uses:` line pins. `--help` confirmed `pr edit --base/--body-file`, `pr comment --body-file`, `pr review --approve`, `pr checks --watch`, `run watch --exit-status`, `pr update-branch` (merge by default, `--rebase` opt-in). git 2.50.1 (scratch repo) — `rev-list --count`, conflicting `git merge` exit 1, `git stash` mid-merge printed `error: could not write index`, `checkout --theirs` took the merged-in base side; on a scratch clone whose only remote is not named `origin`, `fetch <remote> <branch>` then `worktree add -b <head> <remote>/<head>` tracked `<remote>/<head>`. The diff-shape awk, on a synthetic diff, listed an unindented `name:` change that `grep '^[+-] '` dropped, and the non-`uses:` filter printed it. No push, edit, comment or review was sent"
 ---
 
 # stale-pr-revival
@@ -72,8 +72,27 @@ gh pr view <N> --repo <owner>/<repo> --json body,baseRefName,headRefName,isCross
 List each finding with its decoration. An approval that still says "update
 the base first" is a requested change, not a formality.
 
+Then resolve where the head branch lives and whether you can write to it —
+for a fork PR it is not on `origin`:
+
+```bash
+gh pr view <N> --repo <owner>/<repo> \
+  --json isCrossRepository,headRepositoryOwner,headRepository,headRefName,maintainerCanModify
+gh api repos/<head-owner>/<head-repo> --jq .permissions.push
+```
+
+The head is writable when `.permissions.push` is `true`, or for a
+cross-repository PR when `maintainerCanModify` is `true` and you maintain the
+base. Otherwise stop and report: never push the branch to the base repository
+instead. Name the local remotes from `git remote -v`: `<head-remote>` is the
+one whose URL is the head repository (add it with `git remote add` when none
+is), `<base-remote>` the one for `<owner>/<repo>`; for a same-repository PR
+both are usually `origin`.
+
 Done when: every review body and every thread is listed as a finding with its
-decoration, and the head/base branch names are known.
+decoration, the head/base branch names are known, and the head repository,
+its write access, and `<head-remote>` / `<base-remote>` are recorded — or the
+revival stopped because the head is not writable.
 
 ### Step 2: Check for parallel work on the same defect
 
@@ -88,8 +107,10 @@ or issue is named with its URL (or "none found" with the scan scope).
 ### Step 3: Open a worktree on the PR's own branch
 
 ```bash
-git worktree add ../<repo>-<slug> -b <head> origin/<head>
-git rev-list --count HEAD..origin/<base>          # how far behind
+git fetch <head-remote> <head>
+git fetch <base-remote> <base>
+git worktree add ../<repo>-<slug> -b <head> <head-remote>/<head>
+git rev-list --count HEAD..<base-remote>/<base>   # how far behind
 ```
 
 When the PR is months behind, list the **convention changes** that landed on
@@ -104,7 +125,7 @@ convention changes since the PR opened are listed (or "none").
 ### Step 4: Merge the base in
 
 ```bash
-git merge origin/<base>
+git merge <base-remote>/<base>
 ```
 
 Not `git rebase`, and nothing that needs `--force` afterwards.
@@ -149,13 +170,13 @@ review nit.
 - A pre-commit formatter may reformat a line that had already drifted on the
   base. Re-add the file, commit again, and mention it in the change comment.
 
-Done when: `git log origin/<head>..HEAD` shows the merge commit followed by one
+Done when: `git log <head-remote>/<head>..HEAD` shows the merge commit followed by one
 commit per addressed review finding.
 
 ### Step 8: Push and update the PR's own surfaces
 
 ```bash
-git push origin <head>
+git push <head-remote> <head>
 gh pr edit <N> --repo <owner>/<repo> --body-file <body.md>
 gh pr comment <N> --repo <owner>/<repo> --body-file <comment.md>
 ```
@@ -177,7 +198,7 @@ status.
 Check that the new base already contains everything the old one does:
 
 ```bash
-git diff --quiet origin/<new> origin/<old>; echo $?     # 0 = trees equal
+git diff --quiet <base-remote>/<new> <base-remote>/<old>; echo $?     # 0 = trees equal
 gh pr edit <N> --base <new>
 gh pr view <N> --json files,additions,deletions          # must be unchanged
 ```
@@ -214,7 +235,7 @@ run is reported.
 | Error | Recovery |
 | ------- | ---------- |
 | `git stash` fails with `could not write index` mid-merge | Do not retry and do not `stash pop`; stage the resolved files and commit the merge |
-| Push rejected as non-fast-forward | Someone pushed meanwhile: fetch and merge `origin/<head>` in; never force |
+| Push rejected as non-fast-forward | Someone pushed meanwhile: fetch and merge `<head-remote>/<head>` in; never force |
 | Retarget trees differ | Stop (Step 9); report which commits would be dragged in |
 | Required check fails only on a body/issue-link rule | Read that workflow for its documented bypass ([`references/bot-dependency-prs.md`](references/bot-dependency-prs.md), Step 4) |
 | `gh` not authenticated for the repo | Abort with `gh auth status` output |

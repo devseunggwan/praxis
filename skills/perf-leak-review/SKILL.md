@@ -19,7 +19,7 @@ allowed-tools:
   - Bash(git status *)
 verified-against-runtime: true
 runtime-verified-at: 2026-10-16
-runtime-verified-note: "Claude Code Agent(general-purpose) — 7 read-only delegations over the fixture corpus returned schema-valid envelopes, 5/5 planted classes recalled, both clean controls empty, every prepared tree still porcelain-clean; a third of envelopes arrived inside a ```json fence; git 2.50.1 (2026-10-16) — the repo-wide sweep's sizing reads (`git ls-files | wc -l`, `git ls-files <area> | xargs wc -l | tail -1`) and its `rev-parse` / `status --porcelain` snapshot ran on a scratch repo; the sweep's AskUserQuestion not round-tripped"
+runtime-verified-note: "Claude Code Agent(general-purpose) — 7 read-only delegations over the fixture corpus returned schema-valid envelopes, 5/5 planted classes recalled, both clean controls empty, every prepared tree still porcelain-clean; a third of envelopes arrived inside a ```json fence; git 2.50.1 (2026-10-16) — the repo-wide sweep's sizing reads (`git ls-files | wc -l`, `git ls-files -z <area> | xargs -0 cat | wc -l`) and its `rev-parse` / `status --porcelain` snapshot ran on a scratch repo — forcing two-file batches, `xargs wc -l | tail -1` printed one batch's count while the `-0 cat | wc -l` form printed the full 50/60 lines, a path with a space included; the inside-the-repo scratch guard rejected `<repo>/sub` (exit 1) and accepted an outside path, with the repo reached through a symlink; the sweep's AskUserQuestion not round-tripped"
 ---
 
 # perf-leak-review

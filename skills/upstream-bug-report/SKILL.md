@@ -12,7 +12,7 @@ when_to_use: >
   own repository or on a bug whose cause is local setup.
 verified-against-runtime: true
 runtime-verified-at: 2026-10-16
-runtime-verified-note: "gh 2.102.0 — against public repos: `issue list --state all --search`, `search issues` / `search prs` (incl. `--author --merged`), the commits API title query, `issue list --json title`, `label list --json name,description`, `api repos/<r> --jq .permissions` (pull-only on a repo without write access), the issue timeline `cross-referenced` filter and `pr view --json state,isDraft,labels,files,reviewDecision,body` returned live rows; `issue create` / `issue edit` flags checked via `--help` only — nothing was posted. git 2.50.1 — `fetch origin pull/<pr>/head:pr-<pr>`, `worktree add --detach` and `worktree remove` worked on a scratch clone. praxis hooks replayed on a `gh issue create --title '[Bug]: …'` payload: `commit-title-format-check` exited 2 (not Conventional Commits) and `block-gh-issue-create-without-dup-search` blocked with no prior `gh search issues` / `gh issue list`. AskUserQuestion not round-tripped"
+runtime-verified-note: "gh 2.102.0 — against public repos: `issue list --state all --search`, `search issues` / `search prs` (incl. `--author --merged`), the commits API title query, `issue list --json title`, `label list --json name,description`, `api repos/<r> --jq .permissions` (pull-only on a repo without write access), the issue timeline `cross-referenced` filter and `pr view --json state,isDraft,labels,files,reviewDecision,body` returned live rows; `issue create` / `issue edit` flags checked via `--help` only — nothing was posted. `repo view --json url,defaultBranchRef` and `pr view --json baseRefName` returned the URL, default branch and base. git 2.50.1 — on a scratch clone whose remote is not named `origin`: `fetch <url> <default-branch>` + `worktree add --detach … FETCH_HEAD`, and `fetch <url> pull/<pr>/head:pr-<pr> <base>:pr-<pr>-base` + two `worktree add --detach`, then `worktree remove` and `branch -D` worked. praxis hooks replayed on a `gh issue create --title '[Bug]: …'` payload: `commit-title-format-check` exited 2 (not Conventional Commits) and `block-gh-issue-create-without-dup-search` blocked with no prior `gh search issues` / `gh issue list`. AskUserQuestion not round-tripped"
 ---
 
 # upstream-bug-report
@@ -38,7 +38,7 @@ on pristine upstream that produced the quoted output.
 
 - An installed plugin, server, or library misbehaves and the defect is in its
   code, not in the local setup.
-- The user asks to report a bug upstream or to open an upstream issue or PR.
+- The user asks to report a bug upstream or to open an upstream issue.
 - A contributor opened a PR for an issue you filed and the user asks how well
   it covers it (Step 8).
 
@@ -54,9 +54,14 @@ on pristine upstream that produced the quoted output.
 
 ### Step 1: Diagnose locally before blaming upstream
 
-- **Read the error class first.** 401 means the credential is not reaching the
-  process; 422/400 means the request shape is wrong. A 401 → 422 transition
-  after adding a key means auth now works and the next bug is in the payload.
+- **Read the error class first, as a clue, not a verdict.** A 401 says
+  authentication failed: the credential may be missing from the process, or
+  present but invalid or expired. A 400/422 points at the request, but the
+  vendor may use it for other rejections too. Read the response body, and
+  check the credential's presence (without printing it) and its validity
+  before naming a cause. A 401 → 422 transition after adding a key suggests
+  auth now works and the next problem is in the payload — confirm it from the
+  422's response body.
 - **A long-running server process keeps the env and code it started with.** A
   tool served by an already-running MCP server or daemon stays stale until
   that process restarts. Test a fix in a **fresh process** — import the module
@@ -84,11 +89,15 @@ Do not reproduce on the locally patched tree.
   `__init__.py`) — and run the exact reproduce command you will put in the
   body from there.
 - **Whole package** (when the local install carries patches on top of
-  upstream): check out the latest upstream head instead —
-  `git -C <repo> fetch origin main && git -C <repo> worktree add --detach <scratch>/<name>-upstream origin/main`
-  — point the import path at it, run the repro, then `git worktree remove` it.
-  Reproducing on upstream `main` rather than the installed commit also answers
-  "is it already fixed"; cite that SHA in the body.
+  upstream): check out the latest upstream head instead. A local `origin` may
+  be a fork and the default branch may not be `main`, so resolve both from
+  the canonical repository first —
+  `gh repo view <r> --json url,defaultBranchRef --jq '.url, .defaultBranchRef.name'`
+  — then fetch by URL:
+  `git -C <repo> fetch <upstream-url> <default-branch> && git -C <repo> worktree add --detach <scratch>/<name>-upstream FETCH_HEAD`.
+  Point the import path at it, run the repro, then `git worktree remove` it.
+  Reproducing on the upstream default branch rather than the installed commit
+  also answers "is it already fixed"; cite that SHA in the body.
 - **Self-contained:** a throwaway config/home directory, synthetic ids and
   labels, `<checkout>` placeholders — so the repro carries no account names or
   local state.
@@ -160,7 +169,8 @@ quoted output traces to a Step 2 run.
 ### Step 6: Ask for approval
 
 Show the full title and body, then one `AskUserQuestion` with these options:
-"Post issue", "Post issue and open a PR", "Edit draft", "Keep body file only".
+"Post issue", "Edit draft", "Keep body file only". A PR is a separate public
+write: it is out of this skill's scope and needs its own draft and approval.
 The last is the non-posting tier; if you drop it, praxis's
 `menu-mutation-tier-advisory` expects a column-0
 `Safe-tier-unavailable: <why>` line in the question body instead (posting has
@@ -180,8 +190,10 @@ gh issue view <n> --repo <r> --json title,state,body
 ```
 
 Confirm the title, the OPEN state, and the body length against the local
-file. After any `gh issue edit --body-file`, re-read the first lines of the
-posted body. If a hook blocks the title, do not bypass it: return to Step 4,
+file. A body edit after posting is a new public write: show the complete
+revised body and get an explicit approval for it before each
+`gh issue edit --body-file`, then re-read the first lines of the posted
+body. If a hook blocks the title, do not bypass it: return to Step 4,
 propose the new title, and re-ask.
 
 Report the URL, that the local fix is still uncommitted and local-only, and
@@ -198,17 +210,21 @@ When a PR appears for the issue and the user asks how well it covers it:
    `gh api repos/<r>/issues/<n>/timeline --jq '.[]|select(.event=="cross-referenced")|.source.issue.html_url'`,
    then `gh pr view <pr> --json state,isDraft,labels,files,reviewDecision,body`
    and `gh pr checks <pr>`.
-2. **Run both sides.** Check the head out into a scratch worktree
-   (`git fetch origin pull/<pr>/head:pr-<pr>`, then
-   `git worktree add --detach <scratch>/pr-<pr> pr-<pr>`). Run the issue's
-   repro on `origin/main` and on the PR head, plus the PR's own tests and the
-   neighbouring suites it names.
+2. **Run both sides.** Take the PR's real base branch
+   (`gh pr view <pr> --repo <r> --json baseRefName`) — it may be a
+   maintenance branch, not `main` — and fetch both sides from the upstream
+   URL resolved in Step 2:
+   `git fetch <upstream-url> pull/<pr>/head:pr-<pr> <base>:pr-<pr>-base`,
+   then `git worktree add --detach <scratch>/pr-<pr> pr-<pr>` and
+   `git worktree add --detach <scratch>/pr-<pr>-base pr-<pr>-base`. Run the
+   issue's repro on the base worktree and on the PR head, plus the PR's own
+   tests and the neighbouring suites it names.
 3. **Go one step past the repro.** Exercise the real long-lived object (for
    example a loaded pool that later flushes **and** selects), and grep every
    other writer of the same store for paths the fix does not cover. A fix that
    cleans the disk while the live process keeps using the removed thing is
    partial — report it as such.
-4. **Report** a table: scenario × `main` × PR (✅/❌), the test count, and the
+4. **Report** a table: scenario × base × PR (✅/❌), the test count, and the
    remaining gaps marked verified or inferred. The author's track record
    (`gh search prs --author <u> --merged`) is a side note; say when a count
    hit the search limit.
@@ -220,10 +236,11 @@ When a PR appears for the issue and the user asks how well it covers it:
    in a file the PR does not touch (no diff line to anchor on). Confirm the
    head SHA is unchanged right before posting, then re-read the posted body.
 
-Remove the scratch worktrees and the `pr-<pr>` branch afterwards.
+Remove the scratch worktrees and the `pr-<pr>` / `pr-<pr>-base` branches
+afterwards.
 
 Done when: the scenario table covers every repro scenario on both sides, and
-the scratch worktrees and branch are gone.
+the scratch worktrees and branches are gone.
 
 ## Error Handling
 

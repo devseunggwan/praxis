@@ -10,8 +10,11 @@ consolidate several bumps into one PR unless asked.
 Per bumped dependency:
 
 ```bash
-git grep -nE '<action>@' origin/<base> -- .github/
+git grep -nE '<action>@' <base-remote>/<base> -- .github/
 ```
+
+`<base-remote>` is the remote for the base repository, resolved in `SKILL.md`
+Step 1 (usually `origin`; fetch it first).
 
 When the workflows pin actions by commit SHA, the version is only in the
 trailing comment (`uses: <action>@<sha> # v1.2.3`); read the base state from
@@ -55,9 +58,9 @@ Follow `SKILL.md` Steps 3, 4 and 8 on the bot branch, with these specifics:
 - Commit the merge, then one `ci(deps): bump <action> to <ver> in remaining
   workflows` commit.
 - Check the effective diff is only tag lines:
-  `git diff origin/<base>...HEAD` must show nothing but `uses:` changes.
+  `git diff <base-remote>/<base>...HEAD` must show nothing but `uses:` changes.
 
-Done when: `git diff origin/<base>...HEAD` contains only `uses:` tag lines
+Done when: `git diff <base-remote>/<base>...HEAD` contains only `uses:` tag lines
 and every `.github/` usage of the action is on the target version.
 
 ## Step 4: Issue-link checks
@@ -97,8 +100,13 @@ Collect the evidence per PR with these reads (formerly a helper script; run
 them directly):
 
 1. **State:** `gh pr view <N> --json headRefOid,mergeable,mergeStateStatus,reviewDecision`.
-2. **Diff shape:** `gh pr diff <N> | grep -E '^[+-] ' | sort | uniq -c` — the
-   only changed lines should be the tag swap, counted per file usage.
+2. **Diff shape:** every added or removed content line, unindented ones
+   included, with the `diff --git` / `---` / `+++` headers left out —
+   `gh pr diff <N> | awk '/^diff --git /{h=0} /^@@/{h=1; next} h && /^[+-]/' | sort | uniq -c`.
+   The only changed lines should be the tag swap, counted per file usage, so
+   `... | grep -vE '^[+-][[:space:]]*(-[[:space:]]+)?uses:'` on the same
+   stream must print nothing. (`grep '^[+-] '` misses a change to a top-level
+   key such as `name:`, which has no space after the marker.)
 3. **Checks:** `gh pr checks <N>`.
 4. **Executed?** A green check does not prove the bumped step ran. List the
    successful runs on the head

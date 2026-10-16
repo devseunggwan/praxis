@@ -6,14 +6,28 @@ GitHub Actions; `<o>/<r>` is the repository, `ci.yml` the workflow file.
 ## Baseline run and its step timings
 
 ```bash
-gh run list --workflow ci.yml --branch main --limit 1
+gh run list --workflow ci.yml --branch main --status success --limit 1 --json databaseId,event
 gh api repos/<o>/<r>/actions/runs/<id>/jobs \
-  -q '.jobs[]|select(.name=="test")|.steps[]|"\(.name)\t\(.started_at)\t\(.completed_at)"'
+  -q '.jobs[]|select(.name=="test" or (.name|startswith("test (")))|.name as $j|.steps[]|"\($j)\t\(.name)\t\(.started_at)\t\(.completed_at)"'
 ```
 
-When the PR base selects the CI path, list runs of PRs into that base instead
-of `main`, and confirm the passed/skipped/deselected counts match the after-run
-before comparing.
+The job filter matches a single `test` job and matrix legs named
+`test (<leg>)` alike (`.name=="test"` alone returns nothing once the job is
+split, see [`parallel-runner.md`](parallel-runner.md)). A `main` run is a
+`push` run. When the PR base selects the CI path, take the baseline from the
+latest successful `pull_request` run into that same base instead:
+
+```bash
+gh api "repos/<o>/<r>/actions/workflows/ci.yml/runs?event=pull_request&status=success&per_page=50" \
+  -q '.workflow_runs[]|select(any(.pull_requests[]?; .base.ref=="<base>"))|"\(.id)\t\(.head_branch)\t\(.pull_requests[0].number)"' | head -1
+```
+
+A run from a fork has an empty `pull_requests` list, so this filter skips it;
+when the base only gets fork PRs, resolve the run through the PR instead
+(`gh pr list --base <base> --state merged --json headRefOid`, then
+`gh run list --workflow ci.yml --commit <sha> --event pull_request --status success`).
+Then confirm the passed/skipped/deselected counts match the after-run before
+comparing.
 
 Inside one big step, split by the runner's section banners: save
 `gh run view <id> --log --job <job_id>` to a scratch file, then
@@ -33,21 +47,34 @@ runs, and separate queue wait from execution:
      -q '.workflow_runs[]|select(.conclusion=="success" or .conclusion=="failure")|"\(.id)\t\(.event)"' > runs.tsv
    ```
 
-2. For each run, emit one row per executed step — `job`, `step`, seconds — and
-   one row per job for queue (`started_at − created_at`) and duration
-   (`completed_at − started_at`). jq's `fromdate` parses the API timestamps:
+2. For each run, emit rows prefixed with the run id and event: one per job for
+   queue (`started_at − created_at`) and duration (`completed_at −
+   started_at`), and one per executed step. jq's `fromdate` parses the API
+   timestamps. A failed jobs query stops the loop with a non-zero status
+   instead of leaving a partial `steps.tsv`:
 
    ```bash
-   cut -f1 runs.tsv | while read -r id; do
-     gh api "repos/<o>/<r>/actions/runs/$id/jobs" -q '.jobs[] | select(.completed_at) | . as $j
-       | .steps[] | select(.completed_at and .conclusion != "skipped")
-       | [$j.name, .name, ((.completed_at|fromdate) - (.started_at|fromdate))] | @tsv'
-   done > steps.tsv
+   (
+     set -o pipefail
+     while IFS=$'\t' read -r id event; do
+       gh api "repos/<o>/<r>/actions/runs/$id/jobs" -q '.jobs[] | select(.completed_at) | . as $j
+         | (["queue", $j.name, "", ((.started_at|fromdate) - (.created_at|fromdate))],
+            ["job", $j.name, "", ((.completed_at|fromdate) - (.started_at|fromdate))]),
+           (.steps[] | select(.completed_at and .conclusion != "skipped")
+            | ["step", $j.name, .name, ((.completed_at|fromdate) - (.started_at|fromdate))])
+         | @tsv' | awk -v id="$id" -v ev="$event" 'BEGIN { OFS = "\t" } { print id, ev, $0 }' \
+         || { echo "jobs query failed for run $id" >&2; exit 1; }
+     done < runs.tsv
+   ) > steps.tsv
    ```
 
-3. Group by `(job, step)` and print median, p90 and max, sorted by median; drop
-   steps whose median is under ~3 s. Keep the event (`push` vs
-   `pull_request`) as a grouping key when the two take different paths.
+   Columns: `run_id  event  kind  job  step  seconds`, where `kind` is
+   `queue`, `job` or `step` (`step` is empty on the two job rows).
+
+3. Group `step` rows by `(job, step)` and `queue` / `job` rows by job, and
+   print median, p90 and max, sorted by median; drop steps whose median is
+   under ~3 s. Keep the event (`push` vs `pull_request`) as a grouping key
+   when the two take different paths.
 4. Read the runner's instance type from a job log (`Instance type:` line or the
    runner label) and compare its vCPU count to the configured worker count.
 

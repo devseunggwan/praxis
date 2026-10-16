@@ -13,7 +13,7 @@ when_to_use: >
   benchmarking with no candidate list.
 verified-against-runtime: true
 runtime-verified-at: 2026-10-16
-runtime-verified-note: "git 2.50.1 — `rev-parse HEAD` / `status --porcelain` snapshots and the `diff` against them ran on a scratch repo. Python 3.9.6 — `python3 -I -B -c` with a trailing arg showed `sys.argv == ['-c', '50']` (N read from `argv[-1]`), and `runpy.run_path(..., run_name='__main__')` ran the probe as `__main__`. vitest 5.0.5 on node 26 — a config outside the project importing `vitest/config` failed with `UNRESOLVED_IMPORT`; a plain object spreading the project's `vite.config` with `root`, `dir`, `include`, `globals`, `pool: 'forks'`, `execArgv: ['--expose-gc']` ran a scratch probe test that saw `gc` as a function. No desktop-process probe was run"
+runtime-verified-note: "git 2.50.1 — `rev-parse HEAD` / `status --porcelain` snapshots and the `diff` against them ran on a scratch repo; after an empty commit the status diff stayed empty while the `HEAD` diff did not, and the scratch guard rejected a path inside the repo (exit 1). Python 3.9.6 — `python3 -I -B -c` with a trailing arg showed `sys.argv == ['-c', '50']` (N read from `argv[-1]`), and `runpy.run_path(..., run_name='__main__')` ran the probe as `__main__`. vitest 5.0.5 on node 26 — a config outside the project importing `vitest/config` failed with `UNRESOLVED_IMPORT`; a plain object spreading the project's `vite.config` with `root`, `dir`, `include`, `globals`, `pool: 'forks'`, `execArgv: ['--expose-gc']` ran a scratch probe test that saw `gc` as a function. No desktop-process probe was run"
 ---
 
 # perf-leak-verify
@@ -70,11 +70,15 @@ sites cited by `file:line`) or listed as `not run` with a reason.
 ### Step 2: Snapshot for the no-write check
 
 ```bash
-git -C <repo> rev-parse HEAD > <scratch>/HEAD.before
-git -C <repo> status --porcelain > <scratch>/status.before
+repo=$(git -C <repo> rev-parse --show-toplevel)
+mkdir -p <scratch> && scratch=$(cd <scratch> && pwd -P)
+case "$scratch/" in "$repo"/*) echo "scratch is inside the repo" >&2; exit 1;; esac
+git -C <repo> rev-parse HEAD > "$scratch/HEAD.before"
+git -C <repo> status --porcelain > "$scratch/status.before"
 ```
 
-Done when: both snapshot files exist in the scratch directory.
+Done when: the scratch directory is confirmed outside the checkout and both
+snapshot files exist in it.
 
 ### Step 3: Run probes with the project's own runtime
 
@@ -176,11 +180,13 @@ Done when: each reproduced row carries a real-volume estimate, or an explicit
 
 ```bash
 git -C <repo> status --porcelain | diff <scratch>/status.before -
+git -C <repo> rev-parse HEAD | diff <scratch>/HEAD.before -
 ```
 
-An empty diff (and an unchanged `HEAD`) is the pass.
+The pass needs both diffs empty: a probe that commits leaves the status clean
+but moves `HEAD`.
 
-Done when: the diff is empty, or every difference is reported as a
+Done when: both diffs are empty, or every difference is reported as a
 violation.
 
 ### Step 10: Report

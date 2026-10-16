@@ -96,9 +96,11 @@ create a file, then assert the file does not exist.
   the command exactly as written.
 - Keep the old expectations. Change one only when the new rule deliberately
   flips it, and explain the flip in a comment.
-- **Check every new case against the real shell.** Recover the exact string
-  with `bash -c "printf %s <literal>"`, run it as
-  `zsh -f -c 'setopt nomatch; <cmd>'` in a fixture with the same file layout,
+- **Check every new case against the real shell.** Write the exact string to
+  a script outside the repository from bash, so no second quoting layer can
+  break a case that contains `'` —
+  `{ echo 'setopt nomatch'; printf '%s\n' <literal>; } > <scratch>/case.zsh` —
+  run `zsh -f <scratch>/case.zsh` from a fixture with the same file layout,
   and label it: agree, deliberate MISS (zsh aborts, gate passes), or
   deliberate FP (gate blocks, zsh runs). Document every MISS and FP in
   `spec.md` as a trade-off.
@@ -228,9 +230,13 @@ contains.
   assistant text, Bash `tool_use`, `tool_result`, `AskUserQuestion` with a
   `"q"="a"` result), write them to `tests/fixtures/<gate>-<case>.jsonl`, and
   keep the generator in scratch so review rounds add cases by editing it.
-- Prove RED by stashing only the impl files
-  (`git stash push -- <impl> <sibling impl>`), running both test files, then
-  `git stash pop`. Each new release case must fail on `main`, and each new
+- Prove RED by reverting only the impl files to the old ref, with the copy
+  procedure in [Applying review findings](#applying-review-findings) (save a
+  copy of `<impl>` and `<sibling impl>`, write the old versions with
+  `git show`, run both test files, copy the saved files back). A
+  `git stash pop` afterwards would pop whatever sits at `stash@{0}`, and a
+  stash of committed impl changes saves nothing. Each new release case must
+  fail on `main`, and each new
   deny case must fail on the previous commit's impl.
 
 ## 8. Before opening the PR
@@ -281,8 +287,12 @@ Notes that the entry point does not tell you:
 ### Applying review findings
 
 1. Prove each new test RED on the old code by reverting **only the
-   implementation file** (`git stash push -- <impl>`, or
-   `git show <ref>:<impl> > <impl>` then `git checkout -- <impl>`). Stashing
+   implementation file** to the old ref and then restoring your exact copy:
+   `cp <impl> <scratch>/impl.keep`, `git show <ref>:<impl> > <impl>`, run the
+   tests, `cp <scratch>/impl.keep <impl>`. Do not restore with
+   `git checkout -- <impl>` (it brings back the index version and drops
+   unstaged edits), and do not rely on `git stash push -- <impl>` (it saves
+   nothing when the implementation change is already committed). Reverting
    everything reverts the new tests too, so the run passes and proves nothing.
 2. A behavior you decide to keep (an accepted trade-off) gets a test that pins
    it, with the reason in a comment.

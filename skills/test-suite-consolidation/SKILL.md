@@ -13,7 +13,7 @@ when_to_use: >
   pruning ask (that is `test-suite-speedup`).
 verified-against-runtime: true
 runtime-verified-at: 2026-10-16
-runtime-verified-note: "pytest 9.0.3 — `--collect-only -q -p no:cacheprovider | grep '::' | sort` gave one sorted id per test on a scratch project. git 2.50.1 — `git archive origin/main tests/hooks | tar -x` extracted 30 files, `git log --diff-filter=A --format='%h %s'` named the adding commit. pre-commit 4.7.0 — with `.pre-commit-config.yaml` edited but unstaged, `git commit` exited 1 with `Your pre-commit configuration is unstaged`. `uvx ruff@0.15.8` resolved the pinned formatter. `gh issue create --body-file` checked via `--help` only; nothing was filed"
+runtime-verified-note: "pytest 9.0.3 — `--collect-only -q -p no:cacheprovider | grep '::' | sort` gave one sorted id per test on a scratch project; pytest 9.1.1 with a file that fails to collect — the pipeline exited 0 without `set -o pipefail` and 2 with it. git 2.50.1 — `git archive origin/main tests/hooks | tar -x` extracted 30 files, `git log --diff-filter=A --format='%h %s'` named the adding commit. pre-commit 4.7.0 — with `.pre-commit-config.yaml` edited but unstaged, `git commit` exited 1 with `Your pre-commit configuration is unstaged`. `uvx ruff@0.15.8` resolved the pinned formatter. `gh issue create --body-file` checked via `--help` only; nothing was filed"
 ---
 
 # test-suite-consolidation
@@ -97,8 +97,13 @@ widened autouse override has its grep result stated.
 ### Step 3: Take the oracle before touching anything
 
 ```bash
-pytest <tests> --collect-only -q -p no:cacheprovider | grep '::' | sort > before.txt
+set -o pipefail
+pytest <tests> --collect-only -q -p no:cacheprovider | grep '::' | sort > <scratch>/before.txt
 ```
+
+`pipefail` makes a collection error fail the command instead of leaving a
+partial `before.txt` behind `sort`'s exit 0; the file lives outside the
+checkout so it never shows up in the diff.
 
 After every step, regenerate and diff: only additions for new tests, zero
 deletions. This catches what lint does not — a re-export removed by
