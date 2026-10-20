@@ -396,14 +396,14 @@ _BRIEFING_ITEM_GROUPS: tuple[tuple[str, ...], ...] = (
     # 1. What changed
     ("what changed", "무엇이 변경", "무엇이 바뀌", "바뀌는 것", "변경 사항",
      "변경사항", "변경 내용", "changed:", "changes:", "scope summary",
-     "what was changed"),
+     "what was changed", "바뀐 것"),
     # 2. What was verified
     ("verified", "검증", "verification", "tested", "test pass", "테스트 통과",
-     "lint clean", "확인 완료", "확인함"),
+     "lint clean", "확인 완료", "확인함", "확인한 것"),
     # 3. What was NOT verified
     ("not verified", "not tested", "미검증", "검증 안 된", "검증되지 않은",
      "미확인", "unverified", "not exercised", "검증하지", "확인하지 못",
-     "deferred", "ci pending", "skipped"),
+     "deferred", "ci pending", "skipped", "확인 못 한", "확인 못한"),
     # 4. Risk / blast radius
     ("risk", "blast radius", "리스크", "위험", "영향 범위", "영향범위",
      "blast", "downstream", "affects"),
@@ -553,10 +553,13 @@ _PR_REF_RE = re.compile(r"(?:#|/pull/|(?<![A-Za-z])pr\s*#?\s*)(\d+)(?![A-Za-z0-9
 
 # The PRs a merge verb takes as its object: a list of references right before
 # 머지/병합 ("#1023, #1024 를 머지") or right after "merge" ("Approve merge #833").
+# `·` separates a list in Korean prose ("#1525 · #1526"), like `,`.
 _REF_LIST = (r"(?:#|(?<![A-Za-z])pr\s*#?\s*)\d+(?![A-Za-z0-9_])"
-             r"(?:\s*(?:,|과|와|및|and|&)\s*(?:#|pr\s*#?\s*)?\d+(?![A-Za-z0-9_]))*")
+             r"(?:\s*(?:,|·|과|와|및|and|&)\s*(?:#|pr\s*#?\s*)?\d+(?![A-Za-z0-9_]))*")
+# A count restating the list before the particle ("#1 · #2 · #3 세 건을 머지").
+_REF_COUNT = r"(?:\s*(?:두|세|네|다섯|\d+)\s*(?:건|개)(?:\s*(?:모두|전부))?)?"
 _MERGE_OBJECT_RE = re.compile(
-    rf"({_REF_LIST})\s*(?:을|를|은|는|도)?\s*(?:머지|병합)"
+    rf"({_REF_LIST}){_REF_COUNT}\s*(?:을|를|은|는|도)?\s*(?:머지|병합)"
     rf"|(?<![A-Za-z])merg(?:e|ing)(?:\s*:\s*|\s+)(?:pr\s*)?({_REF_LIST})", re.IGNORECASE)
 
 # A single positional token that is a bare PR number or a …/pull/N URL.
@@ -676,14 +679,17 @@ def _human_user_indices(entries: list[dict]) -> list[int]:
     return idxs
 
 
-def _assistant_text(entries: list[dict], lo: int, hi: int) -> str:
-    """Concatenate what the assistant said in entries[lo:hi]: prose blocks and
-    the questions it asked.
+def _assistant_text(entries: list[dict], lo: int, hi: int, pr: str | None = None) -> str:
+    """Concatenate what the assistant said in entries[lo:hi]: its prose blocks,
+    plus — when `pr` is given — each AskUserQuestion question that asks to merge
+    `pr`.
 
-    An AskUserQuestion question is shown to the user before they answer, so a
-    briefing written inside it is a briefing the user saw. Hosts whose approval
-    tool carries the whole briefing in the question (Hermes `clarify`) left the
-    prose empty, and every merge after the first was denied."""
+    The user reads a question before answering it, so a briefing written inside
+    the merge question is a briefing the user saw. Hosts whose approval tool
+    carries the whole briefing in the question (Hermes `clarify`) left the prose
+    empty, and every merge after the first was denied. Only the question asking
+    to merge THIS PR counts: unrelated questions in the same window would add
+    keywords no briefing of this merge carried."""
     texts: list[str] = []
     for ev in entries[lo:hi]:
         msg = ev.get("message")
@@ -697,10 +703,23 @@ def _assistant_text(entries: list[dict], lo: int, hi: int) -> str:
                 prose = block_prose(b)
                 if prose is not None:
                     texts.append(prose)
-                elif (isinstance(b, dict) and b.get("type") == "tool_use"
-                      and b.get("name") == "AskUserQuestion"):
-                    texts.append(_ask_question_text(b))
+                elif pr is not None:
+                    texts.extend(_merge_ask_questions(b, pr))
     return "\n".join(texts)
+
+
+def _merge_ask_questions(block: object, pr: str) -> list[str]:
+    """The questions of an AskUserQuestion tool_use that ask to merge `pr`."""
+    if not (isinstance(block, dict) and block.get("type") == "tool_use"
+            and block.get("name") == "AskUserQuestion"):
+        return []
+    inp = block.get("input")
+    questions = inp.get("questions") if isinstance(inp, dict) else None
+    if not isinstance(questions, list):
+        return []
+    return [q["question"] for q in questions
+            if isinstance(q, dict) and isinstance(q.get("question"), str)
+            and _is_merge_ask(q["question"], pr)]
 
 
 def _is_interrupt_only(content: object) -> bool:
@@ -1405,7 +1424,7 @@ _CHDIR_COMMANDS = frozenset({"cd", "pushd", "popd"})
 # ("#833, #999 를 머지할까요?", "Approve merging #833 and #999?"). A list
 # before "머지 전에 … 돌릴까요?" or "머지 큐에 올려둘까요?" asks something else.
 _LISTED_ASK_RE = re.compile(
-    rf"(?P<ko>{_REF_LIST})\s*(?:을|를|은|는|도)?\s*(?:모두\s*|전부\s*|다\s*)?(?:머지|병합)\s*"
+    rf"(?P<ko>{_REF_LIST}){_REF_COUNT}\s*(?:을|를|은|는|도)?\s*(?:모두\s*|전부\s*|다\s*)?(?:머지|병합)\s*"
     r"(?:할까요|해도\s*될까요|해도\s*되나요|진행할까요|하시겠(?:어요|습니까)?|해\s*드릴까요|해드릴까요)\s*\??\s*$"
     rf"|^\s*(?:(?:shall|should|can|may)\s+i\s+|approve\s+|ok\s+to\s+)?merg(?:e|ing)\s*:?\s*(?:pr\s*)?"
     rf"(?P<en>{_REF_LIST})\s*\?\s*$",
@@ -1433,19 +1452,26 @@ def _bulk_reply_prs(text: str) -> set[str] | None:
     # a bare number is something else ("1 — #833, #999 머지" is an ordinal),
     # so it stays in the text and voids the reply instead of naming PR 1.
     ref_re = _PR_REF_RE if _PR_REF_RE.search(raw) else _REPLY_PR_RE
+    approved = False
     for sentence in _SENTENCE_TAIL_RE.split(raw):
         if not sentence.strip():
             continue
         flat = re.sub(r"\s*[—–:]\s*", " ", sentence.lower())
-        named |= set(ref_re.findall(flat))
+        refs = set(ref_re.findall(flat))
+        named |= refs
         rest = ref_re.sub(" ", flat)
         words = [w for w in re.split(r"[\s,()]+", rest)
                  if w and w not in _BULK_FILLERS and w not in _BULK_QUANTIFIERS]
         remainder = " ".join(words).strip(" .!~,·")
+        # `·` lists PRs but also splits clauses, so "#1 · #2 · #3 머지" yields a
+        # piece that is only a reference; it names a PR and approves nothing.
+        if refs and not remainder:
+            continue
         if not (remainder in _APPROVAL_TOKENS or remainder in _BULK_EXTRA_TOKENS
                 or (words and all(w in _BULK_APPROVAL_WORDS for w in words))):
             return None
-    return named
+        approved = True
+    return named if approved else None
 
 
 def _listed_merge_ask(text: str) -> tuple[set[str], str]:
@@ -1648,7 +1674,7 @@ def _bulk_released(entries: list[dict], idxs: list[int], command: object) -> boo
     approved = named or listed
     if pr not in approved or len(approved) < 2:
         return False
-    briefing = _assistant_text(entries, brief_lo, brief_hi)
+    briefing = _assistant_text(entries, brief_lo, brief_hi, pr)
     section = _pr_sections(briefing, approved).get(pr)
     if section is None:
         return False
@@ -1730,7 +1756,11 @@ def _merge_escalation_reason(payload: dict) -> str | None:
 
     idxs = _human_user_indices(entries)
     lo = (idxs[-1] + 1) if idxs else 0
-    current_text = _assistant_text(entries, lo, len(entries))
+    last_merge = _last_executed_merge(entries)
+    # The PR this merge targets, so the question asking to merge it is read as
+    # part of the briefing (issue #ISSUE).
+    target = _merge_target_pr(entries, code, 0 if last_merge is None else last_merge + 1)
+    current_text = _assistant_text(entries, lo, len(entries), target)
     if _is_trivial_merge(current_text):
         return None
     if _bulk_released(entries, idxs, code):
@@ -1740,7 +1770,6 @@ def _merge_escalation_reason(payload: dict) -> str | None:
     # half (issue #1402). Once a merge has run, a briefing written after it with
     # no user message since can only be citing an answer the earlier merge
     # already consumed, so it no longer releases the next merge on text alone.
-    last_merge = _last_executed_merge(entries)
     # One answer releases one merge: a loop or chained merge is never answered.
     # An answer also does not cross repos — the prose names a number, never a
     # repo, so a `--repo`-bearing merge whose window probed a DIFFERENT repo is
@@ -1750,8 +1779,7 @@ def _merge_escalation_reason(payload: dict) -> str | None:
         and not _repo_conflict(
             _merge_target_repo(code),
             _context_repo_from_window(entries, last_merge + 1, len(entries)))
-        and _answered_after(entries, idxs, last_merge,
-                            _merge_target_pr(entries, code, last_merge + 1)))
+        and _answered_after(entries, idxs, last_merge, target))
     items = _briefing_item_count(current_text)
     full_briefing = items >= MERGE_BRIEFING_MIN_ITEMS
     if full_briefing and answered:
@@ -1794,7 +1822,7 @@ def _merge_escalation_reason(payload: dict) -> str | None:
     floor = 0 if last_merge is None else last_merge + 1
     marker_prev = _correlated_prior_turn_text(entries, idxs, code, floor)
     marker_items = max(
-        _briefing_item_count(_assistant_text(entries, max(lo, floor), len(entries))),
+        _briefing_item_count(_assistant_text(entries, max(lo, floor), len(entries), target)),
         _briefing_item_count(marker_prev) if marker_prev is not None else 0,
     )
     if marker_ok and marker_items >= MERGE_BRIEFING_MARKER_MIN_ITEMS:

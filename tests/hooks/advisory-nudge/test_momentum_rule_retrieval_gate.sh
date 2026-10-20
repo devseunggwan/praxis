@@ -829,6 +829,17 @@ run_merge_escalation_case "merge_serial_question_briefing_held_denies" \
   "yes" "" "momentum-merge-serial-question-briefing-held.jsonl" "gh pr merge 999 --squash"
 run_merge_escalation_case "merge_serial_question_no_briefing_denies" \
   "yes" "" "momentum-merge-serial-question-no-briefing.jsonl" "gh pr merge 999 --squash"
+# Only the question asking to merge THIS PR is read: a sibling question in the
+# same call, full of briefing words but about something else, adds nothing.
+run_merge_escalation_case "merge_serial_question_unrelated_asks_denies" \
+  "yes" "" "momentum-merge-serial-question-unrelated-asks.jsonl" "gh pr merge 999 --squash"
+# A three-PR list joined by `·` with a count ("#833 · #999 · #1001 세 건을 머지할까요?"),
+# answered by a label naming all three, releases the second merge with no marker.
+# `·` also splits clauses, so a label of bare references approves nothing.
+run_merge_escalation_case "merge_bulk_question_dot_list_second_passes" \
+  "no" "" "momentum-merge-bulk-question-dot-list.jsonl" "gh pr merge 999 --repo o/r --squash"
+run_merge_escalation_case "merge_bulk_question_dot_list_refs_only_denies" \
+  "yes" "" "momentum-merge-bulk-question-dot-list-refs-only.jsonl" "gh pr merge 999 --repo o/r --squash"
 # Outside the set, or not a single numbered merge: the bulk path does not apply.
 run_merge_escalation_case "merge_bulk_unlisted_pr_denies" \
   "yes" "" "momentum-merge-bulk-all-second.jsonl" "gh pr merge 1001 --squash"

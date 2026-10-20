@@ -102,18 +102,30 @@ What was verified / What was NOT verified / Risk-blast-radius / Open items /
 explicit approve-ask. Keyword groups live in `_BRIEFING_ITEM_GROUPS`
 (`impl.py`); EN/KO variants are enumerated there, not duplicated in prose here.
 
-**The question is part of the briefing (issue #ISSUE).** Every window this
-gate scores reads the assistant's prose blocks *and* the question text of its
-`AskUserQuestion` calls (`_assistant_text`). The user reads the question before
-answering it, so a briefing written inside the question is one the user saw.
-Hosts whose approval tool carries the whole briefing in the question — Hermes
-`clarify`, mapped to `AskUserQuestion` by the adapter — left the prose empty:
-the first merge of a bulk set passed only when unrelated prose happened to hold
-a keyword, and every later merge was denied, because the serial-merge cut
-(#1214) leaves only prose written after the last merge. Reading the question
-changes no answer handling — the answer checks (#1402) run exactly as before,
-so a held answer after an earlier merge still denies — and a question carrying
-no briefing items still denies.
+**The merge question is part of the briefing (issue #ISSUE).** The windows this
+gate scores for a merge read the assistant's prose blocks *and* each
+`AskUserQuestion` question that asks to merge the target PR (`_is_merge_ask`;
+`_assistant_text(..., pr)`). The user reads that question before answering it,
+so a briefing written inside it is one the user saw. Hosts whose approval tool
+carries the whole briefing in the question — Hermes `clarify`, mapped to
+`AskUserQuestion` by the adapter — left the prose empty: the first merge of a
+bulk set passed only when unrelated prose happened to hold a keyword, and every
+later merge was denied, because the serial-merge cut (#1214) leaves only prose
+written after the last merge. Other questions are not read: a sibling question
+about something else would add keywords no briefing of this merge carried.
+Reading the question changes no answer handling — the answer checks (#1402) run
+exactly as before, so a held answer after an earlier merge still denies — and a
+question carrying no briefing items still denies.
+
+**`·` lists and Korean section labels (issue #ISSUE).** Korean prose joins a PR
+list with `·` (`#1525 · #1526을 머지할까요?`) and may restate it with a count
+(`#1524 · #1525 · #1526 세 건을 머지할까요?`). `_REF_LIST` takes `·` as a
+separator and `_REF_COUNT` the count, so both read as listed merge asks.
+`_SENTENCE_TAIL_RE` also splits clauses on `·`, which cut a picked label like
+`승인 — #1524 · #1525 · #1526 머지` into a piece holding only `#1525`; that piece
+now names a PR and approves nothing, and the reply still needs one piece that
+is an approval (`#833 · #999` alone is not). The item vocabulary gained the
+section labels these briefings use: `바뀐 것`, `확인한 것`, `확인 못 한`.
 
 **Vocabulary coverage is EN/KO substring matching, not free-form Korean
 (issue #1118).** A real 6-item briefing was blocked at 3/6 because it phrased
