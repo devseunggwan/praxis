@@ -392,18 +392,20 @@ MERGE_BRIEFING_MARKER_MIN_ITEMS = 1
 
 # Each tuple is one Pre-Merge Reporting item; a single keyword hit marks the
 # item present. Bilingual (EN/KO) since briefings are authored in Korean.
+# Korean section labels match only with their colon ("바뀐 것:"): the bare
+# phrase is ordinary prose too ("새로 바뀐 것은 없습니다").
 _BRIEFING_ITEM_GROUPS: tuple[tuple[str, ...], ...] = (
     # 1. What changed
     ("what changed", "무엇이 변경", "무엇이 바뀌", "바뀌는 것", "변경 사항",
      "변경사항", "변경 내용", "changed:", "changes:", "scope summary",
-     "what was changed", "바뀐 것"),
+     "what was changed", "바뀐 것:"),
     # 2. What was verified
     ("verified", "검증", "verification", "tested", "test pass", "테스트 통과",
-     "lint clean", "확인 완료", "확인함", "확인한 것"),
+     "lint clean", "확인 완료", "확인함", "확인한 것:"),
     # 3. What was NOT verified
     ("not verified", "not tested", "미검증", "검증 안 된", "검증되지 않은",
      "미확인", "unverified", "not exercised", "검증하지", "확인하지 못",
-     "deferred", "ci pending", "skipped", "확인 못 한", "확인 못한"),
+     "deferred", "ci pending", "skipped", "못 한 것:", "못한 것:"),
     # 4. Risk / blast radius
     ("risk", "blast radius", "리스크", "위험", "영향 범위", "영향범위",
      "blast", "downstream", "affects"),

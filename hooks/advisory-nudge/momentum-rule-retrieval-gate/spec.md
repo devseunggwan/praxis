@@ -125,7 +125,9 @@ separator and `_REF_COUNT` the count, so both read as listed merge asks.
 `승인 — #1524 · #1525 · #1526 머지` into a piece holding only `#1525`; that piece
 now names a PR and approves nothing, and the reply still needs one piece that
 is an approval (`#833 · #999` alone is not). The item vocabulary gained the
-section labels these briefings use: `바뀐 것`, `확인한 것`, `확인 못 한`.
+section labels these briefings use, colon included — `바뀐 것:`, `확인한 것:`,
+`못 한 것:` (as in `확인 못 한 것:`) — because the bare phrase is ordinary prose too (`새로 바뀐 것은
+없습니다` released a marked merge in corpus replay before the colon was required).
 
 **Vocabulary coverage is EN/KO substring matching, not free-form Korean
 (issue #1118).** A real 6-item briefing was blocked at 3/6 because it phrased
