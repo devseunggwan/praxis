@@ -816,6 +816,19 @@ run_merge_escalation_case "merge_bulk_ok_to_listed_ask_passes" \
   "no" "" "momentum-merge-bulk-ok-listed.jsonl" "gh pr merge 999 --squash"
 run_merge_escalation_case "merge_bulk_ask_answer_passes" \
   "no" "" "momentum-merge-bulk-ask-answer.jsonl" "gh pr merge 999 --squash"
+# The briefing written inside the question itself is what the user read before
+# answering, so it counts the same as prose above the question. Hosts whose
+# approval tool carries the whole briefing in its question (Hermes `clarify`)
+# were denied every merge after the first. A question with no briefing items,
+# or a held answer, still denies.
+run_merge_escalation_case "merge_bulk_question_briefing_second_passes" \
+  "no" "" "momentum-merge-bulk-question-briefing.jsonl" "gh pr merge 999 --squash"
+run_merge_escalation_case "merge_serial_question_briefing_passes" \
+  "no" "" "momentum-merge-serial-question-briefing.jsonl" "gh pr merge 999 --squash"
+run_merge_escalation_case "merge_serial_question_briefing_held_denies" \
+  "yes" "" "momentum-merge-serial-question-briefing-held.jsonl" "gh pr merge 999 --squash"
+run_merge_escalation_case "merge_serial_question_no_briefing_denies" \
+  "yes" "" "momentum-merge-serial-question-no-briefing.jsonl" "gh pr merge 999 --squash"
 # Outside the set, or not a single numbered merge: the bulk path does not apply.
 run_merge_escalation_case "merge_bulk_unlisted_pr_denies" \
   "yes" "" "momentum-merge-bulk-all-second.jsonl" "gh pr merge 1001 --squash"

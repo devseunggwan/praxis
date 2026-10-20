@@ -102,6 +102,19 @@ What was verified / What was NOT verified / Risk-blast-radius / Open items /
 explicit approve-ask. Keyword groups live in `_BRIEFING_ITEM_GROUPS`
 (`impl.py`); EN/KO variants are enumerated there, not duplicated in prose here.
 
+**The question is part of the briefing (issue #ISSUE).** Every window this
+gate scores reads the assistant's prose blocks *and* the question text of its
+`AskUserQuestion` calls (`_assistant_text`). The user reads the question before
+answering it, so a briefing written inside the question is one the user saw.
+Hosts whose approval tool carries the whole briefing in the question — Hermes
+`clarify`, mapped to `AskUserQuestion` by the adapter — left the prose empty:
+the first merge of a bulk set passed only when unrelated prose happened to hold
+a keyword, and every later merge was denied, because the serial-merge cut
+(#1214) leaves only prose written after the last merge. Reading the question
+changes no answer handling — the answer checks (#1402) run exactly as before,
+so a held answer after an earlier merge still denies — and a question carrying
+no briefing items still denies.
+
 **Vocabulary coverage is EN/KO substring matching, not free-form Korean
 (issue #1118).** A real 6-item briefing was blocked at 3/6 because it phrased
 group0/2/4 as `무엇이 바뀌는 것` / `검증 안 된` / `열린 항목` — content the

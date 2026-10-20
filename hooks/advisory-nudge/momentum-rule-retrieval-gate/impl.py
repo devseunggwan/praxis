@@ -677,7 +677,13 @@ def _human_user_indices(entries: list[dict]) -> list[int]:
 
 
 def _assistant_text(entries: list[dict], lo: int, hi: int) -> str:
-    """Concatenate assistant prose blocks in entries[lo:hi]."""
+    """Concatenate what the assistant said in entries[lo:hi]: prose blocks and
+    the questions it asked.
+
+    An AskUserQuestion question is shown to the user before they answer, so a
+    briefing written inside it is a briefing the user saw. Hosts whose approval
+    tool carries the whole briefing in the question (Hermes `clarify`) left the
+    prose empty, and every merge after the first was denied."""
     texts: list[str] = []
     for ev in entries[lo:hi]:
         msg = ev.get("message")
@@ -691,6 +697,9 @@ def _assistant_text(entries: list[dict], lo: int, hi: int) -> str:
                 prose = block_prose(b)
                 if prose is not None:
                     texts.append(prose)
+                elif (isinstance(b, dict) and b.get("type") == "tool_use"
+                      and b.get("name") == "AskUserQuestion"):
+                    texts.append(_ask_question_text(b))
     return "\n".join(texts)
 
 
