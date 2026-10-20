@@ -706,12 +706,18 @@ def _assistant_text(entries: list[dict], lo: int, hi: int, pr: str | None = None
                 if prose is not None:
                     texts.append(prose)
                 elif pr is not None:
-                    texts.extend(_merge_ask_questions(b, pr))
+                    texts.extend(_merge_ask_questions(b, pr, entries))
     return "\n".join(texts)
 
 
-def _merge_ask_questions(block: object, pr: str) -> list[str]:
-    """The questions of an AskUserQuestion tool_use that ask to merge `pr`."""
+def _merge_ask_questions(block: object, pr: str, entries: list[dict]) -> list[str]:
+    """The questions of an AskUserQuestion tool_use that ask to merge `pr`.
+
+    A question that names PRs but not `pr` briefs another merge, even when it
+    ends in an unnamed "Approve merge?". A question whose answer holds the
+    merge (`보류`) is not a briefing the user accepted: its tool_result is not a
+    human message, so it does not close the window the way a typed `보류` does.
+    """
     if not (isinstance(block, dict) and block.get("type") == "tool_use"
             and block.get("name") == "AskUserQuestion"):
         return []
@@ -719,9 +725,39 @@ def _merge_ask_questions(block: object, pr: str) -> list[str]:
     questions = inp.get("questions") if isinstance(inp, dict) else None
     if not isinstance(questions, list):
         return []
+    answer = _tool_result_content(entries, block.get("id"))
+    if answer is not None and _question_answer_holds(answer, pr):
+        return []
     return [q["question"] for q in questions
             if isinstance(q, dict) and isinstance(q.get("question"), str)
-            and _is_merge_ask(q["question"], pr)]
+            and _is_merge_ask(q["question"], pr)
+            and pr in (set(_PR_REF_RE.findall(q["question"])) or {pr})]
+
+
+def _question_answer_holds(content: object, pr: str) -> bool:
+    """True when an AskUserQuestion result picks a non-approval for a question
+    about `pr` or about merging. A label listing PRs (`#1 · #2 모두 머지`) is a
+    bulk approval, which `_ask_label_approves` alone does not read."""
+    return any((_mentions_pr(q, pr) or _MERGE_WORD_RE.search(q))
+               and not _ask_label_approves(a, pr)
+               and _bulk_reply_prs(a) is None
+               for q, a in _ASK_ANSWER_RE.findall(_user_message_text(content)))
+
+
+def _tool_result_content(entries: list[dict], tool_use_id: object) -> object:
+    """The content of the tool_result answering `tool_use_id`, else None."""
+    if not isinstance(tool_use_id, str):
+        return None
+    for ev in entries:
+        msg = ev.get("message")
+        content = msg.get("content") if isinstance(msg, dict) else None
+        if not isinstance(content, list):
+            continue
+        for b in content:
+            if (isinstance(b, dict) and b.get("type") == "tool_result"
+                    and b.get("tool_use_id") == tool_use_id):
+                return b.get("content")
+    return None
 
 
 def _is_interrupt_only(content: object) -> bool:
@@ -1433,6 +1469,7 @@ _LISTED_ASK_RE = re.compile(
     re.IGNORECASE)
 # Env assignments that move a `gh` call to another repo without a flag.
 _REPO_ENV_RE = re.compile(r"^(?:GH_REPO|GH_HOST)=")
+_COUNT_PHRASE_RE = re.compile(r"(?:두|세|네|다섯|\d+)\s*(?:건|개)")
 
 
 def _bulk_reply_prs(text: str) -> set[str] | None:
@@ -1461,7 +1498,9 @@ def _bulk_reply_prs(text: str) -> set[str] | None:
         flat = re.sub(r"\s*[—–:]\s*", " ", sentence.lower())
         refs = set(ref_re.findall(flat))
         named |= refs
-        rest = ref_re.sub(" ", flat)
+        # A count phrase restates the list ("#1 · #2 두 건 모두 머지"), as the
+        # listed ask allows (`_REF_COUNT`); it approves nothing on its own.
+        rest = _COUNT_PHRASE_RE.sub(" ", ref_re.sub(" ", flat))
         words = [w for w in re.split(r"[\s,()]+", rest)
                  if w and w not in _BULK_FILLERS and w not in _BULK_QUANTIFIERS]
         remainder = " ".join(words).strip(" .!~,·")
@@ -1760,7 +1799,7 @@ def _merge_escalation_reason(payload: dict) -> str | None:
     lo = (idxs[-1] + 1) if idxs else 0
     last_merge = _last_executed_merge(entries)
     # The PR this merge targets, so the question asking to merge it is read as
-    # part of the briefing (issue #ISSUE).
+    # part of the briefing (issue #1597).
     target = _merge_target_pr(entries, code, 0 if last_merge is None else last_merge + 1)
     current_text = _assistant_text(entries, lo, len(entries), target)
     if _is_trivial_merge(current_text):

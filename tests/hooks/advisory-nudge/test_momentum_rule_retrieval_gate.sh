@@ -844,6 +844,21 @@ run_merge_escalation_case "merge_bulk_question_dot_list_refs_only_denies" \
 # status line, so it is not the one briefing item a marked merge needs.
 run_merge_escalation_case "merge_prose_label_without_colon_denies" \
   "yes" "" "momentum-merge-prose-label-no-briefing.jsonl" "gh pr merge 999 --squash # briefing-surfaced: asked"
+# A question answered `보류` is not a briefing the user accepted. Its answer is a
+# tool_result, so it does not close the window the way a typed `보류` does, and
+# a first merge runs no answer check — the question must not release it.
+run_merge_escalation_case "merge_first_question_briefing_held_denies" \
+  "yes" "" "momentum-merge-first-question-briefing-held.jsonl" "gh pr merge 999 --squash # briefing-surfaced: asked"
+run_merge_escalation_case "merge_first_question_briefing_approved_passes" \
+  "no" "" "momentum-merge-first-question-briefing-approved.jsonl" "gh pr merge 999 --squash"
+# A question that briefs #833 and ends in an unnamed "Approve merge?" asks about
+# #833; its briefing does not release a merge of #999.
+run_merge_escalation_case "merge_question_briefs_other_pr_denies" \
+  "yes" "" "momentum-merge-question-briefs-other-pr.jsonl" "gh pr merge 999 --squash # briefing-surfaced: asked"
+# A picked label that restates the list with a count ("세 건 모두 머지") is the
+# same approval as the bare list.
+run_merge_escalation_case "merge_bulk_question_dot_list_count_label_passes" \
+  "no" "" "momentum-merge-bulk-question-dot-list-count-label.jsonl" "gh pr merge 999 --repo o/r --squash"
 # Outside the set, or not a single numbered merge: the bulk path does not apply.
 run_merge_escalation_case "merge_bulk_unlisted_pr_denies" \
   "yes" "" "momentum-merge-bulk-all-second.jsonl" "gh pr merge 1001 --squash"
