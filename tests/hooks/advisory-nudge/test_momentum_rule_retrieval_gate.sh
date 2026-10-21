@@ -859,6 +859,14 @@ run_merge_escalation_case "merge_question_briefs_other_pr_denies" \
 # same approval as the bare list.
 run_merge_escalation_case "merge_bulk_question_dot_list_count_label_passes" \
   "no" "" "momentum-merge-bulk-question-dot-list-count-label.jsonl" "gh pr merge 999 --repo o/r --squash"
+# A declined question (`is_error` result, no "q"="a" pair) is not a briefing the
+# user accepted either.
+run_merge_escalation_case "merge_first_question_briefing_declined_denies" \
+  "yes" "" "momentum-merge-first-question-briefing-declined.jsonl" "gh pr merge 999 --squash # briefing-surfaced: asked"
+# "두 건만 머지" against a three-PR listed ask picks a subset it never names;
+# a count that disagrees with the PRs the reply names is not an approval.
+run_merge_escalation_case "merge_bulk_question_dot_list_partial_count_denies" \
+  "yes" "" "momentum-merge-bulk-question-dot-list-partial-count.jsonl" "gh pr merge 999 --repo o/r --squash"
 # Outside the set, or not a single numbered merge: the bulk path does not apply.
 run_merge_escalation_case "merge_bulk_unlisted_pr_denies" \
   "yes" "" "momentum-merge-bulk-all-second.jsonl" "gh pr merge 1001 --squash"

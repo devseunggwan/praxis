@@ -116,7 +116,7 @@ about something else would add keywords no briefing of this merge carried, and
 a question that names PRs but not the target briefs another merge even when it
 ends in an unnamed "Approve merge?". A question whose answer holds the merge
 (`보류`, `_question_answer_holds` — a label that is neither a single nor a bulk
-approval) is not read either: its answer arrives as a
+approval) or that the user declined (`is_error` result) is not read either: its answer arrives as a
 tool_result, not a human message, so unlike a typed `보류` it does not close the
 window, and on a first merge — where no answer check runs — its briefing would
 release the merge the user just held. The answer checks (#1402) are otherwise
@@ -129,7 +129,9 @@ separator and `_REF_COUNT` the count, so both read as listed merge asks.
 `_SENTENCE_TAIL_RE` also splits clauses on `·`, which cut a picked label like
 `승인 — #1524 · #1525 · #1526 머지` into a piece holding only `#1525`; that piece
 now names a PR and approves nothing, and a count phrase restating the list
-(`#1525 · #1526 두 건 모두 머지`) is dropped the same way; the reply still needs
+(`#1525 · #1526 두 건 모두 머지`) is dropped the same way, but only when the
+count equals the number of PRs the reply names — `두 건만 머지` against a
+three-PR ask names none and picks a subset, so it is not read; the reply still needs
 one piece that is an approval (`#833 · #999` alone is not). The item vocabulary gained the
 section labels these briefings use, colon included — `바뀐 것:`, `확인한 것:`,
 `못 한 것:` (as in `확인 못 한 것:`) — because the bare phrase is ordinary prose too (`새로 바뀐 것은

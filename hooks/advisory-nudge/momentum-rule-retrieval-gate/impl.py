@@ -715,8 +715,9 @@ def _merge_ask_questions(block: object, pr: str, entries: list[dict]) -> list[st
 
     A question that names PRs but not `pr` briefs another merge, even when it
     ends in an unnamed "Approve merge?". A question whose answer holds the
-    merge (`보류`) is not a briefing the user accepted: its tool_result is not a
-    human message, so it does not close the window the way a typed `보류` does.
+    merge (`보류`) or that the user declined (`is_error`) is not a briefing the
+    user accepted: its tool_result is not a human message, so it does not close
+    the window the way a typed `보류` does.
     """
     if not (isinstance(block, dict) and block.get("type") == "tool_use"
             and block.get("name") == "AskUserQuestion"):
@@ -725,8 +726,9 @@ def _merge_ask_questions(block: object, pr: str, entries: list[dict]) -> list[st
     questions = inp.get("questions") if isinstance(inp, dict) else None
     if not isinstance(questions, list):
         return []
-    answer = _tool_result_content(entries, block.get("id"))
-    if answer is not None and _question_answer_holds(answer, pr):
+    result = _tool_result_block(entries, block.get("id"))
+    if result is not None and (
+            result.get("is_error") or _question_answer_holds(result.get("content"), pr)):
         return []
     return [q["question"] for q in questions
             if isinstance(q, dict) and isinstance(q.get("question"), str)
@@ -744,8 +746,8 @@ def _question_answer_holds(content: object, pr: str) -> bool:
                for q, a in _ASK_ANSWER_RE.findall(_user_message_text(content)))
 
 
-def _tool_result_content(entries: list[dict], tool_use_id: object) -> object:
-    """The content of the tool_result answering `tool_use_id`, else None."""
+def _tool_result_block(entries: list[dict], tool_use_id: object) -> dict | None:
+    """The tool_result block answering `tool_use_id`, else None."""
     if not isinstance(tool_use_id, str):
         return None
     for ev in entries:
@@ -756,7 +758,7 @@ def _tool_result_content(entries: list[dict], tool_use_id: object) -> object:
         for b in content:
             if (isinstance(b, dict) and b.get("type") == "tool_result"
                     and b.get("tool_use_id") == tool_use_id):
-                return b.get("content")
+                return b
     return None
 
 
@@ -1469,7 +1471,8 @@ _LISTED_ASK_RE = re.compile(
     re.IGNORECASE)
 # Env assignments that move a `gh` call to another repo without a flag.
 _REPO_ENV_RE = re.compile(r"^(?:GH_REPO|GH_HOST)=")
-_COUNT_PHRASE_RE = re.compile(r"(?:두|세|네|다섯|\d+)\s*(?:건|개)")
+_COUNT_PHRASE_RE = re.compile(r"(두|세|네|다섯|\d+)\s*(?:건|개)")
+_COUNT_WORDS = {"두": 2, "세": 3, "네": 4, "다섯": 5}
 
 
 def _bulk_reply_prs(text: str) -> set[str] | None:
@@ -1492,6 +1495,7 @@ def _bulk_reply_prs(text: str) -> set[str] | None:
     # so it stays in the text and voids the reply instead of naming PR 1.
     ref_re = _PR_REF_RE if _PR_REF_RE.search(raw) else _REPLY_PR_RE
     approved = False
+    counts: list[int] = []
     for sentence in _SENTENCE_TAIL_RE.split(raw):
         if not sentence.strip():
             continue
@@ -1500,7 +1504,10 @@ def _bulk_reply_prs(text: str) -> set[str] | None:
         named |= refs
         # A count phrase restates the list ("#1 · #2 두 건 모두 머지"), as the
         # listed ask allows (`_REF_COUNT`); it approves nothing on its own.
-        rest = _COUNT_PHRASE_RE.sub(" ", ref_re.sub(" ", flat))
+        rest = ref_re.sub(" ", flat)
+        counts += [_COUNT_WORDS.get(m.group(1)) or int(m.group(1))
+                   for m in _COUNT_PHRASE_RE.finditer(rest)]
+        rest = _COUNT_PHRASE_RE.sub(" ", rest)
         words = [w for w in re.split(r"[\s,()]+", rest)
                  if w and w not in _BULK_FILLERS and w not in _BULK_QUANTIFIERS]
         remainder = " ".join(words).strip(" .!~,·")
@@ -1512,6 +1519,11 @@ def _bulk_reply_prs(text: str) -> set[str] | None:
                 or (words and all(w in _BULK_APPROVAL_WORDS for w in words))):
             return None
         approved = True
+    # A count must restate the PRs the reply names: "두 건만 머지" against a
+    # three-PR ask names none and picks a subset, and "두 건 모두" over three
+    # references disagrees with itself — either way the reply is not read.
+    if any(n != len(named) for n in counts):
+        return None
     return named if approved else None
 
 
