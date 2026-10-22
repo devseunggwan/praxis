@@ -102,6 +102,41 @@ What was verified / What was NOT verified / Risk-blast-radius / Open items /
 explicit approve-ask. Keyword groups live in `_BRIEFING_ITEM_GROUPS`
 (`impl.py`); EN/KO variants are enumerated there, not duplicated in prose here.
 
+**The merge question is part of the briefing (issue #1597).** The windows this
+gate scores for a merge read the assistant's prose blocks *and* each
+`AskUserQuestion` question that asks to merge the target PR (`_is_merge_ask`;
+`_assistant_text(..., pr)`). The user reads that question before answering it,
+so a briefing written inside it is one the user saw. Hosts whose approval tool
+carries the whole briefing in the question — Hermes `clarify`, mapped to
+`AskUserQuestion` by the adapter — left the prose empty: the first merge of a
+bulk set passed only when unrelated prose happened to hold a keyword, and every
+later merge was denied, because the serial-merge cut (#1214) leaves only prose
+written after the last merge. Other questions are not read: a sibling question
+about something else would add keywords no briefing of this merge carried, and
+a question that names PRs but not the target briefs another merge even when it
+ends in an unnamed "Approve merge?". A question whose answer holds the merge
+(`보류`, `_question_answer_holds` — a label that is neither a single nor a bulk
+approval) or that the user declined (`is_error` result) is not read either: its answer arrives as a
+tool_result, not a human message, so unlike a typed `보류` it does not close the
+window, and on a first merge — where no answer check runs — its briefing would
+release the merge the user just held. The answer checks (#1402) are otherwise
+unchanged, and a question carrying no briefing items still denies.
+
+**`·` lists and Korean section labels (issue #1597).** Korean prose joins a PR
+list with `·` (`#1525 · #1526을 머지할까요?`) and may restate it with a count
+(`#1524 · #1525 · #1526 세 건을 머지할까요?`). `_REF_LIST` takes `·` as a
+separator and `_REF_COUNT` the count, so both read as listed merge asks.
+`_SENTENCE_TAIL_RE` also splits clauses on `·`, which cut a picked label like
+`승인 — #1524 · #1525 · #1526 머지` into a piece holding only `#1525`; that piece
+now names a PR and approves nothing, and a count phrase restating the list
+(`#1525 · #1526 두 건 모두 머지`) is dropped the same way, but only when the
+count equals the number of PRs the reply names — `두 건만 머지` against a
+three-PR ask names none and picks a subset, so it is not read; the reply still needs
+one piece that is an approval (`#833 · #999` alone is not). The item vocabulary gained the
+section labels these briefings use, colon included — `바뀐 것:`, `확인한 것:`,
+`못 한 것:` (as in `확인 못 한 것:`) — because the bare phrase is ordinary prose too (`새로 바뀐 것은
+없습니다` released a marked merge in corpus replay before the colon was required).
+
 **Vocabulary coverage is EN/KO substring matching, not free-form Korean
 (issue #1118).** A real 6-item briefing was blocked at 3/6 because it phrased
 group0/2/4 as `무엇이 바뀌는 것` / `검증 안 된` / `열린 항목` — content the

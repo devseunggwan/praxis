@@ -1,0 +1,3 @@
+{"type": "user", "message": {"role": "user", "content": "#999 상태 봐줘"}}
+{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": "PR #999 는 CI 전부 통과했고 새로 바뀐 것은 없습니다. 머지하시려면 `merge` 라고 답해 주세요."}]}}
+{"type": "user", "message": {"role": "user", "content": "merge"}}
