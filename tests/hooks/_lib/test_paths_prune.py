@@ -59,7 +59,7 @@ def _file(cache: Path, name: str, days: float) -> Path:
 def test_current_session_entries_survive_a_sweep(tmp_path: Path) -> None:
     cache = tmp_path / "cache"
     cache.mkdir()
-    mine = _file(cache, f"retrospect-active-{SID}.json", days=30)
+    mine = _file(cache, f"md-read-history-{SID}.json", days=30)
     mine_too = _file(cache, f"session-intent-{SID}.json", days=30)
 
     removed = _paths.prune_stale(str(cache), ttl_days=7.0, session_id=SID)
@@ -174,8 +174,8 @@ def test_resolve_cache_file_threads_session_id(tmp_path: Path) -> None:
     os.environ["PRAXIS_HOME"] = str(home)
     os.environ["PRAXIS_CACHE_TTL_DAYS"] = "7"
     try:
-        sibling = _file(cache, f"retrospect-active-{SID}.json", days=30)
-        theirs = _file(cache, f"retrospect-active-{OTHER}.json", days=30)
+        sibling = _file(cache, f"md-read-history-{SID}.json", days=30)
+        theirs = _file(cache, f"md-read-history-{OTHER}.json", days=30)
 
         resolved = _paths.resolve_cache_file(
             f"session-intent-{SID}.json", session_id=SID
@@ -216,12 +216,12 @@ def test_second_resolution_skips_the_sweep(tmp_path: Path, monkeypatch) -> None:
     # 0 sweeps every time, a large value never resumes (#1079, codex round 1).
     monkeypatch.delenv("PRAXIS_CACHE_PRUNE_INTERVAL_HOURS", raising=False)
     try:
-        first = _file(cache, f"retrospect-active-{OTHER}.json", days=30)
+        first = _file(cache, f"md-read-history-{OTHER}.json", days=30)
         _paths.resolve_cache_file(f"session-intent-{SID}.json", session_id=SID)
         assert not first.exists()          # sweep 1 ran
         assert _stamp(cache).exists()
 
-        second = _file(cache, f"retrospect-active-{OTHER}.json", days=30)
+        second = _file(cache, f"md-read-history-{OTHER}.json", days=30)
         _paths.resolve_cache_file(f"session-intent-{SID}.json", session_id=SID)
         assert second.exists()             # sweep 2 was throttled away
     finally:
@@ -242,7 +242,7 @@ def test_sweep_resumes_once_the_interval_has_passed(tmp_path: Path, monkeypatch)
     try:
         _paths.resolve_cache_file(f"session-intent-{SID}.json", session_id=SID)
         _aged(_stamp(cache), days=2)       # stamp older than the 24h interval
-        stale = _file(cache, f"retrospect-active-{OTHER}.json", days=30)
+        stale = _file(cache, f"md-read-history-{OTHER}.json", days=30)
         _paths.resolve_cache_file(f"session-intent-{SID}.json", session_id=SID)
         assert not stale.exists()
     finally:
@@ -260,7 +260,7 @@ def test_zero_interval_restores_every_time_sweeping(tmp_path: Path) -> None:
     os.environ["PRAXIS_CACHE_PRUNE_INTERVAL_HOURS"] = "0"
     try:
         _paths.resolve_cache_file(f"session-intent-{SID}.json", session_id=SID)
-        stale = _file(cache, f"retrospect-active-{OTHER}.json", days=30)
+        stale = _file(cache, f"md-read-history-{OTHER}.json", days=30)
         _paths.resolve_cache_file(f"session-intent-{SID}.json", session_id=SID)
         assert not stale.exists()
     finally:

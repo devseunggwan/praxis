@@ -491,9 +491,6 @@ can miss a note without error.
   assistant text since the previous tool call.
 - `hooks/advisory-nudge/momentum-rule-retrieval-gate/impl.py:672` —
   `_assistant_text`, assistant text across an index range.
-- `hooks/advisory-nudge/negation-answer-quote-advisory/impl.py:259` —
-  `pending_negation_answer`, which disarms when a later assistant `text`
-  block quotes the answer.
 - `hooks/completion-verify/pr-report-destination-gate/impl.py:247` —
   `_reduce_event`, the PR numbers named in each event's `text` blocks.
 - `hooks/completion-verify/runtime-state-claim-gate/impl.py:330` —
@@ -507,7 +504,6 @@ block, which was not observed.
 - `hooks/completion-verify/completion-verify/impl.sh:187` — `$last_text`.
   Line 203 filters `text` blocks too, but on `tool_result` content, which
   this entry does not cover.
-- `hooks/completion-verify/retrospect-mix-check/impl.sh:106` — `LAST_TEXT`.
 - `hooks/advisory-nudge/response-language-nudge/impl.py:176` —
   `_last_assistant_uuid_and_text`.
 - `hooks/_lib/_transcript.py:568` — `extract_last_assistant_text`. It is the

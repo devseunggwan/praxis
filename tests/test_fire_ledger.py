@@ -456,7 +456,7 @@ def test_standalone_suppression_does_not_kill_its_own_rich_record(tmp_path, monk
     """A standalone hook still gets its rich record after suppressing the coarse one.
 
     `suppress_coarse_duplicate` used to set `_DISPATCHER_PROCESS`, and two hooks
-    (output-block-falsify-advisory, comment-yap-advisory) call it BEFORE their
+    (output-block-falsify-advisory and a since-removed advisory) called it BEFORE their
     record_session_fire. Gating the rich write on that same flag therefore
     dropped those hooks' only telemetry — 8 assertions in
     tests/hooks/advisory-nudge/test_output_block_falsify_advisory.sh went from

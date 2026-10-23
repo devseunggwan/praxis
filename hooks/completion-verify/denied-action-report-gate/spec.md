@@ -9,7 +9,7 @@ Supported hosts: all
 
 ## Why this exists
 
-Issue #1392. `retrospect-mix-check` Gate-12 (#1013) already holds this rule, and
+Issue #1392. The retrospect skill's Gate-12 (#1013) already holds this rule, and
 states the mechanism better than a restatement would: a refused action "has no
 outcome, so it leaves no error, no correction and no confession, and selection
 by ease of recall never reaches it". Everything else in a session leaves a trace
@@ -277,7 +277,7 @@ drops sidechain markers itself.
 
 | Hook | Overlap |
 | ---- | ------- |
-| `retrospect-mix-check` Gate-12 | same rule and same oracle, but reachable only inside a retrospect's Stage-3 fences. This gate is the ordinary-report half; neither subsumes the other |
+| `retrospect` skill, Gate-12 | same rule and same oracle, but reachable only inside a retrospect's Stage-3 fences, and self-checked by the skill. This gate is the ordinary-report half; neither subsumes the other |
 | `rejected-mutation-reconsent-gate` | the same `scan_user_rejections` oracle, but `PreToolUse`: it blocks *re-attempting* a refused mutation. Different surface, different claim — and it keeps the `user-rejected`-only default, because re-issuing a corrected call after a hook block is the intended recovery, not a reconsent case. That is why `kinds` is a parameter rather than a widening in place |
 | `negative-existence-verdict-gate` | source of the narrow-trigger discipline the turn scoping implements |
 

@@ -869,7 +869,7 @@ def read_last_user_record(
 # Two consumers need the same enumeration and must not drift:
 #   - preflight-gate/rejected-mutation-reconsent-gate (#1007) asks again before
 #     a mutation whose target the user already refused;
-#   - retrospect pre-scan lane 6 / retrospect-mix-check Gate-12 (#1013) supply
+#   - retrospect pre-scan lane 6 / the retrospect skill's Gate-12 (#1013) supply
 #     the denied-actions candidates a confession-biased friction scan misses.
 #
 # Shape, verified against a live transcript (2 records in

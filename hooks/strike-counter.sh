@@ -4,7 +4,7 @@
 # Direct exec so the impl's own #!/bin/bash shebang is honored —
 # `exec sh impl.sh` would re-route through /bin/sh (dash on Debian)
 # and break Bash-only syntax like [[ ... =~ ... ]] used in
-# retrospect-mix-check / codex-review-route / strike-counter.
+# completion-verify / strike-counter.
 # Absent impl means the hook cannot judge, so it must not judge — same
 # contract as the python wrapper above.
 IMPL="$(dirname "$0")/completion-verify/strike-counter/impl.sh"

@@ -113,8 +113,7 @@ decision to act without looking.
 
 Claude only. The refusal fields (`toolDenialKind`, the refusal sentence) are
 Claude Code transcript fields. Cursor's `preToolUse` accepts `ask` but does not
-enforce it, and Codex reports an `ask` hook as failed and lets the call through
-(see `cross-tool-reroute-gate/spec.md`, *Known limitations* 4).
+enforce it, and Codex reports an `ask` hook as failed and lets the call through.
 
 ## Recurrence evidence
 
@@ -165,7 +164,6 @@ transcript once.
 | --- | --- | --- |
 | `denied-action-report-gate` | reports a refused call at `Stop` | this one asks before the next mutation |
 | `rejected-mutation-reconsent-gate` | re-running a refused destructive target | this one covers any mutation after any refused mutating call |
-| `cross-tool-reroute-gate` | reaching a hook-blocked target through another tool | reads hook blocks, which this one ignores |
 
 ## Tests
 

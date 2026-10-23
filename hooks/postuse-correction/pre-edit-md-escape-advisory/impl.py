@@ -153,8 +153,7 @@ def _extract_session_id(payload: dict) -> str | None:
     """Return the trimmed `session_id` from the hook payload, or None.
 
     Canonical praxis hook session key — same field consumed by
-    `completion-verify.sh`, `retrospect-mix-check.sh`, and
-    `strike-counter.sh`.
+    `completion-verify.sh` and `strike-counter.sh`.
     """
     sid = payload.get("session_id")
     if isinstance(sid, str) and sid.strip():
@@ -197,8 +196,7 @@ def save_history(path: str, history: dict) -> bool:
     answers with an EMPTY dict. The whole read set restarts, so the Edit gate
     scores a file that WAS read as unread — and denies under
     `PRAXIS_MD_ESCAPE_MODE=block`. The pid is the floor under that degraded
-    path (issue #970 established the same floor for the sibling
-    `jq-config-empty-dict-advisory`). Return True on success.
+    path (issue #970 first established this floor). Return True on success.
     """
     tmp_path = f"{path}.{os.getpid()}.tmp"
     try:

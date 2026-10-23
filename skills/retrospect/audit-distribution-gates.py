@@ -3,18 +3,17 @@
 
 Producer-side pre-flight: parses a Stage 3 draft (unified findings table +
 memory_scan evidence blocks) and runs every mechanically-checkable Stage 2.5
-gate, mirroring the Stop hook's parsing semantics
-(hooks/completion-verify/retrospect-mix-check/impl.sh) so a clean audit here
-cannot be blocked later by the hook on the same checks.
+gate, using the same parsing semantics the Stage 3 gates apply,
+so the per-finding checks stay deterministic.
 
 Semantic gates stay with the agent: Gate-3 (evidence robustness) and Gate-6
 (oracle match) verdicts are supplied via --gate3 / --gate6. The script refuses
 to leave Gate-3 unevaluated (None or NA) when compound findings exist; Gate-6
 applicability (stored-value corrections) is not mechanically detectable, so
-its verdict is fully agent-trusted. Session-level Stop-hook gates (7-10:
-transcript receipt, suppression ledger, silent-pass coverage, critic roots)
-are out of scope here — a script-clean draft can still be hook-blocked on
-those.
+its verdict is fully agent-trusted. Session-level gates (7, 8, 10:
+transcript receipt, suppression ledger, critic roots)
+are out of scope here and stay self-checked — a script-clean draft can still
+fail those.
 
 Usage:
   audit-distribution-gates.py --draft <stage3-draft.md>

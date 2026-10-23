@@ -56,20 +56,16 @@ indistinguishable from a true same-topic loop under this proxy.
 `PostToolUse(AskUserQuestion)`, appending one record per call as it happens
 — mirrors `bypass-telemetry`'s (`hooks/postuse-correction/bypass-telemetry`)
 per-event append-as-you-go pattern. The alternative considered was a
-Stop-hook transcript sweep at session end; rejected because
-`hooks/completion-verify/retrospect-mix-check` already does an expensive
-transcript parse for its own, unrelated self-validation purpose (see
-"Boundary" below) — a second sweep would duplicate that cost for no shared
-benefit, and per-event append needs no transcript access at all.
+Stop-hook transcript sweep at session end; rejected because a whole-transcript
+parse at every Stop is expensive, and per-event append needs no transcript
+access at all.
 
-## Boundary: does NOT touch retrospect-mix-check
+## Boundary: an independent detector
 
-`hooks/completion-verify/retrospect-mix-check/impl.sh` (L607-668, L732-746)
-already has a "user-correction marker" regex, but it was built for
-retrospect's own Stop-hook self-validation (did the AI's own response get
-corrected) — a different question from "did the AI ask the same clarifying
-question more than once." This hook does not read, call, or modify
-retrospect-mix-check in any way; it is an independent detector.
+retrospect's "user-correction marker" regex answers a different question (did
+the AI's own response get corrected) from this hook's "did the AI ask the same
+clarifying question more than once." This hook shares no code or state with
+it.
 
 ## Fire-ledger record format
 

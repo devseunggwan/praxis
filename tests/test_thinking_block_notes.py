@@ -33,7 +33,6 @@ def _load(name: str, rel: str) -> ModuleType:
 
 cited = _load("cited_rule_gate", "advisory-nudge/cited-rule-gate")
 momentum = _load("momentum_rule_retrieval_gate", "advisory-nudge/momentum-rule-retrieval-gate")
-negation = _load("negation_answer_quote_advisory", "advisory-nudge/negation-answer-quote-advisory")
 pr_report = _load("pr_report_destination_gate", "completion-verify/pr-report-destination-gate")
 runtime_claim = _load("runtime_state_claim_gate", "completion-verify/runtime-state-claim-gate")
 
@@ -103,26 +102,6 @@ class TestMomentumAssistantText:
     def test_blank_thinking_adds_nothing(self):
         events = _blank_thinking()
         assert momentum._assistant_text(events, 0, len(events)) == ""
-
-
-class TestNegationQuote:
-    ANSWER = "아니요, 그 방식 말고 파일을 먼저 만들어 주세요"
-
-    def _asked(self) -> list[dict]:
-        ask = _assistant([{"type": "tool_use", "id": "q_1", "name": "AskUserQuestion",
-                           "input": {"questions": []}}], "msg_0")
-        answer = {"type": "user", "message": {"role": "user", "content": [{
-            "type": "tool_result", "tool_use_id": "q_1",
-            "content": f'The user answered: "How?"="{self.ANSWER}"'}]}}
-        return [ask, answer]
-
-    def test_unquoted_answer_stays_armed(self):
-        assert negation.pending_negation_answer(self._asked() + _blank_thinking()) == self.ANSWER
-
-    @pytest.mark.parametrize("shape", SHAPES)
-    def test_quoting_note_disarms(self, shape):
-        events = self._asked() + _note(shape, f"You said: {self.ANSWER}. Writing the file first.")
-        assert negation.pending_negation_answer(events) is None
 
 
 class TestPrReportContext:

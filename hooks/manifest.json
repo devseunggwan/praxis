@@ -118,20 +118,6 @@
       }
     },
     {
-      "name": "retrospect-active-marker",
-      "role": "preflight-gate",
-      "event": "UserPromptSubmit",
-      "timeout": 5,
-      "review_by": "2026-12-04"
-    },
-    {
-      "name": "retrospect-active-marker",
-      "role": "preflight-gate",
-      "event": "PreToolUse",
-      "matcher": "Skill",
-      "timeout": 5
-    },
-    {
       "name": "memory-hint",
       "role": "advisory-nudge",
       "event": "PreToolUse",
@@ -231,40 +217,6 @@
       "role": "preflight-gate",
       "event": "PreToolUse",
       "matcher": "Agent|Task",
-      "timeout": 5
-    },
-    {
-      "name": "cross-tool-reroute-gate",
-      "role": "preflight-gate",
-      "event": "PreToolUse",
-      "matcher": "Bash",
-      "hosts": [
-        "claude",
-        "codex"
-      ],
-      "timeout": 5,
-      "review_by": "2026-12-23"
-    },
-    {
-      "name": "cross-tool-reroute-gate",
-      "role": "preflight-gate",
-      "event": "PreToolUse",
-      "matcher": "Edit|NotebookEdit|Write",
-      "hosts": [
-        "claude",
-        "codex"
-      ],
-      "timeout": 5
-    },
-    {
-      "name": "cross-tool-reroute-gate",
-      "role": "preflight-gate",
-      "event": "PreToolUse",
-      "matcher": "mcp__.*",
-      "hosts": [
-        "claude",
-        "codex"
-      ],
       "timeout": 5
     },
     {
@@ -670,14 +622,6 @@
       "review_by": "2026-12-04"
     },
     {
-      "name": "comment-yap-advisory",
-      "role": "advisory-nudge",
-      "event": "PreToolUse",
-      "matcher": "Edit|Write",
-      "timeout": 5,
-      "review_by": "2026-12-04"
-    },
-    {
       "name": "destructive-bash-guard",
       "role": "advisory-nudge",
       "event": "PreToolUse",
@@ -720,14 +664,6 @@
       }
     },
     {
-      "name": "jq-config-empty-dict-advisory",
-      "role": "advisory-nudge",
-      "event": "PreToolUse",
-      "matcher": "Bash",
-      "timeout": 5,
-      "review_by": "2026-12-04"
-    },
-    {
       "name": "bash-worktree-existence-advisory",
       "role": "advisory-nudge",
       "event": "PreToolUse",
@@ -737,14 +673,6 @@
     },
     {
       "name": "cwd-relative-exec-advisory",
-      "role": "advisory-nudge",
-      "event": "PreToolUse",
-      "matcher": "Bash",
-      "timeout": 5,
-      "review_by": "2026-12-04"
-    },
-    {
-      "name": "pytest-direct-exec-advisory",
       "role": "advisory-nudge",
       "event": "PreToolUse",
       "matcher": "Bash",
@@ -798,26 +726,6 @@
       "mode": {
         "bypass_env": [
           "PRAXIS_SKIP_STAGED_FILE_ENUM"
-        ]
-      }
-    },
-    {
-      "name": "commit-decomposition-advisory",
-      "role": "advisory-nudge",
-      "event": "PreToolUse",
-      "matcher": "Bash",
-      "gates": [
-        "git-commit"
-      ],
-      "hosts": [
-        "claude",
-        "hermes"
-      ],
-      "timeout": 10,
-      "review_by": "2026-12-04",
-      "mode": {
-        "bypass_env": [
-          "PRAXIS_SKIP_COMMIT_DECOMPOSITION_ADVISORY"
         ]
       }
     },
@@ -1023,27 +931,6 @@
       }
     },
     {
-      "name": "negation-answer-quote-advisory",
-      "role": "advisory-nudge",
-      "event": "PreToolUse",
-      "matcher": "Bash",
-      "timeout": 5,
-      "review_by": "2026-12-19",
-      "mode": {
-        "bypass_env": ["PRAXIS_NEGATION_ANSWER_BYPASS"]
-      }
-    },
-    {
-      "name": "negation-answer-quote-advisory",
-      "role": "advisory-nudge",
-      "event": "PreToolUse",
-      "matcher": "mcp__.*",
-      "timeout": 5,
-      "mode": {
-        "bypass_env": ["PRAXIS_NEGATION_ANSWER_BYPASS"]
-      }
-    },
-    {
       "name": "block-commit-without-codex-review",
       "role": "preflight-gate",
       "event": "PreToolUse",
@@ -1086,22 +973,6 @@
       "mode": {
         "bypass_env": [
           "PRAXIS_HOOK_BYPASS_HUB_ENFORCE"
-        ]
-      }
-    },
-    {
-      "name": "skill-gate-commands",
-      "role": "preflight-gate",
-      "event": "PreToolUse",
-      "matcher": "Bash",
-      "timeout": 5,
-      "review_by": "2026-12-04",
-      "mode": {
-        "bypass_env": [
-          "PRAXIS_HOOK_BYPASS_SKILL_GATE"
-        ],
-        "external_commands": [
-          "git remote get-url origin"
         ]
       }
     },
@@ -1247,14 +1118,6 @@
           "PRAXIS_MD_READ_HISTORY_FILE"
         ]
       }
-    },
-    {
-      "name": "advisory-wrapper-signature-verify",
-      "role": "advisory-nudge",
-      "event": "PreToolUse",
-      "matcher": "Edit|Write",
-      "timeout": 5,
-      "review_by": "2026-12-04"
     },
     {
       "name": "bulk-write-memory-checkpoint",
@@ -1461,35 +1324,6 @@
       "review_by": "2026-12-04"
     },
     {
-      "name": "elapsed-time-signal",
-      "role": "advisory-nudge",
-      "body": "impl.sh",
-      "event": "UserPromptSubmit",
-      "hosts": ["claude"],
-      "args": ["UserPromptSubmit"],
-      "timeout": 3,
-      "review_by": "2026-12-25"
-    },
-    {
-      "name": "elapsed-time-signal",
-      "role": "advisory-nudge",
-      "body": "impl.sh",
-      "event": "PostToolUse",
-      "matcher": ".*",
-      "hosts": ["claude"],
-      "args": ["PostToolUse"],
-      "timeout": 3
-    },
-    {
-      "name": "elapsed-time-signal",
-      "role": "advisory-nudge",
-      "body": "impl.sh",
-      "event": "PostToolUseFailure",
-      "hosts": ["claude"],
-      "args": ["PostToolUseFailure"],
-      "timeout": 3
-    },
-    {
       "name": "parallel-gated-mutation-gate",
       "role": "preflight-gate",
       "event": "PostToolBatch",
@@ -1526,14 +1360,6 @@
       "event": "SubagentStop",
       "hosts": ["claude"],
       "timeout": 10
-    },
-    {
-      "name": "retrospect-mix-check",
-      "role": "completion-verify",
-      "body": "impl.sh",
-      "event": "Stop",
-      "timeout": 10,
-      "review_by": "2026-12-04"
     },
     {
       "name": "completion-signal-gate",

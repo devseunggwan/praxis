@@ -35,7 +35,6 @@ in [`../SECURITY.md`](../SECURITY.md).
 | `PRAXIS_HOOK_BYPASS_DELEGATION_CONTEXT` | `delegation-context-inject` | Skip the subagent shared-state isolation contract injection. Exact value `1` after stripping — `true` / `yes` / `0` leave the injection active |
 | `PRAXIS_HOOK_BYPASS_DESTRUCTIVE_BASH` | `destructive-bash-guard` | Skip the destructive-command guard |
 | `PRAXIS_HOOK_BYPASS_ROUTE_SIGNAL` | `bypass-route-signal` | Skip the bypass-route frequency meter. The hook emits nothing on any path, so setting this changes only whether the turn is counted — it silences no output and relaxes no gate |
-| `PRAXIS_HOOK_BYPASS_SKILL_GATE` | `skill-gate-commands` | Skip the skill-gated-command preflight |
 | `PRAXIS_HOOK_BYPASS_MEMORY_FIELDS` | `memory-distillation-fields-gate` | Skip the memory distillation-field preflight |
 | `PRAXIS_HOOK_BYPASS_WORKTREE_GATE` | `worktree-edit-gate` | Skip the worktree-edit preflight |
 | `PRAXIS_HOOK_BYPASS_DECISION_CONSISTENCY_GATE` | `write-decision-consistency-gate` | Skip the Decisions-block consistency preflight |
@@ -73,10 +72,8 @@ in [`../SECURITY.md`](../SECURITY.md).
 | `PRAXIS_PBGUARD_SKIP` | `pre-edit-protected-branch-guard` | Skip the protected-branch edit guard |
 | `PRAXIS_MOMENTUM_BYPASS` | `momentum-rule-retrieval-gate` | Skip the high-momentum rule nudge |
 | `PRAXIS_MOMENTUM_MERGE_ADVISORY` | `momentum-rule-retrieval-gate` | Demote the merge-briefing escalation to advisory (stderr reminder still fires; no `deny` block on an incomplete pre-merge briefing) |
-| `PRAXIS_NEGATION_ANSWER_BYPASS` | `negation-answer-quote-advisory` | Skip the unquoted-correction advisory before an external write |
 | `PRAXIS_VERSION_BUMP_BYPASS` | `version-bump-evidence-check` | Skip the version-bump evidence advisory |
 | `PRAXIS_SKIP_STAGED_FILE_ENUM` | `pre-commit-staged-file-enumeration` | Skip the pre-commit staged-file enumeration advisory |
-| `PRAXIS_SKIP_COMMIT_DECOMPOSITION_ADVISORY` | `commit-decomposition-advisory` | Skip the commit-decomposition advisory |
 | `PRAXIS_SKIP_MODEL_ROUTING` | `model-routing-advisory` | Skip the delegation `--model` tier-mismatch advisory |
 | `PRAXIS_GH_JSON_BYPASS` | `gh-json-validator` | Skip the `gh --json` field validation (env var form). Note: the inline-comment form `# PRAXIS_GH_JSON_BYPASS=skip` also bypasses the hook but is **not** captured by bypass-telemetry |
 | `PRAXIS_ASK_END_ADVISORY` | `block-ask-end-option` | Demote the end-option guard to advisory mode (exit 0 + stderr) |
@@ -159,7 +156,6 @@ per-hook `spec.md` before promoting any of them.
 | `PRAXIS_BRANCH_NAME_REGEX` | `branch-name-check` | Override the allowed branch-name regex |
 | `PRAXIS_BRANCH_NAME_WHITELIST` | `branch-name-check` | Allowlist of exempt branch names |
 | `PRAXIS_COMMIT_TITLE_ALLOWED_TYPES` | `commit-title-format-check` | Allowed conventional-commit types |
-| `PRAXIS_SKILL_GATED_COMMANDS` | `skill-gate-commands` | Commands that require a skill invocation |
 | `PRAXIS_HUB_MEDIATED_ORGS` | `block-child-repo-issue-create` | Orgs whose child-repo issues route through the hub |
 | `PRAXIS_WORKTREE_ENFORCED_REPOS` | `worktree-edit-gate` | Repos where the worktree workflow is enforced |
 | `PRAXIS_CITED_RULE_PREFIXES` | `cited-rule-gate` | Comma-separated citation prefixes (default `Rule:`) |
@@ -170,8 +166,6 @@ per-hook `spec.md` before promoting any of them.
 | `PRAXIS_INTENT_PIVOT_MODE` | `session-intent` | Pivot-detection mode |
 | `PRAXIS_SKIP_JEV_ROUTING` | `cmux-delegate` (skill, not a hook) | `1` stops the delegation route script from calling TypeSafe's System One API, so an omitted `--model` keeps the pre-jev default. See [`../PRIVACY.md`](../PRIVACY.md) Direct egress (issue #1481) |
 | `PRAXIS_RESPONSE_LANGUAGE` | `postcompact-context`, `response-language-nudge` | User's response-language instruction. `postcompact-context` echoes it verbatim as one context line; `response-language-nudge` additionally requires it to normalize to Korean before it runs its drift check. No default, no hardcoded language — unset or blank leaves both hooks' output unchanged (issue #1476) |
-| `PRAXIS_TIME_START_EPOCH` | `elapsed-time-signal` | Launch time in epoch seconds; its presence opts the session into the `elapsed <n>s` signal. Set by the `cmux-delegate --time-budget` wrapper, not by hand. Unset means no output and no stdin read (issue #1501) |
-| `PRAXIS_TIME_BUDGET_S` | `elapsed-time-signal` | Budget in seconds shown as `elapsed <n>s / <budget>s`; `0` or unset means elapsed-only. Advisory only: nothing stops the worker at the limit (issue #1501) |
 
 ## Path / test (relocate state, caches, logs)
 

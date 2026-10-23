@@ -137,6 +137,10 @@ carries the ranking: #4 is a HIGH-cost row sitting after the LOW-MED #3.
   blocking hook's own refusal printed is the permitted bypass line, so this
   gate exempts it. The row stays open for every other route (permission rules,
   settings edits, moving the file), which this gate does not read.
+- **Gap #4, agent-executed reroute through another tool → open, no hook**:
+  `cross-tool-reroute-gate` was removed for zero engagement over 60 days
+  (2026-08-25..2026-10-23), so nothing now asks before a call reaches a
+  hook-blocked target through a different tool.
 - Gaps **#2** and **#3** are surfaced here but **not yet issue-tracked** — open
   them if/when the cost is judged worth a dedicated hook.
 - Gap **#5** is deliberately unhooked. `#1009` measured this same axis and chose a

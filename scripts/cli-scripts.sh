@@ -15,12 +15,7 @@
 
 # shellcheck disable=SC2034  # CLI_SCRIPTS is consumed by the sourcing script
 CLI_SCRIPTS=(
-  "skills/recover-sessions/claude-recover"
-  "skills/recover-sessions/claude-recover-scan"
-  "skills/cmux-resume-sessions/cmux-resume-sessions"
-  "skills/cmux-save-sessions/cmux-save-sessions"
   "skills/cmux-recover-sessions/cmux-recover-sessions"
-  "skills/cmux-session-manager/cmux-session-status"
-  "skills/cmux-session-manager/cmux-session-cleanup"
+  "skills/cmux-recover-sessions/claude-recover-scan"
   "skills/bypass-review/bypass-review"
 )

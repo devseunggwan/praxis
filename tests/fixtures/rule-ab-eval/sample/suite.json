@@ -1,20 +1,28 @@
 {
-  "description": "elapsed-time-signal (#1501): does a visible time budget change wall-clock, tool use or answer quality on short read-only tasks?",
+  "description": "Sample suite for the rule-ab-eval harness tests: two arms, four read-only tasks against this repository. The hook registrations are placeholders; the tests drive a stand-in claude.",
   "hooks": {
-    "UserPromptSubmit": [
-      {"hooks": [{"type": "command", "command": "sh \"$PRAXIS_EVAL_REPO/hooks/advisory-nudge/elapsed-time-signal/impl.sh\" UserPromptSubmit"}]}
-    ],
-    "PostToolUse": [
-      {"matcher": ".*", "hooks": [{"type": "command", "command": "sh \"$PRAXIS_EVAL_REPO/hooks/advisory-nudge/elapsed-time-signal/impl.sh\" PostToolUse"}]}
-    ],
-    "PostToolUseFailure": [
-      {"matcher": ".*", "hooks": [{"type": "command", "command": "sh \"$PRAXIS_EVAL_REPO/hooks/advisory-nudge/elapsed-time-signal/impl.sh\" PostToolUseFailure"}]}
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"$PRAXIS_EVAL_REPO/hooks/strike-counter.sh\""
+          }
+        ]
+      }
     ]
   },
-  "signal_hook": "elapsed-time-signal",
+  "signal_hook": "strike-counter",
   "arms": {
-    "budget": {"env": {"PRAXIS_TIME_START_EPOCH": "@now", "PRAXIS_TIME_BUDGET_S": "600"}},
-    "none": {"env": {}}
+    "budget": {
+      "env": {
+        "PRAXIS_TIME_START_EPOCH": "@now",
+        "PRAXIS_TIME_BUDGET_S": "600"
+      }
+    },
+    "none": {
+      "env": {}
+    }
   },
   "tasks": {
     "consumers": {
@@ -26,7 +34,7 @@
       "oracle": "bash tests/hooks/completion-verify/test_early_stop_advisory.sh 2>&1 | tail -1 | grep -oE '[0-9]+ passed, [0-9]+ failed'"
     },
     "specdrift": {
-      "prompt": "Compare hooks/advisory-nudge/elapsed-time-signal/spec.md with hooks/advisory-nudge/elapsed-time-signal/impl.sh. Report every place where the spec describes behaviour the implementation does not have, or the reverse, with the lines on each side. If they agree, say so and say what you compared."
+      "prompt": "Compare hooks/advisory-nudge/long-foreground-call-advisory/spec.md with hooks/advisory-nudge/long-foreground-call-advisory/impl.py. Report every place where the spec describes behaviour the implementation does not have, or the reverse, with the lines on each side. If they agree, say so and say what you compared."
     },
     "stophooks": {
       "prompt": "List every hook this repository registers on the Stop event (read the generated manifests under hooks/), and for each say whether it can block the stop or only advise, citing the line that decides it.",

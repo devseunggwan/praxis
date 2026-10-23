@@ -57,7 +57,8 @@ The following are structural stop signals:
 
 ## Integration notes
 
-- The Stop hook parses the distribution card and unified findings table
+- The distribution card and unified findings table keep a fixed, parsed shape
+  (`audit-distribution-gates.py` reads them)
 - Post-compaction sessions also require the `retrospect:transcript_receipt`
   fence
 - When compaction (or a chunked/bounded rule or transcript read) leaves the

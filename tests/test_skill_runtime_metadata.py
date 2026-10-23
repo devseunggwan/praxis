@@ -583,28 +583,12 @@ def test_current_repo_runtime_sensitive_skill_set_is_stable():
             "external-cli-wrapper",
             "helper-executable",
         ),
-        "cmux-resume-sessions": (
-            "AskUserQuestion",
-            "external-cli-wrapper",
-            "helper-executable",
-        ),
-        "cmux-save-sessions": (
-            "AskUserQuestion",
-            "external-cli-wrapper",
-            "helper-executable",
-        ),
-        "cmux-session-manager": (
-            "AskUserQuestion",
-            "external-cli-wrapper",
-            "helper-executable",
-        ),
         "codex-review-wrap": (
             "AskUserQuestion",
             "Skill(...)",
             "external-cli-wrapper",
             "helper-executable",
         ),
-        "debt": ("external-cli-wrapper",),
         # Skill(...) since #978: the approved merge chains into
         # worktree-merge-cleanup, which owns the merge call itself.
         # AskUserQuestion since #1445: the approve-ask is a tool call, and its
@@ -614,20 +598,11 @@ def test_current_repo_runtime_sensitive_skill_set_is_stable():
         # resolve the review's inputs; helper-executable from the envelope
         # validator, which is the one place the closed contract is enforced.
         "perf-leak-review": ("external-cli-wrapper", "helper-executable"),
-        # external-cli-wrapper from the git snapshot and the project test
-        # runner (`npx vitest run --config ...`) the probes execute under.
-        "perf-leak-verify": ("external-cli-wrapper",),
-        "recover-sessions": (
-            "AskUserQuestion",
-            "external-cli-wrapper",
-            "helper-executable",
-        ),
         "retrospect": (
             "AskUserQuestion",
             "external-cli-wrapper",
             "helper-executable",
         ),
-        "spec-drift": ("helper-executable",),
         # external-cli-wrapper from the gh review/PR reads and the git merge.
         "stale-pr-revival": ("external-cli-wrapper",),
         "surface-enumeration": ("external-cli-wrapper",),

@@ -45,14 +45,11 @@ main() is labeled with its number, and this list is the canonical roster
   12. skills/<skill-name>/ on disk matches the EXPECTED_SKILLS frozen set
      (issue #465 — surface freeze gate against silent skill proliferation).
   13. Doc drift invariants (issues #498, #1177): AGENTS.md "## Skills (N)"
-     count and per-skill backtick tokens, docs/skills.md per-skill table
-     rows, and the skills/using-praxis/SKILL.md routing tables (every skill
-     routed by a table row, no phantom skill names in category rows or
-     scenario routing cells) all match EXPECTED_SKILLS; docs/skills.md
-     trigger-keyword cells quote keywords verbatim from each skill's
-     frontmatter `when_to_use` (or `description`, #1331); and the
-     compatibility-tier tables in
-     README.md, AGENTS.md, and using-praxis stay normalized-identical.
+     count and per-skill backtick tokens and docs/skills.md per-skill table
+     rows all match EXPECTED_SKILLS; docs/skills.md trigger-keyword cells
+     quote keywords verbatim from each skill's frontmatter `when_to_use` (or
+     `description`, #1331); and the compatibility-tier tables in README.md
+     and AGENTS.md stay normalized-identical.
   14. Each manifest `dispatch_groups` (event, matcher) collapses to exactly
      one dispatcher node per platform hooks.json (no member silently left as
      its own node, no second dispatcher node), and the runtime resolver
@@ -528,9 +525,6 @@ SPEC_PATH_EXEMPT: dict[str, set[str]] = {
         "hooks/pre-tool-use/fake.sh",
         "hooks/foo.sh",
         "docs/hook/nonexistent-spec.md",
-    },
-    "hooks/advisory-nudge/pytest-direct-exec-advisory/spec.md": {
-        "tests/test_api.py",
     },
     "hooks/advisory-nudge/count-assertion-verify/spec.md": {
         "tests/file.sh",
@@ -1184,7 +1178,7 @@ def main() -> int:
     # ------------------------------------------------------------------
     # Rule 4 — completion-verify Stop ordering
     # ------------------------------------------------------------------
-    expected_stop = ["completion-verify", "retrospect-mix-check",
+    expected_stop = ["completion-verify",
                      "completion-signal-gate", "readonly-verify-deferral-gate",
                      "merge-state-claim-gate", "runtime-state-claim-gate",
                      "negative-existence-verdict-gate",
@@ -1622,13 +1616,11 @@ def main() -> int:
     # Rule 13 — Doc skill-count invariant (#498, #1177)
     #
     # AGENTS.md carries an explicit "## Skills (N)" header whose count must
-    # equal len(EXPECTED_SKILLS).  AGENTS.md, docs/skills.md, and the
-    # using-praxis onboarding skill embed skill names inside table cells as
-    # `backtick` tokens; every EXPECTED_SKILLS member must appear in each
-    # document (13b/13c/13d), using-praxis table rows must not name phantom
-    # skills (13d), docs/skills.md keyword cells must quote the frontmatter
-    # verbatim (13e), and the three tier-table copies must stay
-    # normalized-identical (13f).
+    # equal len(EXPECTED_SKILLS).  AGENTS.md and docs/skills.md embed skill
+    # names inside table cells as `backtick` tokens; every EXPECTED_SKILLS
+    # member must appear in each document (13b/13c), docs/skills.md keyword
+    # cells must quote the frontmatter verbatim (13e), and the two tier-table
+    # copies must stay normalized-identical (13f).  There is no 13d.
     #
     # Parsing is intentionally coarse — we match the pattern
     # `skill-name` (backtick-delimited) so the check is robust to table
@@ -1656,8 +1648,7 @@ def main() -> int:
             )
 
     # Shared plumbing for Rules 13b-13f — each doc surface reduces to token
-    # sets, and the two drift directions (missing skill / phantom skill) are
-    # reported identically for every surface.
+    # sets, and a missing skill is reported identically for every surface.
     def _norm_ws(s: str) -> str:
         return _re.sub(r"\s+", " ", s).strip()
 
@@ -1671,8 +1662,6 @@ def main() -> int:
         doc_label: str,
         present_tokens: set[str],
         missing_hint: str,
-        listed_tokens: set[str] | None = None,
-        phantom_hint: str | None = None,
     ) -> list[str]:
         out: list[str] = []
         missing = EXPECTED_SKILLS - present_tokens
@@ -1681,12 +1670,6 @@ def main() -> int:
                 f"DOC SKILL LIST {doc_label}: {sorted(missing)!r} declared in "
                 f"EXPECTED_SKILLS but {missing_hint}"
             )
-        if listed_tokens is not None:
-            phantom = listed_tokens - EXPECTED_SKILLS
-            if phantom:
-                out.append(
-                    f"DOC SKILL LIST {doc_label}: {sorted(phantom)!r} {phantom_hint}"
-                )
         return out
 
     # Rule 13b — every EXPECTED_SKILLS member appears in AGENTS.md
@@ -1725,50 +1708,6 @@ def main() -> int:
             "add them to the skill table",
         )
     )
-
-    # Rule 13d — the using-praxis onboarding entry point routes every skill
-    # (#1177).  A skill counts as routed only when a table row names it:
-    # either the first column of a category table, or a `backtick` token in
-    # a routing cell of the Common Scenarios table (rows whose first cell is
-    # a "quoted situation").  Prose mentions do not satisfy the check.  The
-    # reverse direction runs over the same token set, so a typo in either a
-    # category row or a scenario routing cell is caught as a phantom skill.
-    using_praxis_path = REPO_ROOT / "skills" / "using-praxis" / "SKILL.md"
-    if not using_praxis_path.exists():
-        drifts.append(
-            "DOC SKILL LIST skills/using-praxis/SKILL.md: file missing — it is "
-            "the onboarding entry point that must route every skill"
-        )
-        using_praxis_text = ""
-    else:
-        using_praxis_text = using_praxis_path.read_text()
-    using_praxis_routed: set[str] = set()
-    for line in using_praxis_text.splitlines():
-        cells = _table_cells(line)
-        if not cells:
-            continue
-        first_col = _re.fullmatch(r"`([^`]+)`", cells[0])
-        if first_col:
-            # category-table row — the first column is the skill name
-            using_praxis_routed.add(first_col.group(1))
-        elif cells[0].startswith('"'):
-            # scenario-table row — every token in the routing cells is a skill
-            for cell in cells[1:]:
-                using_praxis_routed.update(_re.findall(r"`([^`]+)`", cell))
-    if using_praxis_path.exists():
-        drifts.extend(
-            _doc_roster_drifts(
-                "skills/using-praxis/SKILL.md",
-                using_praxis_routed,
-                "not routed by any table row — the onboarding entry point must "
-                "route every skill (a prose mention does not count); add them "
-                "to a category table",
-                listed_tokens=using_praxis_routed,
-                phantom_hint="named in a category-table first column or a "
-                "scenario routing cell but not declared in EXPECTED_SKILLS — "
-                "fix the typo or remove the stale row",
-            )
-        )
 
     # Rule 13e — docs/skills.md trigger-keyword cells mirror the skill's
     # frontmatter trigger fields verbatim (#1177).  Every `backtick` keyword
@@ -1842,8 +1781,8 @@ def main() -> int:
                 "verbatim; fix the row or the frontmatter"
             )
 
-    # Rule 13f — the compatibility-tier table is maintained in three places
-    # (README.md, AGENTS.md, skills/using-praxis/SKILL.md); their data rows
+    # Rule 13f — the compatibility-tier table is maintained in two places
+    # (README.md, AGENTS.md); their data rows
     # must stay identical after normalization (backticks stripped, whitespace
     # collapsed) so tier membership cannot drift between copies (#1177).
     # README.md is the reference copy (canonical per issue #1177).
@@ -1862,13 +1801,10 @@ def main() -> int:
     if not reference_tiers:
         drifts.append(
             "TIER TABLE MISSING README.md: no compatibility-tier rows found — "
-            "it is the reference copy the other two are checked against"
+            "it is the reference copy AGENTS.md is checked against"
         )
     else:
-        for label, text in (
-            ("AGENTS.md", agents_text),
-            ("skills/using-praxis/SKILL.md", using_praxis_text),
-        ):
+        for label, text in (("AGENTS.md", agents_text),):
             rows = _tier_rows(text)
             if rows != reference_tiers:
                 drifts.append(

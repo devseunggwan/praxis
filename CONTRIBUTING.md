@@ -9,7 +9,7 @@ class of drift bugs that have cost the most debugging time.
 ### Clone and CLI symlinks
 
 The CLI tools shipped by skills (e.g. `cmux-recover-sessions`,
-`claude-recover`, `cmux-save-sessions`) are symlinked from `~/.local/bin` into
+`claude-recover-scan`, `bypass-review`) are symlinked from `~/.local/bin` into
 whichever clone ran `scripts/install.sh`, so a patch reaches the version that
 runs at the shell only if it lands in that clone. Keep one development clone
 per machine; a second clone silently leaves the links pointing at stale code.
@@ -22,12 +22,11 @@ to confirm all `~/.local/bin` entries still resolve to this clone.
 These are CLI tools installed via `scripts/install.sh` into `~/.local/bin`. The
 language is per tool — `bypass-review` is Python, not a shell wrapper. They are
 not AI skills: they have no `SKILL.md` of their own, and the binary is not
-invocable as `/praxis:*`. A skill may still run one: `/praxis:bypass-report`
-runs `bypass-review`.
+invocable as `/praxis:*`; run them from a shell.
 
 | Binary          | Source                               | Purpose                                                                                                                                                     |
 | --------------- | ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `bypass-review` | `skills/bypass-review/bypass-review` | Review both local ledger families — bypass-telemetry events and the hook fire-rate ledger — as aggregated JSONL records (run via `/praxis:bypass-report`)   |
+| `bypass-review` | `skills/bypass-review/bypass-review` | Review both local ledger families — bypass-telemetry events and the hook fire-rate ledger — as aggregated JSONL records                                     |
 
 ### Install / refresh CLI symlinks
 
@@ -96,7 +95,7 @@ reads low). Content only a contributor needs — setup, tooling,
 procedures that are never executed in-session — belongs in this file; leave a
 one-line pointer in `AGENTS.md`, and keep its Skills tables, compatibility-tier
 table, and Issue & PR conventions intact, since `check-plugin-manifests.py`
-Rule 13 normalizes those against `README.md` and `using-praxis` (issue #1306).
+Rule 13 normalizes those against `README.md` and `docs/skills.md` (issue #1306).
 
 ## Writing a spec
 
@@ -113,7 +112,7 @@ anything a reviewer needs belongs in the PR body or a commit trailer.
 
 Not every change needs one — [`docs/spec-store.md`](docs/spec-store.md) is the
 source of truth for the naming rules, the required `**Issue**: #N` header, the
-`Verify:` convention `praxis:spec-drift` reads, and the conditions under which
+`Verify:` convention, and the conditions under which
 a spec is skipped.
 
 ## Adding or modifying a skill
@@ -388,8 +387,7 @@ The invocation surface depends on the hook's manifest entry — read `body` and
 # Default: body omitted (impl.py), no args
 printf '%s' "$PAYLOAD" | python3 hooks/<role>/<name>/impl.py; echo "rc=$?"
 
-# body: "impl.sh" (codex-review-route, completion-verify, elapsed-time-signal,
-# retrospect-mix-check, strike-counter) — the generated wrapper is the
+# body: "impl.sh" (completion-verify, strike-counter) — the generated wrapper is the
 # invocation surface, and args are part of the registration
 printf '%s' "$PAYLOAD" | hooks/<name>.sh <args...>; echo "rc=$?"
 ```
@@ -724,7 +722,7 @@ have gone vacuous instead — passing because the thing under test never ran.
 `bash scripts/run-tests.sh --doctor` tells you up front which of those
 `SKIPPED:` lines a run on your machine will produce. It prints one table of
 every external tool the runner or a sub-suite needs (`python3`, `pytest`,
-`coverage`, `mypy`, `PyYAML`, `git`, `jq`, `zsh`, `tmux`, `lsof`, `ruff`,
+`coverage`, `mypy`, `PyYAML`, `git`, `jq`, `zsh`, `lsof`, `ruff`,
 `shellcheck`, `markdownlint-cli2`) with found/missing, the version when found, and the same
 install hint the `SKIPPED:` line would carry. It runs no tests and always
 exits 0.

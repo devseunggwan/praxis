@@ -17,7 +17,7 @@ from pathlib import Path
 import pytest
 
 SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "rule-ab-eval.py"
-SUITE = Path(__file__).resolve().parent / "fixtures" / "rule-ab-eval" / "elapsed-time-signal"
+SUITE = Path(__file__).resolve().parent / "fixtures" / "rule-ab-eval" / "sample"
 
 FAKE_CLAUDE = r'''#!/usr/bin/env python3
 import json, os, sys, time

@@ -20,8 +20,8 @@ python3 "${CLAUDE_PLUGIN_ROOT}/skills/retrospect/audit-distribution-gates.py" \
   [--reinforce-memory N]
 ```
 
-The script mechanizes, mirroring the Stop hook's parsing semantics
-(`hooks/completion-verify/retrospect-mix-check/impl.sh`):
+The script mechanizes, using the same parsing semantics the Stage 3 gates
+apply:
 
 - **table schema** — 10-cell rows, valid `category[]` / `Tool Layer` /
   `Proposed Actions` enums, 1-2 actions after dedupe
@@ -71,9 +71,9 @@ The script mechanizes, mirroring the Stop hook's parsing semantics
   therefore only ever add escalation, never remove one: `private` and
   `internal` count as one class, so declaring either against a private repo is
   not a contradiction
-- **Gate-4b — the Stop hook resolves it again** (issue #1244). Do not
+- **Gate-4b — resolve it, never hand-write it** (issue #1244). Do not
   hand-write `gate_4_verdict`, and do not hand-edit an escalated row's marker:
-  `hooks/completion-verify/retrospect-mix-check/impl.sh` recomputes this same
+  the self-checked Gate-4b recomputes this same
   classification from each routed row's `backing_repo` / `repo_visibility` plus
   the same API, and blocks the Stage 3 output when the card's verdict, or a
   missing `⚠ EXTERNAL:` marker, contradicts what it resolves. Where its lookup
@@ -90,10 +90,10 @@ Exit codes: `0` clean, `1` violations (fix the draft and re-run), `2`
 usage/input error. `--reinforce-memory N` adds `successful_patterns` rows
 whose `reinforce_action` is `memory` to the memory count.
 
-Scope note: the script is a pre-flight for the Stop hook's per-finding checks
-only. Session-level hook gates (Gate-7 transcript receipt, Gate-8/8b/8c
-suppression ledger, Gate-9 silent-pass coverage, Gate-10 critic roots) are not
-mirrored here — a script-clean draft can still be hook-blocked on those.
+Scope note: the script is a pre-flight for the per-finding checks only.
+Session-level gates (Gate-7 transcript receipt, Gate-8/8b/8c suppression
+ledger, Gate-10 critic roots) are not mirrored
+here and stay self-checked — a script-clean draft can still fail those.
 
 Do NOT hand-compute anything the script owns; do NOT hand-edit the card the
 script rendered.
@@ -184,6 +184,6 @@ trail before proceeding.
 The script renders the canonical card (all six action counts, the
 `memory_hygiene` / `output_quality` category counts, and
 `gate_1..6_verdict`). `gate_1_verdict`, `gate_2_verdict`, and
-`gate_4_verdict` are structurally relevant to the Stop-hook path;
+`gate_4_verdict` are structurally relevant to the Stage 3 gates;
 `gate_3_verdict`, `gate_5_verdict`, and `gate_6_verdict` are emitted for
-procedural audit even when the Stop hook does not parse them.
+procedural audit even though no Stage 3 gate reads them.

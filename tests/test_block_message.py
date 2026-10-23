@@ -151,7 +151,6 @@ def test_merge_verb_checklist_names_every_merge_gate() -> None:
         "commit-title-length-check",
         "pipefail-advisory",
         "session-intent",
-        "skill-gate-commands",
     ):
         assert gate in out, f"merge checklist must name {gate}"
     # Satisfaction forms, verified against each hook's own source.
@@ -179,7 +178,6 @@ def test_merge_checklist_splits_unconditional_from_conditional() -> None:
         "commit-title-length-check",        # requires -s / --squash
         "pipefail-advisory",                # requires a pipe
         "session-intent",                   # requires a read-only-intent session
-        "skill-gate-commands",              # requires PRAXIS_SKILL_GATED_COMMANDS
     ):
         assert flag_gated in tail, f"{flag_gated} is flag-gated — belongs below the split"
 

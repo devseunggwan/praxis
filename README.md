@@ -17,9 +17,8 @@ statement and becomes something done. That is this repository's whole design, wr
 [`ETHOS.md`](ETHOS.md) as **spec defines, hook enforces**: every hook here is the
 structural enforcement of a rule that already existed as prose in a `CLAUDE.md` or a
 memory entry, and exists precisely because the prose had already failed at the moment it
-was needed. The skills sit on the same axis — `strike`, `debt`, `spec-drift`, and
-`merge-briefing` all make an already-decided rule reachable at execution time rather
-than deciding anything new.
+was needed. The skills sit on the same axis — `strike` and `merge-briefing` both make
+an already-decided rule reachable at execution time rather than deciding anything new.
 
 The word carries none of that domain on its own, which is what the paragraph above is
 for. It is also a crowded name: the Praxis API framework (Ruby), PraxisEMR, and several
@@ -67,7 +66,7 @@ ln -s ~/projects/praxis/skills/<skill-name> ~/.claude/skills/<skill-name>
 Skills installed this way are invoked as `/<skill-name>` rather than
 `/praxis:<skill-name>`, and the hooks are not installed — this path ships
 skills only. Skills that call a bundled helper through `CLAUDE_PLUGIN_ROOT`
-(`strike`, `spec-drift`, the `cmux-*` skills) need that variable exported to
+(`strike`, the `cmux-*` skills) need that variable exported to
 the clone path, e.g. `export CLAUDE_PLUGIN_ROOT=~/projects/praxis`.
 
 ## Where to start
@@ -94,30 +93,29 @@ Three reading paths, each 3–4 steps. Time estimates are for a first read.
 
 ## Skills
 
-Twenty-five skills, grouped as Discovery, Development, Discipline, and Session Management.
+Sixteen skills, grouped as Development, Discipline, and Session Management.
 The full table — trigger keywords, when to use each, example invocation — lives in
 [`docs/skills.md`](docs/skills.md).
 
-If you are new, `/praxis:using-praxis` maps situations onto the skill that handles each —
-sessions lost to a crash, a broken rule you want on record, a review whose comments have
-piled up — which is a shorter read than the full table. The three worth knowing by name
-on day one:
+If you are new, start with [`docs/skills.md`](docs/skills.md): each row names the
+situation a skill handles — sessions lost to a crash, a broken rule you want on record, a
+review whose comments have piled up — and the phrases that trigger it. The two worth
+knowing by name on day one:
 
 | Skill | What it is for |
 | ------- | ---------------- |
-| `/praxis:using-praxis` | Finding the right skill when you don't know what exists yet |
 | `/praxis:retrospect` | After a session that went badly — find the friction's root cause and act on it |
 | `/praxis:merge-briefing` | Before merging — probe all three finding surfaces, then brief and ask |
 
 Praxis also ships `bypass-review`, a Python CLI with no `SKILL.md` of its own. It
-reads the bypass-telemetry and fire-rate event ledgers; `/praxis:bypass-report` is
-the skill that runs it for you. See
+reads the bypass-telemetry and fire-rate event ledgers; run it from a shell (for
+example `bypass-review fire-rate`). See
 [CONTRIBUTING.md → Local development](CONTRIBUTING.md#local-development) for every
 shipped CLI wrapper.
 
 ## Hooks
 
-Hooks are the larger half of praxis: **116 hooks**, registered at 143 points across
+Hooks are the larger half of praxis: **105 hooks**, registered at 126 points across
 `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `PostToolBatch`, `Stop`,
 `SubagentStart`, `SubagentStop`, `UserPromptSubmit`, and `SessionStart`. They run
 without being invoked, so this section is the one to read before installing — it is what
@@ -128,9 +126,9 @@ promoted into blocking:
 
 | Role | Count | What it does |
 | ------ | ------- | -------------- |
-| `preflight-gate` | 42 | Inspects a tool call before it runs and can deny it |
-| `completion-verify` | 20 | Fires at `Stop`; selected hooks also run at `SubagentStop` — can block a response that claims completion without evidence |
-| `advisory-nudge` | 49 | Prints a warning to stderr and lets the call through — 19 read a `PRAXIS_*_STRICT` variable that makes them stop the call instead |
+| `preflight-gate` | 39 | Inspects a tool call before it runs and can deny it |
+| `completion-verify` | 19 | Fires at `Stop`; selected hooks also run at `SubagentStop` — can block a response that claims completion without evidence |
+| `advisory-nudge` | 42 | Prints a warning to stderr and lets the call through — 19 read a `PRAXIS_*_STRICT` variable that makes them stop the call instead |
 | `postuse-correction` | 5 | Reacts after a tool call — telemetry, follow-up signals |
 
 Concretely, what a gate stops looks like this — `gh issue create` without a duplicate
@@ -158,7 +156,7 @@ contracts every hook follows.
 
 A hook that blocks something you meant to do is not a wall. There are three levers.
 
-**One gate.** 77 of the 116 hooks declare an opt-out or tuning variable. Which variable
+**One gate.** 73 of the 105 hooks declare an opt-out or tuning variable. Which variable
 belongs to which hook, and what setting it actually does to that hook, is the table in
 [`docs/bypass-vars.md`](docs/bypass-vars.md); the generated
 [Hook Operating Matrix](docs/hook-operating-matrix.md) carries the same mapping with each
@@ -188,7 +186,7 @@ Most skills delegate to external agents or session managers. Install the depende
 
 | Dependency | Required for | Install |
 | ------------ | ------------- | --------- |
-| **gh CLI** | Standalone (`recover-sessions`), strike skills, PR/issue ops | `brew install gh` |
+| **gh CLI** | Standalone tier (strike skills), PR/issue ops | `brew install gh` |
 | **jq** | Strike skills (session-scoped counter parsing) | `brew install jq` |
 | **oh-my-claudecode** | Agent delegation (tracer, analyst, critic, code-reviewer) | `omc install` |
 | **cmux** | Session management skills (cmux-*) | Mac app installer |
@@ -221,7 +219,7 @@ declaration would turn every tier below into a hard requirement; see
 
 | Tier | What works | What you need |
 | ------ | ----------- | --------------- |
-| **Standalone** | recover-sessions, strike / strikes / reset-strikes, debt | `gh` CLI, `jq`; `recover-sessions` also needs `tmux`; `debt` needs only `git` |
+| **Standalone** | strike / strikes / reset-strikes | `gh` CLI, `jq` |
 | **Enhanced** | + retrospect, codex-review-wrap | + oh-my-claudecode |
 | **Full** | + all cmux-* skills | + cmux |
 | **Multi-provider** | + codex/gemini routing in cmux-delegate | + codex-cli, gemini-cli |
@@ -273,8 +271,8 @@ existing platforms required.
 ## Local Development
 
 When you work from a clone rather than the plugin cache, the CLI wrappers
-shipped by skills (`cmux-recover-sessions`, `claude-recover`,
-`cmux-save-sessions`, …) are installed as `~/.local/bin` symlinks into
+shipped by skills (`cmux-recover-sessions`, `claude-recover-scan`,
+`bypass-review`) are installed as `~/.local/bin` symlinks into
 whichever clone ran `scripts/install.sh` — so a patch reaches the version that
 runs at the shell only if it lands in that clone. One clone per machine keeps
 the links honest; `verify-symlinks.sh` tells you when they are not.

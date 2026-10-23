@@ -375,8 +375,8 @@ def test_dispatch_member_with_body_is_allowed(manifest):
     # Rejected until issue #1281: the dispatcher imported every member as
     # Python. `_dispatch.run_one` now runs a shell body as a subprocess under
     # the member deadline, so a `body: impl.sh` member collapses into its
-    # group like any other (the Stop group's completion-verify and
-    # retrospect-mix-check are the live cases).
+    # group like any other (the Stop group's completion-verify is the live
+    # case).
     name = _first_dispatch_member_name(manifest)
     entry = next(h for h in manifest["hooks"] if h["name"] == name)
     entry["body"] = "impl.sh"

@@ -19,7 +19,7 @@ ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 . "$(dirname "$0")/_tree_mutation_lock.sh"
 CHECK="$ROOT_DIR/scripts/check-plugin-manifests.py"
 # A real hook stub used for the delete/tamper cases.
-TARGET="$ROOT_DIR/docs/hook/skill-gate-commands.md"
+TARGET="$ROOT_DIR/docs/hook/side-effect-scan.md"
 # A fake orphan stub for the reverse-parity case. Must NOT pre-exist.
 ORPHAN="$ROOT_DIR/docs/hook/zzz-test-orphan-stub.md"
 
@@ -65,7 +65,7 @@ run_case "baseline_check_clean" "$?" "0"
 rm -f "$TARGET"
 OUT="$(python3 "$CHECK" 2>&1)"
 run_case "missing_check_nonzero" "$?" "1"
-echo "$OUT" | grep -q "STUB MISSING docs/hook/skill-gate-commands.md"
+echo "$OUT" | grep -q "STUB MISSING docs/hook/side-effect-scan.md"
 run_case "missing_names_stub" "$?" "0"
 restore
 
@@ -73,7 +73,7 @@ restore
 printf '\n<!-- tampered by test -->\n' >> "$TARGET"
 OUT="$(python3 "$CHECK" 2>&1)"
 run_case "drift_check_nonzero" "$?" "1"
-echo "$OUT" | grep -q "STUB DRIFT docs/hook/skill-gate-commands.md"
+echo "$OUT" | grep -q "STUB DRIFT docs/hook/side-effect-scan.md"
 run_case "drift_names_stub" "$?" "0"
 restore
 

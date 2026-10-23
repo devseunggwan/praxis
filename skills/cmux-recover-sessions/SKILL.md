@@ -4,12 +4,8 @@ description: >
   Bulk recover Claude Code sessions after a crash, power loss, OOM kill, or reboot
   by scanning the .jsonl files Claude Code persists automatically. Interactive
   interview chooses recovery scope and layout. Use this when sessions died and
-  you need them back, NOT for restoring an intentionally saved layout.
-  Priority: crash context wins. If the request mentions a crash/power loss/OOM,
-  prefer this skill even when the user also mentions a snapshot — the snapshot
-  may be stale, and .jsonl scan reflects the real final state.
-  Only defer to cmux-resume-sessions when there is NO crash context and the user
-  explicitly wants to rehydrate a saved snapshot.
+  you need them back. The .jsonl scan reflects each session's real final state,
+  so no snapshot taken before the crash is needed.
 when_to_use: >
   Triggers on "터졌다", "크래시 복구", "크래시 복원", "전원 꺼짐 복구", "OOM 복구", "세션 살려야", "recover cmux", "crash recovery", "power loss recovery", "cmux session recovery".
 verified-against-runtime: true
@@ -19,16 +15,10 @@ runtime-verified-note: "cmux-recover-sessions --help and --list --from --to run 
 
 # Recover Sessions (cmux)
 
-> ⚠️ **Wrong skill?** If you have a JSON snapshot you previously saved with
-> `cmux-save-sessions` and just want to rehydrate that exact layout, use
-> **`cmux-resume-sessions`** instead. Recover scans the on-disk `.jsonl` files
-> Claude Code persists automatically — useful precisely *because* you never
-> got a chance to save anything before the crash.
-
 ## Overview
 
 Bulk recover Claude Code sessions after crash or power loss into cmux workspaces.
-cmux variant of `recover-sessions` — replaces tmux backend with cmux workspace/split API.
+The bundled `claude-recover-scan` finds the sessions on disk; `cmux-recover-sessions` reopens each one through the cmux workspace/split API.
 
 **Core principle:** Claude Code conversations are safely persisted to disk as `.jsonl` files. Recovery = find saved sessions and open them in cmux workspaces.
 
@@ -52,6 +42,7 @@ Recovery reads `.jsonl` files and re-opens them in new cmux workspaces. It must 
 ## Prerequisites
 
 - `cmux-recover-sessions` script bundled at `${CLAUDE_SKILL_DIR}/cmux-recover-sessions`; no install step (`scripts/install.sh` can additionally symlink it into `~/.local/bin` for running the tool from a terminal — optional, not part of this skill's flow)
+- `claude-recover-scan` (the session scanner, `python3` standard library only) bundled next to it at `${CLAUDE_SKILL_DIR}/claude-recover-scan`; the wrapper resolves it as a sibling, through symlinks
 - cmux running (`cmux ping` should succeed) — not required for `--plain` and `--list` modes
 
 ## Process
@@ -253,7 +244,7 @@ cmux window
 
 ### Filtering Pipeline
 
-Same as `recover-sessions` — automatically excludes:
+`claude-recover-scan` automatically excludes:
 
 | Filter | What it removes |
 | -------- | ---------------- |

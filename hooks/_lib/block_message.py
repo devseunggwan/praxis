@@ -156,8 +156,6 @@ Conditional — fire only in the stated situation:
   Mutation verb declared for this session   ← session-intent
     A session that opened read-only and never stated a mutation intent: asks,
     and denies under PRAXIS_INTENT_PIVOT_MODE=block.
-  Required skill not invoked this session   ← skill-gate-commands
-    NO-OP unless PRAXIS_SKILL_GATED_COMMANDS lists `gh pr merge`.
 
 Approving one PR approves only that PR — a companion or follow-up merge needs
 its own briefing and its own answer.

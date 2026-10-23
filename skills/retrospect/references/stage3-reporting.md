@@ -4,6 +4,10 @@ Normative Stage 3 contract for [`../SKILL.md`](../SKILL.md). `SKILL.md` keeps
 the execution spine; this file defines the canonical Stage 3 report shape, the
 approval flow, and the output-level gates.
 
+The gates below are self-checked: the skill applies each one to its own draft
+and does not emit Stage 3 until every gate passes. No hook backs them up, so a
+gate the agent skips is simply not enforced.
+
 ## Canonical emit order
 
 Stage 3 output MUST emit, in this order:
@@ -129,9 +133,9 @@ session.
 ```
 
 Emit the fence as **bare markdown in the report body**, not inside a fenced
-code block — the Stop hook strips fenced code before parsing, so a ledger
-wrapped in a ```` ```markdown ```` block is invisible to Gate-8 and blocks. The
-block above is illustration only.
+code block — Gate-8 reads only the report body outside fenced code, so a
+ledger wrapped in a ```` ```markdown ```` block does not satisfy it. The block
+above is illustration only.
 
 Rules:
 
@@ -157,12 +161,12 @@ Rules:
     `not-suppressed: <reason>` ledger row
 - Painful framing is preserved verbatim; softening the wording inside the ledger
   defeats its purpose.
-- The Stop hook (Gate-8) blocks a Stage 3 report that omits this fence or either
-  required line.
-- The Stop hook also re-derives cheap deterministic adverse signals from the
-  live transcript (`is_error:true`, content-error syntax, and documented
-  `user_correction` markers on user turns). When the ledger claims a
-  clean/no-failure path while those signals exceed tolerance, Gate-8 blocks as
+- Gate-8 (self-checked): do not emit a Stage 3 report that omits this fence or
+  either required line.
+- Gate-8 also checks the ledger against cheap deterministic adverse signals in
+  the live transcript (`is_error:true`, content-error syntax, and documented
+  `user_correction` markers on user turns). A ledger that claims a
+  clean/no-failure path while those signals exceed tolerance fails Gate-8 as
   ledger laundering.
 
 ## Transcript receipt
@@ -189,35 +193,7 @@ and give it its own row rather than assuming its category from a sibling row.
 The skipped variant is allowed only when the transcript is genuinely
 unreachable.
 
-## Silent-pass candidate & critic-root coverage (Gate-9 / Gate-10, issue #772)
-
-Signal-driven scans miss conduct that produces NO friction (no user correction,
-no tool error): a secret shown in plaintext, a sanctioned wrapper bypassed, a
-PR created then discarded. `retrospect-mix-check` runs a deterministic grep
-catalog (`hooks/_lib/silent-pass-catalog.json`) over the live transcript and
-force-injects any match into the coverage requirement regardless of whether the
-Stage 2 scan surfaced it.
-
-### Gate-9 — hard silent-pass candidate coverage
-
-For each **hard** catalog match (currently `credential-display` and
-`sanctioned-path-bypass`), the report must EITHER:
-
-- bind it in a unified-findings-table Rationale cell with a structured token
-  `covers: <class-id>` (mirrors the `backing_repo:` parse — a bare prose mention
-  of "credential" does NOT satisfy it), OR
-- dismiss it in a `retrospect:dismissed_candidates` fence:
-
-```markdown
-<!-- retrospect:dismissed_candidates begin -->
-- <class-id>: <why this match is a false positive or an intentional, non-leaking display>
-<!-- retrospect:dismissed_candidates end -->
-```
-
-A hard match that is neither covered nor dismissed blocks. **soft** matches
-(currently `create-delete-churn`) are surfaced as hints and NEVER block.
-
-### Gate-10 — critic-root coverage
+## Critic-root coverage (Gate-10, issue #772)
 
 When the externalized critic tier ran, it emits a `critic_roots:` block in its
 subagent return (see
@@ -231,14 +207,14 @@ folded: <root-id> because <reason>
 ```
 
 A reason-less `folded: <root-id>` does not count. Gate-10 arms on transcript
-eligibility (a hard silent-pass candidate OR a user-correction signal), so an
+eligibility (a user-correction signal), so an
 eligible session whose transcript shows NO critic invocation blocks regardless
 of the ledger `critic_diff` label.
 
 For display, paste the critic's roots into a `retrospect:critic_roots` fence in
 the report body so a human reader sees them alongside the findings. This fence is
-**display-only** — it is not the oracle and its fidelity is not gated (the hook
-reads the critic's transcript return):
+**display-only** — it is not the oracle and its fidelity is not gated (Gate-10
+is checked against the critic's transcript return):
 
 ```markdown
 <!-- retrospect:critic_roots begin -->
@@ -267,10 +243,11 @@ produced at least one row, Stage 3 MUST emit them:
 ```
 
 Emit the fence as **bare markdown in the report body**, not inside a fenced code
-block — the Stop hook strips fenced code before parsing (same discipline as the
-suppression ledger). With zero lane rows, omit the fence entirely.
+block — Gate-12 reads only the report body outside fenced code (same
+discipline as the suppression ledger). With zero lane rows, omit the fence
+entirely.
 
-`retrospect-mix-check` Gate-12 re-derives the denied set from the **live
+Gate-12 is checked against the denied set derived from the **live
 transcript** with the same structural scanner the lane uses
 (`hooks/_lib/_transcript.py::scan_user_rejections` — `toolDenialKind ==
 "user-rejected"` plus `is_error: true` plus the runtime's fixed refusal
@@ -326,8 +303,8 @@ on them. One was settled by replaying the hook's own transcript output
 `ls hooks/completion-verify`, which showed an existing gate covering half the
 proposal.
 
-`Falsification:` carries the same rule and it is structurally enforced:
-`retrospect-mix-check` Gate-13 blocks Stage 3 when the line promises the check
+`Falsification:` carries the same rule:
+Gate-13 rejects Stage 3 when the line promises the check
 (`will verify …`, `Stage 4에서 확인`, `확인 예정`) instead of reporting one. The
 rule the skill already records for `(Recommended)` — a disconfirming test runs
 before the label, not after — is the same rule.
@@ -380,7 +357,7 @@ the standing home is
 cite it rather than opening a fourth restatement of a rule that was already in
 force.
 
-The `retrospect-mix-check` Stop hook (Gate-11) blocks a Stage 3 report that
+Gate-11 rejects a Stage 3 report that
 proposes a remedy-layer action without a well-formed fence carrying a complete
 row — `reach=` verdict, `surface:`, and a named `unreached:` axis — **for that
 finding's own number**. One row cannot answer for a sibling finding: two
@@ -391,7 +368,7 @@ silently adopts the more comfortable answer.
 
 If Stage 2.5 Gate-3 detected sibling decision-coupling and demoted the weaker
 action, emit one bullet per demoted action after the unified findings table.
-This section is for human review only and is not parsed by the Stop hook.
+This section is for human review only; no gate checks it.
 
 Format: literal `^- Finding #N: file <action> when <observation predicate>$`.
 
@@ -544,9 +521,8 @@ Any schema drift here — including the `retrospect:suppression_ledger` fence
 (Gate-8) and the `retrospect:denied_actions` fence (Gate-12) — must be
 co-updated with:
 
-- `hooks/completion-verify/retrospect-mix-check/impl.sh`
-- `tests/hooks/completion-verify/test_retrospect_mix_check.sh`
-- `tests/fixtures/retrospect-synth-*.jsonl` + `.expected.json`
+- `skills/retrospect/audit-distribution-gates.py`
+- `tests/test_audit_distribution_gates.py`
 
 ## Examples
 

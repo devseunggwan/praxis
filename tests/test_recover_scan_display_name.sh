@@ -5,7 +5,7 @@ set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-SCAN="$REPO_ROOT/skills/recover-sessions/claude-recover-scan"
+SCAN="$REPO_ROOT/skills/cmux-recover-sessions/claude-recover-scan"
 
 if [[ ! -f "$SCAN" ]]; then
   echo "FAIL: scanner not found at $SCAN" >&2

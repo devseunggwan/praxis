@@ -32,7 +32,7 @@ intent is persisted to a JSON file, resolved in this order:
 2. `${TMPDIR:-/tmp}/praxis-session-intent-${session_id}.json` when the
    hook payload carries a `session_id` field (**primary key** — the
    canonical praxis hook session pattern, also used by
-   `completion-verify.sh`, `retrospect-mix-check.sh`, and
+   `completion-verify.sh` and
    `strike-counter.sh` via `jq -r '.session_id // ...'`). `session_id`
    is stable across hook invocations within a single Claude Code session
    and resets at session boundaries — the exact lifetime the gate needs.

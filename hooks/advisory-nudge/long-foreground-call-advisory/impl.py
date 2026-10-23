@@ -37,7 +37,7 @@ command pattern list, no per-repo configuration, no guessing which commands are
 Design:
 
   • **Advisory only** — stderr, exit 0, never blocks. No bypass env var: there
-    is nothing to bypass. Mirrors `pytest-direct-exec-advisory`'s shape.
+    is nothing to bypass.
   • **Declared-intent keyed** — the hook reads `tool_input.timeout` only. It
     never inspects the command text, so it cannot disagree with
     `foreground-poll-loop-guard` about which commands are legitimate.

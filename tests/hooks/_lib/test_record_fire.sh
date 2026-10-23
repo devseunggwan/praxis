@@ -404,24 +404,6 @@ printf '{"transcript_path":"%s","session_id":"sess-cv"}' "$TMP/cv.jsonl" \
     bash "$ROOT_DIR/hooks/completion-verify/completion-verify/impl.sh" >/dev/null
 assert_record "$LEDGER" "completion-verify records block" completion-verify block sess-cv
 
-# retrospect-mix-check — ordinary message passes
-python3 - "$TMP/rm.jsonl" <<'PY'
-import json, sys
-events = [
-    {"message": {"role": "user", "content": "go"}},
-    {"message": {"role": "assistant",
-                 "content": [{"type": "text", "text": "평범한 응답입니다."}]}},
-]
-with open(sys.argv[1], "w", encoding="utf-8") as f:
-    for e in events:
-        f.write(json.dumps(e, ensure_ascii=False) + "\n")
-PY
-LEDGER="$TMP/rm-led.jsonl"
-printf '{"transcript_path":"%s","session_id":"sess-rm"}' "$TMP/rm.jsonl" \
-  | PRAXIS_FIRE_TELEMETRY_FILE="$LEDGER" \
-    bash "$ROOT_DIR/hooks/completion-verify/retrospect-mix-check/impl.sh" >/dev/null
-assert_record "$LEDGER" "retrospect-mix-check records pass" retrospect-mix-check pass sess-rm
-
 # codex-review-route — /codex:review advises.
 #
 # Ported from impl.sh to impl.py in #1304, so it no longer goes through
@@ -452,26 +434,20 @@ assert_record "$LEDGER" "codex-review-route records advise" codex-review-route a
 # aggregate_fires adds any non-empty session string to its distinct-session
 # set, so "unknown" would collapse every unattributed fire into one fake
 # session — inflating the session count these records exist to measure.
-for probe in \
-  "completion-verify:completion-verify/completion-verify/impl.sh" \
-  "retrospect-mix-check:completion-verify/retrospect-mix-check/impl.sh"
-do
-  probe_hook="${probe%%:*}"
-  LEDGER="$TMP/${probe_hook}-nosess.jsonl"
-  printf '{"transcript_path":"%s"}' "$TMP/rm.jsonl" \
-    | PRAXIS_FIRE_TELEMETRY_FILE="$LEDGER" \
-      bash "$ROOT_DIR/hooks/${probe#*:}" >/dev/null
-  if python3 -c '
+LEDGER="$TMP/completion-verify-nosess.jsonl"
+printf '{"transcript_path":"%s"}' "$TMP/cv.jsonl" \
+  | PRAXIS_FIRE_TELEMETRY_FILE="$LEDGER" \
+    bash "$ROOT_DIR/hooks/completion-verify/completion-verify/impl.sh" >/dev/null
+if python3 -c '
 import json, sys
 recs = [json.loads(l) for l in open(sys.argv[1], encoding="utf-8") if l.strip()]
 sys.exit(0 if recs and all(r.get("session_id") == "" for r in recs) else 1)
 ' "$LEDGER" 2>/dev/null; then
-    ok "$probe_hook records an absent session as empty, not \"unknown\""
-  else
-    ko "$probe_hook records an absent session as empty, not \"unknown\"" \
-      "$(cat "$LEDGER" 2>/dev/null)"
-  fi
-done
+  ok "completion-verify records an absent session as empty, not \"unknown\""
+else
+  ko "completion-verify records an absent session as empty, not \"unknown\"" \
+    "$(cat "$LEDGER" 2>/dev/null)"
+fi
 
 # strike-counter — three strikes then a blocking stop
 STATE="$TMP/state"

@@ -26,8 +26,7 @@ tier is worth anything and what the false-positive floor looks like.
 So this hook **judges nothing**. It never blocks, never emits a decision the
 model can read, and never tells the user their turn was suspicious. It appends
 one telemetry record when the final message carries the shape, and that is
-the whole behaviour. `bypass-review fire-rate` (or `/praxis:bypass-report`)
-reads the count back.
+the whole behaviour. `bypass-review fire-rate` reads the count back.
 
 Records land in their own `bypass-route-events-*.jsonl` family rather than the
 fire ledger — see the Storage section below for the measurement that forced

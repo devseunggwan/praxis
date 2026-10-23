@@ -26,8 +26,8 @@
 # Two selection rules per file:
 #   1. *.sh by extension — what the old `find . -name '*.sh'` covered.
 #   2. non-.sh files whose first line is a bash/sh shebang — the skills/ CLI
-#      scripts (claude-recover, cmux-*, spec-drift) ship without a .sh
-#      suffix, so rule 1 alone missed ~1,475 lines of runtime shell.
+#      scripts (cmux-recover-sessions) ship without a .sh suffix, so rule 1
+#      alone missed their runtime shell.
 #      Python CLIs (claude-recover-scan, bypass-review) don't match and stay
 #      with ruff.
 set -euo pipefail
