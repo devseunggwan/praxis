@@ -127,7 +127,7 @@ WRAPPER_SH_TEMPLATE = """\
 # Direct exec so the impl's own #!/bin/bash shebang is honored —
 # `exec sh impl.sh` would re-route through /bin/sh (dash on Debian)
 # and break Bash-only syntax like [[ ... =~ ... ]] used in
-# retrospect-mix-check / codex-review-route / strike-counter.
+# completion-verify / strike-counter.
 # Absent impl means the hook cannot judge, so it must not judge — same
 # contract as the python wrapper above.
 IMPL="$(dirname "$0")/{role}/{name}/impl.sh"
@@ -418,7 +418,7 @@ def manifest_schema_drifts(manifest) -> list[str]:
     # dispatcher imported every member as Python; `_dispatch.run_one` now
     # runs a shell member as a subprocess under the member deadline, so a
     # shell body collapses into the group like any other member (the Stop
-    # group's completion-verify and retrospect-mix-check are the live cases).
+    # group's completion-verify is the live case).
     if isinstance(manifest, dict):
         # The argv sentinel doubles as a legal matcher value (the schema
         # allows any non-empty string), and a group whose matcher IS the

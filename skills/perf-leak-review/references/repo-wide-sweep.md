@@ -7,8 +7,8 @@ changes its contract. This file is the procedure for that request — fan out
 read-only reviewers per area, validate, and report **candidates** — without
 pretending the result is the same thing as a diff review.
 
-Nothing here is executed. To prove the candidates this produces, hand the
-merged envelope to [`perf-leak-verify`](../../perf-leak-verify/SKILL.md).
+Nothing here is executed. The sweep ends at the reported candidate list;
+proving any of them by execution is outside this procedure.
 
 ## Step 1: Size the repository, then ask once
 
@@ -133,8 +133,8 @@ each top candidate, and the no-write diff are all recorded.
   of release you re-confirmed (state the grep scope).
 - **The rest**, grouped by class and marked reviewer-only.
 - **A class with 0 findings gets a scope caveat** — sampling is not absence.
-- Attach the validated merged envelope, and offer `perf-leak-verify` for the
-  priority rows.
+- Attach the validated merged envelope. That is the end of the sweep — it
+  offers no follow-up execution.
 
 Done when: every finding in the merged envelope appears in the priority table
 or in the reviewer-only groups.

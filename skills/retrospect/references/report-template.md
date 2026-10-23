@@ -11,7 +11,7 @@ Emit order and fence markers per the Output Schema Contract.
 
 The `retrospect:transcript_receipt` fence (§3e) is **post-compaction sessions
 only** — omit the whole block when the transcript has no compaction marker.
-Unlike the other Stage 2 fences it **IS parsed by the Stop hook (Gate-7)**:
+Unlike the other Stage 2 fences it **is checked by Gate-7** (self-checked):
 its absence in a post-compaction session blocks Stage 3. The body must be
 real command output run against the live `transcript_path`, never
 hand-written. If the transcript is genuinely unreachable, replace the fence
@@ -27,7 +27,7 @@ each body individually [issue #720]. Omit the nested enum block only when
 
 The `retrospect:denied_actions` fence (§3d′) is emitted whenever pre-scan lane 6
 produced a row, in any session — it is **not** post-compaction-only. Like the
-receipt it **IS parsed by the Stop hook (Gate-12)**, and against a transcript
+receipt it **is checked by Gate-12** (self-checked), and against a transcript
 oracle rather than the fence itself: when the live transcript carries a
 structural user rejection and no row disposes of one, Stage 3 blocks
 [issue #1013]. Omit the whole block only when the lane found zero rejections.

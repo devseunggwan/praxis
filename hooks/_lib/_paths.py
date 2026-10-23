@@ -114,11 +114,10 @@ def legacy_tmp_path(filename: str) -> str:
 def resolve_cache_file(filename: str, session_id: str | None = None) -> str:
     """Cache path for `filename`, adopting the pre-#903 ${TMPDIR} file if present.
 
-    Session-scoped state (retrospect marker, session intent, dedup markers) is
-    written mid-session. Upgrading praxis while such a session is live would
-    otherwise strand the old file and read the new path as "no state" — for the
-    retrospect marker that means the Stop gate silently stops firing, the exact
-    failure #666 was opened for. The adoption is a one-time move, mirroring the
+    Session-scoped state (session intent, dedup markers) is written
+    mid-session. Upgrading praxis while such a session is live would otherwise
+    strand the old file and read the new path as "no state", so a gate keyed on
+    that state silently stops firing. The adoption is a one-time move, mirroring the
     #527 strike-state migration in strike-counter/impl.sh.
 
     Pass the caller's `session_id` (the same token its filename is keyed on) so

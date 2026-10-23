@@ -25,7 +25,7 @@ session-intent/impl.py`), not a transcript-tail scan. A transcript-tail scan
 would need to re-parse the full session's tool-call history on every Bash
 invocation (unbounded cost, growing with session length) and has no stable
 API in the hook payload; the state file is O(1) per call and mirrors the
-established repo convention (session-intent, retrospect-active-marker).
+established repo convention (session-intent).
 
 ## Detection
 

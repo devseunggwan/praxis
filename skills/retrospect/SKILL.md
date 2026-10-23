@@ -38,7 +38,7 @@ Symptom-level fixes miss the underlying pattern.
 
 **Prerequisites:** `oh-my-claudecode` must be installed. The tracer and
 analyst calls in Stage 2 have no fallback, which is why this skill sits in
-the Enhanced tier of the compatibility table (`using-praxis`), not Standalone.
+the Enhanced tier of the compatibility table (`README.md`), not Standalone.
 
 **Reference map:**
 
@@ -210,9 +210,9 @@ self-downgraded to `note only` (severity-honesty floor). The result is recorded
 in the Stage 3 `retrospect:suppression_ledger` fence. Judging which item is most
 painful is a self-feedback step and does **not** mechanize (issue #715) — the
 externalized critic tier below is the enforcing external signal, not a smarter
-self-check. What *is* mechanized: Gate-8c (retrospect-mix-check) blocks a
-`critic_diff: not-run` when the live transcript carries user corrections, so the
-external tier cannot be self-skipped in the conceal-prone case. Full rules in
+self-check. Gate-8c is the rule that keeps the external tier honest: a
+`critic_diff: not-run` is not acceptable when the live transcript carries user
+corrections, so the external tier is not self-skipped in the conceal-prone case. Full rules in
 [`references/stage1-2-analysis.md`](references/stage1-2-analysis.md).
 
 **Externalized critic re-scan tier (conditional, issue #702):** after MEMORY
@@ -222,19 +222,10 @@ when the friction path is non-empty and the tier predicate in
 Record the outcome in the Stage 3 `critic_diff:` ledger line whether the tier
 ran or was skipped. When it runs, the critic emits a `critic_roots:` block in
 its subagent return; each root must be covered in the findings table or
-`folded: <root-id> because <reason>` — `retrospect-mix-check` Gate-10 enforces
-this against the critic's transcript return (not an agent-pasted fence), and
-arms on transcript eligibility so the requirement cannot be self-cleared by the
+`folded: <root-id> because <reason>` — Gate-10 checks this against the
+critic's transcript return (not an agent-pasted fence), and applies on
+transcript eligibility so the requirement cannot be self-cleared by the
 `critic_diff` label (issue #772).
-
-**Silent-pass candidate coverage (deterministic, issue #772):** a grep catalog
-(`hooks/_lib/silent-pass-catalog.json`) force-injects friction-free conduct
-(plaintext secret, sanctioned-wrapper bypass, create/delete churn) into the
-coverage requirement regardless of the signal scan. Each **hard** match must be
-bound via a `covers: <class-id>` token in the findings table or dismissed in a
-`retrospect:dismissed_candidates` fence; **soft** matches are hints only. Full
-contract in
-[`references/stage3-reporting.md`](references/stage3-reporting.md).
 
 **Core flow:**
 
@@ -451,7 +442,14 @@ The complete failure matrix is in
 
 ## Integration
 
-- The Stop hook parses the Stage 3 distribution card and unified findings table
+> **Gate enforcement.** Gate-7, Gate-8 and Gate-10 through Gate-13 are
+> self-checked: the skill applies each one to its own Stage 3 draft and does
+> not emit the report until every gate passes. No hook backs them up.
+> `audit-distribution-gates.py` mechanizes the per-finding half (Stage 2.5).
+> Gate-9 is retired.
+
+- The Stage 3 distribution card and unified findings table keep their parsed
+  shape, so `audit-distribution-gates.py` can read them
 - Post-compaction Stage 3 output also needs the `retrospect:transcript_receipt`
   fence
 - Any schema drift must be co-updated with the hook and tests called out in

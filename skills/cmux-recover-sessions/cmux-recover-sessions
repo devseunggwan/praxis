@@ -2,7 +2,7 @@
 # cmux-recover-sessions: Bulk recover Claude Code sessions into cmux workspaces
 #
 # Workflow:
-#   1. Scan recent sessions (shared logic with claude-recover)
+#   1. Scan recent sessions (sibling claude-recover-scan)
 #   2. Create cmux workspaces (tabs or splits)
 #
 # Usage:
@@ -96,7 +96,7 @@ while [ -L "$REAL_PATH" ]; do
   [[ "$REAL_PATH" != /* ]] && REAL_PATH="$LINK_DIR/$REAL_PATH"
 done
 SCRIPT_DIR="$(cd "$(dirname "$REAL_PATH")" && pwd)"
-SCAN_SCRIPT="${SCRIPT_DIR}/../recover-sessions/claude-recover-scan"
+SCAN_SCRIPT="${SCRIPT_DIR}/claude-recover-scan"
 SCAN_OUTPUT=$(python3 "${SCAN_SCRIPT}" "${DAYS_AGO:-}" "${FROM_DATE:-}" "${TO_DATE:-}")
 
 declare -a SESSIONS=()
@@ -235,8 +235,8 @@ elif [[ "$MODE" == "tabs" ]]; then
     # #1095: skip a single failed workspace instead of aborting the whole
     # run. Under `set -euo pipefail`, `ws_ref=$(create_and_resume …)` used to
     # abort the script the moment the helper returned 1, so the old
-    # `else … ✗ failed to create` branch was dead code. Mirror the
-    # `… || { echo …; continue; }` idiom from cmux-resume-sessions.
+    # `else … ✗ failed to create` branch was dead code. Use the
+    # `… || { echo …; continue; }` idiom instead.
     ws_ref=$(create_and_resume "$project_dir" "$resume_cmd") || {
       echo "  ✗ workspace $((i + 1)): failed to create"
       continue
@@ -276,8 +276,8 @@ elif [[ "$MODE" == "split" ]]; then
     # #1095: skip a single failed workspace instead of aborting the whole
     # run. The prior `if [[ -z "$ws_ref" ]]` guard was dead code — under
     # `set -euo pipefail` the failing command-substitution aborted the
-    # script before it was reached. Mirror cmux-resume-sessions'
-    # `… || { echo …; continue; }` idiom.
+    # script before it was reached. Use the
+    # `… || { echo …; continue; }` idiom instead.
     ws_ref=$(create_and_resume "$dir1" "$resume_cmd1") || {
       echo "  ✗ workspace ${ws_num}: failed to create"
       i=$((i + 1))

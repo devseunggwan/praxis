@@ -645,12 +645,11 @@ merge-only, per the issue scope (only the merge failure was reproduced).
 
 **Deny reason carries the whole verb's checklist (issue #873).** The briefing
 is one of three gates that fire on every `gh pr merge` whatever the flags — the
-other two are `pre-merge-approval-gate` and `side-effect-scan`. Five more are
+other two are `pre-merge-approval-gate` and `side-effect-scan`. Four more are
 conditional: `gh-merge-worktree-precondition` (only with `--delete-branch`),
 `commit-title-length-check` (only with `--squash`), `pipefail-advisory` (only
-when the merge is piped), `session-intent` (only when the session never declared
-a mutation intent), and `skill-gate-commands` (only when
-`PRAXIS_SKILL_GATED_COMMANDS` lists the verb). The checklist keeps that split
+when the merge is piped), and `session-intent` (only when the session never
+declared a mutation intent). The checklist keeps that split
 explicit — a conditional gate listed as unconditional sends the reader looking
 for a requirement that does not apply to their command.
 Before #873 each was discovered by its own separate block, costing a retry turn

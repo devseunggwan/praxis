@@ -170,7 +170,7 @@ def test_a_known_hook_of_each_channel_classifies_as_expected() -> None:
         # a Stop advisory with no block path: reaches the user, not the model
         "completion-signal-gate": ["system-msg"],
         # the exit-0 stderr advisory class this census was opened for
-        "pytest-direct-exec-advisory": ["stderr"],
+        "fallback-negative-warn": ["stderr"],
     }
     for name, channels in expected.items():
         assert channels_for_hook(REPO_ROOT, by_name[name]) == channels, name

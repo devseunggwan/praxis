@@ -10,9 +10,8 @@ topic judgment itself (see "Same-topic detection" below); it appends one
 fire-ledger record per AskUserQuestion call so `bypass-review fire-rate` can
 compute a per-session call count as a COARSE proxy for the loop signal.
 
-Explicitly NOT a reuse of `hooks/completion-verify/retrospect-mix-check`'s
-user-correction-marker regex (impl.sh L607-668, L732-746) — that regex was
-built for retrospect's own Stop-hook self-validation (did the AI's own
+Explicitly NOT a reuse of retrospect's user-correction-marker regex — that
+regex was built for retrospect's own self-validation (did the AI's own
 response get corrected), a different question from "did the AI ask the same
 clarifying question more than once." Reusing it here would measure the wrong
 thing. This hook is a fresh, independent detector.

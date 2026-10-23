@@ -92,7 +92,7 @@ def _is_git_binary(token: str) -> bool:
     """True iff `token` names the git binary, bare or path-prefixed.
 
     Mirrors the `_is_git_binary` every sibling commit gate carries
-    (`commit-decomposition-advisory`, `pre-commit-staged-file-enumeration`, …)
+    (`pre-commit-staged-file-enumeration`, `commit-title-length-check`, …)
     and the `_is_gh_binary` in
     `_hook_utils`. An exact `argv[0] == "git"` comparison is bypassed by
     `/usr/bin/git commit -m …`, which is the same path-prefix hole #1099 closed

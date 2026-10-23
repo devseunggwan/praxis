@@ -17,8 +17,8 @@ These tests cover:
 
 Three further groups cover the PR #1142 review findings:
 
-  - **host scoping.** Three of the eight gated hooks carry `hosts: ["claude"]`,
-    so the sibling set the runtime actually installs is 8 on `claude` and 5 on
+  - **host scoping.** Two of the seven gated hooks carry `hosts: ["claude"]`,
+    so the sibling set the runtime actually installs is 7 on `claude` and 5 on
     `codex` / `cursor`. A host-blind derivation pinned `claude`'s
     number on every platform. The per-row `Hosts` cell and the per-host table
     are both checked, in both directions, against every platform that emits a
@@ -61,7 +61,6 @@ gates = _load()
 # prose surface at once still has to come through here.
 EXPECTED = [
     "block-commit-without-codex-review",
-    "commit-decomposition-advisory",
     "commit-message-paren-check",
     "commit-title-format-check",
     "commit-title-length-check",
@@ -75,7 +74,7 @@ _SURFACE_FILES = (gates.MANIFEST, gates.SPEC, gates.IMPL, gates.TEST, gates.CHEC
 # Hosts that install hooks today, and the sibling count each one actually gets
 # once `hosts` whitelists are applied. Spelled out for the same reason EXPECTED
 # is: a whitelist edit has to come through this file too.
-EXPECTED_PER_HOST = {"claude": 8, "codex": 5, "cursor": 5}
+EXPECTED_PER_HOST = {"claude": 7, "codex": 5, "cursor": 5}
 
 # A host with no `hooks` output in `manifests/platforms/` — every shipped
 # platform installs hooks today, so this is a synthetic name.
@@ -83,11 +82,10 @@ NON_HOOK_PLATFORM = "skills-only-host"
 
 # The manifest block the fixtures edit, quoted verbatim so a reformat of the
 # manifest breaks the fixture loudly instead of silently no-opping.
-# `commit-decomposition-advisory` stands in as the fixture's "retired hook":
-# it is `claude`-only, same as the hook this file used to exercise before
-# issue #1439 removed it.
+# `pre-commit-staged-file-enumeration` stands in as the fixture's "retired
+# hook": like the earlier stand-ins it ships to `claude` and `hermes` only.
 _RETIRED_HOOK_ENTRY = (
-    '      "name": "commit-decomposition-advisory",\n'
+    '      "name": "pre-commit-staged-file-enumeration",\n'
     '      "role": "advisory-nudge",\n'
     '      "event": "PreToolUse",\n'
     '      "matcher": "Bash",\n'
@@ -142,15 +140,15 @@ def test_name_missing_from_spec_table_is_drift(tmp_path):
         tmp_path,
         {
             gates.SPEC: (
-                "| `commit-decomposition-advisory` | `claude`, `hermes` | oversized single "
-                "commit |\n",
+                "| `pre-commit-staged-file-enumeration` | `claude`, `hermes` | staging "
+                "without enumerating files |\n",
                 "",
             )
         },
     )
     drifts = gates.check(repo)
     assert any(
-        "commit-decomposition-advisory" in d and "missing from the enumeration" in d
+        "pre-commit-staged-file-enumeration" in d and "missing from the enumeration" in d
         for d in drifts
     ), drifts
 
@@ -173,11 +171,11 @@ def test_spurious_name_in_spec_table_is_drift(tmp_path):
 
 
 def test_name_missing_from_impl_docstring_is_drift(tmp_path):
-    repo = _tree(tmp_path, {gates.IMPL: ("commit-decomposition-advisory, ", "")})
+    repo = _tree(tmp_path, {gates.IMPL: ("pre-commit-staged-file-enumeration,\n", "")})
     drifts = gates.check(repo)
     assert any(
         "impl.py" in d
-        and "commit-decomposition-advisory" in d
+        and "pre-commit-staged-file-enumeration" in d
         and "missing from the enumeration" in d
         for d in drifts
     ), drifts
@@ -208,18 +206,18 @@ def test_retired_hook_left_on_the_surfaces_is_drift(tmp_path):
     )
     drifts = gates.check(repo)
     assert any(
-        "commit-decomposition-advisory" in d and "carries no gates" in d
+        "pre-commit-staged-file-enumeration" in d and "carries no gates" in d
         for d in drifts
     ), drifts
     # …and every count word now disagrees, on all three surfaces.
-    assert sum("prose says 8 siblings, manifest derives 7" in d for d in drifts) >= 3
+    assert sum("prose says 7 siblings, manifest derives 6" in d for d in drifts) >= 3
 
 
 def test_stale_count_word_alone_is_drift(tmp_path):
     """The exact #1123 failure mode: names edited, a count word left behind."""
-    repo = _tree(tmp_path, {gates.SPEC: ("Eight sibling", "Six sibling")})
+    repo = _tree(tmp_path, {gates.SPEC: ("Seven sibling", "Six sibling")})
     drifts = gates.check(repo)
-    assert any("prose says 6 siblings, manifest derives 8" in d for d in drifts), drifts
+    assert any("prose says 6 siblings, manifest derives 7" in d for d in drifts), drifts
 
 
 def test_count_word_in_the_shell_test_comment_is_checked(tmp_path):
@@ -229,13 +227,13 @@ def test_count_word_in_the_shell_test_comment_is_checked(tmp_path):
         tmp_path,
         {
             gates.TEST: (
-                "at ASK: the eight\n# sibling gates",
+                "at ASK: the seven\n# sibling gates",
                 "at ASK: the five\n# sibling gates",
             )
         },
     )
     drifts = gates.check(repo)
-    assert any("prose says 5 siblings, manifest derives 8" in d for d in drifts), drifts
+    assert any("prose says 5 siblings, manifest derives 7" in d for d in drifts), drifts
 
 
 def test_unreadable_table_is_drift_not_a_silent_pass(tmp_path):
@@ -249,7 +247,7 @@ def test_missing_count_claim_is_drift_not_a_silent_pass(tmp_path):
         tmp_path,
         {
             gates.TEST: (
-                "# eight sibling commit hooks that gate this argv",
+                "# seven sibling commit hooks that gate this argv",
                 "# the commit hooks that gate this argv",
             )
         },
@@ -258,9 +256,9 @@ def test_missing_count_claim_is_drift_not_a_silent_pass(tmp_path):
     # once both are gone, so the second is removed here too.
     path = repo / gates.TEST
     text = path.read_text(encoding="utf-8")
-    assert "at ASK: the eight\n# sibling gates" in text
+    assert "at ASK: the seven\n# sibling gates" in text
     path.write_text(
-        text.replace("at ASK: the eight\n# sibling gates", "at ASK: the\n# gates"),
+        text.replace("at ASK: the seven\n# sibling gates", "at ASK: the\n# gates"),
         encoding="utf-8",
     )
     drifts = gates.check(repo)
@@ -289,7 +287,7 @@ def test_gate_label_on_a_non_bash_entry_is_drift(tmp_path):
 
 def test_gate_label_on_a_hook_absent_from_disk_is_drift(tmp_path):
     repo = _tree(tmp_path)
-    shutil.rmtree(repo / "hooks" / "advisory-nudge" / "commit-decomposition-advisory")
+    shutil.rmtree(repo / "hooks" / "advisory-nudge" / "pre-commit-staged-file-enumeration")
     drifts = gates.check(repo)
     assert any("is not on disk" in d for d in drifts), drifts
 
@@ -309,7 +307,7 @@ def test_malformed_manifest_is_drift(tmp_path):
 def test_main_exit_codes(monkeypatch, tmp_path):
     assert gates.main() == 0
     monkeypatch.setattr(
-        gates, "REPO", _tree(tmp_path, {gates.SPEC: ("Eight sibling", "Six sibling")})
+        gates, "REPO", _tree(tmp_path, {gates.SPEC: ("Seven sibling", "Six sibling")})
     )
     assert gates.main() == 1
 
@@ -534,7 +532,7 @@ def test_checklist_membership_is_derived_from_the_hook_that_prints_it():
 
 
 def test_stale_checklist_count_word_is_drift(tmp_path):
-    repo = _tree(tmp_path, {gates.SPEC: ("Four of the eight", "Eleven of the eight")})
+    repo = _tree(tmp_path, {gates.SPEC: ("Four of the seven", "Eleven of the seven")})
     drifts = gates.check(repo)
     assert any(
         "prose says 11 of the siblings are in the deny checklist" in d for d in drifts
@@ -554,8 +552,8 @@ def test_a_row_added_to_the_deny_checklist_breaks_the_stale_four(tmp_path):
             gates.CHECKLIST: (
                 "    Advisory only — never blocks.\n",
                 "    Advisory only — never blocks.\n"
-                "  Oversized single commit                   ← "
-                "commit-decomposition-advisory\n"
+                "  Message parses for release-please         ← "
+                "commit-message-paren-check\n"
                 "    Advisory only — never blocks.\n",
             )
         },
@@ -567,13 +565,13 @@ def test_a_row_added_to_the_deny_checklist_breaks_the_stale_four(tmp_path):
             and "prose says 4 of the siblings are in the deny checklist" in d
             for d in drifts
         ), (surface, drifts)
-    # The per-host table's second column moves with it — but only where the
-    # newly-listed hook actually ships. `commit-decomposition-advisory` is
-    # claude-only, so `codex`'s "2" is still correct and must NOT be flagged.
+    # The per-host table's second column moves with it wherever the
+    # newly-listed hook ships. `commit-message-paren-check` ships to every
+    # host, so the `claude` and `codex` rows are both stale now.
     assert any(
         "'claude' row says 4 of them are in the deny checklist" in d for d in drifts
     ), drifts
-    assert not any("'codex' row" in d for d in drifts), drifts
+    assert any("'codex' row" in d for d in drifts), drifts
 
 
 def test_checklist_naming_a_hook_that_is_not_a_commit_gate_is_drift(tmp_path):
@@ -599,7 +597,7 @@ def test_missing_checklist_claim_is_drift_not_a_silent_pass(tmp_path):
         tmp_path,
         {
             gates.SPEC: (
-                "Four of the eight siblings are the checklist",
+                "Four of the seven siblings are the checklist",
                 "Some of the siblings appear in the checklist",
             )
         },
@@ -674,7 +672,7 @@ def test_a_rewritten_manifest_is_re_read_not_served_stale(tmp_path):
     fixtures would silently stop testing anything.
     """
     tree = _tree(tmp_path)
-    assert len(gates.derive(tree, "claude")[0]) == 8
+    assert len(gates.derive(tree, "claude")[0]) == 7
 
     manifest_path = tree / gates.MANIFEST
     data = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -684,5 +682,5 @@ def test_a_rewritten_manifest_is_re_read_not_served_stale(tmp_path):
     manifest_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
 
     names, _ = gates.derive(tree, "claude")
-    assert len(names) == 7, "the rewrite was served from a stale parse"
+    assert len(names) == 6, "the rewrite was served from a stale parse"
     assert "commit-title-length-check" not in names

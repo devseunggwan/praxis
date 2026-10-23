@@ -143,12 +143,10 @@ doctor() {
     "'PyYAML ' + yaml.__version__"
   doctor_probe git "step 12 diff base; sub-suite fixture repos" \
     "apt install git / brew install git" git --version
-  doctor_probe jq "catalog, fixture-key, reaper, retrospect suites" \
+  doctor_probe jq "reaper and hook suites" \
     "apt install jq / brew install jq" jq --version
   doctor_probe zsh "test_block_unmatched_glob.sh" \
     "apt install zsh / brew install zsh" zsh --version
-  doctor_probe tmux "test_cmux_session_*.sh sub-suites" \
-    "apt install tmux / brew install tmux" tmux -V
   doctor_probe lsof "test_codex_broker_reaper.sh lsof sub-cases" \
     "apt install lsof" sh -c 'lsof -v 2>&1 | sed -n "s/^ *revision: */lsof /p"'
 

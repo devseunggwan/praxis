@@ -335,8 +335,8 @@ Notes that the entry point does not tell you:
   fixture processes and temp dirs leak; check `pgrep -f <fixture>` and the
   temp-dir glob are empty after the run.
 - **Prerequisite rows.** Leave the `README.md` / `AGENTS.md` prerequisite
-  rows alone unless the change needs them: the tier table is mirrored in
-  `skills/using-praxis/SKILL.md` under a drift check, and `AGENTS.md` has a
+  rows alone unless the change needs them: the two tier tables are kept
+  identical by a drift check, and `AGENTS.md` has a
   word budget (see
   [Keeping `AGENTS.md` small](../CONTRIBUTING.md#keeping-agentsmd-small)).
   Put a skill's dependency note in the skill itself.

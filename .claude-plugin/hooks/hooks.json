@@ -72,16 +72,6 @@
             "timeout": 5
           }
         ]
-      },
-      {
-        "matcher": ".*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/elapsed-time-signal.sh PostToolUse",
-            "timeout": 3
-          }
-        ]
       }
     ],
     "UserPromptSubmit": [
@@ -101,31 +91,11 @@
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/session-intent.sh",
             "timeout": 5
-          },
-          {
-            "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/retrospect-active-marker.sh",
-            "timeout": 5
-          },
-          {
-            "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/elapsed-time-signal.sh UserPromptSubmit",
-            "timeout": 3
           }
         ]
       }
     ],
     "PreToolUse": [
-      {
-        "matcher": "Skill",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/retrospect-active-marker.sh",
-            "timeout": 5
-          }
-        ]
-      },
       {
         "matcher": "Bash",
         "hooks": [
@@ -153,16 +123,6 @@
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/_dispatch.sh PreToolUse 'Edit|NotebookEdit|Write' claude",
             "timeout": 10
-          }
-        ]
-      },
-      {
-        "matcher": "mcp__.*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/cross-tool-reroute-gate.sh",
-            "timeout": 5
           }
         ]
       },
@@ -232,16 +192,6 @@
           {
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/cited-rule-gate.sh",
-            "timeout": 5
-          }
-        ]
-      },
-      {
-        "matcher": "mcp__.*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/negation-answer-quote-advisory.sh",
             "timeout": 5
           }
         ]
@@ -344,11 +294,6 @@
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/second-failure-advisory.sh",
             "timeout": 5
-          },
-          {
-            "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/elapsed-time-signal.sh PostToolUseFailure",
-            "timeout": 3
           }
         ]
       }

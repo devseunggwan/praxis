@@ -86,7 +86,7 @@ run_case "assigned_arm_call_fails" \
 # 6. A different hook's name in the call does not satisfy this hook's rule —
 #    the match is name-anchored, so a copy-paste from a sibling still fails.
 run_case "wrong_hook_name_fails" \
-  "$(sub_arm '  praxis_fire_arm retrospect-mix-check completion-verify "$TELEMETRY_SESSION_ID" ""')" "1"
+  "$(sub_arm '  praxis_fire_arm strike-counter completion-verify "$TELEMETRY_SESSION_ID" ""')" "1"
 
 echo "----"
 echo "PASS: $PASS / FAIL: $FAIL"

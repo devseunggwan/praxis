@@ -21,29 +21,23 @@ Skills are orchestrators with pluggable steps; external integrations (issue trac
 
 ## Prerequisites
 
-| Tier               | What works                                               | Dependencies                            |
-| ------------------ | -------------------------------------------------------- | --------------------------------------- |
-| **Standalone**     | recover-sessions, strike / strikes / reset-strikes, debt | `gh` CLI, `jq`; `recover-sessions` also needs `tmux`; `debt` needs only `git` |
-| **Enhanced**       | + retrospect, codex-review-wrap                          | + oh-my-claudecode                      |
-| **Full**           | + all cmux-* skills                                      | + cmux                                  |
-| **Multi-provider** | + codex/gemini routing in cmux-delegate                  | + codex-cli, gemini-cli                 |
+| Tier               | What works                              | Dependencies            |
+| ------------------ | --------------------------------------- | ----------------------- |
+| **Standalone**     | strike / strikes / reset-strikes        | `gh` CLI, `jq`          |
+| **Enhanced**       | + retrospect, codex-review-wrap         | + oh-my-claudecode      |
+| **Full**           | + all cmux-* skills                     | + cmux                  |
+| **Multi-provider** | + codex/gemini routing in cmux-delegate | + codex-cli, gemini-cli |
 
 > `gh` is also a prerequisite of the verification-anchor convention — an anchor
 > can be posted without it, but not revised past rev 1. MCP-only procedure:
 > [`CONTRIBUTING.md` → Anchor revision without `gh`](CONTRIBUTING.md#anchor-revision-without-gh)
 > (issue #1211).
 
-## Skills (25)
+## Skills (16)
 
 > **Invocation**: praxis entries are *skills*, not subagents. Call them
 > via `Skill(skill="praxis:<name>")` — `Agent(subagent_type="praxis:<name>")`
 > returns `Agent type not found` (rationale: [RUNTIME_CONSTRAINTS.md §3](RUNTIME_CONSTRAINTS.md)).
-
-### Discovery
-
-| Skill                  | Purpose                                                                                             |
-| ---------------------- | --------------------------------------------------------------------------------------------------- |
-| `using-praxis`         | Onboarding entry point — maps scenarios to the right skill for new praxis users                     |
 
 ### Development
 
@@ -51,15 +45,11 @@ Skills are orchestrators with pluggable steps; external integrations (issue trac
 | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `retrospect`               | Session retrospect — find friction root causes, propose improvements                                                                                                                              |
 | `codex-review-wrap`        | Worktree-aware wrapper for `/codex:review` — explicit target selection, premise-verification gate, flip detection                                                                                 |
-| `debt`                     | Deferred-decision ledger — commit-trailer markers (`Not-tested:`, `Confidence: low`, `Rejected:`, `Directive:`, `Scope-risk:`) plus `# [PR #N]` comments; report-only                             |
 | `surface-enumeration`      | Input-surface enumeration before writing a parser/validator/sanitizer/classifier — every variant becomes a required test case                                                                     |
-| `bypass-report`            | Bypass-telemetry and hook fire-rate viewer — runs the `bypass-review` CLI over local event ledgers; user-invoked, report-only                                                                     |
-| `spec-drift`               | Spec↔code drift report — runs each requirement's `Verify:` command, reports `implemented` / `missing` / `UNKNOWN`; report-only                                                                    |
 | `merge-briefing`           | Pre-merge approval procedure — three-surface probe, blocking-decoration grading, anchor-gap carry, six-part approve-ask; chains into `worktree-merge-cleanup`                                     |
 | `worktree-merge-cleanup`   | Pre-merge worktree precondition + post-merge cleanup — base-worktree call site, submodule `--force` caveat, squash-ancestry stale-HEAD guard, no-`&&`-chain rule                                  |
 | `perf-leak-review`         | Perf/leak review — a read-only reviewer reads a diff and the repo for five closed classes: N+1, unreleased resource, unbounded container, load-then-filter, leaked listener or timer; report-only |
 | `tradeoff`                 | Tradeoff report — options at a fork, or whether a finding blocks; reversibility / blast radius / cost-if-wrong / process cost, graded by source; report-only                                      |
-| `perf-leak-verify`         | Run `perf-leak-review` candidates to prove or refute them                                                                                                                                         |
 | `test-suite-speedup`       | Speed up slow CI tests; measured before/after                                                                                                                                                     |
 | `test-suite-consolidation` | Share copied fixtures; prune approved tests                                                                                                                                                       |
 | `stale-pr-revival`         | Revive a stalled or bot PR without rebasing                                                                                                                                                       |
@@ -77,11 +67,7 @@ Skills are orchestrators with pluggable steps; external integrations (issue trac
 
 | Skill                   | Purpose                                                               |
 | ----------------------- | --------------------------------------------------------------------- |
-| `cmux-save-sessions`    | Save cmux session list as JSON snapshot                               |
-| `cmux-resume-sessions`  | Restore cmux workspaces from JSON snapshot                            |
 | `cmux-recover-sessions` | Bulk recover sessions after crash (cmux backend)                      |
-| `recover-sessions`      | Bulk recover sessions after power loss (tmux backend)                 |
-| `cmux-session-manager`  | Daily session lifecycle — status dashboard, cleanup, reorganize       |
 | `cmux-delegate`         | Give an independent issue its own session with auto-collected context |
 
 ## Hooks

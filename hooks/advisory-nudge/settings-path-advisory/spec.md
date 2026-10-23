@@ -23,9 +23,8 @@ unhooked by decision (#1009): a relayed `Bypass` line and an originated route
 are textually indistinguishable. The third is a tool call: the `Write` or
 `Edit` to `.claude/settings.json` that follows the user's pick. That call was
 silent on every `Edit|Write` hook — `protected-paths-guard` keys on
-credential-shaped names (`.env`, `*.pem`, `.ssh/`), and the only other
-`settings.json` matcher, `jq-config-empty-dict-advisory`, is a Bash read
-advisory. This hook closes that one lane.
+credential-shaped names (`.env`, `*.pem`, `.ssh/`), and no other `Edit|Write`
+hook matches a settings path. This hook closes that one lane.
 
 `ConfigChange`, the harness event for settings edits, was considered and
 rejected for this: the hooks reference says a blocked change "surfaces no
@@ -137,7 +136,6 @@ Strict (exit 2): stderr only, `BLOCKED (strict mode)` in the header.
 | Hook | Scope | Overlap |
 | ------ | ------- | --------- |
 | `protected-paths-guard` | credential-shaped file names | None — settings files are not in its set; both fire on nothing in common |
-| `jq-config-empty-dict-advisory` | `jq` reading a config file (Bash) | None — a read advisory on a different tool |
 | `bulk-write-memory-checkpoint` | the 2nd+ write under `.claude/` per session | Both can fire on one `.claude/settings.json` write; that hook is about bulk authoring, this one about what the file does |
 
 ## Known limitations

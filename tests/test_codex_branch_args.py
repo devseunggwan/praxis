@@ -96,8 +96,7 @@ def _run_claude(tmp_path: pathlib.Path, sub_model: str, effort: str, cwd: pathli
     prompt.write_text("task")
     body = _render(
         _branch("claude"),
-        # {time_env} / {time_sysprompt} carry --time-budget (#1501); empty is the default.
-        {"sub_model": sub_model, "effort": effort, "claude_env": "", "budget_flag": "", "time_env": "", "time_sysprompt": ""},
+        {"sub_model": sub_model, "effort": effort, "claude_env": "", "budget_flag": ""},
     )
     script = tmp_path / "wrapper.sh"
     # `$SYS_PROMPT` is set in the Step 4 preamble, outside this branch (#1510).

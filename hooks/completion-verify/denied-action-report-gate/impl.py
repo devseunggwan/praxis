@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Stop-hook gate: a refused tool call this turn that the report never mentions.
 
-Background (issue #1392). `retrospect-mix-check` Gate-12 (#1013) already encodes
+Background (issue #1392). The retrospect skill's Gate-12 (#1013) already encodes
 this rule and states its mechanism: a refused action "has no outcome, so it
 leaves no error, no correction and no confession, and selection by ease of
 recall never reaches it". But Gate-12 keys on the retrospect Stage-3 report's

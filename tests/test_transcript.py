@@ -521,10 +521,6 @@ class TestScanUserRejections:
 HOOKS = REPO_ROOT / "hooks"
 
 _CONSUMERS = {
-    # Scans a tail past the turn boundary (min_events=150): the answer, the
-    # re-ask and the write can share one turn, which is the incident shape.
-    HOOKS / "advisory-nudge" / "negation-answer-quote-advisory" / "impl.py":
-        ["load_recent_events", "block_prose"],
     HOOKS / "completion-verify" / "readonly-verify-deferral-gate" / "impl.py":
         ["load_current_turn", "extract_last_assistant_text"],
     # Registered on SubagentStop as well (#1337), so it takes the turn through
@@ -594,9 +590,6 @@ _CONSUMERS = {
     # transcript file and session, a byte budget per call (#1277).
     HOOKS / "preflight-gate" / "block-commit-without-codex-review" / "impl.py":
         ["scan_transcript_resumable", "scan_cursor_path", "TranscriptReadError"],
-    # Whole-session scans under a byte cap, needle-prefiltered (#1312).
-    HOOKS / "preflight-gate" / "skill-gate-commands" / "impl.py":
-        ["iter_transcript_bounded", "TranscriptReadError", "json_needle"],
     HOOKS / "advisory-nudge" / "pre-commit-staged-file-enumeration" / "impl.py":
         ["iter_transcript_bounded", "TranscriptReadError"],
     HOOKS / "preflight-gate" / "block-ask-end-option" / "impl.py":
@@ -638,10 +631,6 @@ _CONSUMERS = {
     # shape for this one caller was not worth it.
     HOOKS / "advisory-nudge" / "response-language-nudge" / "impl.py":
         ["load_current_turn"],
-    # A block anywhere earlier in the session arms the gate, so it folds the
-    # whole transcript through a session-keyed cursor (#1485).
-    HOOKS / "preflight-gate" / "cross-tool-reroute-gate" / "impl.py":
-        ["scan_transcript_resumable", "scan_cursor_path", "TranscriptReadError"],
     # Classifies the human message that opened the turn, so it reads past
     # injected user records with `human_only=True` (#1486).
     HOOKS / "preflight-gate" / "question-turn-mutation-gate" / "impl.py":
@@ -682,8 +671,6 @@ _CONSTANT_CONSUMERS = {
     HOOKS / "completion-verify" / "denied-action-report-gate" / "impl.py":
         ["AUTOMODE_BLOCK_DENIAL_KIND", "DENIAL_KINDS", "HOOK_BLOCK_DENIAL_KIND",
          "REJECTION_DENIAL_KIND"],
-    HOOKS / "preflight-gate" / "cross-tool-reroute-gate" / "impl.py":
-        ["HOOK_BLOCK_DENIAL_KIND"],
     HOOKS / "preflight-gate" / "block-guard-removal-menu" / "impl.py":
         ["HOOK_BLOCK_DENIAL_KIND"],
     HOOKS / "preflight-gate" / "rejected-call-probe-gate" / "impl.py":

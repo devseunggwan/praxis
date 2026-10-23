@@ -70,13 +70,13 @@ def test_input_surface_classification():
         # ``$0`` resolves to the first argument: the loader's ``\d+`` matches a
         # zero and its argument array is zero-indexed. Verified against the
         # expression in the installed runtime, quoted in the checker docstring.
-        '"$(dirname "$0")/cmux-resume-sessions" "$@"': True,
+        '"$(dirname "$0")/cmux-recover-sessions" "$@"': True,
         "echo $0": True,
         # multi-digit — substituted once that many arguments are passed, and
         # caught here through the leading ``$1``
         "echo $10": True,
         # not references
-        '"$(dirname "${0}")/cmux-resume-sessions" "$@"': False,
+        '"$(dirname "${0}")/cmux-recover-sessions" "$@"': False,
         "${HOME} and ${1}": False,
         "a $ sign, then 1 on its own": False,
         "awk -v f=1 '{print $f}'": False,
@@ -118,9 +118,9 @@ def test_planted_reference_is_reported(tmp_path, monkeypatch):
 
 
 def test_scope_excludes_shell_scripts_beside_the_skill(tmp_path, monkeypatch):
-    # `claude-recover` and friends live under skills/ and are executed by the
-    # shell, never loaded as model context, so their positional parameters are
-    # correct. Flagging them would make the check unusable.
+    # `cmux-recover-sessions` and friends live under skills/ and are executed
+    # by the shell, never loaded as model context, so their positional
+    # parameters are correct. Flagging them would make the check unusable.
     repo = _git_repo(
         tmp_path,
         {
@@ -168,27 +168,6 @@ def test_cmux_delegate_step_5b_regression():
     assert '[ "${TARGET#workspace:}" = "$TARGET" ]' in body
 
 
-def test_cmux_wrapper_snippets_resolve_via_skill_dir():
-    """The four wrapper snippets the widening exposed.
-
-    They once read ``dirname "${0}"`` — braced so the loader's ``\\$(\\d+)``
-    could not rewrite it — but inside a skill body ``$0`` is the shell, not
-    the SKILL.md, so the path never resolved (#1290). Each tool sits in its
-    own skill directory, so they now take ``${CLAUDE_SKILL_DIR}`` like the
-    recover skills below; this pins that no ``$0`` form comes back in either
-    spelling.
-    """
-    for rel, tool in (
-        ("skills/cmux-resume-sessions/SKILL.md", "cmux-resume-sessions"),
-        ("skills/cmux-save-sessions/SKILL.md", "cmux-save-sessions"),
-        ("skills/cmux-session-manager/SKILL.md", "cmux-session-status"),
-    ):
-        body = (_REPO / rel).read_text(encoding="utf-8")
-        assert 'dirname "$0"' not in body, rel
-        assert 'dirname "${0}"' not in body, rel
-        assert "${CLAUDE_SKILL_DIR}/" + tool in body, rel
-
-
 def test_no_skill_body_wraps_a_placeholder_in_parameter_expansion():
     """A placeholder carrying any bash suffix is not substituted, so it must not appear.
 
@@ -209,19 +188,18 @@ def test_no_skill_body_wraps_a_placeholder_in_parameter_expansion():
 
 
 def test_recover_skill_snippets_resolve_via_skill_dir():
-    """The two recover skills address their bundled tool via ``CLAUDE_SKILL_DIR``.
+    """The recover skill addresses its bundled tool via ``CLAUDE_SKILL_DIR``.
 
-    They never had the ``$0`` form — they told the model to ``ln -sf`` the tool
+    It never had the ``$0`` form — it told the model to ``ln -sf`` the tool
     into ``~/.local/bin`` and call it by bare name, which a plugin install never
-    sets up (#1333). Each tool lives inside its own skill directory, so the
+    sets up (#1333). The tool lives inside its own skill directory, so the
     documented ``${CLAUDE_SKILL_DIR}`` placeholder (substituted inline in skill
-    content, cwd-independent) is the exact fit. The bash ``${VAR:?...}`` guard
-    the cmux skills use is deliberately absent here: skill-content placeholders
+    content, cwd-independent) is the exact fit. A bash ``${VAR:?...}`` guard
+    is deliberately absent here: skill-content placeholders
     are not promised as environment variables, so ``:?`` could fire on a
     substituted-away name with nothing to fall back on.
     """
     for rel, tool in (
-        ("skills/recover-sessions/SKILL.md", "claude-recover"),
         ("skills/cmux-recover-sessions/SKILL.md", "cmux-recover-sessions"),
     ):
         body = (_REPO / rel).read_text(encoding="utf-8")

@@ -38,8 +38,7 @@ LLM reviewer** and asks one question: does this change introduce a candidate in
 one of five defect classes? It is **report-only** — it runs none of the
 project's code, writes nothing into the repository, and grades every finding
 `candidate` rather than defect, the same read-oracle lineage
-[`spec-drift`](../spec-drift/SKILL.md) and
-[`codex-review-wrap`](../codex-review-wrap/SKILL.md) sit in.
+[`codex-review-wrap`](../codex-review-wrap/SKILL.md) sits in.
 
 **Core principle:** a reader can point at a candidate; only an execution can
 prove a defect — so the output says `candidate` and never more.
@@ -47,8 +46,8 @@ prove a defect — so the output says `candidate` and never more.
 **References:** [`references/reviewer-brief.md`](references/reviewer-brief.md)
 is the delegated reviewer's prompt (Step 3);
 [`references/repo-wide-sweep.md`](references/repo-wide-sweep.md) is the
-area fan-out for a request with no diff. Proving a candidate by execution is
-the sibling skill [`perf-leak-verify`](../perf-leak-verify/SKILL.md).
+area fan-out for a request with no diff. The skill ends at the candidate list;
+proving a candidate by execution is outside it.
 
 ## When to Use
 
@@ -58,8 +57,8 @@ the sibling skill [`perf-leak-verify`](../perf-leak-verify/SKILL.md).
   candidates listed with file and line.
 - Do **not** use it to measure anything. No profiler, no benchmark, no
   before/after comparison — those need execution, which this skill refuses.
-  To prove or refute candidates by running them, use
-  [`perf-leak-verify`](../perf-leak-verify/SKILL.md).
+  Proving or refuting a candidate by running it is separate work that starts
+  from this skill's report.
 - No diff — the user wants the whole repository swept. That changes this
   skill's contract (Step 1 requires `--diff`); follow
   [`references/repo-wide-sweep.md`](references/repo-wide-sweep.md), which
@@ -173,10 +172,9 @@ Zero findings is a result, not a failure — say `0 candidates` plainly. Every
 finding carries `file`, `line`, and the quoted `evidence`, so the reader can go
 to the line without re-deriving anything.
 
-When the user wants a candidate proven, offer
-[`perf-leak-verify`](../perf-leak-verify/SKILL.md) with the validated
-envelope as its input. Offering it is the whole action — this skill runs
-nothing.
+The report — the validated envelope and the candidate list above — is the
+whole output. This skill runs nothing and hands off to nothing; whether a
+candidate gets proven by execution is the reader's decision.
 
 ## Error Handling
 
@@ -192,9 +190,8 @@ nothing.
 ## Limitations
 
 - **Candidates, not defects.** Nothing is executed, so a finding is a reading of
-  the code, and a false positive is expected rather than exceptional.
-  [`perf-leak-verify`](../perf-leak-verify/SKILL.md) is where a candidate is
-  driven and measured.
+  the code, and a false positive is expected rather than exceptional. Driving
+  and measuring a candidate happens outside this skill.
 - **Read-only is an instruction, not a structure.** `allowed-tools` does not
   constrain the delegated reviewer. A harness that needs proof runs the review
   against a write-protected copy and checks `git status --porcelain` afterwards

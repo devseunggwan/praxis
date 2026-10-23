@@ -99,10 +99,19 @@ approaches the budget was not measured.
 
 `Reach` is stage 1; `Stage 2` is the measurement or the reason there is none.
 
+> **2026-10-23 note.** Seven advisory hooks were later removed after a 60-day
+> fire-rate window showed no block, ask or advise from any of them:
+> `advisory-wrapper-signature-verify`, `comment-yap-advisory`,
+> `commit-decomposition-advisory`, `elapsed-time-signal`,
+> `jq-config-empty-dict-advisory`, `negation-answer-quote-advisory`, and
+> `pytest-direct-exec-advisory`. Their rows are gone because the table is
+> re-derived from the manifest; the stage 2 result for `elapsed-time-signal`
+> above, and the "22 reachable hooks" count it was taken against, are kept as
+> the record of that measurement.
+
 <!-- rule-noop-audit:begin -->
 | Hook | Channels | Strict env | Reach | Stage 2 |
 | --- | --- | --- | --- | --- |
-| `advisory-wrapper-signature-verify` | stderr | - | unreachable | - |
 | `bash-worktree-existence-advisory` | stderr | - | unreachable | - |
 | `block-personal-asset-leak` | context, stderr | `PRAXIS_PERSONAL_LEAK_STRICT` | reachable | unmeasured: write |
 | `bulk-write-memory-checkpoint` | stderr | - | unreachable | - |
@@ -110,20 +119,16 @@ approaches the budget was not measured.
 | `cited-rule-gate` | decision, context, stderr | `PRAXIS_CITED_RULE_STRICT` | reachable | unmeasured: command |
 | `cli-flag-incompat-advisory` | stderr | - | unreachable | - |
 | `codex-review-route` | context | - | reachable | unmeasured: event |
-| `comment-yap-advisory` | stderr | - | unreachable | - |
-| `commit-decomposition-advisory` | stderr | - | unreachable | - |
 | `composed-command-gate` | stderr | `PRAXIS_COMPOSED_COMMAND_STRICT` | unreachable | - |
 | `count-assertion-verify` | stderr | - | unreachable | - |
 | `cwd-relative-exec-advisory` | decision | - | reachable | unmeasured: command |
 | `delegation-context-inject` | context | - | reachable | unmeasured: event |
 | `destructive-bash-guard` | decision, context, stderr | `PRAXIS_DESTRUCTIVE_BASH_STRICT` | reachable | unmeasured: command |
-| `elapsed-time-signal` | context | - | reachable | measured: no-op |
 | `exclusion-probe-gate` | decision, stderr | `PRAXIS_EXCLUSION_PROBE_STRICT` | reachable | unmeasured: strict |
 | `external-api-literal-trigger` | stderr | - | unreachable | - |
 | `external-write-path-existence-check` | context, stderr | `PRAXIS_PHANTOM_PATH_STRICT` | reachable | unmeasured: write |
 | `fallback-negative-warn` | stderr | - | unreachable | - |
 | `inspection-chain-advisory` | stderr | - | unreachable | - |
-| `jq-config-empty-dict-advisory` | stderr | - | unreachable | - |
 | `long-foreground-call-advisory` | stderr | - | unreachable | - |
 | `memory-hint` | stderr | - | unreachable | - |
 | `menu-mutation-tier-advisory` | decision, stderr | `PRAXIS_MENU_MUTATION_TIER_STRICT` | reachable | unmeasured: event |
@@ -131,7 +136,6 @@ approaches the budget was not measured.
 | `model-routing-advisory` | stderr | - | unreachable | - |
 | `momentum-rule-retrieval-gate` | decision, stderr | `PRAXIS_MOMENTUM_STRICT` | reachable | unmeasured: write |
 | `n1-quantitative-claim-advisory` | stderr | - | unreachable | - |
-| `negation-answer-quote-advisory` | decision | - | reachable | unmeasured: write |
 | `output-block-falsify-advisory` | decision, stderr | - | reachable | unmeasured: write |
 | `path-probe-gate` | decision, stderr | `PRAXIS_PATH_PROBE_STRICT` | reachable | unmeasured: strict |
 | `perf-multiplier-evidence-advisory` | stderr | - | unreachable | - |
@@ -142,7 +146,6 @@ approaches the budget was not measured.
 | `pre-output-falsification-gate` | stderr | - | unreachable | - |
 | `protected-paths-guard` | context, stderr | `PRAXIS_PROTECTED_PATHS_STRICT` | reachable | unmeasured: write |
 | `push-remote-ref-verify` | stderr | `PRAXIS_PUSH_VERIFY_STRICT` | unreachable | - |
-| `pytest-direct-exec-advisory` | stderr | - | unreachable | - |
 | `response-language-nudge` | context | - | reachable | unmeasured: language |
 | `secret-print-redaction-advisory` | context, stderr | - | reachable | unmeasured: command |
 | `settings-path-advisory` | context, stderr | `PRAXIS_SETTINGS_PATH_STRICT` | reachable | unmeasured: write |

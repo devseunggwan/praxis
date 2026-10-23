@@ -216,18 +216,6 @@ Bounded-drop rule:
 
 Stage 2 starts with a symmetric pre-scan before any agent calls.
 
-**Front-load candidate hints (best-effort).** When the retrospect skill was
-invoked, the PreToolUse marker hook may have dropped a silent-pass candidate
-hint file at
-`${TMPDIR:-/tmp}/praxis-retrospect-candidates-<session_id>.json` (or, under an
-explicit marker override, the marker path plus `.candidates.json`). If present,
-read it first: each `mandatory_candidates[]` entry (`class_id`, `severity`,
-`evidence`) is grep-detected friction-free conduct the signal scan would miss.
-Fold each **hard** candidate into the Stage-3 coverage plan up front — the same
-grep runs again at Stop as the source of truth (Gate-9), so pre-covering here
-avoids a late block. Absence of the file is normal (front-load is advisory);
-never depend on it.
-
 ### Pre-scan lanes
 
 Scope window: scan the current session boundary when available; otherwise scan
@@ -335,8 +323,8 @@ including sidechain friction here carries no enforcement risk.
      `is_error: true`, AND the runtime's fixed refusal sentence is present. An
      option label reading "No" is never classified as a refusal. The shared
      enumerator is `hooks/_lib/_transcript.py::scan_user_rejections`, which the
-     `retrospect-mix-check` Gate-12 oracle also calls — one scanner, so the lane
-     and the gate cannot drift
+     Gate-12 check also uses — one scanner, so the lane and the gate cannot
+     drift
    - scope: unlike lanes 3-5 this lane reads the **whole readable transcript**,
      not the scope window. A refusal is a standing NO that does not expire after
      50 turns, and Gate-12 re-derives the same set from the whole transcript — a
@@ -417,28 +405,28 @@ Rules:
   drop is a Red Flag.
 
 **Limits — what is mechanizable vs what is not (issue #715):** Only the *format*
-of this pass is hook-enforceable: the `retrospect:suppression_ledger` and
+of this pass is mechanically checkable: the `retrospect:suppression_ledger` and
 `retrospect:distribution` fences must be present with their required lines, and
 the `## Actions Executed` marker must appear. The *semantic* judgment this pass turns
 on — "is this actually the single most painful item, and did a positive learning
-quietly take its slot?" — is **not** hook-enforceable; it stays a self-feedback
-step even when wrapped in a hook. Four consecutive recurrences of the
+quietly take its slot?" — is **not** mechanically checkable; it stays a self-feedback
+step even when wrapped in a gate. Four consecutive recurrences of the
 "hid the painful part" failure, plus the self-correction literature (intrinsic
 self-correction without an external signal does not reliably work and can degrade
 output; the bottleneck is error *detection*, not correction), establish that
 adding more self-check prose to this family does not enforce it. Do not keep
 refining self-prompts here — the leverage is the **external** signal (the
 externalized critic tier below, or the user's "you hid it?" probe), not a smarter
-self-instruction. That leverage is mechanized, not just described: **Gate-8c**
-in `retrospect-mix-check` blocks a `critic_diff: not-run` whenever the live
+self-instruction. That leverage is a rule, not just a description: **Gate-8c**
+rejects a `critic_diff: not-run` whenever the live
 transcript carries more than one *near-unambiguous* user-correction marker (a
 deliberately low-false-positive set — issue #722 — far tighter than Gate-8b's,
 biased toward a false-negative so a clean retrospect is never hard-blocked;
 ambiguous everyday-conversational corrections remain this prose layer's job, not
 the gate's). Within that narrowed set the external tier cannot be self-skipped in
 exactly the case (a genuine, clearly-stated user correction occurred) its
-predicate is satisfied. The hook cannot judge *which* failure is worst; it can
-and does force the external auditor to run when the transcript proves real
+predicate is satisfied. Gate-8c cannot judge *which* failure is worst; it does
+require the external auditor to run when the transcript proves real
 user-visible friction.
 
 ### Externalized critic re-scan tier (conditional, issue #702)
@@ -522,13 +510,10 @@ critic_roots:
 ```
 
 This block is the **transcript-authoritative oracle** for the Stage-3 Gate-10
-coverage check (issue #772): `retrospect-mix-check` parses the critic's roots
+coverage check (issue #772): the check reads the critic's roots
 from **this subagent tool_result**, not from any agent-pasted fence. Emit
 `critic_roots:` with zero bullets when the critic finds no distinct root beyond
-what the agent already surfaced (empty coverage is accepted). Choose root-ids
-that do not collide as a substring with a silent-pass class id
-(`credential-display`, `sanctioned-path-bypass`, `create-delete-churn`) so
-coverage matching stays unambiguous.
+what the agent already surfaced (empty coverage is accepted).
 
 #### Diff handling
 
@@ -552,10 +537,10 @@ Separately from the `critic_candidates` suppression diff, each `critic_roots`
 entry carries a Stage-3 coverage obligation (issue #772): every root-id must
 either be covered in the unified findings table or explicitly folded with a
 non-empty reason (`folded: <root-id> because <reason>`). A reason-less fold does
-NOT count as coverage. `retrospect-mix-check` Gate-10 enforces this against the
+NOT count as coverage. Gate-10 checks this against the
 critic's transcript roots — see
 [`stage3-reporting.md`](stage3-reporting.md). The eligibility that arms Gate-10
-is transcript-derived (a silent-pass hard candidate OR a user-correction signal),
+is transcript-derived (a user-correction signal),
 so an eligible session with **no critic invocation in the transcript** blocks
 regardless of the `critic_diff` label (`not-run` / `none` / `checked`) — the
 label cannot self-clear the requirement that the external critic actually ran.
@@ -639,8 +624,8 @@ with a report sentence confirming the existing resolution still works.
 
 For any row whose `Proposed Actions` contains `upstream_feedback` or `issue`,
 the `Rationale` cell must include a literal `backing_repo: <owner>/<repo>` line,
-embedded with `<br>` separators when rendered in the Stage 3 table. The Stop
-hook treats both actions as routed actions, and Stage 4 re-reads this declaration
+embedded with `<br>` separators when rendered in the Stage 3 table. The
+gates treat both actions as routed actions, and Stage 4 re-reads this declaration
 as the routing decision before creating either upstream feedback or project issue
 artifacts.
 
@@ -795,7 +780,7 @@ transcript before analysis instead of relying only on the compaction summary:
     `is_error_count`.** A single category-assumed row ("these are all
     transient timeouts, dismiss") satisfies Gate-7's structural check while
     still under-enumerating. Treat row-count parity with `is_error_count` as a
-    Stage 2 MUST even though the hook cannot verify it: do not close the enum
+    Stage 2 MUST even though Gate-7's structural check cannot verify it: do not close the enum
     block until every counted `is_error` has its own disposition row.
   - **is_error / tool_census cross-check (MUST).** `is_error_count` must
     equal the sum of `error_count` across all `tool_census` rows (pre-scan

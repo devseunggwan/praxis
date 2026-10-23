@@ -41,7 +41,6 @@ drift.
 | Hook | Command | Purpose |
 | ------ | --------- | --------- |
 | `hooks/preflight-gate/pre-gh-pr-create-dedup-gate/impl.py` | `git remote get-url origin` | Resolve the repo owner/name for the dedup search |
-| `hooks/preflight-gate/skill-gate-commands/impl.py` | `git remote get-url origin` | Resolve the repo the mapping is scoped to, so a gate declared for one repository does not fire in another |
 | `hooks/preflight-gate/pre-edit-protected-branch-guard/impl.py` | `git rev-parse --show-toplevel` | Locate the git repo root |
 | `hooks/preflight-gate/pre-edit-protected-branch-guard/impl.py` | `git rev-parse --abbrev-ref HEAD` | Read the current branch name |
 | `hooks/preflight-gate/pre-edit-protected-branch-guard/impl.py` | `git status --porcelain` | Check for a dirty working tree |
@@ -87,7 +86,7 @@ remote state. Hooks fail-open (exit 0) when the binary is missing or times out.
 ## Guard Parser Boundary
 
 Several praxis preflight guards (`destructive-bash-guard`, the commit/push
-gates, `skill-gate-commands`, the `gh`-flag guards, …) inspect the **literal
+gates, the `gh`-flag guards, …) inspect the **literal
 command tokens** of a Bash invocation via a shared structural tokenizer. This is
 a deliberate, bounded threat model — the guards are correctness/discipline
 nudges, **not a sandbox**:

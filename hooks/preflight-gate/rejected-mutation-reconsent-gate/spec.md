@@ -96,7 +96,7 @@ so a host rename cannot silently disarm the surface.
 ### What counts as a rejection — structural only
 
 `_lib/_transcript.py::scan_user_rejections` is the shared enumerator (also
-consumed by retrospect pre-scan lane 6 / `retrospect-mix-check` Gate-12,
+consumed by retrospect pre-scan lane 6 / the retrospect skill's Gate-12,
 issue #1013). A record qualifies only when **three independent markers agree**:
 
 | Marker | Field |

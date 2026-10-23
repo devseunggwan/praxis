@@ -148,7 +148,7 @@ directly under it:
   - Verify: `test "$(sh -c '. hooks/_lib/_paths.sh; praxis_specs_dir')" = "$HOME/.praxis/docs/specs"`
 ```
 
-`praxis:spec-drift` runs these lines and nothing else. **Backticks in the
+These lines are the requirement's check, and nothing else is. **Backticks in the
 surrounding prose are never executed** — the example above is exactly why: one
 of its three backticked spans is the oracle, one is a counter-example the
 requirement exists to reject, and one is a path pattern. A convention that
@@ -158,9 +158,8 @@ guessed between them would run the command the spec says not to trust.
 that block ends at the next line starting in column 0. The requirement's own
 nested items and indented continuation prose stay inside it; a `- Verify:`
 further down the document, under a later heading, belongs to nothing and is
-not run. Writing a second `Verify:` in one block is an authoring error — the
-first binds, and the report prints the rest as `warning` lines naming the
-command it did not run.
+not a check. Writing a second `Verify:` in one block is an authoring error —
+only the first is the requirement's check.
 
 Rules on what may appear there — the count is deliberately not stated, so that
 adding one cannot leave a stale number behind:
@@ -170,31 +169,30 @@ adding one cannot leave a stale number behind:
   `scripts/run-tests.sh` is the standing example, since it reads a per-user
   store that lives outside the checkout ([#1003](https://github.com/devseunggwan/praxis/issues/1003)).
   A requirement with no eligible command keeps no `Verify:` line.
-- **The command must terminate without input.** It runs unattended, with stdin
-  at `/dev/null` ([#1008](https://github.com/devseunggwan/praxis/issues/1008)),
-  so a command that reads stdin gets immediate EOF. Before that it inherited the
-  report's own stdin, hung until the timeout, and was reported `missing` — a
-  rule stated here but not enforced showed up only as a wrong verdict.
+- **The command must terminate without input.** Write it to run unattended,
+  with stdin at `/dev/null` ([#1008](https://github.com/devseunggwan/praxis/issues/1008)):
+  a command that reads stdin gets immediate EOF there, and hangs wherever a
+  terminal is attached.
 - **The command must fail when its inputs are gone.** An oracle whose subject
   has been deleted must exit non-zero, not collapse into a vacuous success. The
   shape that breaks this is a comparison whose *both* sides are command
   substitutions: when the subject is absent both substitutions fail, both
-  collapse to the empty string, and `test "" = ""` exits 0 — so the report
-  prints `implemented` for a requirement nothing in the tree satisfies
+  collapse to the empty string, and `test "" = ""` exits 0 — so the check
+  passes for a requirement nothing in the tree satisfies
   ([#1011](https://github.com/devseunggwan/praxis/issues/1011)). Pin at least
   one side to a literal, so an absent subject compares against something and
   the mismatch is visible. This does not conflict with the first rule: that one
   is about per-user state *outside* the checkout, this one is about the
   repo-relative inputs the requirement is actually asserting.
 
-Commands run from the repository root of wherever the report was invoked, so a
+Commands run from the repository root, so a
 `Verify:` line may use repo-relative paths — and a spec written for repository
-A will report `missing` if run from repository B. That is the store being
+A fails if run from repository B. That is the store being
 shared while the checks are not.
 
-A requirement with no `Verify:` line is reported as `UNKNOWN`, which is a
-readable state rather than a failure — some requirements are about prose, and
-the report says so instead of guessing. What it must never be is a requirement
+A requirement with no `Verify:` line has no mechanical check, which is a
+readable state rather than a failure — some requirements are about prose.
+What it must never be is a requirement
 that *had* an eligible command and did not carry it.
 
 ## What praxis did not adopt

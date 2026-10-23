@@ -162,10 +162,8 @@ around it were deleted — the #1034 measurement of the old write
 | --- | --- | --- | --- |
 | `postuse-correction/second-failure-advisory` | per-`(tool, signature)` counter | fires on `prior_count == 1` exactly — Q1 | yes — Q0 PASS(live), 0/100 (#1034); per-pid staging floor (#1383) |
 | `postuse-correction/pre-edit-md-escape-advisory` | accumulating set of Read paths | the Edit gate warns, or denies under `PRAXIS_MD_ESCAPE_MODE=block`, for a file that was Read — Q2 | yes — Q0 PASS(live), 0/100 vs 4/100 unlocked (#1034); per-pid staging floor (#1383) |
-| `advisory-nudge/jq-config-empty-dict-advisory` | dedup set of advised paths | one advisory repeats — but the pair shared one `.tmp` staging name, so the surviving file could also be unparseable, which `_load_seen` reads as empty and the session's whole dedup set restarts — Q0 | yes |
 | `preflight-gate/worktree-prune-snapshot-gate` | single `snapshot_taken` flag, only ever set true | concurrent writers write the identical value | no — Q0 PASS(live), 0/100 (#1034) |
 | `preflight-gate/session-intent` | set-once intent flags | written only from `UserPromptSubmit`, which is serialized per session; the `PreToolUse` gate path is read-only | no — Q0 PASS(live), 0/100 (#1034) |
-| `preflight-gate/retrospect-active-marker` | marker existence | whole-file write and `unlink`, no read-modify-write to lose | no — Q0 PASS(live), 0/100 (#1034) |
 | `preflight-gate/foreground-poll-loop-guard` | per-session registry of background waiters (start time, armed flag, command display string) | one advisory does not fire — Q3; stages through a per-pid name, so Q0 does not apply | no — classified from the impl, not measured |
 | `preflight-gate/approval-premise-reread-gate` | single-use premise ack file | consumed by an atomic `os.rename` claim; no read-modify-write to lose | no — classified from the impl, not measured |
 | `_lib/block_message` and `_lib/_hook_io` (counting in `_lib/_block_repeat`) | per-session gate-block count, keyed by `rule_name` for the five-field message and by the deny reason's gate marker for `permissionDecision` (#1420) | the repeat notice fires on the `count >= 2` boundary — Q1 | yes — classified from the impl, not measured; per-pid staging floor |
@@ -223,7 +221,7 @@ that could have failed it.
   generated platform `hooks.json`) is presentational.
 - Stop hooks run **sequentially in array order**. The order is fixed by
   `scripts/check-plugin-manifests.py` Rule 4 (`expected_stop`):
-  `completion-verify` and `retrospect-mix-check` first, then the
+  `completion-verify` first, then the
   completion-verify evidence gates, and `strike-counter stop` last —
   thirteen entries at the time of writing; the manifest is the list. Since
   issue #1281 the twelve stdin-only entries form one `(Stop)` dispatch

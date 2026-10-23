@@ -10,7 +10,7 @@ is the worst outcome available: an ``if [ -z "$VAR" ]`` guard passes it
 straight through to the next command.
 
 Scope is ``skills/*/SKILL.md`` only. Executable scripts under ``skills/`` —
-``claude-recover``, ``cmux-save-sessions`` and friends — are run by the shell
+``cmux-recover-sessions``, ``claude-recover-scan`` and friends — are run by the shell
 and never loaded as model context, so their positional parameters are correct
 and must not be flagged.
 

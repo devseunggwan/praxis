@@ -155,15 +155,12 @@ fi
 # Static check (no PATH games): a guard that exits 0 for a missing tool must
 # print the marker first, or the skip is invisible to strict mode again.
 GUARDED_FILES=(
-  "tests/test_no_live_keys_in_fixtures.sh"
-  "tests/test_catalog_monotonic.sh"
   "tests/test_bypass_review.sh"
   "tests/hooks/postuse-correction/test_second_failure_advisory.sh"
   "tests/hooks/postuse-correction/test_builtin_task_postuse.sh"
   "tests/hooks/postuse-correction/test_askuserquestion_loop_signal.sh"
   "tests/hooks/postuse-correction/test_bypass_telemetry.sh"
   "tests/hooks/preflight-gate/test_block_unmatched_glob.sh"
-  "tests/test_cmux_session_orphan_windows.sh"
 )
 missing=()
 for gf in "${GUARDED_FILES[@]}"; do

@@ -117,8 +117,7 @@ let the agent make it.
 ## Hosts
 
 Claude only. Cursor's `preToolUse` accepts `ask` but does not enforce it, and
-Codex reports an `ask` hook as failed and lets the call through (see
-`cross-tool-reroute-gate/spec.md`, *Known limitations* 4). The transcript
+Codex reports an `ask` hook as failed and lets the call through. The transcript
 reader also parses the Claude Code record shape only.
 
 ## Recurrence evidence

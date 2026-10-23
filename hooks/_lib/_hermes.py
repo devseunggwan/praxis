@@ -455,7 +455,6 @@ GROUPED_APPROVAL_HOOKS = frozenset({
     "commit-title-length-check",
     "cwd-relative-exec-advisory",
     "menu-mutation-tier-advisory",
-    "negation-answer-quote-advisory",
     "output-block-falsify-advisory",
     "side-effect-scan",
 })

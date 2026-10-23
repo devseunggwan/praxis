@@ -412,8 +412,7 @@ def _save_state(path: str, state: dict[str, Any]) -> bool:
     write published over a longer one's tail leaves bytes `_load_state`
     answers with a FRESH dict — the session's whole failure count restarts
     rather than one increment going missing. The pid is the floor under that
-    degraded path (issue #970 established the same floor for
-    `jq-config-empty-dict-advisory`).
+    degraded path (issue #970 first established this floor).
     """
     tmp = f"{path}.{os.getpid()}.tmp"
     try:

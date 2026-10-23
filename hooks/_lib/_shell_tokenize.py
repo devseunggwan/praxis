@@ -234,7 +234,7 @@ def strip_heredoc_bodies(command: str) -> str:
     commands after the terminator keep their positions.
 
     The terminator line is kept. Several hooks run their own heredoc scan on
-    top of this one (`pytest-direct-exec-advisory`, `foreground-poll-loop-guard`,
+    top of this one (`foreground-poll-loop-guard`,
     `bash-worktree-existence-advisory`) and each waits for that line to resume
     scanning — blanking it leaves them inside a body that never closes, so
     everything after the heredoc goes silent. That is a bigger hole than the

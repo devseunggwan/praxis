@@ -17,8 +17,8 @@ though `git push` prints `* [new branch]` and exits 0. The follow-up squash
 merge then lands an incomplete branch and `main` goes red (praxis issue #539,
 the #536 incident). The `* [new branch]` line on a branch that already existed
 is the tell, but it is easy to miss in the moment. No existing hook verifies
-the *result* of a push — `side-effect-scan` / `skill-gate-commands` are
-PreToolUse preflights that run before the push executes.
+the *result* of a push — `side-effect-scan` is a
+PreToolUse preflight that runs before the push executes.
 
 ### What is emitted
 
@@ -83,7 +83,6 @@ SHA, so any difference means the success was illusory.
 | Hook | Scope | Overlap |
 | ------ | ------- | --------- |
 | `side-effect-scan` | PreToolUse preflight on `git push` / `gh pr merge` | None — runs *before* the push; this hook verifies the *result* |
-| `skill-gate-commands` | PreToolUse gate on gated commands | None — preflight, not result verification |
 | `momentum-rule-retrieval-gate` | PreToolUse nudge at force-push / merge | None — different trigger and timing |
 
 ### Parsing guarantees (fail-open)

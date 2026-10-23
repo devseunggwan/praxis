@@ -26,7 +26,7 @@ Session state location (in priority order):
   1. `PRAXIS_SESSION_INTENT_FILE` env var (test override; explicit path)
   2. `<PRAXIS_HOME>/cache/session-intent-${session_id}.json` when the hook
      payload carries a `session_id` field (the canonical praxis hook pattern —
-     same key used by `completion-verify.sh`, `retrospect-mix-check.sh`,
+     same key used by `completion-verify.sh` and
      `strike-counter.sh`). Pre-#903 this lived under `${TMPDIR}`;
      `resolve_cache_file` adopts that file if it is still there.
   3. `${PPID}` replaces `${session_id}` in the filename (back-compat fallback
@@ -234,7 +234,7 @@ def _extract_session_id(payload: dict) -> str | None:
     """Return the trimmed `session_id` from the hook payload, or None.
 
     This is the canonical praxis hook session key — same field consumed by
-    `completion-verify.sh`, `retrospect-mix-check.sh`, and
+    `completion-verify.sh` and
     `strike-counter.sh` via `jq -r '.session_id // ...'`.
     """
     sid = payload.get("session_id")

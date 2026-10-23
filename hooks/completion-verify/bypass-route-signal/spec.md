@@ -218,8 +218,7 @@ Sessions with bypass-route vocabulary in a final message : N
 plus a per-session table when N is nonzero. `load_bypass_route_events` reads
 the family and `compute_bypass_route_signal_counts` groups it by session.
 
-Reachable as `/praxis:bypass-report` (issue #1343) or `bypass-review fire-rate`
-directly.
+Reachable by running `bypass-review fire-rate` directly.
 
 ## Tests
 

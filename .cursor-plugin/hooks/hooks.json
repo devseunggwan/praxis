@@ -66,26 +66,11 @@
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/session-intent.sh",
             "timeout": 5
-          },
-          {
-            "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/retrospect-active-marker.sh",
-            "timeout": 5
           }
         ]
       }
     ],
     "PreToolUse": [
-      {
-        "matcher": "Skill",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/retrospect-active-marker.sh",
-            "timeout": 5
-          }
-        ]
-      },
       {
         "matcher": "Bash",
         "hooks": [
@@ -137,16 +122,6 @@
         ]
       },
       {
-        "matcher": "Edit|Write",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/_dispatch.sh PreToolUse 'Edit|Write' cursor",
-            "timeout": 5
-          }
-        ]
-      },
-      {
         "matcher": "Edit|NotebookEdit|Write",
         "hooks": [
           {
@@ -157,11 +132,11 @@
         ]
       },
       {
-        "matcher": "mcp__.*",
+        "matcher": "Edit|Write",
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/negation-answer-quote-advisory.sh",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/_dispatch.sh PreToolUse 'Edit|Write' cursor",
             "timeout": 5
           }
         ]

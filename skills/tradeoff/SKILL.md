@@ -7,8 +7,8 @@ description: >
   ranking arithmetic, no external-surface writes.
 when_to_use: >
   Triggers on "tradeoff", "trade-off", "트레이드오프", "트레이드 오프".
-  Do NOT activate on "기존 결정의 부채 조회" (that is `debt`) or on "이슈 착수
-  가치 판정" (the Issue Review anchor's Judgement table owns that).
+  Do NOT activate on "이슈 착수 가치 판정" (the Issue Review anchor's Judgement
+  table owns that).
 verified-against-runtime: true
 runtime-verified-at: 2026-09-08
 runtime-verified-note: "ugrep 7.8.4 (macOS 26.5.2, invoked as grep) — the Case 2 evidence block is a transcription of a live run: the sunset-field probe exits 1 over skills/ and 0 over hooks/."
@@ -116,9 +116,9 @@ Print the table, then one line per option saying why it was chosen or dropped.
   The axes are read side by side; they are not commensurable.
 - If the decision is worth keeping, propose a `Rejected: <option> | <reason>`
   commit trailer — but only when `measured` and `estimated` cells are the
-  majority. A trailer carries no provenance grade, and `debt` harvests
-  `Rejected:` into its ledger, so an `assumed` judgement promoted to a trailer
-  lands there as a decision with its weakest property stripped off.
+  majority. A trailer carries no provenance grade, so an `assumed` judgement
+  promoted to a trailer reads later as a decision with its weakest property
+  stripped off.
 - Write the trailer nowhere yourself. Proposing it is the whole action.
 
 ## Error Handling

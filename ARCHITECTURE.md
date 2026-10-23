@@ -77,14 +77,6 @@ precondition above is moot for that caller, because a human can answer the dialo
 The stdin column stays correct for genuinely non-interactive callers, which must
 still supply one of the two exemptions.
 
-**Time signal (`--time-budget`, #1501) is claude-only.** The flag reaches a worker as
-two env vars on the `claude` launch (`PRAXIS_TIME_START_EPOCH`,
-`PRAXIS_TIME_BUDGET_S`). The worker's
-[`elapsed-time-signal`](hooks/advisory-nudge/elapsed-time-signal/spec.md) hook turns
-them into an `elapsed <n>s / <budget>s` line on each returned message. The `codex` and
-`gemini` rows have no such channel, so the skill reports the flag as not applied for
-them. The signal is advisory: no row in this table has a hard timeout.
-
 ### Model Notation
 
 Unified `--model` flag across all skills: `<provider>:<model>` or bare model name.
@@ -286,8 +278,8 @@ python3 process.
   run `main()` — re-points `sys.stdin` at a fresh copy of the payload per member,
   and runs each member's `main()` through the existing `_hook_runtime.fail_open`
   decorator. Member `impl.py` files are unmodified; the dispatcher adapts around
-  them. A `body: impl.sh` member (the Stop group's completion-verify and
-  retrospect-mix-check) has no `main()` to import: `run_one` execs it as a
+  them. A `body: impl.sh` member (the Stop group's completion-verify) has no
+  `main()` to import: `run_one` execs it as a
   subprocess with the payload on stdin and the member deadline as its timeout,
   with the child's own `record_fire.sh` arming switched off so the group's
   ledger record is the only one (#1281). Members that read the current turn
@@ -373,7 +365,7 @@ does not, by decision (#1332, plugin-dependencies reference read 2026-09-06):
   `allowCrossMarketplaceDependenciesOn`, which praxis does not control on the
   user's side.
 
-The Standalone tier (`recover-sessions`, the strike skills, `debt`) must work
+The Standalone tier (the strike skills) must work
 with none of oh-my-claudecode, cmux, or the codex plugin installed, so a hard
 dependency would break the tier model. What praxis carries instead is
 declarative: the per-hook `requires` field in `hooks/manifest.json` (#1158),

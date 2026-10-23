@@ -19,7 +19,7 @@ on opposite sides of that split.
 | `~/.praxis/docs/specs/`    | Feature specs ([`spec-store.md`](spec-store.md))   | `praxis_specs_dir()`                         | `PRAXIS_HOME`                               |
 
 The spec store is the one root praxis does not write: a person authors those
-files and `praxis:spec-drift` only reads them. It is here because it is
+files and praxis never writes them. It is here because it is
 relocated by the same knob and must resolve identically from both halves of the
 resolver, not because praxis generates it.
 
@@ -57,9 +57,8 @@ dir is not writable, and never raises.
   size (issue #1282): past 5 MiB (`PRAXIS_HOOK_ERROR_LOG_MAX_BYTES` overrides,
   `0` disables) the file becomes `hook-errors.jsonl.1` and a fresh one starts;
   one predecessor is kept.
-- `stop-triggered.log` / `retrospect-mix-blocked.log` — Stop-gate block logs
-  from [`completion-verify`](../hooks/completion-verify/completion-verify/spec.md)
-  and [`retrospect-mix-check`](../hooks/completion-verify/retrospect-mix-check/spec.md).
+- `stop-triggered.log` — Stop-gate block log
+  from [`completion-verify`](../hooks/completion-verify/completion-verify/spec.md).
   Best-effort appends, rotated to `<name>.1` past 1 MiB by
   `praxis_rotate_log` in [`hooks/_lib/_paths.sh`](../hooks/_lib/_paths.sh)
   (issue #1282) — this directory has no TTL sweep, unlike `cache/` and
@@ -81,9 +80,7 @@ did not move them:
 | Entry                                                              | Producer                                                                                     |
 | ------------------------------------------------------------------ | -------------------------------------------------------------------------------------------- |
 | `session-intent-<sid>.json`                                        | `preflight-gate/session-intent`                                                              |
-| `retrospect-active-<sid>.json`, `retrospect-candidates-<sid>.json` | `preflight-gate/retrospect-active-marker` (read by `completion-verify/retrospect-mix-check`) |
 | `md-read-history-<sid>.json`                                       | `postuse-correction/pre-edit-md-escape-advisory`                                             |
-| `jq-config-advisory-<sid>.json`                                    | `advisory-nudge/jq-config-empty-dict-advisory`                                               |
 | `path-probe-gate/`                                                 | `advisory-nudge/path-probe-gate`                                                             |
 | `pre-output-falsification-gate/`                                   | `advisory-nudge/pre-output-falsification-gate`                                               |
 | `bulk-write-checkpoint/`                                           | `advisory-nudge/bulk-write-memory-checkpoint`                                                |
@@ -94,7 +91,7 @@ did not move them:
 | `approval-premise-ack-<sid>.json`                                  | `preflight-gate/approval-premise-reread-gate` (consumed on read)                              |
 | `gh-label-cache.json`                                              | `preflight-gate/gh-label-verify` (per-repo label sets, #1182 — pre-#1182 XDG location not migrated) |
 | `stop-scan-<hook>-<sid>.json`                                      | Stop gates' resumable reduction cursors (`reduce_transcript_resumable`, #1237)               |
-| `scan-<hook>-<part>-<sid>.json`                                    | Resumable scan cursors of the three commit-path scanners and `retrospect-mix-check` (#1280)  |
+| `scan-<hook>-<part>-<sid>.json`                                    | Resumable scan cursors of the three commit-path scanners (#1280)                             |
 
 ### Sweeping
 
@@ -107,5 +104,5 @@ opportunistically from `resolve_writable("cache", …)` and drops entries past
 
 `resolve_cache_file()` performs a one-time move of a pre-#903
 `${TMPDIR}/praxis-<name>` file into the cache root. Without it, a session that
-was already retrospect-active or intent-anchored when the upgrade landed would
+was already intent-anchored when the upgrade landed would
 read the new path as "no state" and silently disarm its gate mid-session.
