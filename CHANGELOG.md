@@ -5,6 +5,25 @@ All notable changes to praxis are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.22.0](https://github.com/devseunggwan/praxis/compare/v7.21.0...v7.22.0) (2026-10-23)
+
+
+### Added
+
+* **skills:** add five engineering skills ([#1594](https://github.com/devseunggwan/praxis/issues/1594)) ([3f808c6](https://github.com/devseunggwan/praxis/commit/3f808c6346ce54bece7d4f62fed4d926793d0175)), closes [#1593](https://github.com/devseunggwan/praxis/issues/1593)
+
+
+### Fixed
+
+* **hooks:** read merge briefing inside the approval question ([#1598](https://github.com/devseunggwan/praxis/issues/1598)) ([44d649c](https://github.com/devseunggwan/praxis/commit/44d649c5be118e360becbbfe99cc704799482b51)), closes [#1597](https://github.com/devseunggwan/praxis/issues/1597)
+
+
+### Changed
+
+* bump reviewdog/action-actionlint from 1.79.1 to 1.80.2 ([#1596](https://github.com/devseunggwan/praxis/issues/1596)) ([b1b48eb](https://github.com/devseunggwan/praxis/commit/b1b48ebced58af79e5265f00645a9f9a248e091a))
+* bump the codeql-action group with 2 updates ([#1595](https://github.com/devseunggwan/praxis/issues/1595)) ([25b8c20](https://github.com/devseunggwan/praxis/commit/25b8c20d4ad3391dabdcb2cf61b50b17dfad442e))
+* **skills:** harden post-merge worktree cleanup ([#1591](https://github.com/devseunggwan/praxis/issues/1591)) ([ff69e2a](https://github.com/devseunggwan/praxis/commit/ff69e2ab8991a48112a28bf70f97e72b2e3b027d))
+
 ## [7.21.0](https://github.com/devseunggwan/praxis/compare/v7.20.3...v7.21.0) (2026-10-14)
 
 
