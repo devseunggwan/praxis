@@ -560,8 +560,12 @@ _REF_LIST = (r"(?:#|(?<![A-Za-z])pr\s*#?\s*)\d+(?![A-Za-z0-9_])"
              r"(?:\s*(?:,|·|과|와|및|and|&)\s*(?:#|pr\s*#?\s*)?\d+(?![A-Za-z0-9_]))*")
 # A count restating the list before the particle ("#1 · #2 · #3 세 건을 머지").
 _REF_COUNT = r"(?:\s*(?:두|세|네|다섯|\d+)\s*(?:건|개)(?:\s*(?:모두|전부))?)?"
+# A merge method between the particle and the verb ("두 건을 squash 머지",
+# "#5 를 스쿼시로 병합") names how to merge, not a different object.
+_MERGE_METHOD = (r"(?:(?<![A-Za-z])(?:squash|rebase)(?![A-Za-z])|스쿼시|리베이스)"
+                 r"(?:\s*(?:으로|로|방식으로))?\s*")
 _MERGE_OBJECT_RE = re.compile(
-    rf"({_REF_LIST}){_REF_COUNT}\s*(?:을|를|은|는|도)?\s*(?:머지|병합)"
+    rf"({_REF_LIST}){_REF_COUNT}\s*(?:을|를|은|는|도)?\s*(?:{_MERGE_METHOD})?(?:머지|병합)"
     rf"|(?<![A-Za-z])merg(?:e|ing)(?:\s*:\s*|\s+)(?:pr\s*)?({_REF_LIST})", re.IGNORECASE)
 
 # A single positional token that is a bare PR number or a …/pull/N URL.

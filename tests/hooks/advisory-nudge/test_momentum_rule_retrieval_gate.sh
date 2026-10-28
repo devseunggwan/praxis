@@ -961,6 +961,16 @@ run_merge_escalation_case "merge_bulk_cd_before_answer_repo_allows" \
 run_merge_escalation_case "merge_bulk_chained_outside_denies" \
   "yes" "" "momentum-merge-bulk-chained-outside.jsonl" "gh pr merge 999 --squash"
 
+# A merge method between the particle and the verb ("두 건을 squash 머지할까요?")
+# names how to merge, not another object: the ask still names both PRs, so the
+# question's briefing counts for the first merge and the set for the second.
+run_merge_escalation_case "merge_bulk_method_word_first_passes" \
+  "no" "" "momentum-merge-bulk-method-word-first.jsonl" "gh pr merge 833 --repo o/r --squash"
+run_merge_escalation_case "merge_bulk_method_word_second_passes" \
+  "no" "" "momentum-merge-bulk-method-word-second.jsonl" "gh pr merge 999 --repo o/r --squash"
+run_merge_escalation_case "merge_bulk_method_word_unlisted_denies" \
+  "yes" "" "momentum-merge-bulk-method-word-second.jsonl" "gh pr merge 1001 --repo o/r --squash"
+
 # An AskUserQuestion answer is a tool_result, not a typed message. Replayed over
 # local transcripts, 13 of the merges this check first denied were answered this
 # way, so it must count — and neither a declined question (`is_error`) nor a
