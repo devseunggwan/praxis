@@ -980,17 +980,18 @@ run_merge_escalation_case "merge_bulk_cross_repo_wrong_repo_denies" \
   "yes" "" "momentum-merge-bulk-cross-repo-sections.jsonl" "gh pr merge 999 --repo a/x --squash"
 run_merge_escalation_case "merge_bulk_cross_repo_bare_after_cd_denies" \
   "yes" "" "momentum-merge-bulk-cross-repo-sections.jsonl" "gh pr merge 999 --squash"
-# Each form decides alone: #999 named by URL above, by owner/repo#N here.
+# Each form decides alone: #999 named by URL above, by owner/repo#N here; the
+# heading's upper-case `B/Y` still matches `--repo b/y`.
 run_merge_escalation_case "merge_bulk_cross_repo_slug_passes" \
   "no" "" "momentum-merge-bulk-cross-repo-slug.jsonl" "gh pr merge 999 --repo b/y --squash"
 run_merge_escalation_case "merge_bulk_cross_repo_slug_wrong_repo_denies" \
   "yes" "" "momentum-merge-bulk-cross-repo-slug.jsonl" "gh pr merge 999 --repo a/x --squash"
-# Before any merge runs, the full-briefing path must not release a repo the
-# section contradicts either; the repo comparison ignores case like GitHub.
-run_merge_escalation_case "merge_cross_repo_first_section_repo_passes" \
-  "no" "" "momentum-merge-bulk-cross-repo-first.jsonl" "gh pr merge 999 --repo b/y --squash"
-run_merge_escalation_case "merge_cross_repo_first_wrong_repo_denies" \
-  "yes" "" "momentum-merge-bulk-cross-repo-first.jsonl" "gh pr merge 999 --repo a/x --squash"
+# Single-PR merges keep main's behaviour: a consumed same-turn briefing for
+# another repo's #999, or a related-PR sub-heading, does not deny the merge.
+run_merge_escalation_case "merge_same_number_two_repos_same_turn_passes" \
+  "no" "" "momentum-merge-same-number-two-repos-same-turn.jsonl" "gh pr merge 999 --repo b/y --squash"
+run_merge_escalation_case "merge_related_subheading_other_repo_passes" \
+  "no" "" "momentum-merge-related-subheading-other-repo.jsonl" "gh pr merge 999 --repo a/x --squash"
 # A same-number reference in the section body names a related PR, not the repo.
 run_merge_escalation_case "merge_bulk_section_body_ref_ignored_passes" \
   "no" "" "momentum-merge-bulk-section-body-ref.jsonl" "gh pr merge 999 --repo o/r --squash"

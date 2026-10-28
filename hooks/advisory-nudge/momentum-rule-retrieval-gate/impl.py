@@ -1612,17 +1612,6 @@ def _section_repo(section: str, pr: str) -> str | None:
     return repos.pop() if len(repos) == 1 else None
 
 
-def _section_repo_conflict(text: str, pr: str | None, command: object) -> str | None:
-    """The repo `pr`'s briefing section names when the merge's --repo names
-    another, else None. Each repo is a different PR #N, so an approval of the
-    briefed one does not reach the other."""
-    if not pr:
-        return None
-    section = _pr_sections(text, {pr}).get(pr)
-    briefed = _section_repo(section, pr) if section is not None else None
-    return briefed if _repo_conflict(_merge_target_repo(command), briefed) else None
-
-
 def _merge_pr_number(command: str) -> str | None:
     """Explicit PR number of a command that is one merge and nothing else.
 
@@ -1858,27 +1847,6 @@ def _merge_escalation_reason(payload: dict) -> str | None:
         return None
     if _bulk_released(entries, idxs, code):
         return None
-    # A briefing section that names its PR as owner/repo#N approves that repo's
-    # PR. The first merge has no answer check below, so without this a merge
-    # naming another repo's #N rode the full-briefing path.
-    prior = _correlated_prior_turn_text(entries, idxs, code)
-    for text in (current_text, prior or ""):
-        briefed = _section_repo_conflict(text, target, code)
-        if briefed is not None:
-            return format_block(
-                rule_name="Pre-Merge Reporting briefing",
-                why=f"this gh pr merge names --repo {_merge_target_repo(code)}, but the "
-                    f"briefing section for #{target} names {briefed} — the approval is "
-                    "for the PR in that repo, not this one",
-                correct_path=f"re-run the merge with --repo {briefed}, or brief and ask "
-                    "for the PR in the other repo",
-                bypass_env=MERGE_ADVISORY_ENV,
-                bypass_reason_hint="with a one-line reason — set in the session "
-                    "environment, since an inline `VAR=1 gh pr merge …` prefix "
-                    "never reaches this hook",
-                reference="CLAUDE.md → Pre-Merge Reporting; "
-                    "hooks/advisory-nudge/momentum-rule-retrieval-gate/spec.md",
-            )
 
     # A complete briefing is half of the flow; the user's answer is the other
     # half (issue #1402). Once a merge has run, a briefing written after it with
