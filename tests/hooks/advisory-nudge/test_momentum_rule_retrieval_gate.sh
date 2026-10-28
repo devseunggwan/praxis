@@ -980,6 +980,9 @@ run_merge_escalation_case "merge_bulk_cross_repo_wrong_repo_denies" \
   "yes" "" "momentum-merge-bulk-cross-repo-sections.jsonl" "gh pr merge 999 --repo a/x --squash"
 run_merge_escalation_case "merge_bulk_cross_repo_bare_after_cd_denies" \
   "yes" "" "momentum-merge-bulk-cross-repo-sections.jsonl" "gh pr merge 999 --squash"
+# A bare "ok" answers a listed ask that carries a merge method word.
+run_merge_escalation_case "merge_bulk_ok_listed_method_word_passes" \
+  "no" "" "momentum-merge-bulk-ok-listed-method-word.jsonl" "gh pr merge 999 --squash"
 
 # An AskUserQuestion answer is a tool_result, not a typed message. Replayed over
 # local transcripts, 13 of the merges this check first denied were answered this

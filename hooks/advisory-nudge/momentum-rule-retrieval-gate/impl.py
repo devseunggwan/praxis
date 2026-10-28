@@ -1468,9 +1468,9 @@ _CHDIR_COMMANDS = frozenset({"cd", "pushd", "popd"})
 # ("#833, #999 를 머지할까요?", "Approve merging #833 and #999?"). A list
 # before "머지 전에 … 돌릴까요?" or "머지 큐에 올려둘까요?" asks something else.
 _LISTED_ASK_RE = re.compile(
-    rf"(?P<ko>{_REF_LIST}){_REF_COUNT}\s*(?:을|를|은|는|도)?\s*(?:모두\s*|전부\s*|다\s*)?(?:머지|병합)\s*"
+    rf"(?P<ko>{_REF_LIST}){_REF_COUNT}\s*(?:을|를|은|는|도)?\s*(?:모두\s*|전부\s*|다\s*)?(?:{_MERGE_METHOD})?(?:머지|병합)\s*"
     r"(?:할까요|해도\s*될까요|해도\s*되나요|진행할까요|하시겠(?:어요|습니까)?|해\s*드릴까요|해드릴까요)\s*\??\s*$"
-    rf"|^\s*(?:(?:shall|should|can|may)\s+i\s+|approve\s+|ok\s+to\s+)?merg(?:e|ing)\s*:?\s*(?:pr\s*)?"
+    rf"|^\s*(?:(?:shall|should|can|may)\s+i\s+|approve\s+|ok\s+to\s+)?(?:(?:squash|rebase)[\s-]+)?merg(?:e|ing)\s*:?\s*(?:pr\s*)?"
     rf"(?P<en>{_REF_LIST})\s*\?\s*$",
     re.IGNORECASE)
 # Env assignments that move a `gh` call to another repo without a flag.
