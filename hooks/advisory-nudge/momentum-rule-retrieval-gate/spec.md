@@ -474,7 +474,7 @@ approve blindly.
   | the approved set has two or more PRs: the PRs the answer names (`#833 #999 머지`, or by bare number `98, 1118 머지` when the reply has no `#N`/`PR N` reference — beside one, a bare number is an ordinal and voids the reply), else the PRs the listed merge ask names — the PR list is the object of 머지/merge and the ask ending follows the verb directly (`#833, #999 를 머지할까요?`, `Approve merging #833 and #999?`); a merge method may sit between the particle and the verb (`#833 · #999 두 건을 squash 머지할까요?`, `스쿼시로 병합`), since it names how to merge, not another object; `#833, #999 머지 전에 CI 를 다시 돌릴까요?` is not one. A reply naming no PR answers the turn's last question, so the listed ask must be that last question (`… 머지할까요? 그 전에 리베이스해 둘까요?` voids a bare `ok`) | `_listed_merge_ask` |
   | this PR is in the set and has its own section in the briefing turn — from a heading line (a markdown heading, or a line bold end to end) that names exactly one PR, this one (`### PR #833 / PR #1001` is a joint heading even when #1001 is not in the set), to the next heading at the same level or above — with 4 of 6 items inside it, the shared ask counting as its approve-ask item. The first such heading fixes the level; a deeper heading or a `#` comment inside a code fence is content of the section it sits in, a bold lead inside a bullet is an item, a shared block after the last section belongs to no PR, and only a PR's first section counts | `_pr_sections`, `_briefing_item_count` |
   | no merge since the answer targeted a PR outside the set or repeated one, and this PR has not merged since; a clean call that merged inside a chain or condition (`gh pr merge 1001 && echo done`) has no single PR number and ends the set | `_executed_merges(include_skippable=True)` |
-  | no repo conflict (as in **Repo scoping**) and no later `AskUserQuestion` hold; after a Bash call since the briefing window opened (before the answer too) that changed directory (`cd`, `pushd`, `popd`) or exported `GH_REPO`/`GH_HOST`, the merge must name the briefed repo with `--repo` | `_repo_conflict`, `_changed_directory_after`, `_ask_held_after` |
+  | no repo conflict (as in **Repo scoping**) and no later `AskUserQuestion` hold; the briefed repo is the one this PR's section names it with (`owner/repo#N` or a `…/owner/repo/pull/N` URL — one repo only; two repos for the same number name none), else the window's last read-only probe; after a Bash call since the briefing window opened (before the answer too) that changed directory (`cd`, `pushd`, `popd`) or exported `GH_REPO`/`GH_HOST`, the merge must name the briefed repo with `--repo` | `_section_repo`, `_repo_conflict`, `_changed_directory_after`, `_ask_held_after` |
 
   The section rule is the part that keeps *No Approval Transfer*: a combined
   paragraph about two PRs (`momentum-merge-serial-unanswered-prior.jsonl`)
@@ -512,6 +512,22 @@ approve blindly.
   against the round-one version and pass now. The fix after round two had no
   independent review round of its own; the round-two probes were re-run on it
   and every shape they flagged now denies.
+
+  **A merge method word and a set across repos (issue #1604).** Two bulk
+  briefings a user had read and approved were denied in a Hermes session. The
+  ask `#A · #B 두 건을 squash 머지할까요?` put `squash` between the particle
+  and 머지, so `_MERGE_OBJECT_RE` found no object and the six-item question
+  did not score; `_MERGE_METHOD` now allows `squash`/`rebase`/`스쿼시`/`리베이스`
+  there. The second PR of the set lived in another repo, and a `cd` in an
+  unrelated call after the briefing left the window with no probe repo, so the
+  cd rule compared the merge's `--repo` with `None` and denied — although each
+  section heading named its PR as `owner/repo#N`. The section's repo now is the
+  briefed repo. The same change closes a wrong release in the old rule: with
+  the window's last probe on repo `a/x`, `gh pr merge 999 --repo a/x` was
+  released for a #999 the briefing placed in `b/y`; it now denies
+  (`merge_bulk_cross_repo_wrong_repo_denies`). Replayed over every recorded
+  `gh pr merge` (290 calls across 93 transcripts): 2 deny → allow, both the
+  approved merges of the reporting session, 0 allow → deny, 0 errors.
 
   **A deny says why a briefing the user saw was not scored (issue #1433).**
   Message-only; no decision moves. When the two deny paths above fire —

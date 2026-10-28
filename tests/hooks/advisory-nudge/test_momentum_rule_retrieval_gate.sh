@@ -971,6 +971,16 @@ run_merge_escalation_case "merge_bulk_method_word_second_passes" \
 run_merge_escalation_case "merge_bulk_method_word_unlisted_denies" \
   "yes" "" "momentum-merge-bulk-method-word-second.jsonl" "gh pr merge 1001 --repo o/r --squash"
 
+# One bulk set across two repos, each heading naming its PR as owner/repo#N.
+# The section's repo decides, not the window's last probe (a/x here) — and a
+# `cd` after the window opens still needs the merge to name that repo.
+run_merge_escalation_case "merge_bulk_cross_repo_section_passes" \
+  "no" "" "momentum-merge-bulk-cross-repo-sections.jsonl" "gh pr merge 999 --repo b/y --squash"
+run_merge_escalation_case "merge_bulk_cross_repo_wrong_repo_denies" \
+  "yes" "" "momentum-merge-bulk-cross-repo-sections.jsonl" "gh pr merge 999 --repo a/x --squash"
+run_merge_escalation_case "merge_bulk_cross_repo_bare_after_cd_denies" \
+  "yes" "" "momentum-merge-bulk-cross-repo-sections.jsonl" "gh pr merge 999 --squash"
+
 # An AskUserQuestion answer is a tool_result, not a typed message. Replayed over
 # local transcripts, 13 of the merges this check first denied were answered this
 # way, so it must count — and neither a declined question (`is_error`) nor a

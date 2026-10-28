@@ -1592,6 +1592,23 @@ def _pr_sections(text: str, prs: set[str]) -> dict[str, str]:
     return sections
 
 
+# A PR named with its repo: `owner/repo#N`, or a …/owner/repo/pull/N URL.
+_SECTION_SLUG_REF_RE = re.compile(
+    r"(?<![A-Za-z0-9._/-])([A-Za-z0-9._-]+/[A-Za-z0-9._-]+)#(\d+)(?![A-Za-z0-9_])")
+_SECTION_URL_REF_RE = re.compile(r"/([A-Za-z0-9._-]+/[A-Za-z0-9._-]+)/pull/(\d+)(?![A-Za-z0-9_])")
+
+
+def _section_repo(section: str, pr: str) -> str | None:
+    """The one repo a briefing section names `pr` with, else None.
+
+    Two different repos for the same number (`a/x#5` and `b/y#5`) name no
+    single target, so the section decides nothing and the window probe stays
+    the reference."""
+    repos = {m.group(1) for rx in (_SECTION_SLUG_REF_RE, _SECTION_URL_REF_RE)
+             for m in rx.finditer(section) if m.group(2) == pr}
+    return repos.pop() if len(repos) == 1 else None
+
+
 def _merge_pr_number(command: str) -> str | None:
     """Explicit PR number of a command that is one merge and nothing else.
 
@@ -1739,15 +1756,20 @@ def _bulk_released(entries: list[dict], idxs: list[int], command: object) -> boo
     if _briefing_item_count(section + "\n" + ask_text) < MERGE_BRIEFING_MIN_ITEMS:
         return False
     merge_repo = _merge_target_repo(command)
-    window_repo = _context_repo_from_window(entries, brief_lo, len(entries))
-    if _repo_conflict(merge_repo, window_repo):
+    # A section that names its PR with the repo (`owner/repo#N`, a …/pull/N
+    # URL) says which repo the user approved for that PR. It outranks the
+    # window's last-wins probe, which in a bulk set across repos names
+    # whichever PR was probed last.
+    briefed_repo = (_section_repo(section, pr)
+                    or _context_repo_from_window(entries, brief_lo, len(entries)))
+    if _repo_conflict(merge_repo, briefed_repo):
         return False
     # After a `cd` the shell may sit in another checkout, where a bare number
     # names a different PR; only a merge naming the briefed repo is safe then.
     # The window opens at the briefing, not the answer: a cd between the repo
     # probe and the answer moves the shell just the same.
     if _changed_directory_after(entries, brief_lo - 1) and (
-            merge_repo is None or merge_repo != window_repo):
+            merge_repo is None or merge_repo != briefed_repo):
         return False
     spent: set[str] = set()
     for i, cmd in _executed_merges(entries, include_skippable=True):
