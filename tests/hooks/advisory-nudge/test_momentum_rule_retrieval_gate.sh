@@ -961,6 +961,44 @@ run_merge_escalation_case "merge_bulk_cd_before_answer_repo_allows" \
 run_merge_escalation_case "merge_bulk_chained_outside_denies" \
   "yes" "" "momentum-merge-bulk-chained-outside.jsonl" "gh pr merge 999 --squash"
 
+# A merge method between the particle and the verb ("두 건을 squash 머지할까요?")
+# names how to merge, not another object: the ask still names both PRs, so the
+# question's briefing counts for the first merge and the set for the second.
+run_merge_escalation_case "merge_bulk_method_word_first_passes" \
+  "no" "" "momentum-merge-bulk-method-word-first.jsonl" "gh pr merge 833 --repo o/r --squash"
+run_merge_escalation_case "merge_bulk_method_word_second_passes" \
+  "no" "" "momentum-merge-bulk-method-word-second.jsonl" "gh pr merge 999 --repo o/r --squash"
+run_merge_escalation_case "merge_bulk_method_word_unlisted_denies" \
+  "yes" "" "momentum-merge-bulk-method-word-second.jsonl" "gh pr merge 1001 --repo o/r --squash"
+
+# One bulk set across two repos, each heading naming its PR as owner/repo#N.
+# The section's repo decides, not the window's last probe (a/x here) — and a
+# `cd` after the window opens still needs the merge to name that repo.
+run_merge_escalation_case "merge_bulk_cross_repo_section_passes" \
+  "no" "" "momentum-merge-bulk-cross-repo-sections.jsonl" "gh pr merge 999 --repo b/y --squash"
+run_merge_escalation_case "merge_bulk_cross_repo_wrong_repo_denies" \
+  "yes" "" "momentum-merge-bulk-cross-repo-sections.jsonl" "gh pr merge 999 --repo a/x --squash"
+run_merge_escalation_case "merge_bulk_cross_repo_bare_after_cd_denies" \
+  "yes" "" "momentum-merge-bulk-cross-repo-sections.jsonl" "gh pr merge 999 --squash"
+# Each form decides alone: #999 named by URL above, by owner/repo#N here; the
+# heading's upper-case `B/Y` still matches `--repo b/y`.
+run_merge_escalation_case "merge_bulk_cross_repo_slug_passes" \
+  "no" "" "momentum-merge-bulk-cross-repo-slug.jsonl" "gh pr merge 999 --repo b/y --squash"
+run_merge_escalation_case "merge_bulk_cross_repo_slug_wrong_repo_denies" \
+  "yes" "" "momentum-merge-bulk-cross-repo-slug.jsonl" "gh pr merge 999 --repo a/x --squash"
+# Single-PR merges keep main's behaviour: a consumed same-turn briefing for
+# another repo's #999, or a related-PR sub-heading, does not deny the merge.
+run_merge_escalation_case "merge_same_number_two_repos_same_turn_passes" \
+  "no" "" "momentum-merge-same-number-two-repos-same-turn.jsonl" "gh pr merge 999 --repo b/y --squash"
+run_merge_escalation_case "merge_related_subheading_other_repo_passes" \
+  "no" "" "momentum-merge-related-subheading-other-repo.jsonl" "gh pr merge 999 --repo a/x --squash"
+# A same-number reference in the section body names a related PR, not the repo.
+run_merge_escalation_case "merge_bulk_section_body_ref_ignored_passes" \
+  "no" "" "momentum-merge-bulk-section-body-ref.jsonl" "gh pr merge 999 --repo o/r --squash"
+# A bare "ok" answers a listed ask that carries a merge method word.
+run_merge_escalation_case "merge_bulk_ok_listed_method_word_passes" \
+  "no" "" "momentum-merge-bulk-ok-listed-method-word.jsonl" "gh pr merge 999 --squash"
+
 # An AskUserQuestion answer is a tool_result, not a typed message. Replayed over
 # local transcripts, 13 of the merges this check first denied were answered this
 # way, so it must count — and neither a declined question (`is_error`) nor a
