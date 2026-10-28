@@ -980,6 +980,20 @@ run_merge_escalation_case "merge_bulk_cross_repo_wrong_repo_denies" \
   "yes" "" "momentum-merge-bulk-cross-repo-sections.jsonl" "gh pr merge 999 --repo a/x --squash"
 run_merge_escalation_case "merge_bulk_cross_repo_bare_after_cd_denies" \
   "yes" "" "momentum-merge-bulk-cross-repo-sections.jsonl" "gh pr merge 999 --squash"
+# Each form decides alone: #999 named by URL above, by owner/repo#N here.
+run_merge_escalation_case "merge_bulk_cross_repo_slug_passes" \
+  "no" "" "momentum-merge-bulk-cross-repo-slug.jsonl" "gh pr merge 999 --repo b/y --squash"
+run_merge_escalation_case "merge_bulk_cross_repo_slug_wrong_repo_denies" \
+  "yes" "" "momentum-merge-bulk-cross-repo-slug.jsonl" "gh pr merge 999 --repo a/x --squash"
+# Before any merge runs, the full-briefing path must not release a repo the
+# section contradicts either; the repo comparison ignores case like GitHub.
+run_merge_escalation_case "merge_cross_repo_first_section_repo_passes" \
+  "no" "" "momentum-merge-bulk-cross-repo-first.jsonl" "gh pr merge 999 --repo b/y --squash"
+run_merge_escalation_case "merge_cross_repo_first_wrong_repo_denies" \
+  "yes" "" "momentum-merge-bulk-cross-repo-first.jsonl" "gh pr merge 999 --repo a/x --squash"
+# A same-number reference in the section body names a related PR, not the repo.
+run_merge_escalation_case "merge_bulk_section_body_ref_ignored_passes" \
+  "no" "" "momentum-merge-bulk-section-body-ref.jsonl" "gh pr merge 999 --repo o/r --squash"
 # A bare "ok" answers a listed ask that carries a merge method word.
 run_merge_escalation_case "merge_bulk_ok_listed_method_word_passes" \
   "no" "" "momentum-merge-bulk-ok-listed-method-word.jsonl" "gh pr merge 999 --squash"

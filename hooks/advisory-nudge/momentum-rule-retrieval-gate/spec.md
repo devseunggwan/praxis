@@ -522,7 +522,12 @@ approve blindly.
   unrelated call after the briefing left the window with no probe repo, so the
   cd rule compared the merge's `--repo` with `None` and denied — although each
   section heading named its PR as `owner/repo#N`. The section's repo now is the
-  briefed repo. The same change closes a wrong release in the old rule: with
+  briefed repo — read from the heading line only (the body may cite a related
+  PR with the same number in another repo) and lowercased like `--repo` values.
+  The full-briefing path checks it too: a first merge has no answer check, so a
+  merge naming another repo's #N used to ride that path; it now denies with the
+  section's repo in the message. The listed-ask pattern takes the same method
+  words, so a bare `ok` to `#A, #B 를 squash 머지할까요?` releases the set. The same change closes a wrong release in the old rule: with
   the window's last probe on repo `a/x`, `gh pr merge 999 --repo a/x` was
   released for a #999 the briefing placed in `b/y`; it now denies
   (`merge_bulk_cross_repo_wrong_repo_denies`). Replayed over every recorded
