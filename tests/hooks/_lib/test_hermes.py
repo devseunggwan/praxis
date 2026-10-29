@@ -474,6 +474,41 @@ def test_multi_task_delegation_asks_from_its_second_task(tmp_path):
     assert "delegation target #2" in response["message"]
 
 
+def test_retry_after_a_failed_multi_task_delegation_is_not_asked(tmp_path):
+    """A failed batch started none of its tasks, not only the first."""
+    _db(tmp_path / "state.db", [
+        (1, "s1", "user", "verify this one PR", None, None, None),
+        (2, "s1", "assistant", "", None, json.dumps([_delegate("d1", ["a", "b"])]), None),
+        (3, "s1", "tool", json.dumps({"error": "spawn failed"}), "d1", None, "delegate_task"),
+        (4, "s1", "assistant", "", None, json.dumps([_delegate("d2", ["a"])]), None),
+    ])
+    response = _bridge(_delegate_payload("d2", ["a"], tmp_path), tmp_path)
+    assert not _fan_out_asked(response), response
+
+
+def test_failed_batch_result_reaches_every_generated_tool_use(tmp_path):
+    db = _db(tmp_path / "state.db", [
+        (1, "s1", "user", "go", None, None, None),
+        (2, "s1", "assistant", "", None, json.dumps([_delegate("d1", ["a", "b", "c"])]), None),
+        (3, "s1", "tool", json.dumps({"error": "spawn failed"}), "d1", None, "delegate_task"),
+    ])
+    out = hermes.sync_transcript("s1", tmp_path / "t", db)
+    results = json.loads(out.read_text().splitlines()[-1])["message"]["content"]
+    assert [(r["tool_use_id"], r.get("is_error")) for r in results] == [
+        ("d1", True), ("d1#1", True), ("d1#2", True)]
+
+
+def test_successful_batch_result_keeps_one_block(tmp_path):
+    db = _db(tmp_path / "state.db", [
+        (1, "s1", "user", "go", None, None, None),
+        (2, "s1", "assistant", "", None, json.dumps([_delegate("d1", ["a", "b"])]), None),
+        (3, "s1", "tool", json.dumps({"results": [{"summary": "ok"}]}), "d1", None, "delegate_task"),
+    ])
+    out = hermes.sync_transcript("s1", tmp_path / "t", db)
+    results = json.loads(out.read_text().splitlines()[-1])["message"]["content"]
+    assert [r["tool_use_id"] for r in results] == ["d1"]
+
+
 def test_bridge_tool_use_ids_match_the_rebuilt_transcript(tmp_path, monkeypatch):
     """The id a gate receives is the id of its own block in the transcript."""
     db = _db(tmp_path / "state.db", [

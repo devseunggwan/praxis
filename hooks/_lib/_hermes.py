@@ -348,6 +348,8 @@ def transcript_events(rows: List[sqlite3.Row], names: Dict[str, str]) -> Iterato
     `names` collects tool-call id -> Hermes tool name as assistant rows are
     read, so each tool row is rendered by the tool that produced it.
     """
+    # Hermes call id -> how many Claude tool_use blocks it was rendered as.
+    widths: Dict[str, int] = {}
     for row in rows:
         role = row["role"]
         if role == "user":
@@ -363,12 +365,27 @@ def transcript_events(rows: List[sqlite3.Row], names: Dict[str, str]) -> Iterato
         elif role == "assistant":
             event, ids = _assistant_event(row)
             names.update(ids)
+            block_ids = {b.get("id") for b in event["message"]["content"] if b.get("type") == "tool_use"}
+            for call_id in ids:
+                width = 1
+                while tool_use_id(call_id, width) in block_ids:
+                    width += 1
+                widths[call_id] = width
             if event["message"]["content"]:
                 yield event
         elif role == "tool":
-            tool = names.get(str(row["tool_call_id"] or ""))
+            call_id = str(row["tool_call_id"] or "")
+            tool = names.get(call_id)
             if tool is not None:  # a result whose call reached no praxis tool has no tool_use
-                yield _tool_event(row, tool)
+                event = _tool_event(row, tool)
+                [block] = event["message"]["content"]
+                if block.get("is_error"):
+                    # One Hermes call failed as a whole: none of the Claude
+                    # calls it stands for started, so each gets the error.
+                    event["message"]["content"] += [
+                        dict(block, tool_use_id=tool_use_id(call_id, i))
+                        for i in range(1, widths.get(call_id, 1))]
+                yield event
 
 
 def _is_queued(row: sqlite3.Row) -> bool:
