@@ -89,6 +89,8 @@ fatal: 'main' is already used by worktree at /Users/.../<main-worktree>
    worktree, because the failing branch is the *head*, not the base. After
    removal, re-run `git worktree list` to confirm.
    - ⚠️ **The worktree is the agent session's own working folder** (Hermes desktop freezes a chat's cwd at creation; check the runtime `Current working directory` / the turn's workdir): removing it kills the session — every later message fails with "working folder no longer exists" before any model call. Still remove it if the cleanup is approved, but say in the same report that this chat must be moved (desktop **Move to project**) to a live folder before the next message, and name the folder (base worktree or the next issue's worktree).
+   - ⚠️ **Something live may still run from the worktree**: before removing it, check that no symlink points into it (an agent's plugin or skills directory linked to the worktree loads from it: `ls -la <load dir>`) and that no process has its cwd there (`pgrep -fl <worktree path>`). Stop or repoint those first and name them in the report.
+   - ⚠️ **The `codex-review-wrap` companion leaves its app-server broker running with the reviewed worktree as cwd.** Find it (`lsof -a -p <pid> -d cwd` on the `app-server-broker.mjs serve --cwd <worktree>` process) and stop only that pid before removing the worktree — never a broad `pkill`.
    - ⚠️ **Submodule-containing worktree**: plain `git worktree remove` is
      rejected with `fatal: working trees containing submodules cannot be moved
      or removed`. Use `git worktree remove --force <path>` **only after
@@ -105,6 +107,12 @@ fatal: 'main' is already used by worktree at /Users/.../<main-worktree>
      confirm with `git config --get submodule.<name>.url`.
 3. `cd <base-worktree-path>` or chain `cd <path> && gh pr merge ...` in the same
    Bash call (avoid cwd-reset trap between Bash calls).
+   - **Fork clones: pass `--repo <fork-owner>/<repo>` on every `gh pr` call,
+     the merge included.** In a clone whose GitHub repo is a fork, gh
+     resolves a bare `gh pr merge <N>` (and `view` / `comment` / `edit`)
+     against the parent repo: it fails with `Could not resolve to a
+     PullRequest` at best and acts on the upstream PR of the same number at
+     worst.
 4. Even if the call fails on a worktree conflict, the PR may already be merged
    on remote (gh order: remote merge → local sync). Manual cleanup — run each as
    a **separate** Bash call, never chained (a failure in one step must not

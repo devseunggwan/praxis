@@ -26,7 +26,17 @@ Prove the gate is missing and that it can be precise, before writing a spec.
   PreToolUse payload from its `tool_input`, pipe it into `impl.py`, count a
   fire on rc 2 or any stdout/stderr, and print the question tail, the option
   labels and the user's answer (the matching `tool_result`) for each fire.
-  Count distinct questions: retried calls repeat rows.
+  Count distinct questions: retried calls repeat rows. On a Hermes host,
+  [`scripts/replay-clarify-corpus.py`](../scripts/replay-clarify-corpus.py)
+  `<impl.py>` does the same over every `clarify` call in
+  `$HERMES_HOME/state.db` and its profiles; its per-fire lines quote real
+  questions, so publish only the totals and your labels.
+- **Measure what an existing gate does on Hermes** before proposing to keep,
+  narrow or drop it:
+  [`scripts/hermes-gate-effectiveness.py`](../scripts/hermes-gate-effectiveness.py)
+  counts each gate's interventions and what the agent did next (identical
+  re-issue, ack-only, edit, changed, abandoned). Identical re-issues are
+  ceremony unless the gate reads a file the command names.
 - **Label against context the text does not carry.** A text-only detector
   cannot see repo visibility, branch ownership, or whether the rules require
   the ask. A gate meant to flag "unnecessary" asks therefore tends to fire
@@ -120,7 +130,9 @@ The effect section of the PR body is these numbers, not adjectives.
    with its `tool_result`. For a glob gate, keep the Bash calls whose result
    matches `\(eval\):\d+: no matches found: (\S+)` — those are the real
    failures the gate exists to catch. If several config dirs link to the same
-   `projects/` dir, glob only one, or every row counts N times.
+   `projects/` dir, glob only one, or every row counts N times. On a Hermes
+   host also stream `~/.praxis/cache/hermes-transcripts/*.jsonl` (under
+   `$PRAXIS_HOME` when set): calls made under Hermes are recorded only there.
 4. **Static coverage.** For each row, run each side's pre-probe pipeline
    (pass-through checks → segments → candidate spans) and count how often
    the failed pattern is a candidate.
@@ -139,6 +151,34 @@ with every changed row listed. Zero changes plus green release fixtures means
 the new path opens only for the new shape; say exactly that in the spec and
 PR instead of implying real-world coverage.
 
+For the merge gate this replay is
+[`scripts/replay-merge-gate-corpus.py`](../scripts/replay-merge-gate-corpus.py)
+`<worktree>`, which also prints the last question and answer before each
+changed row.
+
+- **Read every `deny_to_allow` row by hand**: was a real briefing shown and
+  approved? Widening the text a gate reads (every question, not only the
+  merge ask) collects keywords from unrelated questions and releases on
+  answers that approved nothing; limit a widened input to text about the
+  merge's target PR.
+- **Reproduce a live block before fixing it** with
+  [`scripts/replay-session-merges.py`](../scripts/replay-session-merges.py),
+  which feeds the session's recorded merge commands, `--repo` included, so
+  verdicts that depend on the repo or an earlier `cd` reproduce (`--cut`
+  builds its own command and cannot). Change code only once every replayed
+  verdict matches the live one.
+- **Find the failing step, not the message.** Call the gate's internal steps
+  (`_latest_ask_answer`, `_ask_decision`, `_pr_sections`,
+  `_briefing_item_count`, `_merge_target_repo`, …) on the same cut; one deny
+  message comes from several steps.
+- **Copy a Hermes transcript out of `~/.praxis/cache/`** the first time you
+  reproduce from it: after a context compaction the bridge rewrites it, row
+  numbers move, and the same cut lands elsewhere and looks like a regression.
+- **Counts that move between review rounds**: run the previous head
+  (`git worktree add --detach`) on the current corpus before blaming the
+  code. Equal numbers mean the corpus changed; re-measure both sides on your
+  saved copy.
+
 ## 7. Transcript-reading gates
 
 Gates such as `momentum-rule-retrieval-gate` and `pre-merge-approval-gate`
@@ -153,6 +193,14 @@ function from the owning `impl.py` and load it in the sibling with
 consent gate, wrap the call so any exception or unreadable transcript returns
 "not approved": the gate keeps asking, whereas the owner's `@fail_open`
 contract would release on a crash.
+
+**Counting earlier calls in the turn.** When PreToolUse fires on Hermes, the
+transcript already holds the current call and any later blocks of the same
+assistant message; under Claude Code it does not. A gate that counts the
+turn's earlier `tool_use` blocks drops candidates from its own block on,
+matched by the payload's `tool_use_id`, but reads `tool_result`s from the
+whole turn. The bridge and the rebuilt transcript both take ids from
+`_hermes.tool_use_id`, so the match holds.
 
 ### Adversarial checklist for approval and briefing parsers
 
@@ -217,6 +265,23 @@ false release in a first implementation.
   reuse a blocking gate's "executed merges" helper as-is: it drops chained
   merges to fail open, which on a release path is a hole — add a flag
   (`include_skippable=True` in `momentum-rule-retrieval-gate`) instead.
+- **Widening what the gate reads.** When a change widens the input (the
+  question text, say), write these deny fixtures first: a question answered
+  with a hold; a refused question (an `is_error` result with no `"q"="a"`
+  pair, so read the whole result block); a question naming a PR that has no
+  section; and a count phrase ("merge the two") whose count differs from the
+  PRs the answer names. A `tool_result` answer does not close the window the
+  way a user message does, and the first merge has no answer check, so these
+  four release directly.
+- **A new parser.** Normalise the way the parser it is compared with does
+  (lowercase `owner/repo`; GitHub matches it case-insensitively). Read only
+  the lines that hold the decision: a section's repo from its heading, not
+  its body, which may cite another repo's PR with the same number. Extend
+  sibling regexes that accept the same vocabulary together.
+- **Another release path.** Widen a deny onto another release path only
+  within the issue's scope. That path also reads briefings an earlier merge
+  in the turn consumed and sub-headings inside another PR's section; pin both
+  as allow fixtures, checked to allow on `main`, before widening.
 
 Before choosing vocabulary, mine real replies: scan short user messages near
 merges in the corpus and sort them into approvals ("merge both", "merge all")
@@ -226,10 +291,22 @@ contains.
 
 ### Fixtures and RED proof
 
-- Generate fixtures with a throwaway generator (helpers for user text,
-  assistant text, Bash `tool_use`, `tool_result`, `AskUserQuestion` with a
-  `"q"="a"` result), write them to `tests/fixtures/<gate>-<case>.jsonl`, and
-  keep the generator in scratch so review rounds add cases by editing it.
+- Generate fixtures with
+  [`tests/fixtures/merge_gate_fixtures.py`](../tests/fixtures/merge_gate_fixtures.py)
+  (helpers for user text, assistant text, Bash `tool_use`, `tool_result`,
+  `AskUserQuestion` with a `"q"="a"` result, a six-item briefing section):
+  add a `CASES` entry and run it to write
+  `tests/fixtures/<gate>-<case>.jsonl`. Pin each case in the gate's test as a
+  pass/deny pair — for the merge gate,
+  `run_merge_escalation_case "<name>" "<yes|no>" "" "<fixture>" "<command>"`.
+  Name each PR in one reference form per fixture (`owner/repo#N` or a
+  `/pull/N` URL), so a broken regex for one form cannot pass on the other.
+- A change that widens what a gate allows ships a "same shape, different
+  target → deny" fixture, run on RED as well: when the base wrongly allows
+  it, that is a separate finding for the PR body and spec.
+- Ablate each fix alone (drop only that change, such as one `.lower()`) and
+  show the case it guards fails; a whole-impl revert does not show which fix
+  guards which case.
 - Prove RED by reverting only the impl files to the old ref, with the copy
   procedure in [Applying review findings](#applying-review-findings) (save a
   copy of `<impl>` and `<sibling impl>`, write the old versions with
@@ -255,6 +332,10 @@ Notes that the entry point does not tell you:
   write `git rev-parse --short HEAD` as the log's first line. A result counts
   for that SHA only; any later commit or rebase needs a fresh run before the
   PR body says the suite passed. Until it lands, leave a placeholder.
+- If the suite fails in a hook test your diff does not touch (check with
+  `grep -rln <gate>` that it does not reference the changed gate), run that
+  file alone, then rerun the whole suite; push only on a green rerun and note
+  the flake in the CI evidence. Transcript-gate tests flake under load.
 - `git fetch origin` before drafting the PR and rebase if `origin/main`
   moved; re-run the touched test files afterwards.
 - Mirror the body of recent merged PRs on the same hook
@@ -264,6 +345,12 @@ Notes that the entry point does not tell you:
   doing nothing (a lock held by a concurrent run, an empty payload). If you
   trimmed the output, say so above the block and name the refs each side ran
   on; re-run probes on the final HEAD rather than pasting a pre-rebase run.
+- Before posting a body or comment, grep it for home paths (`/Users/`,
+  `/home/`) and org identifiers. Session replay output prints each merge's
+  real `--repo`: replace those with placeholders (`<org>/<repo-a>`) and say so
+  under Unverified. Filter test output with an anchored pattern
+  (`grep -E '^FAILED|^[0-9]+ (passed|failed)'`); a bare `failed` also
+  matches pytest traceback paths, which carry the username.
 
 ## 9. Review
 
@@ -279,6 +366,17 @@ Notes that the entry point does not tell you:
 - A [`codex-review-wrap`](../skills/codex-review-wrap/SKILL.md) pass after the
   subagent rounds still finds release holes. Reproduce each finding as a
   fixture RED on the current impl before editing.
+- When a round's findings sit in a block the previous round added, run the
+  impl without that block and ask first whether the block should exist;
+  patching each finding grows code the next round finds regressions in.
+- A bot reviewer that skipped the head (rate limited) leaves those commits
+  unreviewed; run a `codex-review-wrap` round before the merge ask.
+- **Regression or feature request.** For a finding that main allowed the same
+  thing, or that asks for a check the gate never had, run main's original
+  fixture and `git show origin/main:<impl> | grep -c <check>`. If neither
+  shows a regression, do not fix it in this PR: reply `Not fixed —` with that
+  probe, carry it in an issue comment, and list it under the merge briefing's
+  open items when the PR closes that issue.
 - Bot reviewers often post after CI turns green, with real findings on
   release paths. Before asking for a merge, read the inline threads on the
   final HEAD, fix with a RED-proven fixture, reply with the fixing SHA, and
@@ -300,7 +398,13 @@ Notes that the entry point does not tell you:
    on the touched files.
 4. Atomic commits: fix + tests in one, docs wording in another
    (`git add -p` to split hunks). Behavior commits carry `Confidence:` /
-   `Not-tested:` trailers.
+   `Not-tested:` trailers. When one hunk holds two changes, stage the first
+   through the index only — the `HEAD` text with just that change applied,
+   via `git hash-object -w --stdin` and
+   `git update-index --cacheinfo <mode>,<blob>,<file>` — so a background test
+   run never reads a temporarily edited file. Afterwards `cmp` the file with
+   `git show HEAD:<file>`, and prove the earlier commit green in a
+   `git worktree add --detach <scratch> <sha>`.
 5. Rewrite the PR body (`gh pr edit --body-file`) and fix every sentence the
    review falsified: test counts, renamed symbols, new behavior, pointers to
    a verification comment that does not exist. Re-measure every count you
@@ -308,6 +412,11 @@ Notes that the entry point does not tell you:
 6. Read all three comment surfaces (conversation, inline threads, review
    bodies), say whether each bot finding is fixed on HEAD, and check whether
    base commits touch the PR's files (`git diff --name-only HEAD...origin/main`).
+   Pick a round's new inline findings by `original_commit_id` and
+   `created_at`: GitHub moves a kept comment's `commit_id` to the new head.
+   Answer findings with no thread (outside-diff, nitpicks in a review body)
+   in one `--body-file` comment, and read `reviewThreads{isResolved}` before
+   resolving: a bot may resolve its own thread after a `Fixed —` reply.
 
 ## Pitfalls
 

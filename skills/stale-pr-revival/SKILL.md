@@ -216,6 +216,12 @@ cleanly.
   (`git -C <worktree> checkout --theirs <file>`, then re-add) is usually cleaner than
   hand-merging hunks — and it drops the PR's unrelated formatting churn,
   which reviewers tend to flag.
+- **When the base refactored the code the PR fixes**, the PR's hunk no longer
+  has a home: take the base side, find where the logic lives now
+  (`git -C <worktree> log <old-base>..<base-remote>/<base> -- <file>`, grep
+  the raised symbol), and re-apply the fix there — keeping the old hunk
+  resurrects code the refactor deleted. Re-check the blast radius at the new
+  location: a new shared helper can have more callers than the old site.
 
 - **Hunt semantic conflicts the text merge cannot show.** When the PR removes
   or renames a parameter, symbol, or default, callers that landed on the base
@@ -265,6 +271,15 @@ review nit.
   `stash@{0}` — which may belong to another session.
 - A pre-commit formatter may reformat a line that had already drifted on the
   base. Re-add the file, commit again, and mention it in the change comment.
+- **Split a file that mixes two commits' changes by writing each commit's
+  content into the index, not by hand-picking hunks.** Build the
+  intermediate version in scratch (base plus only this commit's change, from
+  `git show HEAD:<path>`), then `git update-index --cacheinfo
+  100644,$(git hash-object -w <scratch file>),<path>`. `git add -p` needs a
+  TTY, and `git apply --cached --unidiff-zero` of a `-U0` diff with some
+  hunks dropped places later pure insertions at shifted lines. Before each
+  commit, prove the index builds: `git checkout-index -a -f
+  --prefix=<scratch>/idxN/` and run the tests there.
 - A pre-commit check that fails on the merge commit may be failing on the base
   itself (a repo-wide guard the base already violates). Prove it by running
   that hook against the base tree first; only then skip that single hook
@@ -291,6 +306,12 @@ gh pr comment <N> --repo <owner>/<repo> --body-file <comment.md>
 - Post one change comment: a table mapping each review finding → what was done
   (with commit SHA), the conflict resolution in prose, and the red/green
   output from Step 6.
+- Reply to each review thread first, then resolve it by the explicit thread
+  id you replied to, one call each — never in parallel (a reply a gate stops
+  leaves a resolved thread with no answer), and never as a loop over "all
+  unresolved threads": a review bot posts its next round minutes after a
+  push, and such a loop closes a fresh finding nobody answered. If that
+  happened, `unresolveReviewThread` it and say so.
 
 Then wait for CI on the new head before any merge talk.
 
@@ -335,6 +356,12 @@ briefing afterwards means asking twice.
   assumption before briefing: `git merge-tree --write-tree --name-only
   <remote>/<headA> <remote>/<headB>` (exit 0 = no textual conflict) plus each
   PR's own runtime dependency (a backend route it calls, an unmerged sibling).
+  Run it against each sibling's pushed head and any in-progress local head,
+  and re-run it whenever either HEAD moves. Positive-control it without
+  touching a branch: in a temporary index (`GIT_INDEX_FILE=<scratch>/pc.index
+  git read-tree <remote>/<base>`) edit the same line differently, `git
+  commit-tree $(git write-tree) -p <remote>/<base>`, and merge-tree against
+  that dangling commit must exit 1.
   A PR blocked only by a stated order but with no conflict and no dependency can
   be briefed on its own; one whose dependency is still unmerged cannot, whatever
   its CI says.
@@ -363,6 +390,7 @@ run is reported.
 | ------- | ---------- |
 | `git stash` fails with `could not write index` mid-merge | Do not retry and do not `stash pop`; stage the resolved files and commit the merge |
 | Push rejected as non-fast-forward | Someone pushed meanwhile: fetch and merge `<head-remote>/<head>` in; never force |
+| `git push` exits non-zero for another reason (timeout, hook output) | Compare `git ls-remote <head-remote> refs/heads/<head>` with `git rev-parse HEAD` before retrying or reporting a failure — the push often landed |
 | Retarget trees differ | Stop (Step 9); report which commits would be dragged in |
 | Required check fails only on a body/issue-link rule | Read that workflow for its documented bypass ([`references/bot-dependency-prs.md`](references/bot-dependency-prs.md), Step 4) |
 | `gh` not authenticated for the repo | Abort with `gh auth status` output |

@@ -50,6 +50,13 @@ Examples:
 | `git status`, `git push`, etc.                            | silent pass (not a commit or PR/issue create)                                           |
 | `gh pr list`, `gh issue view`, etc.                       | silent pass (not create)                                                                |
 
+**Merging the base into a branch.** git's default merge title
+(`Merge remote-tracking branch 'origin/<base>' into <branch>`) is not on the
+whitelist and is blocked; pass `-m "Merge branch '<base>' into <branch>"`.
+Stage the resolved files in their own call first: a blocked
+`git add … && git commit` stages nothing, and the retry then fails on
+unmerged files.
+
 ### Invalid title examples (blocked)
 
 | Title                 | Reason                                        |

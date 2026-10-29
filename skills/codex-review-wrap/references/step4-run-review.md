@@ -169,6 +169,19 @@ take depends on where the session is when the run completes:
 - **No user is reachable** (unattended worker, `-p` run, session already
   ended) — the interactivity check fails and the findings take the
   non-interactive path: verified, applied to nothing, deferred.
+- **No user is reachable, but the run's brief explicitly authorizes fixing
+  reproduced findings** — that brief replaces the apply-nothing path. Per
+  finding: write a test that fails on the reviewed HEAD, fix, one commit per
+  finding with a `Premise-Verified:` trailer naming that failing test, push
+  (never force). Re-run a round after the push and stop at the first round
+  with no new finding (ceiling 3). When the ceiling round still produced
+  findings, the commits fixing them were never reviewed: name those SHAs at
+  the top of the report and in the merge briefing's NOT-verified part rather
+  than reading the cap as a pass. Judgement calls (a finding you cannot
+  reproduce, a design trade-off) go to the report as open decisions, not
+  into code. A headless session cannot end its turn to wait: start the
+  companion in the background and block on it in chunks under the tool
+  timeout.
 
 Either way, never apply a review's findings from the completion notification
 alone.

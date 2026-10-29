@@ -192,6 +192,21 @@ The volatile `${TMPDIR}/praxis-*` cache paths above are slated to move under
 `~/.praxis/cache` in the #527 follow-up; their per-file override vars will
 continue to work. See [`runtime-state-layout.md`](runtime-state-layout.md).
 
+## In-band `# <name>:ack` markers
+
+Some gates also accept a marker in the command itself (`# side-effect:ack`,
+`# cross-boundary:ack`, `# title-length:ack`,
+`# approval-premise:ack <premise>`). Each gate's `spec.md` says what its
+marker attests. Two shell rules apply to all of them:
+
+- **One `#` per marker.** `… # side-effect:ack # cross-boundary:ack` satisfies
+  both gates. In one joined comment (`# side-effect:ack cross-boundary:ack`)
+  only the first marker is read, and the other gate stops the call again.
+- **A marker is a shell comment, so the rest of its line never runs.**
+  `cmd1 # cross-boundary:ack && cmd2` runs only `cmd1` and still exits 0. Put
+  the marker at the end of the last command on the line, or run the
+  follow-up as its own call, and check that its output actually appeared.
+
 ## Maintaining this registry
 
 This registry is a **human-readable view**. The canonical source for a hook's

@@ -512,6 +512,12 @@ to run the tests. Step 2.6 is that rule's fixed question set — its five answer
 go into the prompt below verbatim, and anything the set does not cover is
 written in here on the spot.
 
+**Name the boundaries a parallel worker cannot see.** List the files an open
+PR is already editing (`gh pr list --search <topic>` +
+`gh pr diff <N> --name-only`) as off-limits in the prompt, and have the
+worker report a same-class defect it finds there as `file:line` only, not
+fix it.
+
 Prompt file structure:
 
 ```markdown
@@ -623,6 +629,15 @@ N issues that are already mutually independent, each on its own.
   **candidates**. Do not split just because sections exist — a document that
   divides one task under subheadings is the most common cause of bad splits
 - If the split yields 1 item, ignore distribute (single session)
+- **Bundle items that edit the same files** (or hang on the same decision)
+  into one worker: parallel workers on shared files conflict when their PRs
+  land. The bundled worker still opens one PR per issue.
+- **Drop before splitting**: items already done, items with an open PR, and
+  items another live session is working. Name each dropped item and why in
+  the Step 6 report.
+- Write the shared rules (conventions, forbidden actions, test environment,
+  report shape) once and copy them verbatim into every split file, so the
+  workers cannot drift apart.
 
 **Split process:**
 
@@ -895,6 +910,14 @@ item's `{prompt_file}` / `{script_file}` pair each time.
 ### Step 5b: Send to Existing Session (existing session)
 
 When `--session` is specified:
+
+Before writing a follow-up for a worker that already ran, read its live
+state (`git -C <worktree> log --oneline origin/<base>..HEAD`,
+`git -C <worktree> rev-parse @{u}`, `gh pr list --head <branch>`). A
+worker's last message lags its actions: a follow-up saying "not pushed yet,
+rebase first" to a worker that already pushed and opened the PR invites a
+rebase of a pushed branch. Carry only the new facts and next steps, and
+restate that the original forbidden list still applies.
 
 ```bash
 # 1. Match the workspace

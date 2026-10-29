@@ -317,6 +317,21 @@ every verb the service has and a write is one flag away:
   a flag added by a future gh release must fall through to `ask`, not through
   the gate.
 
+## Operator notes
+
+- **A name you create can carry the marker.** `\bprod-` also matches inside a
+  branch, worktree directory or file name, so every call that names it and is
+  not a read-only shape asks although nothing reaches production:
+  `git push origin issue-12-prod-flag` and
+  `git worktree add ../wt-prod-ops <sha>` ask, while
+  `git push origin issue-12-flag` passes. Keep `prod-` out of names you
+  create, and name a production ref's commit by SHA.
+- **Read-only shapes stay quiet even when they name production**
+  (`git -C ../wt-prod-ops status`, `kubectl --context prod-x get pods`). A
+  report of a read-only call that asked is worth a replay against the current
+  `impl.py` before it is filed: the shape is either missing from the
+  allowlist above or carries a substitution or a writing redirect.
+
 ## Not yet done
 
 - The blast-radius axis in the message is prose. Making it a required structured
