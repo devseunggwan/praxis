@@ -5,6 +5,21 @@ All notable changes to praxis are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.22.1](https://github.com/devseunggwan/praxis/compare/v7.22.0...v7.22.1) (2026-10-29)
+
+
+### Fixed
+
+* **hooks:** read merge method words and per-section bulk repos ([#1605](https://github.com/devseunggwan/praxis/issues/1605)) ([68cfd34](https://github.com/devseunggwan/praxis/commit/68cfd340c507b3dae96ef16c510f0dadf6a2bc7b)), closes [#1604](https://github.com/devseunggwan/praxis/issues/1604)
+* **hooks:** stop fan-out-scope-gate counting the call it gates ([#1608](https://github.com/devseunggwan/praxis/issues/1608)) ([1c2f480](https://github.com/devseunggwan/praxis/commit/1c2f480c629240c2b656c47ae8b97f2b70de6ce9)), closes [#1607](https://github.com/devseunggwan/praxis/issues/1607)
+* **skills:** re-read before calling a PR unmerged ([#1612](https://github.com/devseunggwan/praxis/issues/1612)) ([6fc9b60](https://github.com/devseunggwan/praxis/commit/6fc9b609dc7a1cb8967ab736c0fe12a57a800381))
+* **skills:** upstream local edits, host-neutral ([#1610](https://github.com/devseunggwan/praxis/issues/1610)) ([cb40287](https://github.com/devseunggwan/praxis/commit/cb402874a3b320fb61e0e31f82349a74050f83ca))
+
+
+### Changed
+
+* sync downstream praxis material ([#1614](https://github.com/devseunggwan/praxis/issues/1614)) ([f12665d](https://github.com/devseunggwan/praxis/commit/f12665d852143fc8260e356d4998c304116f5b7c))
+
 ## [7.22.0](https://github.com/devseunggwan/praxis/compare/v7.21.0...v7.22.0) (2026-10-23)
 
 
