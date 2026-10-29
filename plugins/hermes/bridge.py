@@ -107,7 +107,7 @@ def pre_tool_call(hermes: dict) -> dict:
     command_rewrite: Optional[str] = None
     for i, (claude_tool, claude_input) in enumerate(calls):
         payload = dict(base, tool_name=claude_tool, tool_input=claude_input,
-                       tool_use_id=f"{extra.get('tool_call_id') or 'hermes'}#{i}")
+                       tool_use_id=_hermes.tool_use_id(str(extra.get("tool_call_id") or "hermes"), i))
         for matcher in _groups("PreToolUse", claude_tool):
             rc, out, err, group_asks = _run("PreToolUse", matcher, payload)
             decision, reason, context, updated = _hermes.parse_decision(out)

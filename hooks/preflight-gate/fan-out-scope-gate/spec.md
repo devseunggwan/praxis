@@ -40,6 +40,7 @@ to the person who wrote it rather than asking the agent to grade its own scope.
 | Any env-var prefix (`env FOO=1 cmux workspace create`) | counted — no environment variable exempts a target |
 | Marker comment (`# fan-out-mapped:`, any comment text) | `ask` — no agent-attachable bypass exists by design |
 | A prior target whose `tool_result` is `is_error` | not counted — no worker started |
+| The gated call's own `tool_use`, already in the transcript | not counted, nor anything after it in the turn |
 | `--help` / `--dry-run` rehearsal | not counted, and not gated |
 | Command text inside `echo` / `printf` | not counted — `argv[0]` is the echo, not `cmux` |
 | Any other Bash command | silent pass-through |
@@ -99,6 +100,23 @@ tool_result `tool_use_id`, mirroring `pr-claim-mutation-gate`. A tool_use with
 no result yet counts as a success, biasing toward asking: the gate exists to be
 seen while the fan-out is still growing, and silence is the failure it was
 built for.
+
+That rule needs to know which tool_use is the call being gated. A host can
+write the in-flight call into the transcript before its PreToolUse hook runs:
+the Hermes adapter rebuilds the transcript from stored rows, and by then the
+assistant row of the pending call is stored, so the call shows up as a
+result-less tool_use and the first target read as the second. The payload's
+`tool_use_id` names the gated call; when the turn holds a block with that id,
+no tool_use from that block on is counted. The block itself and anything after
+it — later targets of the same message, such as the remaining tasks of one
+multi-task delegation — have not started a worker yet. Results are still read
+from the whole turn, because a host that runs one message's calls in sequence
+stores an earlier call's result after the message; a failed earlier sibling
+stays uncounted. Earlier blocks of the same message
+still count, so the second task of one delegation asks as target #2. A
+`PreToolUse` probe under Claude Code (`claude -p`, 2.1.312) found the gated
+call absent from the transcript at hook time, so there the turn is counted
+whole, as before.
 
 ## Response
 

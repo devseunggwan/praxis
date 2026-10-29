@@ -131,7 +131,7 @@ def command_is_multi_target(command: str) -> bool:
     return bool(_LOOP_RE.search(command) or _FUNCDEF_RE.search(command))
 
 
-def count_targets_in_turn(turn: list[dict]) -> int:
+def count_targets_in_turn(turn: list[dict], current_id: str | None = None) -> int:
     """Number of SUCCESSFUL delegation-target creations already in this turn.
 
     A failed call created no worker, so it must not push the count toward the
@@ -139,10 +139,20 @@ def count_targets_in_turn(turn: list[dict]) -> int:
     mirroring pr-claim-mutation-gate. A tool_use with no result yet counts as
     success, biasing toward asking — the whole point of the gate is to be seen
     while the fan-out is still growing.
+
+    `current_id` is the gated call's own `tool_use_id`. A host that rebuilds
+    the transcript from stored rows (the Hermes adapter) already holds the
+    in-flight call, and later blocks of the same message, when PreToolUse
+    runs; neither has started a worker, so no tool_use from that block on is
+    a candidate. Results are still read from the whole turn: a host that runs
+    one message's calls in sequence stores an earlier call's result after the
+    message. Under Claude Code the call was absent at hook time in a
+    `claude -p` probe, so every tool_use in the turn stays a candidate.
     """
     candidates: list[str] = []
     untracked = 0
     result_is_error: dict[str, bool] = {}
+    reached_current = False
 
     for ev in turn:
         msg = ev.get("message", {})
@@ -162,6 +172,10 @@ def count_targets_in_turn(turn: list[dict]) -> int:
                     result_is_error[tid] = block.get("is_error") is True
                 continue
             if kind != "tool_use" or role != "assistant":
+                continue
+            if current_id and block.get("id") == current_id:
+                reached_current = True
+            if reached_current:
                 continue
             name = block.get("name", "") or ""
             if name == AGENT_TOOL:
@@ -259,7 +273,11 @@ def main() -> int:
     if not isinstance(transcript_path, str) or not transcript_path:
         return 0
 
-    prior = count_targets_in_turn(load_current_turn(transcript_path))
+    current_id = payload.get("tool_use_id")
+    prior = count_targets_in_turn(
+        load_current_turn(transcript_path),
+        current_id if isinstance(current_id, str) else None,
+    )
     if multi:
         ground = ("this single command creates more than one delegation "
                   "target — a loop, a function body, or repeated invocations")
