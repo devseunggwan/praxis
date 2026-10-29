@@ -8,7 +8,9 @@ description: >
   retargeting; the merge itself stays behind the merge briefing.
 when_to_use: >
   Triggers on "revive stale PR", "stalled PR", "dependabot PR", "renovate PR",
-  "retarget PR", "묵은 PR 살리기". Do NOT activate on "merge cleanup" or
+  "retarget PR", "묵은 PR 살리기", and on a status check of an open PR
+  ("PR 현황 확인", a bare PR link) that turns out `CONFLICTING`/`DIRTY` or
+  many commits behind its base — load it before the first merge command. Do NOT activate on "merge cleanup" or
   "post-merge cleanup" (that is `worktree-merge-cleanup`) or on reviewing
   someone else's PR without pushing to it.
 verified-against-runtime: true
@@ -45,7 +47,21 @@ branch — it does not cover rewriting that branch's history or deleting it.
 
 For many stale PRs across several repositories, run this procedure once per
 repository — one delegated worker per repository, each following the steps
-below — rather than interleaving them in one context.
+below — rather than interleaving them in one context. This holds for a
+cross-repo PR set serving one issue too: give each repo's PR its own worker
+and keep the cross-repo contract check (names one side writes, the other
+reads) and the deploy order for the orchestrator. One worker carrying three
+large revivals runs out of iterations mid-way and leaves an unpushed merge
+plus uncommitted fixes for someone else to reconstruct.
+
+Order a batch by the stale clock: a PR carrying a stale-bot label closes
+(and on many repos loses its head branch) a fixed number of days after the
+label, and any push or comment resets it — revive or at least comment on
+those first.
+
+Every status line, briefing, and final report goes out in the user's working
+language from their rule set — long tool chains (merge, tests, gate retries)
+are exactly where replies drift into English and the user has to ask again.
 
 ## The Iron Law
 
@@ -101,8 +117,58 @@ mechanism — `gh search issues` and `gh search prs` with the mechanism's
 keywords (function name, config key), plus `git worktree list` for a local
 attempt. A stalled PR is often one of two parallel fixes for the same defect.
 
-Done when: the searches and their keywords are listed, and any overlapping PR
-or issue is named with its URL (or "none found" with the scan scope).
+Include **merged** PRs, not only open ones (`gh pr list --state merged
+--search "<file or mechanism>"`, `git log <base-remote>/<deploy-branch> -- <files
+the PR touches>`): the goal often shipped through a different PR while this one
+waited. Then read the deploy branch's version of the touched files and compare
+it to the PR's intent line by line — a flag the PR adds may now be the
+operator's default, so the PR's remaining delta can shrink to a tuning value.
+
+Also check whether the base grew a **house-standard mechanism for the whole
+class of change** while the PR waited (a shared operator, builder, or tier
+table now used by several siblings: `git grep -l <ClassName> <base-remote>/<base>`).
+When it did, narrowing the old diff keeps a one-off path whose original
+justification may now be handled by that mechanism (re-read the PR body's
+"why not X" against the new code's docstring). Offer the user the choice
+before Step 3 — narrow the residual, or rewrite the PR onto the standard on
+the same branch (new commits, retitled body, no force-push) — with the
+trade-off in one table (path, resource cost per account, precedent count).
+A rewrite follows the two closest siblings' wiring rather than inventing
+constants, and the change comment names them with file:line.
+Re-run the PR's reproduction against the **current** base build and live
+vendor before porting anything (a control run: the base binary, the same
+input the PR's body says misbehaves). The vendor or an upstream change may now
+refuse that input itself (a new server-side validation returning 400), which
+turns the revival into a much smaller change — often only docs or a clearer
+error — and the PR into one to close with that evidence. Recount any impact
+number the PR body states from the field the system actually acts on, not a
+compatibility echo; the old count is frequently inflated. When the premise
+shrinks, stop and re-ask scope before committing the full port.
+
+If the goal is already live, do not revive: close the PR with a comment naming
+the superseding PR and the residual difference, and close the linked issue only
+after a deploy-branch run shows the goal working (cite the run and the log
+lines). Ask the user before closing when the residual difference is a real
+behavior choice.
+
+Ask whether the work still has demand before reviving a large PR or a
+cross-repo PR set whose rollout needs human prerequisites (secret seeding,
+infra apply, deploy ordering): a one-line question with the cost (repos,
+files, prerequisites) is cheap, while a full multi-worker revival the user then
+closes as unneeded is wasted. Small single-file revivals can proceed without
+asking.
+
+Also ask whether the target repository is under a freeze or a large in-flight
+refactor before spending a revival on it (one line in the plan, or a quick
+question when several PRs in one repo are queued). A revived head merged into
+a moving refactor conflicts again within days and the owners may refuse
+outside merges until it lands, so the whole Step 3–8 cost is thrown away;
+record such PRs as on hold with their worktree kept, not revived.
+
+Done when: the searches and their keywords are listed, any overlapping PR
+or issue (open or merged) is named with its URL (or "none found" with the scan
+scope), a superseded PR is routed to close instead of Step 3, and the
+repository's freeze/refactor status is known.
 
 ### Step 3: Open a worktree on the PR's own branch
 
@@ -119,13 +185,19 @@ docs, the PR template, new `.github/workflows` (new required checks), and
 framework or API migrations. A clean text merge does not surface any of them;
 apply them in the same revival (a missing PR-body link line, a migrated API).
 
+From here on, address the worktree explicitly in every git call
+(`git -C <worktree> merge …`, or `cd <worktree> && …` in the same command):
+shell cwd resets between calls, and a `cd` that fails silently runs the merge
+in the main checkout, fast-forwarding or dirtying a branch another session
+uses.
+
 Done when: the worktree is on `<head>`, the behind-count is recorded, and the
 convention changes since the PR opened are listed (or "none").
 
 ### Step 4: Merge the base in
 
 ```bash
-git merge <base-remote>/<base>
+git -C <worktree> merge <base-remote>/<base>
 ```
 
 Not `git rebase`, and nothing that needs `--force` afterwards.
@@ -141,18 +213,42 @@ cleanly.
 - **Rewrite tests whose premise the PR changes.** A test that relied on the
   old fall-through path now has to drive the new event sequence.
 - **Taking the base side of a file and re-applying the PR's small additions**
-  (`git checkout --theirs <file>`, then re-add) is usually cleaner than
+  (`git -C <worktree> checkout --theirs <file>`, then re-add) is usually cleaner than
   hand-merging hunks — and it drops the PR's unrelated formatting churn,
   which reviewers tend to flag.
 
-Done when: no conflict markers remain, and every conflicted file has a
-one-line note saying which side's mechanism survived and why.
+- **Hunt semantic conflicts the text merge cannot show.** When the PR removes
+  or renames a parameter, symbol, or default, callers that landed on the base
+  while it waited still use the old shape and merge cleanly into a broken tree.
+  `git -C <worktree> grep -n <removed symbol>` on the merged tree, and run the repository's
+  import/load test (e.g. DagBag import errors) before committing; fold the
+  caller fixes into the merge commit so every commit stays buildable.
+- For a read-only conflict preview while only reporting status (no worktree
+  needed): `git merge-tree --write-tree --name-only <base-remote>/<base>
+  <head-sha>` lists the conflicted files.
+
+Done when: no conflict markers remain, every conflicted file has a
+one-line note saying which side's mechanism survived and why, and a grep of
+the merged tree for each symbol the PR removes/renames returns only intended
+hits.
 
 ### Step 6: Prove the core change red/green
 
 Revert only the core line (for example the base-class swap), run the touched
 tests, and show they fail. Restore it, then run the touched test directories
 plus the repository's import / smoke tests.
+
+- Sync submodules first (`git submodule update --init <path>`): the base merge
+  moves the submodule pin, and a stale checkout produces import errors that
+  look like regressions.
+- Do not quiet pytest with `-p no:logging`; it removes the `caplog` fixture
+  and turns every test that uses it into a setup error.
+- **Re-measure every enumeration the PR body or anchor rests on** against the
+  merged tree, not only CI. Absence claims ("0 callers of X", "no DAG built by
+  Y", "only Z changes") go stale while a PR waits — new users of the changed
+  path land on the base. Diff the before/after behavior map (base tree vs
+  merged tree) and treat any new entry as a fresh equivalence proof, with a
+  positive control showing the probe can detect a difference.
 
 Done when: one failing run (core line reverted) and one passing run (restored)
 are captured as output, with the commands that produced them.
@@ -169,6 +265,11 @@ review nit.
   `stash@{0}` — which may belong to another session.
 - A pre-commit formatter may reformat a line that had already drifted on the
   base. Re-add the file, commit again, and mention it in the change comment.
+- A pre-commit check that fails on the merge commit may be failing on the base
+  itself (a repo-wide guard the base already violates). Prove it by running
+  that hook against the base tree first; only then skip that single hook
+  (`SKIP=<hook-id> git commit`) for the merge commit, keep every hook on your
+  own follow-up commits, and name the skip in the change comment.
 
 Done when: `git log <head-remote>/<head>..HEAD` shows the merge commit followed by one
 commit per addressed review finding.
@@ -182,12 +283,22 @@ gh pr comment <N> --repo <owner>/<repo> --body-file <comment.md>
 ```
 
 - Fix the body's stale facts — usually the verification-environment line, the
-  "applied to" scope, and the test list.
+  "applied to" scope, the test list, and any count or "0 users" premise that
+  Step 6's re-measurement changed.
+- When the PR keeps a verification anchor comment, edit it in place as a new
+  revision (rows re-measured vs. carried over named in its history) after CI
+  on the new head finishes, then post the one-line update notice.
 - Post one change comment: a table mapping each review finding → what was done
   (with commit SHA), the conflict resolution in prose, and the red/green
   output from Step 6.
 
 Then wait for CI on the new head before any merge talk.
+
+Re-read `gh pr view <N> --json headRefOid` before writing the verification
+anchor or the final report: an auto-review pipeline running on the same
+account often pushes a follow-up commit (a type annotation, a thread reply)
+seconds after your push and cancels your CI run. Measure and cite the final
+head, and say which commits were not yours.
 
 Done when: the push landed, the body no longer states a fact the new head
 contradicts, the change comment is posted, and CI on the new head has a final
@@ -220,11 +331,27 @@ briefing afterwards means asking twice.
   independent has reviewed your resolution.
 - `Closes #N` auto-closes its issue only on merge to the default branch; a
   plain reference does not. Say which issues stay open.
+- When several revived PRs were assumed to merge in a fixed order, test the
+  assumption before briefing: `git merge-tree --write-tree --name-only
+  <remote>/<headA> <remote>/<headB>` (exit 0 = no textual conflict) plus each
+  PR's own runtime dependency (a backend route it calls, an unmerged sibling).
+  A PR blocked only by a stated order but with no conflict and no dependency can
+  be briefed on its own; one whose dependency is still unmerged cannot, whatever
+  its CI says.
 - Merge with `--squash`, and without `--delete-branch` when the head belongs
   to another author ([`worktree-merge-cleanup`](../worktree-merge-cleanup/SKILL.md)
   owns the post-merge steps). Remove only your own worktree and local branch.
 - After merge, check the deploy job of the base-branch CI run
-  (`gh run view <id> --json jobs`) before saying the change is live.
+  (`gh run view <id> --json jobs`) before saying the change is live. A
+  skipped `deploy` job is not a failure when the repo ships through another
+  job (a DAG-bundle publish): read which job carries the release before
+  judging. Compare the merged `headRefOid` with the head you verified — the
+  user or a review pipeline may have pushed after your report — and list any
+  extra commits (`git log <verified>..<merged-head>`) in the post-merge note.
+- Re-read each revived PR's `state` before listing it as "awaiting approval"
+  in a later status: the user often closes revived PRs as no longer needed
+  (a migration made them moot) without telling this session, and a stale
+  list reports a closed PR as pending.
 
 Done when: the briefing is in the reply text and ends with the approval
 question, or the merge has happened after an explicit approval and its base CI

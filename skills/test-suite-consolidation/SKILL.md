@@ -40,7 +40,7 @@ Reference map — load only when the step runs:
 | ------ | ------- |
 | [`references/duplicate-audit.md`](references/duplicate-audit.md) | How to find copied fixtures/helpers on the base ref with a normalized-AST grouping, and the three buckets to report |
 | [`references/copy-guard.md`](references/copy-guard.md) | Copy-guard design: binding-aware equality, diff-scoped vs baseline, thresholds, checker mutation testing, CI placement |
-| [`references/pruning.md`](references/pruning.md) | Pruning shape: own-PR quick pass, criteria, deterministic probes, read-only fan-out, re-verification traps, implementation, report |
+| [`references/pruning.md`](references/pruning.md) | Pruning shape: own-PR quick pass, criteria, deterministic probes (never-runs / empty-parametrize / failing-since-added), window audit of newly added tests, read-only fan-out, re-verification traps (randomized differential, forced-state simulations, uniform mocks, self-comparing differentials), parallel implementation lanes (private DBs, HEAD-checked mutations), removal-vs-approved check, report |
 
 ## When to Use
 
@@ -52,6 +52,11 @@ Reference map — load only when the step runs:
 - The user asks which tests are unnecessary, or asks to clean them up —
   including tests you wrote in your own open PR (→ the quick pass in
   [`references/pruning.md`](references/pruning.md#own-pr-quick-pass)).
+- **Unasked, before opening any PR that adds tests.** Run the own-PR quick
+  pass (mutation matrix via
+  [`scripts/mutation_matrix.sh`](scripts/mutation_matrix.sh)) before
+  `gh pr create`; otherwise the user asks for it after review and the anchor,
+  PR body and CI all need another revision.
 
 Pick the shape first: **consolidate** (Steps 1–8) or **prune**
 ([`references/pruning.md`](references/pruning.md)). A request for both runs
@@ -103,7 +108,17 @@ pytest <tests> --collect-only -q -p no:cacheprovider | grep '::' | sort > <scrat
 
 `pipefail` makes a collection error fail the command instead of leaving a
 partial `before.txt` behind `sort`'s exit 0; the file lives outside the
-checkout so it never shows up in the diff.
+checkout so it never shows up in the diff. vitest/jest equivalent:
+`npx vitest list | LC_ALL=C sort > <scratch>/before.txt` (one
+`file > describe > case` line per test; it imports every test module, so a
+broken import fails it). Vitest 5+ parses files statically by default and
+then skips the imports — add `--no-static-parse` there. Sort both sides with `LC_ALL=C` and compare with
+`LC_ALL=C comm`: shells with different locales collate non-ASCII test names
+differently, and `comm` then reports thousands of identical lines as
+added/removed. Group the removed lines by file (`sed 's/ > .*//' | sort -u`)
+and check every file is one the change touched; IDs behind env-dependent
+`skipIf` can appear or vanish between runs — name them, don't count them as
+losses.
 
 After every step, regenerate and diff: only additions for new tests, zero
 deletions. This catches what lint does not — a re-export removed by

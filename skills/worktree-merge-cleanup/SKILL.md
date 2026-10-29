@@ -3,12 +3,17 @@ name: worktree-merge-cleanup
 description: >
   On-demand home for the pre-merge worktree precondition and the unified
   post-merge cleanup sequence — how to run `gh pr merge --squash --delete-branch`
-  from the base-branch worktree, the submodule `--force` caveat, the
-  squash-ancestry stale-HEAD guard, and the no-`&&`-chain rule.
+  from the base-branch worktree, the submodule `--force` caveat (never
+  `git submodule deinit` a linked worktree: it strips the shared submodule
+  url), the squash-ancestry stale-HEAD guard, and the no-`&&`-chain rule.
 when_to_use: >
   Triggers on "merge cleanup", "post-merge cleanup", "worktree cleanup",
   "delete-branch merge", "squash-ancestry", "pre-merge worktree", "머지 후 정리",
-  "worktree 정리", "PR merged", "머지했습니다" (the user reporting a merge).
+  "worktree 정리", "PR merged", "머지했습니다" (the user reporting a merge),
+  and on removing ANY worktree (load it BEFORE the first removal command) or
+  cleaning up after a merge — including the worktree of a PR that was
+  closed without merging ("닫았습니다" → "정리해주세요") — or when about to
+  run `git submodule deinit` to get a worktree removed.
   Do NOT activate on "merge conflict resolution" or a plain
   feature-branch "git merge".
 verified-against-runtime: true
@@ -45,6 +50,17 @@ short-circuits the chain and its trailing output is easily misread as success.
 - After a squash-merge the local feature branch was not deleted
   (`warning: deleting branch 'X' ... not yet merged to HEAD`).
 - Cleaning up a worktree that contains a submodule.
+- Removing the worktree and head branch of a PR the user closed without
+  merging. The removal mechanics are the same as below (clean-check, submodule
+  `--force` without `deinit`, explicit workdir afterwards, remote tip equals
+  the PR's `headRefOid` before `push origin --delete`), but a post-merge
+  standing approval does not cover it: list the worktree and branches and ask
+  once. Load this skill before the first removal command even for a one-off
+  closed PR — skipping it is how the shared-config `deinit` damage repeats.
+- Cleaning up many stale worktrees across repos at once → follow
+  `references/bulk-stale-worktree-cleanup.md` (inventory, classification order,
+  squash-safe content oracle, regenerable-artifact list, checkpointed background run,
+  and the stash/keep-branch pass for removing holds when the user asks for all).
 
 ## Pre-call checklist
 
@@ -58,20 +74,35 @@ fatal: 'main' is already used by worktree at /Users/.../<main-worktree>
 
 1. Confirm the worktree occupying the base branch with `git worktree list`.
 2. **If `--delete-branch` is included**: remove the PR head branch's worktree
-   first (`git worktree remove <issue-worktree-path>`). The post-merge local
+   first (`git worktree remove <issue-worktree-path>`). If the shell's working
+   directory is that worktree, every later shell call fails at its implicit
+   `cd` once the directory is gone — run the remove from (or with `-C`) the base
+   worktree, and give every following call an explicit working directory
+   (`workdir`, `git -C`, `--repo`) instead of retrying. On Hermes the
+   terminal tool's persistent cwd is applied before your command runs, so a
+   `cd <base> && …` inside the command still fails with `cd: <removed path>:
+   No such file or directory` — set the tool's `workdir` parameter.
+   Likewise, step 5's scratch deletion removes only files you created for
+   this PR: list them with mtimes and leave older files other sessions wrote. The post-merge local
    branch delete fails if the branch is still occupied — `cannot delete branch
    'X' used by worktree at ...` — even when invoked from the base (main)
    worktree, because the failing branch is the *head*, not the base. After
    removal, re-run `git worktree list` to confirm.
+   - ⚠️ **The worktree is the agent session's own working folder** (Hermes desktop freezes a chat's cwd at creation; check the runtime `Current working directory` / the turn's workdir): removing it kills the session — every later message fails with "working folder no longer exists" before any model call. Still remove it if the cleanup is approved, but say in the same report that this chat must be moved (desktop **Move to project**) to a live folder before the next message, and name the folder (base worktree or the next issue's worktree).
    - ⚠️ **Submodule-containing worktree**: plain `git worktree remove` is
      rejected with `fatal: working trees containing submodules cannot be moved
      or removed`. Use `git worktree remove --force <path>` **only after
      confirming the worktree is clean** (`git -C <path> status --porcelain`
      empty, and no `!!` line from `--porcelain --ignored` other than a
      regenerable dependency or build cache — `remove` deletes ignored files too). `--force` destroys uncommitted changes in a dirty worktree, so
-     never make it the default. `git submodule deinit -f --all` first does not
-     lift the rejection — the check looks at the registered submodule, not its
-     checkout — so skip that detour and go straight to the clean-check + `--force`.
+     never make it the default. Never run `git submodule deinit` in a linked worktree as a
+     cleanup step: it does not lift the rejection (the check looks at the
+     registered submodule, not its checkout), and it deletes
+     `submodule.<name>.url` from the repository config that every worktree
+     shares, so sibling worktrees lose their submodule registration. Go
+     straight to the clean-check + `--force`. If a deinit already ran, restore
+     the entry from the main checkout with `git submodule init <path>` and
+     confirm with `git config --get submodule.<name>.url`.
 3. `cd <base-worktree-path>` or chain `cd <path> && gh pr merge ...` in the same
    Bash call (avoid cwd-reset trap between Bash calls).
 4. Even if the call fails on a worktree conflict, the PR may already be merged
@@ -91,6 +122,8 @@ fatal: 'main' is already used by worktree at /Users/.../<main-worktree>
    `git pull` fixes it, not `git worktree remove`.
 
 ## When the user merged out-of-band
+
+A repository bot can also merge the PR once approval and checks are green, so your own `gh pr merge` prints `already merged` (exit 0). Treat that as an out-of-band merge: read `gh pr view <N> --json state,mergedAt,mergedBy,mergeCommit` and report who merged it. The user's approval to merge still covers the cleanup below.
 
 When the user reports "merged" after merging themselves (a `/merge` PR-comment
 slash command, the web UI), the cleanup below deletes things: the head
@@ -113,15 +146,32 @@ Confirm before touching anything:
    `git merge-base --is-ancestor <mergeCommit> origin/<base>`.
 3. Remove the head worktree and local branch as separate calls (checklist item 2),
    deleting the local branch only when its tip (`git rev-parse <branch>`)
-   equals `headRefOid`.
+   equals `headRefOid`, or is an ancestor of it
+   (`git fetch origin <branch>` then
+   `git merge-base --is-ancestor <branch> origin/<branch>` exit `0` with
+   `origin/<branch>` equal to `headRefOid`). The ancestor case is common when a
+   remote review bot or a "merge base into branch" pushed commits after your
+   last local commit: the local branch holds nothing the merged PR lacks, so
+   deleting it loses nothing — say so in the report.
    A dirty worktree (`git -C <path> status --porcelain` non-empty) or a tip
-   mismatch is the stop condition: report it and leave it. `--porcelain`
+   that is not equal to or an ancestor of `headRefOid` (local commits the PR
+   never saw) is the stop condition: report it and leave it. `--porcelain`
    alone does not list ignored files, and `git worktree remove` deletes them
    with the directory (a `.env`, local config, a scratch dataset). Also run
    `git -C <path> status --porcelain --ignored` and read its `!!` lines: when
    any of them is not a regenerable dependency or build cache
    (`node_modules/`, `.venv/`, `__pycache__/`, `.pytest_cache/`, `dist/`,
-   `build/` and the like), stop and report the list instead of removing. When
+   `build/` and the like), stop and report the list instead of removing.
+   Files a local test run wrote into the worktree (an Airflow `airflow.db`, an
+   empty `logs/`, a coverage file) count as regenerable only when every file
+   in them is newer than the worktree's creation (the worktree's `.git` file):
+   `find <artifact> -type f ! -newer <path>/.git` prints nothing — say so in
+   the report; anything it prints was there before you and stays a stop
+   condition.
+   An ignored *source-looking* directory (`providers/<x>/`) that `!!` lists
+   whole is often a package whose sources the base merge deleted while its
+   `__pycache__/` stayed: `find <dir> -type f -not -path '*/__pycache__/*'`
+   printing nothing makes it a cache, not user data. When
    `git worktree remove` succeeded,
    skip `git worktree prune` — there is nothing of yours left to prune, and the
    prune is repository-wide (see below).

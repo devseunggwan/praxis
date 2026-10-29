@@ -8,7 +8,8 @@ description: >
   against the original reproduction.
 when_to_use: >
   Triggers on "upstream bug report", "file upstream issue", "report upstream",
-  "vet fix PR", "업스트림 이슈". Do NOT activate on filing an issue in your
+  "vet fix PR", "업스트림 이슈", and on a feature request to a third-party
+  public repo (Steps 3–7 apply; skip Steps 1–2). Do NOT activate on filing an issue in your
   own repository or on a bug whose cause is local setup.
 verified-against-runtime: true
 runtime-verified-at: 2026-10-16
@@ -113,6 +114,22 @@ gh search issues --repo <r> "<phrase>"
 gh search prs --repo <r> "<phrase>"
 ```
 
+For a repo of a few hundred issues, or one whose reports are multilingual
+(CJK titles are common on AI-tool repos), pull the whole corpus once and
+filter locally instead — it covers every language and both states in one
+pass:
+
+```bash
+gh issue list --repo <r> --state all --limit 1000 \
+  --json number,title,state,createdAt,url,body > "$TMPDIR/<r>-issues.json"
+# then regex title+body in python, including CJK/Korean synonyms
+# (e.g. shortcut|hotkey|快捷键|단축키, sidebar|collapse|折叠|收起|접기)
+```
+
+Check the count against `--limit`. Give `gh search issues` a positive
+control: if it returns `[]` for a phrase a known issue contains, discard its
+empty results and rely on the local filter.
+
 Run several phrasings: the symptom, the function name, and a mechanism word
 (for example `tombstone`, `resurrect`). Report the result with its scan scope
 (the phrasings used), plus the closest related-but-different reports and why
@@ -138,9 +155,14 @@ title precedent, mirror the commit convention (for example Conventional
 Commits `fix(<scope>): <lowercase>`) and state that as the basis.
 
 praxis's `commit-title-format-check` also checks `gh issue create` titles and
-rejects a template's `[Bug]:` title prefix. Propose the Conventional title in the
-**first** approval ask and say the template prefix was dropped for that
-reason; otherwise the post bounces and costs a second approval round.
+rejects a template's `[Bug]:` / `[Feature]:` title prefix. Propose the
+Conventional title in the **first** approval ask and say the template prefix
+was dropped for that reason; otherwise the post bounces and costs a second
+approval round. Do not offer "advisory mode for this one call" as an option:
+an inline `PRAXIS_COMMIT_TITLE_FORMAT_STRICT=0 gh issue create …` prefix
+does not reach the hook, which reads the agent process's own environment. The
+real choices are the Conventional title, or the user posting the body file
+themselves with the repo's own prefix — offer both up front.
 
 Done when: the proposed title cites the convention it follows and the
 evidence for it (commit subjects, issue titles, or template).
@@ -157,14 +179,26 @@ Write it to a scratch file outside the repository. Include:
   A worse case inferred only from code goes on the same line, marked
   `(inferred from the code path, not reproduced)`.
 - The reproduce command and its output from Step 2, with the upstream SHA.
+- **Only observed claims about the product.** Every sentence about current
+  behavior ("settings lists only X", "no toggle exists") traces to a probe
+  you ran; cite competitor behavior by its official doc URL. Cut a plausible
+  but unprobed claim (e.g. how full screen or resizing behaves) rather than
+  soften it — the "Alternatives considered" field is where these creep in.
 - The vendor-contract URL from Step 1 and the related reports from Step 3.
 - **Template fields that would upload local state** (a "debug report" field
   that pastes config and logs to a public paste service) are left out. Write
   in that field: "Omitted: it would upload local config and logs. The
   reproduction above is self-contained."
 
+**Feature request (Steps 1–2 skipped):** drop the severity line, the
+reproduce command, and the vendor-contract URL. Instead state the use case,
+the current behavior as observed by a probe on the latest upstream release
+or default branch (name it), and the requested behavior; the observed-claims
+and related-reports items still apply.
+
 Done when: the body file exists, opens with the severity line, and every
-quoted output traces to a Step 2 run.
+quoted output traces to a Step 2 run — or, for a feature request, every
+claim about current behavior traces to a named probe.
 
 ### Step 6: Ask for approval
 

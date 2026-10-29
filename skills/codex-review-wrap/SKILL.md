@@ -120,7 +120,18 @@ detached
 
 ### Step 2: Disambiguation Gate
 
-**Case A — exactly 1 non-bare worktree:**
+Evaluate Case A2 first; Cases A and B apply only when no PR is named.
+
+**Case A2 — the review is for a named PR:**
+
+Read the PR's `headRefOid` (`gh pr view <N> --json headRefOid`). If exactly
+one worktree's `HEAD` equals it, that worktree is the target: skip the
+question and proceed to Step 3. The commit match removes the ambiguity the
+question exists for. Ask as in Case B when no worktree or more than one
+matches — even when only one worktree exists, since its `HEAD` is then not
+the PR's head and reviewing cwd would review unrelated code.
+
+**Case A — exactly 1 non-bare worktree (no named PR):**
 
 Skip selection. Proceed directly to Step 3 using cwd.
 
@@ -404,6 +415,11 @@ Two traps seen under Hermes:
   notification while the companion's job record still says `running`.
   Apply Step 4b's liveness rule: check the pid with `ps`, and on a dead pid
   `cancel` the job and re-launch — never read the silence as a clean round.
+- **A clean round may not have run the tests.** Codex's sandbox is
+  read-only, so suites that write temp files fail inside it, and the
+  review text says so in its summary line. Report a no-findings round as
+  "diff read, no defect found; tests not run by the reviewer", and point at
+  your own test run or CI for test evidence.
 
 ## Error Handling and Limitations
 
