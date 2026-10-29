@@ -161,6 +161,19 @@ ordinary comment there, so blocking would fire on every comment built that way.
 It is not silent either: stderr says the pre-check was skipped, because silence
 reads as "checked and clean", which is the one thing it is not.
 
+**Operator notes.**
+
+- A merged toggle (`Evidence 4·5 — …`) starts with neither `Evidence 4 —`
+  nor `Evidence 5 —`, so it satisfies neither row; an older anchor that
+  merged rows blocks its next `PATCH` revision until it is split.
+- Fences are stripped in pairs, so one unclosed fence pairs with the next
+  fence and hides every toggle between them. When the missing-row list
+  changes after a fix, check that the fence count is even.
+- Only a redirect or `tee` into the body file counts as a rewrite. An
+  in-place edit chained before the post (`sed -i … anchor.md && gh pr
+  comment …`) is not seen, so the file is judged as it is on disk and the
+  post is blocked again; fix the file in its own call, then post.
+
 ## PostToolUse — the published comment
 
 ### Only a command that published is checked

@@ -121,6 +121,10 @@ query is wrong" at the same time until you have seen this exact query print
 rows on a PR known to have them. Run it once against such a PR; that is the
 positive control the negative claim rests on.
 
+In a fork clone, `--repo` must name the fork on every probe: a bare `gh pr`
+call resolves against the parent repo (see `worktree-merge-cleanup` →
+*Pre-call checklist*).
+
 If CI is pending or failing, **stop here** — do not ask yet. A briefing whose
 verification rows are still moving is asking the user to approve a guess.
 
@@ -193,6 +197,12 @@ defect is graded the same way. Blocking findings on either surface stop the ask
 just as an inline one does — they simply have no thread to leave open, so they
 are carried in the briefing's open items instead.
 
+Reconcile the CodeRabbit count before grading is done: count its findings by
+the `` `LINES`: ** `` markers in the bodies and match the total the review
+header states (e.g. `Major comments: N`). Answer the set in **one**
+conversation comment grouped `Fixed — <sha> (n)` / `Not fixed (n)` /
+`False positive (n)`, whose counts sum to that total.
+
 The unlabeled case is the common one, not the exception: bots write in their
 own vocabulary. CodeRabbit opens with its own severity line
 (`_🎯 Functional Correctness_ | _🟠 Major_ | …`), Copilot and BugBot with
@@ -248,7 +258,11 @@ as "머지 후 실전송으로 확인" dies with the PR unless something outlive
 Six parts, in this order (this list is the canonical shape; it was originally
 derived from the author's dotfiles PR-workflow template):
 
-1. **What changed** — scope (files, logical changes), not the issue title again
+1. **What changed** — open with one plain sentence of what the PR does and
+   what changes for the user if it merges (and if it does not), then the
+   scope (files, logical changes), not the issue title again. A part 1 made
+   of counts and internal shorthand gets "what does it do?" back instead of
+   an answer, which resets the approval window and costs a full re-brief.
 2. **What was verified** — real output, with the command cited
 3. **What was NOT verified** — skipped, deferred, blocked, CI-pending
 4. **Risk / blast radius** — who breaks if this is wrong
@@ -272,6 +286,15 @@ Part 3 anti-patterns:
 "완료했습니다, 머지할까요?" with no evidence; a skipped check
 demoted to a trailing aside; reporting at merge time what should have surfaced
 at PR-ready time.
+
+**Close part 3 items by observing, not by reading.** When the user asks you to
+check the unverified items, go item by item and run the cheapest probe that
+settles each by observation: the real function on a scratch fixture, the OS
+asked who holds the file or lock (`lsof`), the store queried. Correlating log
+timestamps with a process start, or quoting a source comment, is inference and
+leaves the item open. An item only the unbuilt change can settle stays in part
+3, naming the probe that will close it and when. An action the brief forbids
+(a config change, a restart) stays forbidden: name it as the blocker.
 
 **Calibrate the length.** A typo, comment-only, or single-line config PR gets
 two lines — the bar is "enough context to decide", not "long report".
@@ -312,6 +335,10 @@ still binds:
   look approved.
 - **No session-end option** — that surface is restricted independently
   (`block-ask-end-option`).
+- **A PR no reviewer has looked at** (0 reviews, e.g. the review bot skipped
+  the head on a rate limit) gets a hold option that names the missing step —
+  `Hold — run codex-review-wrap first` — so the user can pick the review over
+  the merge.
 - The Step 3 follow-up decision (`Carried: #N` / `Carried: none — <사유>`) may
   ride along as a second question in the same call; it is about this same merge.
   Any other question (a plan approval, a next-task choice) goes in a separate
@@ -445,9 +472,10 @@ decorative.
 | Companion PR merged on the neighbour's approval | Approval transfer | One briefing per PR (Step 5) |
 | A progress signal (`ok`, `계속`) consumed as merge consent | The ask was prose, so any short reply landed on it | Ask through `AskUserQuestion` (Step 5) |
 | The gate counts 0 briefing items although a full briefing was written | The briefing lived in a question that does not name the target PR, or in prose the host never delivered to the hook | Name the PR in the merge question and carry the items there or in delivered prose (Step 5) |
-| Hermes: merge denied with `no briefing is present in the window` mid-turn although the briefing was written as prose right before the call | Prose between tool calls in one Hermes turn is not seen by the hook; after a merge has run, only what follows that merge counts | Put the six items inside the `clarify` merge question, naming the PR; for several PRs, one section per PR inside the same question body plus the listed ask. After that answer, merge each listed PR as its own command (`gh pr merge N --repo o/r --squash # side-effect:ack`), back to back, no `cd`/chain. Pre-merge writes the procedure requires between the answer and the merge (anchor `Carried:` rev, update notice, head-worktree removal) can still make the gate score fewer than 4 items on that merge call. Then, and only then, the briefing provably sits in this turn's answered `clarify` body, so re-issue the same merge once with `# briefing-surfaced: six-item briefing in this turn's clarify merge question for PR N, answered <label>` — a truthful attestation, not a bypass. Never use the marker when no answered PR-named briefing exists in the turn |
+| Hermes: merge denied with `no briefing is present in the window` mid-turn although the briefing was written as prose right before the call | Prose between tool calls in one Hermes turn is not seen by the hook; after a merge has run, only what follows that merge counts | Put the six items inside the `clarify` merge question, naming the PR; for several PRs, one section per PR inside the same question body plus the listed ask. After that answer, merge each listed PR as its own command (`gh pr merge N --repo o/r --squash # side-effect:ack`), back to back, no `cd`/chain. Pre-merge writes the procedure requires between the answer and the merge (anchor `Carried:` rev, update notice, head-worktree removal) can still make the gate score fewer than 4 items on that merge call. Then, and only then, the briefing provably sits in this turn's answered `clarify` body, so re-issue the same merge once with `# briefing-surfaced: six-item briefing in this turn's clarify merge question for PR N, answered <label>` — a truthful attestation, not a bypass. Never use the marker when no answered PR-named briefing exists in the turn. To keep the gap from opening at all, merge first and clean up after: run `gh pr view <N> --repo o/r` alone, then the merge alone **without** `--delete-branch` (the flag is what forces the head-worktree removal before it), and remove the head worktree, the local branch and — when `delete_branch_on_merge` is false — the remote branch afterwards, through `worktree-merge-cleanup` |
 | Hermes: `briefed turn does not name the PR this merge targets` after one briefing covered two PRs and the user said `merge` | A joint briefing is scored for neither PR, and re-writing the briefing in the same turn as the merge call does not count either | Stop after the first block (no third retry). Brief exactly one PR, end the turn, merge it on the reply; brief the next PR in the merge-result turn. A short delta (e.g. `UNKNOWN` → `MERGEABLE`) plus the PR-named ask is enough when the full briefing for that PR was the previous turn |
-| Hermes: two PRs in different repos asked as two questions of one `clarify` call, both answered `머지`; the first merge passes, the second is denied with `no briefing is present in the window` | Cross-repo PRs cannot use the bulk shape, and once the first merge has run the gate only reads what follows it, so the second PR's earlier answer no longer counts | Finish the first PR's cleanup, then ask the second PR alone in a new `clarify` whose question body carries the six items labelled (`① What changed … ⑥ #N 을 머지할까요?`), and merge it on that answer with the `# briefing-surfaced` marker. Plan cross-repo pairs as two sequential asks from the start |
+| Hermes: two PRs in different repos asked as two questions of one `clarify` call, both answered `머지`; the first merge passes, the second is denied with `no briefing is present in the window` | Cross-repo PRs cannot use the bulk shape, and once the first merge has run the gate only reads what follows it, so the second PR's earlier answer no longer counts | Finish the first PR's cleanup and end the turn with the second PR's briefing; ask the second PR alone in a `clarify` of a later turn (see the next row) whose question body carries the six items labelled (`① What changed … ⑥ #N 을 머지할까요?`), and merge it on that answer with the `# briefing-surfaced` marker. Plan cross-repo pairs as two sequential asks from the start |
+| Hermes: after one merge ran in the turn, a new `clarify` for the next PR is answered `merge`, but that merge is denied with `the last user message (…) is not an approval reply` | The gate reads only the user message that opened the turn; an answer collected later in the same turn is not scored | Do not ask the next PR in the turn that merged the previous one. Write the next PR's full briefing as the turn's final text and end the turn, then merge on the reply — or ask the whole set in the bulk shape from the start. A non-merge decision (whether to open a follow-up PR) may still ride in the same `clarify` |
 | A picked hold read as approval | The hold label's leading segment was an approval token (`진행 — 나중에`) | Hold labels never lead with one (Step 5) |
 | User stops the merge with "검증이 필요합니다" after the briefing | The briefing's evidence was self-produced; this user wants an independent check before approving a multi-PR cluster | Before the bulk ask, dispatch `evidence-audit` (one read-only auditor per repo group), close what can be measured now, fix doc drift on the PR branches, re-rev the anchors, and only then brief. A head that moved re-opens every approval |
 | Hermes: merge blocked with `no briefing is present in the window` although the user answered `merge` to a full briefing | A typed message landed between the briefing and the answer (a question, a correction, a `merge` the host dropped), so the gate reads the turn after it as the one right before the approval and finds no briefing in it. This includes the answer to **your own** clarifying question: if the user's `merge` came with an ambiguous extra ("1번으로") and you asked which item they meant, their reply ("A") is a disambiguation, not an approval. A background-process or subagent notification does not do this: the Hermes adapter tags it `origin.kind` from its `display_kind`, as Claude Code tags its own, and the gate skips it | Do not retry with `# briefing-surfaced` (the marker attests an answered PR-named briefing in this turn, which a disambiguation reply is not — the gate blocks it too). Re-run Step 1, write the full six-part briefing again (not a "same as before" delta, and fold in anything that changed since, e.g. a version bump after a base merge), end the turn, and merge on the next reply. When the PR changed after the user's `merge` (base merge, new commit), say so in the re-brief rather than merging on the old answer |
@@ -457,6 +485,7 @@ decorative.
 | User asks why the PR shows no merge button | `mergeStateStatus: BLOCKED` from a ruleset requiring an approving review on a PR the user authored (authors cannot approve their own PR) | Read the `pull_request` record from `gh api repos/<o>/<r>/rules/branches/<base>` (`.[] \| select(.type=="pull_request") \| .parameters.required_approving_review_count`) and the ruleset's `current_user_can_bypass`. If `always` or `pull_requests_only`, tell the user the "Merge without waiting for requirements to be met (bypass rules)" checkbox in the blocked merge box reveals the button; if `never`, a reviewer is needed. Say this in the briefing's open items before they hit it — and even when bypass is possible, put a hold option `보류 — 리뷰어 지정 후` in the merge question: users often prefer a human approval over bypassing the rule |
 | User picks "reviewer first" but no reviewer is named | Reviewer choice treated as a guess, or the candidates are logins nobody recognizes | Rank candidates from evidence, then ask (assigning notifies people): authors of the changed directory (`git log origin/<base> --since="6 months ago" --format=%an -- <dir> \| sort \| uniq -c \| sort -rn`), each mapped to a login via `gh api repos/<o>/<r>/commits/<sha> --jq .author.login` on their latest commit there, plus top approvers on recent merged PRs (`gh pr list --state merged --limit 40 --json reviews --jq '[.[].reviews[]\|select(.state=="APPROVED")\|.author.login]\|group_by(.)\|map({u:.[0],n:length})'`). Show `login (real name)` with the count behind each; the user may pick several. Then `gh pr edit <N> --add-reviewer a,b,c` and confirm with `gh pr view --json reviewRequests` |
 | CI reported failed because a background `gh run watch --exit-status` exited 1 | The watch itself died (network read timeout on the API poll), not the run | Before calling CI failed, read `gh run view <id> --json status,conclusion,jobs` and the tail of the watch log; only `conclusion` decides |
+| `gh pr checks --watch` exits at once with `no checks reported` | Started right after a push, before the new head's runs registered | Start the watch only after `gh run list --branch <b> --commit <sha>` lists runs for the new head |
 | Merge approval asked on a PR that cannot merge yet | `mergeStateStatus: BLOCKED` only because a required approving review is missing and `current_user_can_bypass` is `never`; everything else (CI, threads, mergeable) is green | Do not ask the merge question. Still finish Step 3 now (write `Carried:` into the anchor, record named follow-ups on the issue that outlives the merge), write the per-PR sections as a status briefing, and ask instead whether to request a reviewer — assigning one notifies a person, so it needs its own yes. If the user declines ("직접 처리"), stop; they may merge out-of-band with the repo's force-merge command, so on their "merged" report go straight to `worktree-merge-cleanup`'s out-of-band path |
 | `--delete-branch` run from the wrong worktree after approval | Step 6 read as advice, merge command hand-rolled | Chain `worktree-merge-cleanup` as the next action (Step 6) |
 | User says "both merged" out-of-band, your check shows one still OPEN, and you warn them (or offer a revert) | The user merges PRs seconds apart; a status read taken right after their message can land before the second merge | Before reporting a reported-merged PR as unmerged, re-read `gh pr view <N> --json state,mergedAt,mergeCommit` once more (a few seconds later) for every PR named; only a second OPEN read is a finding, and the report quotes both `mergedAt` values |

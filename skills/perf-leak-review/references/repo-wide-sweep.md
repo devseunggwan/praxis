@@ -138,3 +138,30 @@ each top candidate, and the no-write diff are all recorded.
 
 Done when: every finding in the merged envelope appears in the priority table
 or in the reviewer-only groups.
+
+## Another axis: capability fit
+
+The same fan-out skeleton answers a different question — "can a new
+framework absorb every existing hand-written unit (providers, runners,
+plugins, adapters)?" — whose output is a verdict per unit, not a defect list.
+What changes:
+
+- **Freeze a snapshot** (`git -C <repo> fetch origin <base>`, then
+  `git archive origin/<base> <paths> | tar -x -C <scratch>/<run>`, short SHA
+  recorded beside it), so every reviewer grades the same tree.
+- **Write the capability spec yourself before dispatch**, from the schema
+  (enums and unions per slot), the extension contract (what custom code may
+  and may not change), and the framework's design docs. Open the
+  implementing class of each enum value before writing "not supported" — a
+  wrong spec line propagates to every reviewer.
+- **Define the verdict classes in the spec** so reviewers grade alike, e.g.
+  `DECLARATIVE` (fits the vocabulary) · `CUSTOM_OK` (needs extension code,
+  nothing fixed blocks it) · `KERNEL_GAP` (blocked by a fixed-skeleton limit;
+  name each gap with a short kebab id, seeded in the spec) · `OUT_OF_KERNEL`
+  (not this kind of workload). `UNKNOWN` instead of a guess.
+- **Balance batches by lines, not by count**: compute non-test LOC per unit
+  and greedy-pack into at most ~10 bins (one huge unit gets its own bin).
+- **Aggregate in code** — verdict counts, units per gap id, the `UNKNOWN`s —
+  and check the unit count equals the dispatched list; re-dispatch only the
+  missing ones once. Then open the evidence lines for every `OUT_OF_KERNEL`
+  verdict and the top gap ids yourself before reporting.

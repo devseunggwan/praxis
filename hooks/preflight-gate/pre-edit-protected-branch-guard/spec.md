@@ -25,6 +25,12 @@ issue → worktree → stash-pop → commit → PR recovery cycle).
 This hook closes the timing gap by firing **at the moment a file is first
 opened for editing**, before any character is written.
 
+A block means: open the issue and the worktree. Making the same change where
+the guard does not watch (an installed plugin copy, a generated or
+materialized file, a non-git copy of a repository file) is the same
+violation. Find the source repository first (symlink target, package
+metadata, the README's install command) and change it there.
+
 ### Relationship to existing hooks (dual-gate)
 
 | Hook                               | Gate timing        | Signal                                   |

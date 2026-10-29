@@ -482,6 +482,18 @@ shipped `impl.py`; all exit 0 with empty stdout and empty stderr:
   is only reachable through a variable (`rm -rf "$PROD_DIR"`) is invisible to
   any text-level predicate.
 
+**Known false positives (probed).** Both factors only need to share a
+segment, so text that merely names them asks:
+
+- A read-only search for a verb in a production ref:
+  `git grep -n delete origin/prod -- src` asks. Write the verb as a character
+  class (`git grep -E "[d]elete_objects" origin/prod -- src` passes): the
+  pattern matches the same text and the command no longer holds the word.
+- A commit or PR title with such a verb next to a production word
+  (`git commit -m 'fix: drop stale checklist for prod'`) asks, and other
+  gates' markers do not change that. Pick another verb (`retire`, `align`)
+  or keep the production word out of that command.
+
 **Deliberate scope boundary — no new `AskUserQuestion` tier.** Blast radius is
 added to the `Bash` leg **only**. `menu-mutation-tier-advisory` already asks on
 the `AskUserQuestion` surface and its vocabulary is in flight (PR #1016);

@@ -83,6 +83,30 @@ Pushing human commits stops the bot from auto-rebasing that PR — say so in the
 report. Start one background `gh pr checks <N> --watch` per PR and end the
 turn; brief each merge separately once green.
 
+- **A watcher is bound to the head that existed when it started.** One
+  launched before your next push reports the old head's checks (green while
+  the new run is pending), or exits 1 with `no checks reported` when the push
+  lands mid-watch. Re-arm it after every push, after a short `sleep` so the
+  new run registers, print `gh pr view <N> --json headRefOid` next to the
+  result, and treat a result for an older SHA as stale.
+- **Wait on a terminal state, not on `gh run watch`.** Without a TTY it can
+  return before the run finishes (empty `conclusion`, a job still
+  `in_progress`). Loop on `gh pr checks`' exit status instead — `8` means
+  checks are still pending. Bound it, and report `rc=8` at the ceiling as
+  unknown, not green:
+  `i=0; until gh pr checks <N> --repo <o>/<r> >/dev/null 2>&1; rc=$?; [ "$rc" -ne 8 ] || [ "$((i += 1))" -ge 60 ]; do sleep 60; done; echo "rc=$rc"`.
+- **Logs are not served while the run is in progress**: `gh run view --log`
+  exits 1 with `run <id> is still in progress`, so a grep on it finds
+  nothing and looks like an empty result. A job that already finished serves
+  its log through `gh api repos/<o>/<r>/actions/jobs/<job id>/logs
+  --allow-escape-sequences` while the run continues.
+- **A failing check on a test the diff never touches is usually inherited
+  from the base**: PR CI runs on the merge ref, so a red base reads as a red
+  PR. Before investigating, compare with the base branch's latest run of
+  that workflow (`gh run list --repo <o>/<r> --branch <base> --workflow
+  <file>.yml --limit 3`, then `gh run view <id> --log-failed`) and cite that
+  run id in the report.
+
 Done when: every revived PR has a watcher running and the report names the
 bot auto-rebase loss.
 

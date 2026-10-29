@@ -161,6 +161,13 @@ across a real context boundary (a subagent dispatch or a hand-off) — an inline
 step leaves the later steps in context. (Adapted from mattpocock/skills
 `writing-for-agents`, MIT.)
 
+**Steps that need consent.** A skill never states that "the user approved"
+an action: that is false for every other user. Write the step as "runs
+without asking when the user's own instructions (`CLAUDE.md`, `AGENTS.md`, or
+agent memory) record a standing approval, otherwise ask once". Purely local,
+reversible steps (a worktree, a local branch, a scratch file) run without
+asking.
+
 #### Progressive disclosure: split large bodies into `references/`
 
 When a skill's body grows past **~15KB**, stop growing the single file and
@@ -194,16 +201,25 @@ The same SKILL.md ships to every platform under `manifests/platforms/` that
 lists `skills/` — Claude Code, Codex, and Cursor today. The table covers the
 two hosts the `runtime-verified-note` entries in this repo were recorded on;
 no skill carries a Cursor verification, so treat Cursor as unverified rather
-than identical to either column:
+than identical to either column. Hermes Agent reads the same files when a user
+adds a praxis checkout to its skill directories; its column is read from
+Hermes source, not from a `runtime-verified-note`:
 
-| Aspect | Claude host | Codex host |
-| -------- | ------------- | ------------ |
-| Invocation | `Skill("praxis:<name>")` or `/praxis:<name>` | `Skill("praxis:<name>")` |
-| `{{ARGUMENTS}}` | Populated from the slash command argument string | Populated from Skill args |
-| `Skill(...)` delegation | Supported for most skills | Supported for most skills |
-| `AskUserQuestion` | Supported, max 4 options | Supported, max 4 options |
-| `Bash` cwd | Resets between separate Bash calls | Same behavior |
-| File `Write` | Supported | Sandbox-restricted; verify with `git status` after |
+| Aspect | Claude host | Codex host | Hermes host |
+| -------- | ------------- | ------------ | ------------ |
+| Invocation | `Skill("praxis:<name>")` or `/praxis:<name>` | `Skill("praxis:<name>")` | `skill_view("<name>")` or `/<name>` |
+| Skill listing | `description` + `when_to_use` | not recorded | `description` only, cut to 60 characters at a word boundary |
+| `{{ARGUMENTS}}` | Populated from the slash command argument string | Populated from Skill args | Not substituted; text after `/<name>` follows the body as the user's instruction |
+| `Skill(...)` delegation | Supported for most skills | Supported for most skills | The agent loads the named skill with `skill_view` |
+| `AskUserQuestion` | Supported, max 4 options | Supported, max 4 options | `clarify`, max 4 choices plus a free-text row |
+| `Agent` subagent | Supported | not recorded | `delegate_task`, one task per `Agent` call |
+| `Read` / `Grep` | Supported | not recorded | `read_file` (each line prefixed `N\|`) / `search_files` |
+| `Bash` cwd | Resets between separate Bash calls | Same behavior | `terminal` keeps the last `cd` across calls |
+| File `Write` | Supported | Sandbox-restricted; verify with `git status` after | `write_file` / `patch` |
+
+Under Hermes, routing sees only the first words of `description`, so open it
+with the action the skill performs. `CLAUDE_PLUGIN_ROOT` is unset there; see
+[hermes-adapter-dev.md §8](hermes-adapter-dev.md#8-auditing-a-live-install).
 
 **Critical cross-host constraint:** never call `Skill("codex:review")` from
 inside any skill on either host — it declares `disable-model-invocation: true`

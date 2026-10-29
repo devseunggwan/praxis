@@ -106,6 +106,12 @@ real data. Grade the evidence:
 | Unit tests and CI | `PASS(mock)` |
 | Gate replay carried from an earlier body, not re-run on HEAD | `Unverified` |
 
+The bridge rewrites `~/.praxis/cache/hermes-transcripts/<session_id>.jsonl`
+from the active rows on every call, so after a context compaction the same
+file holds the compacted session and an earlier row number points somewhere
+else. When a reproduction cuts a transcript at a row, copy the file out of
+the cache the first time you reproduce, and cut the copy.
+
 ## 5. Fixing an ambiguous marker parse
 
 The user's text can contain anything, so a parse cut from the marker scaffold
@@ -220,6 +226,34 @@ tool rows keyed by `tool_call_id`, and the pending call's assistant row last.
 Then run the bridge probe above with that `session_id` and the pending call's
 id, and print the action plus the `[praxis:<gate>]` names.
 
+### Transcript timing at PreToolUse
+
+Hermes persists the assistant row carrying a tool call before any tool in it
+runs (`agent/turn_tool_round.py`), and flushes each tool result before the
+next call of the same message runs (`agent/tool_executor.py`,
+`_flush_session_db_after_tool_progress`). At hook time the rebuilt transcript
+therefore holds the gated call itself, the later blocks of its message with
+no result, and the results of earlier sibling calls after that message.
+Claude Code differs: a `claude -p` probe found the gated call, and an earlier
+parallel sibling, absent from the transcript at `PreToolUse`. A gate that
+counts earlier `tool_use` blocks in the turn must hold on both hosts:
+
+- Exclude by the payload's `tool_use_id`: take no candidate from the gated
+  block on (it and later sibling blocks started nothing), but read
+  `tool_result`s from the whole turn. Cutting the turn at the block drops
+  earlier siblings' results and counts a failed one as started.
+- Fix it in the gate, not by dropping the pending row in the adapter: some
+  gates look their own block up by `tool_use_id`.
+- The payload id and the transcript block id must be equal. Build both with
+  `_hermes.tool_use_id(call_id, i)` (bare id for `i=0`, `<id>#<i>` after); a
+  `#0` suffix on one side silently disables every lookup by id.
+- One Hermes call rendered as N Claude calls (`delegate_task` tasks) has one
+  result row. When it failed, every generated block gets the error result, as
+  Claude Code writes one result per failed call; a success keeps one block.
+- Test both orderings in the gate's shell test (own block present / absent,
+  sibling result before / after the message), and end to end with the probe
+  above, pending assistant row last.
+
 ## 7. Replaying Hermes questions through a menu gate
 
 `clarify` maps to `AskUserQuestion`, and a hook with no `hosts` runs on both
@@ -243,6 +277,9 @@ measure a new menu gate's precision on them (the stop rule in
    stdout/stderr.
 5. Print `questions=N fired=M (p%)`, then one line per fire with the
    question tail, labels and answer, and hand-label each.
+
+`scripts/replay-clarify-corpus.py <impl.py> [--days N] [--hermes-home DIR]`
+runs steps 1–5 up to the hand-labelling.
 
 That per-fire output quotes real conversations and can carry private data or
 secrets: keep it local (a scratch file outside the repository). A PR or report
@@ -278,6 +315,24 @@ into the configured bridge and expect `block-ask-end-option`'s block.
   only for blocked calls and in messages that quote the format. Report the gap
   instead of a number; `grep -c 'plugin_rule:' "$HERMES_HOME/config.yaml"`
   counts stored "always" answers.
+- **Pruning dead "always" keys.** Per-call keys
+  (`plugin_rule:praxis:<12 hex chars>`) never re-match but stay in
+  `command_allowlist`. Copy `config.yaml` aside, load it with a YAML parser,
+  drop the entries matching `^plugin_rule:praxis:[0-9a-f]{12}$`, keep grouped
+  keys (`plugin_rule:praxis:<gate>[tags]`), write the kept list back with
+  `hermes config set command_allowlist '<json list>'`, then re-read it and
+  assert every non-praxis entry is unchanged.
+- **Prose the user or a gate "should have seen".** On models that return text
+  written between tool calls as a server-written progress-update `thinking`
+  block, Hermes files that block as reasoning and stores the row's `content`
+  as `''`, so neither the user nor a transcript-reading gate sees the original
+  text. To confirm a suspected loss, read the row's `reasoning_details` in
+  `state.db`: base64-decode the start of each block's `signature`; a
+  `narration` tag marks a progress update.
+- **Writes made from a script-execution tool were never gated** (see
+  ARCHITECTURE.md → *What does not carry over*). When a session's writes must
+  be accounted for, search its `execute_code`-style calls for spawned
+  `git`/`gh` writes and report them separately.
 - **"praxis keeps asking": find the gate from the stuck session.** In that
   session's rows, assistant `tool_calls` whose `id` has no `role='tool'` row
   with that `tool_call_id` are the calls waiting right now. Replay each through
@@ -291,6 +346,12 @@ into the configured bridge and expect `block-ask-end-option`'s block.
   caches per process apply only to new sessions. Other profiles under
   `$HERMES_HOME/profiles/*/config.yaml` carry their own `hooks:` — grep them
   for `plugins/hermes/bridge.py` before claiming coverage.
+- **Updating the checkout needs no new consent.** Hermes matches its hook
+  allowlist by command string (`shell_hooks.allowlist_entry_for`), so a
+  changed `bridge.py` or hook only makes `hermes hooks doctor` print
+  `script modified since approval`; runtime behaviour is unaffected. After
+  updating, prove the changed gate with one real call in a session (a call
+  that crosses it), not with a version number.
 - **Moving the bridge to a new path needs first-use consent for that exact
   command string.** Without it, Hermes skips the hook at the next start with
   only a log line, and `fail_closed` does not cover a skipped hook — every
@@ -318,3 +379,37 @@ into the configured bridge and expect `block-ask-end-option`'s block.
   drop the finding: changing it would diverge from Hermes.
 - When CI's `test` job passed on the same SHA, cite that run instead of
   re-running the full suite locally, and say so.
+
+## 10. Measuring a gate's effect on Hermes
+
+To judge whether a gate earns its cost on a Hermes host (the Claude-side
+method is [hook-prune-audit.md](hook-prune-audit.md)):
+
+1. **Interventions and what came next.**
+   `scripts/hermes-gate-effectiveness.py --since-days N` reads `state.db`
+   read-only and prints the denominator (all tool calls, bridge-matched
+   calls), the self-check and block counts per gate, and, per gate, the
+   agent's next call to the same tool: `identical`, `ack-only`,
+   `minor-edit`, `changed`, or `abandoned`. Many `identical` or `ack-only`
+   re-issues mean ceremony, except for gates that read a file the command
+   names (an anchor body, a `git commit -F` message), where the fix lands in
+   the file and the call stays the same. Its per-intervention `events.json`
+   holds real commands: keep it local.
+2. **Telemetry by host.** Records under `~/.praxis/telemetry/` carry the
+   session id: a UUID is a Claude Code session, other id shapes are Hermes.
+   When no Hermes id appears, say the Hermes evidence is `state.db` alone.
+3. **False positives per gate.** Open each firing's input and label it by
+   the gate's own premise, e.g. whether an `approval-premise-reread-gate`
+   call actually mutates, or whether a `cross-boundary-preflight` target is
+   private (`gh repo view --json visibility`).
+4. **What never reaches the agent.** List the gates whose output Hermes
+   drops or never runs (ARCHITECTURE.md → *What does not carry over*), from
+   the manifest's `hosts` and events, not from firing counts.
+5. **Latency.** Pipe a `pre_tool_call` payload into the configured bridge and
+   time it, with a throwaway `session_id`: a real one updates that session's
+   counters and self-check records. The first call per session is slower
+   because it syncs the transcript.
+6. **Report** the denominator, a table classing interventions as risk
+   stopped / convention enforced / ceremony or false positive, the count of
+   hooks that do not run, the cost (latency per call, extra round trips), and
+   what was not measured. Recommend changes as manifest `hosts` edits.

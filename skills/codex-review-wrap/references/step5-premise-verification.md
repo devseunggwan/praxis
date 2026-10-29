@@ -54,6 +54,18 @@ once is enough. Premise-falsification before public claim — the
 *External-Surface Write Requires Falsification* rule
 ([`ETHOS.md` → Rules praxis carries](../../../ETHOS.md#rules-praxis-carries)).
 
+### Ordering fixes trade one defect for its mirror
+
+A finding that changes when state is recorded relative to a side effect
+(delivery, dedupe, mark-seen) usually swaps one failure for its opposite:
+mark-before-send loses the item when the send fails, send-then-mark
+duplicates it under a race. Write the opposite-failure test (a concurrent
+second handler on the same store, an exception mid-send) in the same commit
+as the fix, before the next round finds it. When what remains is a
+class-level semantics choice — the same pattern lives in a sibling consumer —
+do not fix one site: raise it as a decision with both options and the
+sibling's location, and record the answer in the PR body as `Rejected:`.
+
 ## 5c. Flip detection — halt A→B→A oscillation
 
 Maintain a per-session ledger across all rounds in the same session.

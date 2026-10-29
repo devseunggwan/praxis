@@ -16,7 +16,9 @@ scope is the diff's added tests. Drop, in one `test(...)` commit, cases that:
   path;
 - (c) re-list rules whose owning module's test already pins them — keep one
   case proving the caller invokes the check;
-- (d) re-test a shared parser/helper;
+- (d) re-test a shared parser/helper — when N call sites delegate a check to
+  one helper, test the rejection once on the helper; call-site tests only
+  need to prove each site accepts the new input;
 - (e) duplicate a repo-wide contract test — grep that test's selection
   predicate (glob + text match) to confirm it covers your file first;
 - (f) restate in a mocked-session unit test what the same PR's real-DB
@@ -299,7 +301,10 @@ Lane verdicts are claims. Re-read the code path behind every `drop` /
   recomputes the logic in its own body (pagination math, clamps, flag
   derivations) cannot fail when production changes — its copy has usually
   already drifted. Classify it vacuous; check whether deleting it leaves the
-  production function with no real coverage and say so.
+  production function with no real coverage and say so. A positive control
+  that re-states a guard's predicate inline protects nothing for the same
+  reason: extract the predicate into one function the guard and the control
+  both call, then show a mutant of it fails the control.
 - **"Re-tests a shared helper" through a caller.** The helper's own test
   pins the helper, not which inputs each caller feeds it. Before dropping a
   caller-side case (e.g. "different source path → different directory"),

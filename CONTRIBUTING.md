@@ -712,6 +712,16 @@ change the timeout. Where `flock(1)` is unavailable the lock is skipped with a
 note, so keep the runs serial yourself there. The runner keys on the same file:
 a suite that sources it is held out of the parallel batch and runs alone, so a
 new suite that edits the tree must source the lock or it will race the others.
+The same holds for a RED check that writes an old impl over a source file:
+do not run one while `run-tests.sh` runs in that checkout, or the run reads
+mixed sources and its result is void.
+
+To tell whether a failing test already fails on `main`, run it in a throwaway
+`git worktree add --detach <scratch> origin/main`, not after `git stash`: the
+stash list is shared by every worktree, and `git stash -u` refuses after
+`git add -N`. When a shell suite fails, its `FAIL` line can be followed by
+captured stdout with no trailing newline; read the suite's closing
+`Failed:` / `failed:` summary line for the names.
 
 A related trap when writing a suite: assert on what your test *changed*, not on
 global state it does not own. Two cases in this repo graded a path outside

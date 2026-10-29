@@ -41,6 +41,17 @@ issue #177.
 Length counting uses Python `len(str)` which counts Unicode code points — the
 correct measure for the 50-char rule in Korean/CJK mixed commit titles.
 
+The `-F` file is read as it is on disk when the gate runs, so
+`sed -i … msg && git commit -F msg` is judged on the old title, and the ask
+stops the `sed` too. Fix the file in its own call, then commit.
+
+**Known gap on Hermes (recorded, not fixed).** There this ask becomes a
+self-check ([ARCHITECTURE.md → Hermes Agent adapter](../../../ARCHITECTURE.md#hermes-agent-adapter),
+*Asks*), whose footer says to re-issue the unchanged call when its points
+hold. A byte-identical re-issue then passes, so an over-length title is
+committed, and published by a chained push. Shorten the title instead of
+re-issuing.
+
 ## Squash-merge path (issue #843)
 
 `git commit` is not the only path a commit title reaches `main` through: `gh

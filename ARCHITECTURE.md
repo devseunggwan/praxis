@@ -475,9 +475,16 @@ blocks the call anyway.
   emits them.
 - `post_tool_call` and `on_session_start` ignore hook output, so `PostToolUse`
   and `SessionStart` hooks are not bridged.
+- The bridge sees Hermes tool calls only. A command spawned by a script the
+  agent runs (a `subprocess` call inside `execute_code`) passes no gate, so
+  such scripts suit read-only bulk reads; route every write through
+  `terminal` so the gates see it.
 - Hooks whose premise is Claude Code's Bash tool are excluded with `hosts`:
-  `zsh-dialect-advisory` (Hermes's `terminal` runs bash) and the two 120 s
-  foreground-ceiling hooks (Hermes defaults to 180 s, up to 600 s).
+  `zsh-dialect-advisory` (Hermes's foreground `terminal` runs bash) and the
+  two 120 s foreground-ceiling hooks (Hermes defaults to 180 s, up to 600 s).
+  A background `terminal` call runs under the user's login `$SHELL` with
+  `-lic` (zsh on a default macOS install), so the zsh exclusion leaves
+  background calls unchecked.
 
 ### Agent Plugins portable manifest
 
