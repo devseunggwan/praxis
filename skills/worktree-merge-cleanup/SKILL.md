@@ -141,7 +141,11 @@ Confirm before touching anything:
    runs as a workflow, so the PR still reads `OPEN` for tens of seconds. If it
    is `OPEN`, find that run (`gh run list --workflow <merge-workflow> --limit 3`)
    and `gh run watch <id> --exit-status`, then re-read the state. Never start
-   cleanup on `OPEN`.
+   cleanup on `OPEN`, and never tell the user "that PR is not merged" from a
+   single read taken within a minute of their report: wait ~30 s and re-read
+   first — when they merged several PRs back to back, the last merge can land
+   seconds after your first read, and a false "you didn't merge it" sends them
+   chasing a non-problem.
 2. Confirm the merge commit is on the base: `git fetch origin --prune` then
    `git merge-base --is-ancestor <mergeCommit> origin/<base>`.
 3. Remove the head worktree and local branch as separate calls (checklist item 2),
