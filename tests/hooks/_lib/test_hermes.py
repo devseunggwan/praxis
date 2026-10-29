@@ -427,6 +427,72 @@ def test_merge_consent_still_asks_the_human(tmp_path):
     assert _bridge(payload, tmp_path)["action"] == "approve"
 
 
+def _delegate(call_id: str, goals: list[str]) -> dict:
+    return _call(call_id, "delegate_task", {"tasks": [{"goal": g} for g in goals]})
+
+
+def _delegate_payload(call_id: str, goals: list[str], tmp_path: Path) -> dict:
+    return {"hook_event_name": "pre_tool_call", "tool_name": "delegate_task", "session_id": "s1",
+            "tool_input": {"tasks": [{"goal": g} for g in goals]}, "cwd": str(tmp_path),
+            "extra": {"tool_call_id": call_id}}
+
+
+def _fan_out_asked(response: dict) -> bool:
+    return "[praxis:fan-out-scope-gate]" in str(response.get("message", ""))
+
+
+def test_first_delegation_is_not_its_own_prior_target(tmp_path):
+    """Hermes stores the in-flight call before the hook runs, so the rebuilt
+    transcript already holds it; fan-out-scope-gate must not count it."""
+    _db(tmp_path / "state.db", [
+        (1, "s1", "user", "verify this one PR", None, None, None),
+        (2, "s1", "assistant", "", None, json.dumps([_delegate("d1", ["verify"])]), None),
+    ])
+    response = _bridge(_delegate_payload("d1", ["verify"], tmp_path), tmp_path)
+    assert not _fan_out_asked(response), response
+
+
+def test_second_delegation_in_a_turn_still_asks(tmp_path):
+    _db(tmp_path / "state.db", [
+        (1, "s1", "user", "verify this one PR", None, None, None),
+        (2, "s1", "assistant", "", None, json.dumps([_delegate("d1", ["verify"])]), None),
+        (3, "s1", "tool", json.dumps({"results": [{"summary": "ok"}]}), "d1", None, "delegate_task"),
+        (4, "s1", "assistant", "", None, json.dumps([_delegate("d2", ["more"])]), None),
+    ])
+    response = _bridge(_delegate_payload("d2", ["more"], tmp_path), tmp_path)
+    assert response.get("action") == "approve" and _fan_out_asked(response), response
+    assert "delegation target #2" in response["message"]
+
+
+def test_multi_task_delegation_asks_from_its_second_task(tmp_path):
+    _db(tmp_path / "state.db", [
+        (1, "s1", "user", "verify this one PR", None, None, None),
+        (2, "s1", "assistant", "", None, json.dumps([_delegate("d1", ["a", "b"])]), None),
+    ])
+    response = _bridge(_delegate_payload("d1", ["a", "b"], tmp_path), tmp_path)
+    assert response.get("action") == "approve" and _fan_out_asked(response), response
+    assert "delegation target #2" in response["message"]
+
+
+def test_bridge_tool_use_ids_match_the_rebuilt_transcript(tmp_path, monkeypatch):
+    """The id a gate receives is the id of its own block in the transcript."""
+    db = _db(tmp_path / "state.db", [
+        (1, "s1", "user", "go", None, None, None),
+        (2, "s1", "assistant", "", None, json.dumps([_delegate("d1", ["a", "b", "c"])]), None),
+    ])
+    out = hermes.sync_transcript("s1", tmp_path / "t", db)
+    blocks = json.loads(out.read_text().splitlines()[-1])["message"]["content"]
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    monkeypatch.setenv("PRAXIS_HOME", str(tmp_path / "praxis"))
+    bridge = _load("hermes_bridge_ids", BRIDGE)
+    sent: list[str] = []
+    monkeypatch.setattr(bridge, "_groups", lambda event, tool: ["Agent"])
+    monkeypatch.setattr(bridge, "_run", lambda event, matcher, payload: (sent.append(payload["tool_use_id"]),
+                                                                         (0, "", "", []))[1])
+    bridge.pre_tool_call(_delegate_payload("d1", ["a", "b", "c"], tmp_path))
+    assert sent == [b["id"] for b in blocks] == ["d1", "d1#1", "d1#2"]
+
+
 def test_take_self_check_expires_and_separates_sessions(tmp_path):
     take = hermes.take_self_check
     assert take(tmp_path, "s1", "k", 1000.0) is False

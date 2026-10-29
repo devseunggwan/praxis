@@ -178,6 +178,15 @@ def _clarify_answer_text(result: Any) -> Optional[str]:
             + ". You can now continue with the user's answers in mind.")
 
 
+def tool_use_id(call_id: str, index: int) -> str:
+    """Claude tool_use id for the `index`-th Claude call one Hermes call stands for.
+
+    The transcript and the PreToolUse payload must agree on it: gates find the
+    gated call's own block in the rebuilt transcript by this id.
+    """
+    return call_id if index == 0 else f"{call_id}#{index}"
+
+
 def _assistant_event(row: sqlite3.Row) -> Tuple[dict, Dict[str, str]]:
     """Claude assistant event for one Hermes assistant row, plus id -> Hermes tool."""
     blocks: List[dict] = []
@@ -196,7 +205,7 @@ def _assistant_event(row: sqlite3.Row) -> Tuple[dict, Dict[str, str]]:
         if calls:
             names[call_id] = tool  # only mapped calls get their result rendered
         for i, (name, tool_input) in enumerate(calls):
-            blocks.append({"type": "tool_use", "id": call_id if i == 0 else f"{call_id}#{i}",
+            blocks.append({"type": "tool_use", "id": tool_use_id(call_id, i),
                            "name": name, "input": tool_input})
     return {"type": "assistant", "message": {"role": "assistant", "content": blocks}}, names
 
