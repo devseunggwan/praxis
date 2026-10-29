@@ -122,6 +122,22 @@ $USER_MSG
 {"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"b1","name":"Bash","input":{"command":"cmux workspace create --name a"}}]}}
 EOF
 
+# A host that runs one message's calls one after another stores an earlier
+# call's result after that message, before the next call's hook runs.
+TX_SIBLING_FAILED="$TMPDIR/tx-sibling-failed.jsonl"
+cat > "$TX_SIBLING_FAILED" <<EOF
+$USER_MSG
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"s1","name":"Agent","input":{"prompt":"a"}},{"type":"tool_use","id":"s2","name":"Agent","input":{"prompt":"b"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"s1","is_error":true}]}}
+EOF
+
+TX_SIBLING_OK="$TMPDIR/tx-sibling-ok.jsonl"
+cat > "$TX_SIBLING_OK" <<EOF
+$USER_MSG
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"s1","name":"Agent","input":{"prompt":"a"}},{"type":"tool_use","id":"s2","name":"Agent","input":{"prompt":"b"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"s1","is_error":false}]}}
+EOF
+
 # --- runner ---------------------------------------------------------------
 
 run_case() {
@@ -325,6 +341,12 @@ run_case "multi-target message: 3rd sibling (ask: target #3)" \
 
 run_case "an id the transcript does not hold exempts nothing (ask)" \
   "ask:delegation target #2" "$(agent_payload_id "$TX_ONE_AGENT" "not-in-transcript")"
+
+run_case "earlier sibling's error result stored after the message is still read (silent)" \
+  "silent" "$(agent_payload_id "$TX_SIBLING_FAILED" "s2")"
+
+run_case "earlier sibling's success result stored after the message (ask: target #2)" \
+  "ask:delegation target #2" "$(agent_payload_id "$TX_SIBLING_OK" "s2")"
 
 # --- prior call did not create a target → SILENT
 

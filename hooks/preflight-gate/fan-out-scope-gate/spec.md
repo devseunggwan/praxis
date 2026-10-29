@@ -107,9 +107,12 @@ the Hermes adapter rebuilds the transcript from stored rows, and by then the
 assistant row of the pending call is stored, so the call shows up as a
 result-less tool_use and the first target read as the second. The payload's
 `tool_use_id` names the gated call; when the turn holds a block with that id,
-counting stops just before it. The block itself and anything after it — later
-targets of the same message, such as the remaining tasks of one multi-task
-delegation — have not started a worker yet. Earlier blocks of the same message
+no tool_use from that block on is counted. The block itself and anything after
+it — later targets of the same message, such as the remaining tasks of one
+multi-task delegation — have not started a worker yet. Results are still read
+from the whole turn, because a host that runs one message's calls in sequence
+stores an earlier call's result after the message; a failed earlier sibling
+stays uncounted. Earlier blocks of the same message
 still count, so the second task of one delegation asks as target #2. A
 `PreToolUse` probe under Claude Code (`claude -p`, 2.1.312) found the gated
 call absent from the transcript at hook time, so there the turn is counted

@@ -131,30 +131,6 @@ def command_is_multi_target(command: str) -> bool:
     return bool(_LOOP_RE.search(command) or _FUNCDEF_RE.search(command))
 
 
-def _blocks_before(turn: list[dict], current_id: str | None) -> list[dict]:
-    """The turn cut just before the gated call's own tool_use, when present.
-
-    A host that rebuilds the transcript from stored rows (the Hermes adapter)
-    already holds the in-flight call, and later blocks of the same message,
-    when PreToolUse runs; neither has started a worker yet. Under Claude Code
-    the call was absent at hook time in a `claude -p` probe; with no block to
-    find, the turn is returned whole.
-    """
-    if not current_id:
-        return turn
-    for i, ev in enumerate(turn):
-        msg = ev.get("message", {})
-        content = msg.get("content") if isinstance(msg, dict) else None
-        if not isinstance(content, list):
-            continue
-        for j, block in enumerate(content):
-            if (isinstance(block, dict) and block.get("type") == "tool_use"
-                    and block.get("id") == current_id):
-                head = dict(ev, message=dict(msg, content=content[:j]))
-                return turn[:i] + [head]
-    return turn
-
-
 def count_targets_in_turn(turn: list[dict], current_id: str | None = None) -> int:
     """Number of SUCCESSFUL delegation-target creations already in this turn.
 
@@ -162,14 +138,23 @@ def count_targets_in_turn(turn: list[dict], current_id: str | None = None) -> in
     prompt. Correlation is tool_use `id` <-> tool_result `tool_use_id`,
     mirroring pr-claim-mutation-gate. A tool_use with no result yet counts as
     success, biasing toward asking — the whole point of the gate is to be seen
-    while the fan-out is still growing. `current_id` is the gated call's own
-    `tool_use_id`; it and anything after it are not prior targets.
+    while the fan-out is still growing.
+
+    `current_id` is the gated call's own `tool_use_id`. A host that rebuilds
+    the transcript from stored rows (the Hermes adapter) already holds the
+    in-flight call, and later blocks of the same message, when PreToolUse
+    runs; neither has started a worker, so no tool_use from that block on is
+    a candidate. Results are still read from the whole turn: a host that runs
+    one message's calls in sequence stores an earlier call's result after the
+    message. Under Claude Code the call was absent at hook time in a
+    `claude -p` probe, so every tool_use in the turn stays a candidate.
     """
     candidates: list[str] = []
     untracked = 0
     result_is_error: dict[str, bool] = {}
+    reached_current = False
 
-    for ev in _blocks_before(turn, current_id):
+    for ev in turn:
         msg = ev.get("message", {})
         if not isinstance(msg, dict) or ev.get("isSidechain"):
             continue
@@ -187,6 +172,10 @@ def count_targets_in_turn(turn: list[dict], current_id: str | None = None) -> in
                     result_is_error[tid] = block.get("is_error") is True
                 continue
             if kind != "tool_use" or role != "assistant":
+                continue
+            if current_id and block.get("id") == current_id:
+                reached_current = True
+            if reached_current:
                 continue
             name = block.get("name", "") or ""
             if name == AGENT_TOOL:
