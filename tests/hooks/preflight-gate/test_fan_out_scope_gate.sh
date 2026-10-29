@@ -78,6 +78,50 @@ $USER_MSG
 {"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","is_error":false}]}}
 EOF
 
+# A host that writes the in-flight call into the transcript before its
+# PreToolUse hook runs (the Hermes adapter rebuilds it from stored rows) shows
+# the gated call itself as a result-less tool_use. Claude Code does not write
+# it until after the hook. The payload's `tool_use_id` names that block.
+
+# Only the gated call itself is in the turn.
+TX_SELF_PENDING="$TMPDIR/tx-self-pending.jsonl"
+cat > "$TX_SELF_PENDING" <<EOF
+$USER_MSG
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"c1","name":"Agent","input":{"prompt":"investigate"}}]}}
+EOF
+
+# A successful Agent call, then the gated call itself.
+TX_OK_THEN_SELF="$TMPDIR/tx-ok-then-self.jsonl"
+cat > "$TX_OK_THEN_SELF" <<EOF
+$USER_MSG
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"Agent","input":{"prompt":"investigate"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","is_error":false}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"c2","name":"Agent","input":{"prompt":"investigate"}}]}}
+EOF
+
+# A failed Agent call, then the gated retry itself.
+TX_FAILED_THEN_SELF="$TMPDIR/tx-failed-then-self.jsonl"
+cat > "$TX_FAILED_THEN_SELF" <<EOF
+$USER_MSG
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"Agent","input":{"prompt":"investigate"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","is_error":true}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"c2","name":"Agent","input":{"prompt":"investigate"}}]}}
+EOF
+
+# One message spawning three targets (a multi-task delegation), none finished.
+TX_SIBLINGS="$TMPDIR/tx-siblings.jsonl"
+cat > "$TX_SIBLINGS" <<EOF
+$USER_MSG
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"m","name":"Agent","input":{"prompt":"a"}},{"type":"tool_use","id":"m#1","name":"Agent","input":{"prompt":"b"}},{"type":"tool_use","id":"m#2","name":"Agent","input":{"prompt":"c"}}]}}
+EOF
+
+# The gated workspace creation itself.
+TX_BASH_SELF_PENDING="$TMPDIR/tx-bash-self-pending.jsonl"
+cat > "$TX_BASH_SELF_PENDING" <<EOF
+$USER_MSG
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"b1","name":"Bash","input":{"command":"cmux workspace create --name a"}}]}}
+EOF
+
 # --- runner ---------------------------------------------------------------
 
 run_case() {
@@ -158,6 +202,30 @@ print(json.dumps({
 " "$1"
 }
 
+agent_payload_id() {  # $1=transcript $2=tool_use_id
+  python3 -c "
+import json, sys
+print(json.dumps({
+    'tool_name': 'Agent',
+    'tool_use_id': sys.argv[2],
+    'tool_input': {'prompt': 'investigate'},
+    'transcript_path': sys.argv[1],
+}))
+" "$1" "$2"
+}
+
+bash_payload_id() {  # $1=transcript $2=command $3=tool_use_id
+  python3 -c "
+import json, sys
+print(json.dumps({
+    'tool_name': 'Bash',
+    'tool_use_id': sys.argv[3],
+    'tool_input': {'command': sys.argv[2]},
+    'transcript_path': sys.argv[1],
+}))
+" "$1" "$2" "$3"
+}
+
 echo "test_fan_out_scope_gate"
 
 # --- 1st target in a turn → SILENT
@@ -231,6 +299,32 @@ run_case "single creation in backticks, 2nd call (ask)" \
 
 run_case "an unrelated for loop beside a single creation (ask — cannot tell)" \
   "ask" "$(bash_payload "$TX_EMPTY" "for f in a b; do echo \$f; done; cmux workspace create --name a")"
+
+# --- the gated call is already in the transcript (Hermes) → it is not a prior
+
+run_case "1st Agent call already in the transcript is not its own prior (silent)" \
+  "silent" "$(agent_payload_id "$TX_SELF_PENDING" "c1")"
+
+run_case "1st workspace creation already in the transcript (silent)" \
+  "silent" "$(bash_payload_id "$TX_BASH_SELF_PENDING" "cmux workspace create --name a" "b1")"
+
+run_case "2nd Agent call with itself in the transcript (ask: target #2)" \
+  "ask:delegation target #2" "$(agent_payload_id "$TX_OK_THEN_SELF" "c2")"
+
+run_case "retry after an is_error Agent call, itself in the transcript (silent)" \
+  "silent" "$(agent_payload_id "$TX_FAILED_THEN_SELF" "c2")"
+
+run_case "multi-target message: 1st sibling (silent)" \
+  "silent" "$(agent_payload_id "$TX_SIBLINGS" "m")"
+
+run_case "multi-target message: 2nd sibling (ask: target #2)" \
+  "ask:delegation target #2" "$(agent_payload_id "$TX_SIBLINGS" "m#1")"
+
+run_case "multi-target message: 3rd sibling (ask: target #3)" \
+  "ask:delegation target #3" "$(agent_payload_id "$TX_SIBLINGS" "m#2")"
+
+run_case "an id the transcript does not hold exempts nothing (ask)" \
+  "ask:delegation target #2" "$(agent_payload_id "$TX_ONE_AGENT" "not-in-transcript")"
 
 # --- prior call did not create a target → SILENT
 
