@@ -402,8 +402,9 @@ Notes that the entry point does not tell you:
    through the index only — the `HEAD` text with just that change applied,
    via `git hash-object -w --stdin` and
    `git update-index --cacheinfo <mode>,<blob>,<file>` — so a background test
-   run never reads a temporarily edited file. Afterwards `cmp` the file with
-   `git show HEAD:<file>`, and prove the earlier commit green in a
+   run never reads a temporarily edited file. After the last commit, `cmp`
+   the file with `git show HEAD:<file>` (before it, `HEAD` lacks the unstaged
+   change and the two differ), and prove the earlier commit green in a
    `git worktree add --detach <scratch> <sha>`.
 5. Rewrite the PR body (`gh pr edit --body-file`) and fix every sentence the
    review falsified: test counts, renamed symbols, new behavior, pointers to

@@ -92,9 +92,9 @@ turn; brief each merge separately once green.
 - **Wait on a terminal state, not on `gh run watch`.** Without a TTY it can
   return before the run finishes (empty `conclusion`, a job still
   `in_progress`). Loop on `gh pr checks`' exit status instead — `8` means
-  checks are still pending:
-  `until gh pr checks <N> --repo <o>/<r> >/dev/null 2>&1; [ $? -ne 8 ]; do sleep 60; done`,
-  with a ceiling.
+  checks are still pending. Bound it, and report `rc=8` at the ceiling as
+  unknown, not green:
+  `i=0; until gh pr checks <N> --repo <o>/<r> >/dev/null 2>&1; rc=$?; [ "$rc" -ne 8 ] || [ "$((i += 1))" -ge 60 ]; do sleep 60; done; echo "rc=$rc"`.
 - **Logs are not served while the run is in progress**: `gh run view --log`
   exits 1 with `run <id> is still in progress`, so a grep on it finds
   nothing and looks like an empty result. A job that already finished serves

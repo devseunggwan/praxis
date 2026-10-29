@@ -81,7 +81,7 @@ def write(out: Path, name: str, events: list[dict]) -> Path:
 def _example() -> list[dict]:
     """Cross-repo bulk ask, an unrelated ``cd`` after the probes, first PR merged."""
     q = ("Merge briefing\n\n" + section("a/x#833") + "\n"
-         + section("PR #999 https://github.com/b/y/pull/999")
+         + section("https://github.com/b/y/pull/999")
          + "\nMerge both, #833 and #999?")
     return [
         user("prepare the two cross-repo PRs for merge"),

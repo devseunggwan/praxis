@@ -513,8 +513,10 @@ go into the prompt below verbatim, and anything the set does not cover is
 written in here on the spot.
 
 **Name the boundaries a parallel worker cannot see.** List the files an open
-PR is already editing (`gh pr list --search <topic>` +
-`gh pr diff <N> --name-only`) as off-limits in the prompt, and have the
+PR is already editing as off-limits in the prompt — every open PR of the
+target repo, not a topic search, which misses PRs that touch the same files
+under another title (`gh pr list --repo <o>/<r> --state open --limit 1000
+--json number` + `gh pr diff <N> --repo <o>/<r> --name-only`) — and have the
 worker report a same-class defect it finds there as `file:line` only, not
 fix it.
 

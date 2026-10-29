@@ -165,9 +165,14 @@ def main(argv: list[str] | None = None) -> int:
           f"interventions {len(rows)} {dict(kinds)} · sessions {len({r['sid'] for r in rows})}")
     for k, c in sorted(per_gate.items(), key=lambda kv: -sum(kv[1].values())):
         print(f"{sum(c.values()):5d}  {k:55s} {dict(c)}")
-    a.out.mkdir(parents=True, exist_ok=True)
+    # Owner-only: the rows are real commands, and the default --out sits in a
+    # shared temp dir on hosts without a per-user TMPDIR.
+    a.out.mkdir(mode=0o700, parents=True, exist_ok=True)
     out = a.out / "events.json"
-    out.write_text(json.dumps(rows, ensure_ascii=False), encoding="utf-8")
+    fd = os.open(out, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    os.fchmod(fd, 0o600)  # an existing file keeps its mode through O_CREAT
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        fh.write(json.dumps(rows, ensure_ascii=False))
     print("events ->", out)
     return 0
 

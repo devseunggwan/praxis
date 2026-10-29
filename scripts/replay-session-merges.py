@@ -11,7 +11,8 @@ Unlike ``replay-merge-gate-corpus.py --cut``, which builds its own
 ``gh pr merge <pr> --squash``, this feeds each REAL recorded command,
 ``--repo`` included, so verdicts that depend on the repo or an earlier ``cd``
 reproduce. For every merge ``tool_use`` it cuts the transcript right before the
-call and prints ``bulk_merge_approved`` and ``_merge_escalation_reason`` (ALLOW
+call (keeping the earlier blocks of a Hermes message and their results) and
+prints ``bulk_merge_approved`` and ``_merge_escalation_reason`` (ALLOW
 or the deny line). Check that every replayed verdict matches the live block
 before changing code.
 
@@ -77,6 +78,37 @@ def transcript_from_session(root: str, session_id: str, out_dir: str, db: Path |
     return dest
 
 
+def cut_before(lines: list[str], i: int, k: int) -> list[str]:
+    """The transcript as the gate sees it at ``PreToolUse`` of block ``k`` of row ``i``.
+
+    A Claude Code row carries one block, so this is ``lines[:i]``. A Hermes row
+    carries the whole message (prose, then every call), so the blocks before
+    the gated one are kept as a trimmed copy of the row, followed by the
+    results of the calls among them, which the host flushes before the gated
+    call runs. The gated block, later blocks and their results are dropped.
+    """
+    out = lines[:i]
+    entry = json.loads(lines[i])
+    prior = entry["message"]["content"][:k]
+    if not prior:
+        return out
+    out.append(json.dumps(dict(entry, message=dict(entry["message"], content=prior)),
+                          ensure_ascii=False))
+    ids = {b.get("id") for b in prior if isinstance(b, dict) and b.get("type") == "tool_use"}
+    for line in lines[i + 1:]:
+        try:
+            msg = json.loads(line).get("message") or {}
+        except (ValueError, AttributeError):
+            continue
+        if msg.get("role") != "user" or not isinstance(msg.get("content"), list):
+            break
+        if not all(isinstance(b, dict) and b.get("type") == "tool_result" for b in msg["content"]):
+            break
+        if any(b.get("tool_use_id") in ids for b in msg["content"]):
+            out.append(line)
+    return out
+
+
 def replay(gate: ModuleType, transcript: str) -> list[str]:
     with open(transcript, encoding="utf-8") as fh:
         lines = fh.read().rstrip("\n").split("\n")
@@ -90,14 +122,16 @@ def replay(gate: ModuleType, transcript: str) -> list[str]:
                 continue
             if msg.get("role") != "assistant" or not isinstance(msg.get("content"), list):
                 continue
-            for b in msg["content"]:
+            for k, b in enumerate(msg["content"]):
                 if not isinstance(b, dict) or b.get("name") != "Bash":
                     continue
                 cmd = (b.get("input") or {}).get("command")
-                if not (isinstance(cmd, str) and cmd.lstrip().startswith("gh pr merge")):
+                # Anywhere in the command, so `cd repo && gh pr merge …` is
+                # replayed too, unchanged.
+                if not (isinstance(cmd, str) and "gh pr merge" in cmd):
                     continue
                 with open(prefix, "w", encoding="utf-8") as fh:
-                    fh.write("\n".join(lines[:i]) + "\n")
+                    fh.write("\n".join(cut_before(lines, i, k)) + "\n")
                 payload = {"tool_name": "Bash", "tool_input": {"command": cmd}, "transcript_path": prefix}
                 r = gate._merge_escalation_reason(payload)
                 rows = (r or "").splitlines()

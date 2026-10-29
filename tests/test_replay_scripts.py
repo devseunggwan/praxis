@@ -221,3 +221,110 @@ def test_session_replay_unknown_session(tmp_path):
 def test_session_replay_needs_one_source():
     with pytest.raises(SystemExit):
         session.main([str(_REPO)])
+
+
+# --- review follow-ups ----------------------------------------------------------
+
+def test_effectiveness_events_file_is_owner_only(tmp_path, capsys):
+    db = _db(tmp_path / "state.db", [_assistant(1, "s1", _call("c1", "terminal", {"command": "ls"}))])
+    out = tmp_path / "new" / "out"
+    assert effect.main(["--db", str(db), "--out", str(out)]) == 0
+    assert (out.stat().st_mode & 0o777) == 0o700
+    assert ((out / "events.json").stat().st_mode & 0o777) == 0o600
+    (out / "events.json").chmod(0o644)  # a file left by an older run is tightened
+    assert effect.main(["--db", str(db), "--out", str(out)]) == 0
+    assert ((out / "events.json").stat().st_mode & 0o777) == 0o600
+    assert json.loads((out / "events.json").read_text()) == []
+
+
+def test_clarify_replay_counts_timeout_and_goes_on(tmp_path, monkeypatch, capsys):
+    impl = tmp_path / "impl.py"
+    impl.write_text("import sys\nsys.exit(2)\n")
+    home = tmp_path / "hermes"
+    _db(home / "state.db", [
+        _assistant(1, "s1", _call("k1", "clarify", {"questions": [{"question": "SLOW?"}]})),
+        _assistant(2, "s1", _call("k2", "clarify", {"questions": [{"question": "fast?"}]})),
+    ])
+    real_run = clarify.subprocess.run
+
+    def run(cmd, **kw):
+        if "SLOW" in kw["input"]:
+            raise clarify.subprocess.TimeoutExpired(cmd, kw["timeout"])
+        return real_run(cmd, **kw)
+
+    monkeypatch.setattr(clarify.subprocess, "run", run)
+    assert clarify.main(["--hermes-home", str(home), str(impl)]) == 0
+    lines = capsys.readouterr().out.splitlines()
+    assert lines[0] == "questions=2 fired=1 (50.0%) timeouts=1"
+    assert json.loads(lines[1])["q"] == "fast?"
+
+
+def _hermes_row(*blocks: dict) -> str:
+    return json.dumps({"type": "assistant", "message": {"role": "assistant", "content": list(blocks)}})
+
+
+def _bash_block(tid: str, cmd: str) -> dict:
+    return {"type": "tool_use", "id": tid, "name": "Bash", "input": {"command": cmd}}
+
+
+def _result_row(tid: str) -> str:
+    return json.dumps({"type": "user", "message": {"role": "user", "content": [
+        {"type": "tool_result", "tool_use_id": tid, "content": "ok"}]}})
+
+
+def _hermes_lines() -> list[str]:
+    """One Hermes message: briefing prose, a probe, the merge, a later call."""
+    return [
+        json.dumps({"type": "user", "message": {"role": "user", "content": "merge it"}}),
+        _hermes_row({"type": "text", "text": "BRIEFED"}, _bash_block("c1", "gh pr checks 5"),
+                    _bash_block("m1", "gh pr merge 5 --squash"), _bash_block("c2", "ls")),
+        _result_row("c1"), _result_row("m1"), _result_row("c2"),
+    ]
+
+
+@pytest.mark.parametrize("mod", [corpus, session])
+def test_cut_keeps_earlier_blocks_of_a_hermes_message(mod):
+    lines = _hermes_lines()
+    cut = mod.cut_before(lines, 1, 2)
+    assert cut[0] == lines[0] and cut[2] == lines[2] and len(cut) == 3
+    kept = json.loads(cut[1])["message"]["content"]
+    assert [b.get("id") or b["type"] for b in kept] == ["text", "c1"]
+    assert mod.cut_before(lines, 1, 0) == lines[:1]  # one-block (Claude Code) row
+
+
+_READS_CUT = """
+def _merge_escalation_reason(payload):
+    return None if "BRIEFED" in open(payload["transcript_path"]).read() else "h\\nh\\nDENY"
+def bulk_merge_approved(payload):
+    return False
+def _ask_question_text(block):
+    return ""
+def _briefing_item_count(text):
+    return 0
+"""
+
+
+def test_corpus_replay_sees_prose_of_the_merge_message(tmp_path, capsys):
+    tr = tmp_path / "hermes.jsonl"
+    tr.write_text("\n".join(_hermes_lines()) + "\n")
+    base = _stub_root(tmp_path / "base", "h\nh\nDENY")
+    branch = tmp_path / "branch"
+    (branch / corpus.REL).parent.mkdir(parents=True)
+    (branch / corpus.REL).write_text(_READS_CUT)
+    assert corpus.main([str(branch), "--base-root", str(base), "--corpus", str(tr)]) == 0
+    stats = json.loads(capsys.readouterr().out.splitlines()[0])
+    assert stats["calls"] == 1 and stats["deny_to_allow"] == 1
+
+
+def test_session_replay_keeps_prefixed_merge_unchanged(tmp_path, capsys):
+    root = tmp_path / "root"
+    (root / session.REL).parent.mkdir(parents=True)
+    (root / session.REL).write_text(_READS_CUT)
+    tr = tmp_path / "t.jsonl"
+    lines = _hermes_lines()
+    lines[1] = _hermes_row({"type": "text", "text": "BRIEFED"},
+                           _bash_block("m1", "cd repo && gh pr merge 5 --squash"))
+    tr.write_text("\n".join(lines[:2]) + "\n")
+    assert session.main([str(root), str(tr)]) == 0
+    out = capsys.readouterr().out.splitlines()
+    assert len(out) == 1 and "ALLOW" in out[0] and out[0].endswith("| cd repo && gh pr merge 5 --squash")

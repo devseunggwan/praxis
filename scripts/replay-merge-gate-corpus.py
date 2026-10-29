@@ -10,8 +10,8 @@ Usage::
 Corpus mode extracts ``hooks/`` at ``--base-ref`` (default ``origin/main``) of
 ``<branch-root>`` into a temp dir (or uses ``--base-root``, an extracted copy),
 loads ``momentum-rule-retrieval-gate/impl.py`` from both sides, and for every
-assistant Bash ``gh pr merge`` call in the corpus writes the transcript lines
-before it to a temp file and calls ``_merge_escalation_reason`` on both sides
+assistant Bash ``gh pr merge`` call in the corpus writes the transcript as the
+gate saw it at that call (see ``cut_before``) to a temp file and calls ``_merge_escalation_reason`` on both sides
 with the gate's advisory env var unset. It prints
 ``{transcripts, calls, same, deny_to_allow, allow_to_deny, errors}``, then for
 every changed row the last AskUserQuestion before it (briefing item count,
@@ -98,8 +98,39 @@ def reason(gate: ModuleType, lines: list[str], cmd: str, scratch: str) -> str | 
                                           "transcript_path": p})
 
 
-def merge_commands(line: str) -> list[str]:
-    """The ``gh pr merge`` Bash commands of one assistant transcript line."""
+def cut_before(lines: list[str], i: int, k: int) -> list[str]:
+    """The transcript as the gate sees it at ``PreToolUse`` of block ``k`` of row ``i``.
+
+    A Claude Code row carries one block, so this is ``lines[:i]``. A Hermes row
+    carries the whole message (prose, then every call), so the blocks before
+    the gated one are kept as a trimmed copy of the row, followed by the
+    results of the calls among them, which the host flushes before the gated
+    call runs. The gated block, later blocks and their results are dropped.
+    """
+    out = lines[:i]
+    entry = json.loads(lines[i])
+    prior = entry["message"]["content"][:k]
+    if not prior:
+        return out
+    out.append(json.dumps(dict(entry, message=dict(entry["message"], content=prior)),
+                          ensure_ascii=False))
+    ids = {b.get("id") for b in prior if isinstance(b, dict) and b.get("type") == "tool_use"}
+    for line in lines[i + 1:]:
+        try:
+            msg = json.loads(line).get("message") or {}
+        except (ValueError, AttributeError):
+            continue
+        if msg.get("role") != "user" or not isinstance(msg.get("content"), list):
+            break
+        if not all(isinstance(b, dict) and b.get("type") == "tool_result" for b in msg["content"]):
+            break
+        if any(b.get("tool_use_id") in ids for b in msg["content"]):
+            out.append(line)
+    return out
+
+
+def merge_commands(line: str) -> list[tuple[int, str]]:
+    """``(block index, command)`` of each ``gh pr merge`` Bash call in one assistant line."""
     if "gh pr merge" not in line:
         return []
     try:
@@ -109,11 +140,11 @@ def merge_commands(line: str) -> list[str]:
     if msg.get("role") != "assistant" or not isinstance(msg.get("content"), list):
         return []
     out = []
-    for b in msg["content"]:
+    for k, b in enumerate(msg["content"]):
         if isinstance(b, dict) and b.get("name") == "Bash":
             cmd = (b.get("input") or {}).get("command")
             if isinstance(cmd, str) and "gh pr merge" in cmd:
-                out.append(cmd)
+                out.append((k, cmd))
     return out
 
 
@@ -160,12 +191,13 @@ def run_corpus(base: ModuleType, branch: ModuleType, files: list[str], scratch: 
         lines = read_lines(f)
         hit = False
         for i, line in enumerate(lines):
-            for cmd in merge_commands(line):
+            for k, cmd in merge_commands(line):
                 hit = True
                 stats["calls"] += 1
                 try:
-                    a = reason(base, lines[:i], cmd, scratch)
-                    c = reason(branch, lines[:i], cmd, scratch)
+                    cut = cut_before(lines, i, k)
+                    a = reason(base, cut, cmd, scratch)
+                    c = reason(branch, cut, cmd, scratch)
                 except Exception as exc:  # noqa: BLE001 - a replay tallies errors, never stops
                     stats["errors"] += 1
                     changed.append(("error", f, i, repr(exc)[:80]))

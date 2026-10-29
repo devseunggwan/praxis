@@ -10,9 +10,10 @@ read-only (``--hermes-home`` defaults to ``$HERMES_HOME``, else ``.hermes`` in t
 home directory).
 Each ``clarify`` question becomes the PreToolUse ``AskUserQuestion`` payload the
 Hermes bridge builds (``choices`` -> ``options[].label``) and is piped into the
-impl; a fire is rc 2 or any stdout/stderr. Prints the totals, then one JSON
-line per fire with the question tail, the labels and the user's answer (when
-answered), for hand-labelling precision.
+impl; a fire is rc 2 or any stdout/stderr, and a run over 10 s is counted as a
+timeout (neither fire nor pass) instead of stopping the replay. Prints the
+totals, then one JSON line per fire with the question tail, the labels and the
+user's answer (when answered), for hand-labelling precision.
 
 The per-fire lines quote real questions and answers: keep them local and
 publish only the totals and your labels.
@@ -50,9 +51,10 @@ def payload(question: dict, cwd: str) -> dict:
                                           "options": [{"label": x} for x in labels]}]}}
 
 
-def replay_db(db_path: Path, impl: str, since: float, cwd: str) -> tuple[int, list[dict]]:
+def replay_db(db_path: Path, impl: str, since: float, cwd: str) -> tuple[int, list[dict], int]:
+    """``(questions, fires, timeouts)`` for one ``state.db``."""
     con = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
-    total, fired = 0, []
+    total, fired, timeouts = 0, [], 0
     try:
         answers: dict[str, dict] = {}
         for cid, content in con.execute(
@@ -83,8 +85,13 @@ def replay_db(db_path: Path, impl: str, since: float, cwd: str) -> tuple[int, li
                         continue
                     total += 1
                     pl = payload(q, cwd)
-                    p = subprocess.run([sys.executable, impl], input=json.dumps(pl), text=True,
-                                       capture_output=True, timeout=10)
+                    try:
+                        p = subprocess.run([sys.executable, impl], input=json.dumps(pl), text=True,
+                                           capture_output=True, timeout=10)
+                    except subprocess.TimeoutExpired:
+                        # Neither a fire nor a pass: counted apart, replay goes on.
+                        timeouts += 1
+                        continue
                     if p.returncode == 2 or p.stderr.strip() or p.stdout.strip():
                         labels = [o["label"] for o in pl["tool_input"]["questions"][0]["options"]]
                         fired.append({"rc": p.returncode, "q": (q.get("question") or "")[-160:],
@@ -92,7 +99,7 @@ def replay_db(db_path: Path, impl: str, since: float, cwd: str) -> tuple[int, li
                                       "answer": (answers.get(c.get("id")) or {}).get(q.get("question"))})
     finally:
         con.close()
-    return total, fired
+    return total, fired, timeouts
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -108,12 +115,14 @@ def main(argv: list[str] | None = None) -> int:
     env = os.environ.get("HERMES_HOME")
     home = (a.hermes_home or (Path(env) if env else Path.home() / ".hermes")).expanduser()
     since = time.time() - a.days * 86400
-    total, fired = 0, []
+    total, fired, timeouts = 0, [], 0
     for db in state_dbs(home):
-        t, f = replay_db(db, a.impl, since, str(Path.home()))
+        t, f, n = replay_db(db, a.impl, since, str(Path.home()))
         total += t
         fired += f
-    print(f"questions={total} fired={len(fired)} ({len(fired) / max(total, 1):.1%})")
+        timeouts += n
+    print(f"questions={total} fired={len(fired)} ({len(fired) / max(total, 1):.1%})"
+          + (f" timeouts={timeouts}" if timeouts else ""))
     for row in fired:
         print(json.dumps(row, ensure_ascii=False))
     return 0

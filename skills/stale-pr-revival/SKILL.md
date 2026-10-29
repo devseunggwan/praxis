@@ -358,10 +358,14 @@ briefing afterwards means asking twice.
   PR's own runtime dependency (a backend route it calls, an unmerged sibling).
   Run it against each sibling's pushed head and any in-progress local head,
   and re-run it whenever either HEAD moves. Positive-control it without
-  touching a branch: in a temporary index (`GIT_INDEX_FILE=<scratch>/pc.index
-  git read-tree <remote>/<base>`) edit the same line differently, `git
-  commit-tree $(git write-tree) -p <remote>/<base>`, and merge-tree against
-  that dangling commit must exit 1.
+  touching a branch, in a subshell that exports a temporary index so every
+  command below uses it (a `GIT_INDEX_FILE=… git read-tree` prefix covers that
+  one command only, and `write-tree` then reads the real index):
+  `(export GIT_INDEX_FILE=<scratch>/pc.index; git read-tree <remote>/<base>`,
+  edit the same line differently with `git hash-object -w --stdin` +
+  `git update-index --cacheinfo <mode>,<blob>,<file>`, then `git commit-tree
+  $(git write-tree) -p <remote>/<base> -m pc)`; merge-tree against that
+  dangling commit must exit 1.
   A PR blocked only by a stated order but with no conflict and no dependency can
   be briefed on its own; one whose dependency is still unmerged cannot, whatever
   its CI says.
