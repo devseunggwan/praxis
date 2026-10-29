@@ -118,15 +118,15 @@ keywords (function name, config key), plus `git worktree list` for a local
 attempt. A stalled PR is often one of two parallel fixes for the same defect.
 
 Include **merged** PRs, not only open ones (`gh pr list --state merged
---search "<file or mechanism>"`, `git log origin/<deploy-branch> -- <files the
-PR touches>`): the goal often shipped through a different PR while this one
+--search "<file or mechanism>"`, `git log <base-remote>/<deploy-branch> -- <files
+the PR touches>`): the goal often shipped through a different PR while this one
 waited. Then read the deploy branch's version of the touched files and compare
 it to the PR's intent line by line — a flag the PR adds may now be the
 operator's default, so the PR's remaining delta can shrink to a tuning value.
 
 Also check whether the base grew a **house-standard mechanism for the whole
 class of change** while the PR waited (a shared operator, builder, or tier
-table now used by several siblings: `git grep -l <ClassName> origin/<base>`).
+table now used by several siblings: `git grep -l <ClassName> <base-remote>/<base>`).
 When it did, narrowing the old diff keeps a one-off path whose original
 justification may now be handled by that mechanism (re-read the PR body's
 "why not X" against the new code's docstring). Offer the user the choice
@@ -197,7 +197,7 @@ convention changes since the PR opened are listed (or "none").
 ### Step 4: Merge the base in
 
 ```bash
-git merge <base-remote>/<base>
+git -C <worktree> merge <base-remote>/<base>
 ```
 
 Not `git rebase`, and nothing that needs `--force` afterwards.
@@ -213,14 +213,14 @@ cleanly.
 - **Rewrite tests whose premise the PR changes.** A test that relied on the
   old fall-through path now has to drive the new event sequence.
 - **Taking the base side of a file and re-applying the PR's small additions**
-  (`git checkout --theirs <file>`, then re-add) is usually cleaner than
+  (`git -C <worktree> checkout --theirs <file>`, then re-add) is usually cleaner than
   hand-merging hunks — and it drops the PR's unrelated formatting churn,
   which reviewers tend to flag.
 
 - **Hunt semantic conflicts the text merge cannot show.** When the PR removes
   or renames a parameter, symbol, or default, callers that landed on the base
   while it waited still use the old shape and merge cleanly into a broken tree.
-  `git grep -n <removed symbol>` on the merged tree, and run the repository's
+  `git -C <worktree> grep -n <removed symbol>` on the merged tree, and run the repository's
   import/load test (e.g. DagBag import errors) before committing; fold the
   caller fixes into the merge commit so every commit stays buildable.
 - For a read-only conflict preview while only reporting status (no worktree

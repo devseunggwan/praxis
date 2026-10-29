@@ -40,8 +40,8 @@ One run is noise. Rank job and step durations over the last ~60 completed
 runs, and separate queue wait from execution:
 
 1. List run IDs, keeping only `success` and `failure` — cancelled runs truncate
-   their steps. For a time window, pass `-f created='>=YYYY-MM-DD'` with
-   `--paginate` (an unfiltered `--paginate` on a busy repo walks the whole
+   their steps. For a time window, pass `-X GET -f created='>=YYYY-MM-DD'`
+   with `--paginate` (`gh api` sends POST once a `-f` field is added; an unfiltered `--paginate` on a busy repo walks the whole
    history and times out; the filtered query caps at 1,000 runs, so read the
    actual min/max `created_at` back as the window):
 
@@ -119,7 +119,7 @@ For "CI is getting slower again, is it the new tests?":
 
 1. **Find the change point with a daily sample.** On a busy repo the
    1,000-run cap covers only days, so fetch one page per day instead
-   (`-f per_page=100 -f created=YYYY-MM-DD`, loop the dates in a script) and
+   (`-X GET -f per_page=100 -f created=YYYY-MM-DD`, loop the dates in a script) and
    print per-path daily p50 of attempt-1 successes. A step drop followed by a
    steady daily creep means suite growth; a one-day jump means one change.
 2. **Pick two comparable runs**: the median run of the baseline day and of
@@ -128,13 +128,16 @@ For "CI is getting slower again, is it the new tests?":
 3. **Compare totals from raw logs**: `collected N items` count, collection
    time (step start → the `collected` line timestamp), pytest summary seconds
    per leg. Report test-count growth % next to time growth %; time growing
-   faster than count means the new tests are individually slow.
+   faster than count means either the new tests are individually slow or the
+   existing ones got slower — step 5b tells the two apart, so do not name the
+   new tests as the cause from totals alone.
 4. **Per-file delta**: run the per-file ranking above on both runs, bucket by
    the first two path segments under the test root, and print baseline,
    now, delta. Start attribution at the `collected` line, not the step start:
    otherwise collection time lands on whichever file runs first and shows up
    as a fake "new slow file". Positive control: the per-leg sum must match the
-   pytest summary seconds within a few seconds.
+   pytest summary seconds minus that leg's collection time (step 3; pytest's
+   summary clock starts before collection) within a few seconds.
 4b. **Step change on the base branch, decomposed**: when the push-run series
    (both-legs sum, SKILL.md Step 7) jumps at one or two commits, (a) diff the
    CI `--durations=30` lists of the run just before and just after each jump —
@@ -159,8 +162,10 @@ For "CI is getting slower again, is it the new tests?":
    or the environment, not at the test code.
    Collect the series with `scripts/ci_leg_series.sh` (background; one jobs
    call per run) and diff the runs either side of each jump with
-   `scripts/ci_durations_diff.py <repo> <before> <after> ...` — it prints
-   per-leg collected/summary and the new-or-grown `--durations` entries. When
+   `scripts/ci_durations_diff.py [--step <name>] <repo> <before> <after> ...` —
+   it windows each log to the main pytest step and prints per-leg
+   collected/summary plus the `--durations` entries that grew or are absent
+   from the before-run's top-N (absent is not proof of new: confirm with (b)). When
    CI runs pytest without `-v` (dots only), this diff is the only per-test
    evidence; say the attribution covers just the top-N share of the leg time.
    A jump at a release merge (dev→prod) bundles many PRs: locate it again in

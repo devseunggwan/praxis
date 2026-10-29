@@ -1,18 +1,17 @@
 ---
 name: worktree-merge-cleanup
 description: >
-  Use when removing any worktree or cleaning up after a merge — load BEFORE the
-  first removal command; never `git submodule deinit` a linked worktree (it
-  strips the shared submodule url). On-demand home for the pre-merge worktree
-  precondition and the unified
+  On-demand home for the pre-merge worktree precondition and the unified
   post-merge cleanup sequence — how to run `gh pr merge --squash --delete-branch`
-  from the base-branch worktree, the submodule `--force` caveat, the
-  squash-ancestry stale-HEAD guard, and the no-`&&`-chain rule.
+  from the base-branch worktree, the submodule `--force` caveat (never
+  `git submodule deinit` a linked worktree: it strips the shared submodule
+  url), the squash-ancestry stale-HEAD guard, and the no-`&&`-chain rule.
 when_to_use: >
   Triggers on "merge cleanup", "post-merge cleanup", "worktree cleanup",
   "delete-branch merge", "squash-ancestry", "pre-merge worktree", "머지 후 정리",
   "worktree 정리", "PR merged", "머지했습니다" (the user reporting a merge),
-  and on removing ANY worktree — including the worktree of a PR that was
+  and on removing ANY worktree (load it BEFORE the first removal command) or
+  cleaning up after a merge — including the worktree of a PR that was
   closed without merging ("닫았습니다" → "정리해주세요") — or when about to
   run `git submodule deinit` to get a worktree removed.
   Do NOT activate on "merge conflict resolution" or a plain
@@ -164,10 +163,11 @@ Confirm before touching anything:
    (`node_modules/`, `.venv/`, `__pycache__/`, `.pytest_cache/`, `dist/`,
    `build/` and the like), stop and report the list instead of removing.
    Files a local test run wrote into the worktree (an Airflow `airflow.db`, an
-   empty `logs/`, a coverage file) count as regenerable only when their mtime
-   (`stat -f '%Sm' <path>`) is after the worktree's creation (the worktree's
-   `.git` file mtime) and the directories hold nothing else — say so in the
-   report; anything older was there before you and stays a stop condition.
+   empty `logs/`, a coverage file) count as regenerable only when every file
+   in them is newer than the worktree's creation (the worktree's `.git` file):
+   `find <artifact> -type f ! -newer <path>/.git` prints nothing — say so in
+   the report; anything it prints was there before you and stays a stop
+   condition.
    An ignored *source-looking* directory (`providers/<x>/`) that `!!` lists
    whole is often a package whose sources the base merge deleted while its
    `__pycache__/` stayed: `find <dir> -type f -not -path '*/__pycache__/*'`

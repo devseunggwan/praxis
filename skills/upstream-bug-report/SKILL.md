@@ -190,8 +190,15 @@ Write it to a scratch file outside the repository. Include:
   in that field: "Omitted: it would upload local config and logs. The
   reproduction above is self-contained."
 
+**Feature request (Steps 1–2 skipped):** drop the severity line, the
+reproduce command, and the vendor-contract URL. Instead state the use case,
+the current behavior as observed by a probe on the latest upstream release
+or default branch (name it), and the requested behavior; the observed-claims
+and related-reports items still apply.
+
 Done when: the body file exists, opens with the severity line, and every
-quoted output traces to a Step 2 run.
+quoted output traces to a Step 2 run — or, for a feature request, every
+claim about current behavior traces to a named probe.
 
 ### Step 6: Ask for approval
 

@@ -111,7 +111,8 @@ partial `before.txt` behind `sort`'s exit 0; the file lives outside the
 checkout so it never shows up in the diff. vitest/jest equivalent:
 `npx vitest list | LC_ALL=C sort > <scratch>/before.txt` (one
 `file > describe > case` line per test; it imports every test module, so a
-broken import fails it). Sort both sides with `LC_ALL=C` and compare with
+broken import fails it). Vitest 5+ parses files statically by default and
+then skips the imports — add `--no-static-parse` there. Sort both sides with `LC_ALL=C` and compare with
 `LC_ALL=C comm`: shells with different locales collate non-ASCII test names
 differently, and `comm` then reports thousands of identical lines as
 added/removed. Group the removed lines by file (`sed 's/ > .*//' | sort -u`)

@@ -156,8 +156,9 @@ audit deletes nothing, and the scope question comes at the end anyway.
   - Enumerate never-runs files over the whole tests tree, not only the files
     a window audit touched: grep every file-level gate form (`importorskip("<dep>")`,
     `_HAS_<DEP>`, `skipif(<dep> is None …)`, and conftests that gate a directory),
-    subtract every dep-installing workflow's targets, and fix the full list in one
-    pass. A reviewer who runs that enumeration finds the files you missed, and each
+    subtract every dep-installing workflow's targets, and report the full list in
+    one pass (fix it in one pass once fixes are in scope; a read-only audit
+    changes no file). A reviewer who runs that enumeration finds the files you missed, and each
     one costs another review round.
   - Then run the uncovered files once in a venv that has the optional
     dependencies, with `-rs`. A test CI always skips can be failing unseen;
@@ -172,14 +173,18 @@ audit deletes nothing, and the scope question comes at the end anyway.
     points at the wrong path. A loop over zero files (`for p in DIR.glob(...)`)
     passing vacuously is the same case.
   - A skip on a missing env var or ref (`CONTRACT_BASE_REF`, a merge-base with
-    a branch a shallow checkout lacks) is fixed in the CI step's `env:`. With
+    a branch a shallow checkout lacks) is fixed in the CI step: set the var in
+    `env:`, and fetch the ref with enough history for `merge-base` to resolve
+    (`fetch-depth`, or `git fetch origin <base>` plus `--deepen`) — the var
+    alone leaves the ref missing and the test still skips. With
     `fetch-depth: 2`, `HEAD^1` is the PR base tip or the previous push commit.
     It spans a whole push only when every allowed merge method lands one commit
     (squash) or a merge commit — read the base ruleset's `allowed_merge_methods`
     (`gh api repos/<o>/<r>/rules/branches/<base>`) before claiming so; a
     permitted rebase merge pushes N commits and `HEAD^1` covers only the last.
     State that caveat with the observed merge mix in any reply defending `HEAD^1`.
-  - Fix a never-runs finding by adding the file to the side workflow's target
+  - Once fixes are in scope (a read-only audit reports the next two items
+    instead), fix a never-runs finding by adding the file to the side workflow's target
     list, run that list locally in the side job's environment with the job's
     marker filter (`-m "not dagbag"`; when replaying a CI line that uses
     `mapfile`, macOS `/bin/bash` 3.2 lacks it, so build the list with
@@ -387,6 +392,9 @@ Lane verdicts are claims. Re-read the code path behind every `drop` /
      HEAD, not its own backup. Another lane's backup can capture a file
      mid-mutation and "restore" the broken line. After all lanes return,
      `git diff --stat -- <production dirs>` must show only intended changes.
+     The HEAD check is check-then-write, not a lock: when two lanes can mutate
+     the same file, give each lane its own detached worktree, or hold a
+     per-file lock (`mkdir <scratch>/locks/<f>`) from mutation through restore.
    - A lane that rewrites a test to execute SQL or code can make it newly
      depend on an optional package. Ask lanes to name such files, then add
      them to the side workflow's target list as in the never-runs fix.

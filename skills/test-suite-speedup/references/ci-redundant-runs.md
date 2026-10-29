@@ -8,7 +8,7 @@ Walk the branch's first-parent history and sort each merge (bot backmerges espec
 
 | Class | Test | Lever |
 | --- | --- | --- |
-| Result tree == first parent's tree | nothing changed on this branch | record the merge, push with a skip marker |
+| Result tree == first parent's tree | nothing changed on this branch | record the merge, push with a skip marker — only when the branch does not require this suite's check (a marker-skipped required check stays `Pending`); otherwise take an in-workflow no-op path that reports success |
 | Result tree == second parent's tree, and that parent's own push run passed | the tree was already tested elsewhere | reuse that run's result instead of re-running tests |
 | Next push follows within N minutes | the run will be overtaken | supersede: skip tests and deploy when a newer run exists |
 | Both sides differ | a new tree nobody has tested | **always test it.** Merged-tree-only failures land here |
@@ -39,7 +39,7 @@ When a degraded answer can still cost something (an API error after a long wait 
 
 ## 4. Cancel superseded tests per job, not per run
 
-Put `concurrency: {group: <name>-<branch>-<matrix leg>, cancel-in-progress: true}` on the test jobs only, and only for the branch push the scheme targets. Keep bundle and deploy jobs outside the group. A cancelled test then blocks publishing through `needs.test.result == 'success'`, and a run-level group would also cancel deploys.
+Put `concurrency: {group: <name>-<branch>-<matrix leg>, cancel-in-progress: true}` on the test jobs only, and only for the branch push the scheme targets. Keep bundle and deploy jobs outside the group. A cancelled test then blocks publishing through `needs.test.result == 'success'`, and a run-level group would also cancel deploys. Cancellation reaches only jobs in the group: a bundle or deploy already running for the older push keeps going and publishes that commit. When an older deploy could still be running as a newer one starts, give deploy its own per-branch group with `cancel-in-progress: false` so deploys run in push order.
 
 Before shipping it, size the deferral it causes and put it in the PR body: every push that lands within one test duration of the previous one cancels that run's tests, bundle and deploy, so a burst defers the branch's deploy until the burst ends. From the branch history, count push gaps shorter than the test job's duration and the longest consecutive chain of such gaps (`git log --first-parent --format=%ct` → sorted gaps). The last push of a burst still tests and deploys, so no stale tree is left, but the user should hear "deploys can lag by up to <chain × gap>" before merge, not after.
 

@@ -120,9 +120,7 @@ detached
 
 ### Step 2: Disambiguation Gate
 
-**Case A — exactly 1 non-bare worktree:**
-
-Skip selection. Proceed directly to Step 3 using cwd.
+Evaluate Case A2 first; Cases A and B apply only when no PR is named.
 
 **Case A2 — the review is for a named PR:**
 
@@ -130,7 +128,12 @@ Read the PR's `headRefOid` (`gh pr view <N> --json headRefOid`). If exactly
 one worktree's `HEAD` equals it, that worktree is the target: skip the
 question and proceed to Step 3. The commit match removes the ambiguity the
 question exists for. Ask as in Case B when no worktree or more than one
-matches.
+matches — even when only one worktree exists, since its `HEAD` is then not
+the PR's head and reviewing cwd would review unrelated code.
+
+**Case A — exactly 1 non-bare worktree (no named PR):**
+
+Skip selection. Proceed directly to Step 3 using cwd.
 
 **Case B — 2 or more non-bare worktrees:**
 

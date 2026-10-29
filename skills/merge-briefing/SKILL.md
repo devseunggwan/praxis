@@ -125,8 +125,11 @@ If CI is pending or failing, **stop here** — do not ask yet. A briefing whose
 verification rows are still moving is asking the user to approve a guess.
 
 **Read which commit each human approval covers** before writing "approved":
-`reviewDecision: APPROVED` survives later pushes. Compare each `APPROVED`
-review's `commit_id` with `headRefOid` and list the non-merge commits after it
+`reviewDecision: APPROVED` survives later pushes. Group the reviews by
+reviewer and take each one's **latest** `APPROVED` review (an earlier approval
+is superseded by a re-approval; a later `CHANGES_REQUESTED` or `DISMISSED`
+from the same reviewer means no current approval). Compare that review's
+`commit_id` with `headRefOid` and list the non-merge commits after it
 (`git log --no-merges <commit_id>..<head>`) in part 5 as "not reviewed by
 <human>" (see the Failure Modes row for the command).
 
@@ -158,8 +161,10 @@ grep that base diff for the symbols this PR changes and run `git merge-tree
 evidence for "no semantic overlap", quoted in part 5. When the pre-merge
 rebase trigger fires (3+ base commits, a review round finished), bring the
 base in with `gh pr update-branch <N>` (a merge commit, never a rewrite),
-which restarts CI and the bot review: wait for both on the new head before
-asking, and re-rev the anchor with the head that moved.
+which restarts CI and the bot review: wait for both on the new head, re-rev
+the anchor with the head that moved, then re-run Steps 1–3 against the new
+head and rebuild the briefing before asking — the findings, merge state, and
+approval coverage collected earlier describe the old head.
 
 ### Step 2: Grade every finding on all three surfaces
 
