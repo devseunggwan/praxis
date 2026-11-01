@@ -438,7 +438,8 @@ other tool result whose JSON carries a truthy `error` (a gate block) or a
 non-zero `exit_code` is marked `is_error`, as Claude Code marks a failed or
 denied call. `state.db` is Hermes-internal; an
 unreadable or changed schema leaves the transcript empty, which the
-transcript-reading gates already treat as fail-open.
+transcript-reading gates already treat as fail-open. Any other error while
+building it does the same, so the gates that do not read it still run.
 
 **Asks.** A praxis `ask` tells the agent to stop and re-check the call; it is
 not a question for the human. The dispatcher emits only the first ask of a
