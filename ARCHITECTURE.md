@@ -406,7 +406,7 @@ manifest's `hosts` field, the same filter the other platforms use.
 | `terminal` | `Bash` |
 | `write_file` / `patch` / `read_file` | `Write` / `Edit` / `Read` |
 | `clarify` | `AskUserQuestion` (`choices` → `options[].label`) |
-| `delegate_task` (spawn) | one `Agent` call per task |
+| `delegate_task` (spawn) | one `Agent` call per task (`tasks` as a list or a JSON string; a legacy top-level `goal` is one task) |
 | `skill_view` (no `file_path`) | `Skill` |
 | `mcp__*` | unchanged |
 
