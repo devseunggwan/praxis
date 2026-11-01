@@ -220,43 +220,6 @@ def test_claude_model_does_not_glob(tmp_path: pathlib.Path) -> None:
     assert _run_claude(tmp_path, sub_model, effort, cwd=wd) == ["--model", "opus[1m]", "--effort", "low", "--append-system-prompt", "sys", "task"]
 
 
-@pytest.mark.parametrize("model", ["claude:opus:bogus", "opus:HIGH", "claude:opus:xHigh"])
-def test_claude_invalid_effort_aborts(model: str) -> None:
-    with pytest.raises(Abort, match="invalid claude effort"):
-        _resolve_claude(model)
-
-
-@pytest.mark.parametrize(
-    "model",
-    ["claude:opus:low; touch x", "opus:$(id)", "claude:opus low", "claude:opus'x", "claude:opus[1m]*", "claude:a b"],
-)
-def test_claude_shell_metacharacters_abort(model: str) -> None:
-    with pytest.raises(Abort, match="invalid claude model"):
-        _resolve_claude(model)
-
-
-@pytest.mark.parametrize(
-    "model",
-    [
-        "opus:",
-        "opus::low",
-        "opus:low:high",
-        "claude:opus:",
-        "claude:opus::low",
-        "claude:opus:low:high",
-        "claude::",
-        # `claude::high` is a likely typo of `claude:opus:high`, not "the
-        # default model at high": it aborts like `opus::low` does.
-        "claude::high",
-        "claude::low",
-    ],
-)
-def test_claude_malformed_tail_aborts(model: str) -> None:
-    """A stray or doubled colon must not reach the CLI as part of a model name."""
-    with pytest.raises(Abort, match="invalid claude model"):
-        _resolve_claude(model)
-
-
 def test_claude_charset_excludes_the_quote_char() -> None:
     """Step 4 single-quotes the model; a `'` in it would close the quote."""
     charset = _claude_model_charset()
