@@ -45,9 +45,25 @@ def test_transcript_error_becomes_an_empty_path(tmp_path, monkeypatch, capsys):
     assert "transcript unavailable: ValueError('bad row')" in capsys.readouterr().err
 
 
+def test_gates_still_run_when_the_transcript_build_raises(tmp_path, monkeypatch):
+    """The real pre_tool_call path with a transcript builder that raises: the
+    gates still run and block. Independent of which rows happen to break it."""
+    bridge = _load("hermes_bridge_transcript_raises", base.BRIDGE)
+
+    def boom(*_args, **_kwargs):
+        raise ValueError("bad row")
+
+    monkeypatch.setattr(bridge._hermes, "sync_transcript", boom)
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    monkeypatch.setenv("PRAXIS_HOME", str(tmp_path / "praxis"))
+    monkeypatch.chdir(tmp_path)  # pre_tool_call chdirs into the payload cwd
+    assert bridge.pre_tool_call(_merge_payload(tmp_path)).get("action") == "block"
+
+
 def test_gates_still_run_when_a_row_breaks_the_transcript(tmp_path):
     """A user row the transcript builder cannot read (an integer in a column
-    with no TEXT type), then a call the bridge must block."""
+    with no TEXT type), then a call the bridge must block. Once #1620 reads such
+    a row, this stays as an end-to-end check; the test above keeps the error path."""
     conn = sqlite3.connect(tmp_path / "state.db")
     conn.execute("CREATE TABLE messages (id INTEGER PRIMARY KEY, session_id, role, content, "
                  "tool_call_id, tool_calls, tool_name, active DEFAULT 1)")
