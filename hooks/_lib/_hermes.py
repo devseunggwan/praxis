@@ -98,7 +98,10 @@ def delegate_tasks(args: dict) -> List[dict]:
     The batch is read as Hermes's `_normalize_task_list` reads it
     (`tools/delegate_tool_tasks.py`): `tasks` sent as a JSON string is parsed,
     an empty `tasks` counts as none, and then a top-level `goal` (the legacy
-    single-goal shape) is a one-task batch.
+    single-goal shape) is a one-task batch. A batch Hermes rejects outright (a
+    task that is not an object, or has no goal) spawns nothing. Its batch
+    quality checks (too many tasks, placeholder or very short goals) are not
+    copied: such a batch still reaches the gates, which can only ask too often.
     """
     if (args.get("action") or "spawn") != "spawn":
         return []
@@ -110,12 +113,15 @@ def delegate_tasks(args: dict) -> List[dict]:
     if not (isinstance(tasks, list) and tasks):
         goal = args.get("goal")
         tasks = [{"goal": goal, "context": args.get("context")}] if isinstance(goal, str) and goal.strip() else []
+    # Hermes rejects the whole call when any task is not an object or has no goal.
+    if not all(isinstance(t, dict) and isinstance(t.get("goal"), str) and t["goal"].strip() for t in tasks):
+        return []
     out = []
     for task in tasks:
-        if not isinstance(task, dict):
-            continue
-        goal = str(task.get("goal") or "")
-        context = str(task.get("context") or "")
+        goal = task["goal"]
+        raw_context = task.get("context")
+        context = raw_context if isinstance(raw_context, str) else (
+            "" if raw_context is None else json.dumps(raw_context, ensure_ascii=False, default=str))
         out.append({
             "description": goal[:80],
             "prompt": goal + ("\n\n" + context if context else ""),

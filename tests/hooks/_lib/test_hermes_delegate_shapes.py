@@ -94,3 +94,15 @@ def test_first_legacy_delegation_is_not_asked(tmp_path):
         (2, "s1", "assistant", "", None, json.dumps([base._call("d1", "delegate_task", legacy)]), None),
     ])
     assert not base._fan_out_asked(base._bridge(_payload("d1", legacy, tmp_path), tmp_path))
+
+
+def test_a_batch_hermes_rejects_outright_spawns_nothing():
+    """Hermes: "Task i must be an object" / "Task i is missing a 'goal'" reject the call."""
+    assert hermes.claude_calls("delegate_task", {"tasks": [{"goal": "verify PR 12"}, "oops"]}) == []
+    assert hermes.claude_calls("delegate_task", {"tasks": [{"goal": "ok"}, {"context": "x"}]}) == []
+    assert hermes.claude_calls("delegate_task", {"tasks": [{"goal": "  "}]}) == []
+
+
+def test_a_structured_context_is_json_not_python_repr():
+    [(_, task)] = hermes.claude_calls("delegate_task", {"goal": "review", "context": {"pr": 12}})
+    assert task["prompt"] == 'review\n\n{"pr": 12}'
