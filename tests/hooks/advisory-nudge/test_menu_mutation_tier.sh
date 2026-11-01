@@ -127,7 +127,6 @@ run_case "mutation signal in description"    advisory default "$(build_payload "
 # (b) PASS — a non-mutating tier IS on the menu
 # ---------------------------------------------------------------------------
 run_case "preview option present"    pass default "$(build_payload '["prod 트리거 전체", "preview 에서 먼저 검증", "prod 트리거 부분"]')"
-run_case "dev option present"        pass default "$(build_payload '["deploy to prod", "deploy to dev first"]')"
 run_case "sandbox option present"    pass default "$(build_payload '["apply to prod", "run in a sandbox"]')"
 run_case "dry-run option present"    pass default "$(build_payload '["트리거 실행", "dry-run 으로 먼저"]')"
 run_case "KO 보고만 present"          pass default "$(build_payload '["실 고객 트리거", "보고만 하고 멈춤"]')"

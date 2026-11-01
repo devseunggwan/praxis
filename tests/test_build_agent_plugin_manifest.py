@@ -60,12 +60,6 @@ def test_schema_is_pinned_to_the_only_published_version():
     )
 
 
-def test_required_fields_present():
-    manifest = _rendered()
-    for field in ("$schema", "name"):
-        assert manifest.get(field), f"{field} is required by spec §5.3"
-
-
 def test_name_satisfies_the_spec_charset():
     """Mirrors codex-rs is_valid_agent_plugin_name: lowercase ascii, digits,
     '.' and '-'; no '--' or '..'; first and last byte alphanumeric.

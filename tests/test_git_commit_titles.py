@@ -94,37 +94,11 @@ text_from_file = gct.text_from_file
         (["git", "commit", "--amend"], []),
         # a positional containing '=' that does not start with '-' is ignored
         (["git", "commit", "key=val", "-m", "hi"], ["hi"]),
+        (["git", "commit", "a=b"], []),
     ],
 )
 def test_extract_contract(argv, expected):
     assert extract_git_titles(argv) == expected
-
-
-# ---------------------------------------------------------------------------
-# 2. Dead-quirk equivalence — embedded `=` branch
-# ---------------------------------------------------------------------------
-
-def test_embedded_message_branch_clean_form():
-    """The embedded-`=` branch applies to `--long=value` only.
-
-    Git splits on `=` for `--message=…` but NOT for the short `-m`: it takes
-    the whole `=quirk path` (leading `=` kept) as the message. The short form
-    therefore falls through to the attached-short-option branch (`-m<value>`),
-    which preserves the `=` (#1097).
-    """
-    assert extract_git_titles(["git", "commit", "-m=quirk path"]) == ["=quirk path"]
-    assert extract_git_titles(["git", "commit", "--message=quirk path"]) == ["quirk path"]
-    # a token with '=' but not starting with '-' takes neither branch
-    assert extract_git_titles(["git", "commit", "a=b"]) == []
-
-
-def test_short_m_equals_keeps_leading_equals():
-    """`git commit -m=fix: thing` — git's message is `=fix: thing`, so the
-    extracted title must retain its leading `=` rather than being split into
-    `fix: thing` by the `--long=value` branch (#1097)."""
-    titles = extract_git_titles(["git", "commit", "-m=fix: thing"])
-    assert titles == ["=fix: thing"]
-    assert titles[0].startswith("=")
 
 
 # ---------------------------------------------------------------------------

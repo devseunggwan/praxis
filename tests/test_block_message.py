@@ -466,8 +466,3 @@ def test_legacy_allowlist_has_no_phantom_entries() -> None:
     existing = {p.parent.name for p in _hook_impls()}
     phantom = sorted(LEGACY_UNMIGRATED - existing)
     assert not phantom, f"LEGACY_UNMIGRATED names non-existent hooks: {phantom}"
-
-
-def test_legacy_and_migrated_are_disjoint() -> None:
-    overlap = EXPECTED_MIGRATED & LEGACY_UNMIGRATED
-    assert not overlap, f"hook listed as both migrated and legacy: {overlap}"

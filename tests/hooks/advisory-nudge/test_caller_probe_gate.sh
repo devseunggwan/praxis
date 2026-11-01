@@ -134,6 +134,7 @@ run_case "--label enhancement + cited path (silent)" \
 
 # --- Axis A — body-level defect tokens ---------------------------------------
 
+# No transcript_path either: Arm B fails open and Arm A still warns.
 run_case "EN 'fails to' + cited path (warn)" \
   "warn" "advisory" \
   '{"tool_name":"Bash","tool_input":{"command":"gh pr comment 5 --body \"parser.py fails to reset the offset\""}}'
@@ -355,10 +356,6 @@ run_case "strict mode converts warn to block" \
 run_case "strict mode still silent when cleared" \
   "silent" "strict" \
   "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"gh issue create --title 'fix(dag): guard' --body 'dags/account_deletion.py 가드가 잘못 판정합니다'\"},\"transcript_path\":\"$SEARCH_TRANSCRIPT\"}"
-
-run_case "no transcript_path — Arm B fails open, Arm A absent (warn)" \
-  "warn" "advisory" \
-  '{"tool_name":"Bash","tool_input":{"command":"gh pr comment 5 --body \"parser.py fails to reset the offset\""}}'
 
 run_case "unreadable transcript path (warn)" \
   "warn" "advisory" \

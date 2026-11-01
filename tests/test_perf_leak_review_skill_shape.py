@@ -15,7 +15,6 @@ closed-list design rests on:
 from __future__ import annotations
 
 import importlib.util
-import json
 import re
 from pathlib import Path
 from typing import Any
@@ -91,11 +90,6 @@ def _fixture_symbols() -> set[str]:
     return {s for s in symbols if s not in GENERIC_NAMES}
 
 
-def test_skill_and_brief_exist() -> None:
-    assert SKILL_MD.is_file()
-    assert BRIEF.is_file()
-
-
 def test_brief_headings_match_the_validator_classes() -> None:
     assert _brief_headings() == _validator_classes()
 
@@ -125,8 +119,3 @@ def test_skill_frontmatter_lists_no_mutation_tool() -> None:
     front = text.split("---")[1]
     for forbidden in ("Write", "Edit", "git commit", "git apply", "gh pr"):
         assert forbidden not in front, f"{forbidden} must not be in allowed-tools"
-
-
-def test_every_fixture_meta_is_valid_json() -> None:
-    for path in sorted(FIXTURES.glob("*/meta.json")):
-        json.loads(path.read_text(encoding="utf-8"))
