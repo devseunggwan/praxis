@@ -447,7 +447,10 @@ in the directory the session last moved to. The bridge runs the gates in
 (Hermes echoes it when a command changes directory and never records it for a
 `workdir` call; every row counts, since Hermes keeps the record across
 compaction), else `TERMINAL_CWD`, else the payload's `cwd`. A path that is not
-a local directory (a container backend's) is skipped.
+a local directory is skipped, and when `TERMINAL_ENV` is not `local` (docker,
+ssh, …) only the payload's `cwd` is used, since the other two name a directory
+inside the sandbox. A restarted Hermes process forgets the session's moves; the
+bridge still reads the last one from `state.db`.
 
 **Asks.** A praxis `ask` tells the agent to stop and re-check the call; it is
 not a question for the human. The dispatcher emits only the first ask of a
