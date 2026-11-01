@@ -426,7 +426,8 @@ Code puts on its own notifications, so the gates skip it as a human message
 on both hosts; `steer`, the user's out-of-band message, stays human. Content
 Hermes stored as a parts list (a message with an image, saved as `\x00json:`
 plus JSON) is reduced to its text parts, in the transcript and in
-`pre_llm_call`'s `user_message`. A slash-skill
+`pre_llm_call`'s `user_message`; content with no text part (an image-only
+message) stays as its JSON, so it is never read as an empty message. A slash-skill
 invocation, which Hermes stores as one row (activation header, skill body, the
 user's instruction), is split into two user entries: the expanded body as an
 `isMeta` entry, then the instruction (or the bare `/<skill>`) as plain text.
