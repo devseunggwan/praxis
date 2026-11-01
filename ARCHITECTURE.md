@@ -423,7 +423,10 @@ Hermes wrote itself (`display_kind` `process_complete`,
 `async_delegation_complete`, or `internal_notification`: a background process
 or subagent finishing) gets `origin.kind` set to that kind, the field Claude
 Code puts on its own notifications, so the gates skip it as a human message
-on both hosts; `steer`, the user's out-of-band message, stays human. A slash-skill
+on both hosts; `steer`, the user's out-of-band message, stays human. Content
+Hermes stored as a parts list (a message with an image, saved as `\x00json:`
+plus JSON) is reduced to its text parts, in the transcript and in
+`pre_llm_call`'s `user_message`. A slash-skill
 invocation, which Hermes stores as one row (activation header, skill body, the
 user's instruction), is split into two user entries: the expanded body as an
 `isMeta` entry, then the instruction (or the bare `/<skill>`) as plain text.
