@@ -155,6 +155,43 @@ def _parse_json(raw: Any) -> Any:
         return None
 
 
+# Hermes stores non-string message content (a user message with an image is a
+# list of parts) as this prefix plus JSON: `_CONTENT_JSON_PREFIX` in
+# `hermes_state.py`, written by `_encode_content` in `hermes_state_messages.py`.
+_CONTENT_JSON_PREFIX = "\x00json:"
+
+
+def _part_text(part: Any) -> str:
+    if isinstance(part, str):
+        return part
+    if isinstance(part, dict) and isinstance(part.get("text"), str):
+        return part["text"]
+    return ""  # an image or other non-text part
+
+
+def content_text(raw: Any) -> str:
+    """The text of one Hermes message content, stored in `state.db` or passed to a hook.
+
+    Decodes the `\\x00json:` form as Hermes's `_decode_content` does (a
+    malformed one stays the raw string; a prefixed literal string is
+    double-encoded) and keeps the text parts of a parts list, so gates read
+    what the user wrote, not the stored JSON.
+    """
+    if isinstance(raw, str):
+        if not raw.startswith(_CONTENT_JSON_PREFIX):
+            return raw
+        try:
+            raw = json.loads(raw[len(_CONTENT_JSON_PREFIX):])
+        except ValueError:
+            return raw
+    if isinstance(raw, list):
+        return "\n".join(text for text in map(_part_text, raw) if text)
+    if isinstance(raw, (str, dict)):
+        return _part_text(raw)
+    if isinstance(raw, bytes):
+        return raw.decode("utf-8", "replace")
+    return "" if raw is None else str(raw)
+
 def _clarify_answer_text(result: Any) -> Optional[str]:
     """Claude's AskUserQuestion result text for a Hermes `clarify` result.
 
@@ -190,8 +227,8 @@ def tool_use_id(call_id: str, index: int) -> str:
 def _assistant_event(row: sqlite3.Row) -> Tuple[dict, Dict[str, str]]:
     """Claude assistant event for one Hermes assistant row, plus id -> Hermes tool."""
     blocks: List[dict] = []
-    text = row["content"]
-    if isinstance(text, str) and text.strip():
+    text = content_text(row["content"])
+    if text.strip():
         blocks.append({"type": "text", "text": text})
     names: Dict[str, str] = {}
     for call in _parse_json(row["tool_calls"]) or []:
@@ -211,7 +248,7 @@ def _assistant_event(row: sqlite3.Row) -> Tuple[dict, Dict[str, str]]:
 
 
 def _tool_event(row: sqlite3.Row, tool: str) -> dict:
-    content = row["content"] if isinstance(row["content"], str) else ""
+    content = content_text(row["content"])
     block: Dict[str, Any] = {"type": "tool_result", "tool_use_id": str(row["tool_call_id"] or "")}
     if tool == "clarify":
         answer = _clarify_answer_text(content)
@@ -357,11 +394,11 @@ def transcript_events(rows: List[sqlite3.Row], names: Dict[str, str]) -> Iterato
             if notice is not None:
                 # Claude Code tags its own notifications with `origin.kind`
                 # (#1410), and the gates skip any kind but `human`.
-                event = _user_message(row["content"] or "")
+                event = _user_message(content_text(row["content"]))
                 event["origin"] = {"kind": notice}
                 yield event
                 continue
-            yield from _user_events(row["content"] or "")
+            yield from _user_events(content_text(row["content"]))
         elif role == "assistant":
             event, ids = _assistant_event(row)
             names.update(ids)

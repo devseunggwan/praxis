@@ -142,9 +142,11 @@ def pre_tool_call(hermes: dict) -> dict:
 
 def pre_llm_call(hermes: dict) -> dict:
     extra = hermes.get("extra") or {}
-    prompt = extra.get("user_message")
-    if not isinstance(prompt, str):
+    raw = extra.get("user_message")
+    if raw is None:
         return {}
+    # A message with an image arrives as a list of parts; gates read its text.
+    prompt = _hermes.content_text(raw)
     payload = dict(_base(hermes, "UserPromptSubmit"), prompt=prompt)
     contexts: List[str] = []
     for matcher in _groups("UserPromptSubmit", None):
