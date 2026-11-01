@@ -440,6 +440,15 @@ denied call. `state.db` is Hermes-internal; an
 unreadable or changed schema leaves the transcript empty, which the
 transcript-reading gates already treat as fail-open.
 
+**Working directory.** The payload's `cwd` is Hermes's process directory (the
+install root under the gateway), but a `terminal` call without `workdir` runs
+in the directory the session last moved to. The bridge runs the gates in
+`workdir`, else the last `"cwd"` a `terminal` result of the session echoed
+(Hermes echoes it when a command changes directory and never records it for a
+`workdir` call; every row counts, since Hermes keeps the record across
+compaction), else `TERMINAL_CWD`, else the payload's `cwd`. A path that is not
+a local directory (a container backend's) is skipped.
+
 **Asks.** A praxis `ask` tells the agent to stop and re-check the call; it is
 not a question for the human. The dispatcher emits only the first ask of a
 group, so the bridge collects every gate that asked through
