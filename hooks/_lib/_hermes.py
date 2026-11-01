@@ -94,11 +94,24 @@ def delegate_tasks(args: dict) -> List[dict]:
     `delegate_task` spawns a batch; Claude spawns each subagent with its own
     `Agent` call. Fan-out gates count those calls, so a batch of N becomes N
     inputs. Control actions (`list` / `steer` / `stop`) spawn nothing.
+
+    The batch is read as Hermes's `_normalize_task_list` reads it
+    (`tools/delegate_tool_tasks.py`): `tasks` sent as a JSON string is parsed,
+    an empty `tasks` counts as none, and then a top-level `goal` (the legacy
+    single-goal shape) is a one-task batch.
     """
     if (args.get("action") or "spawn") != "spawn":
         return []
+    tasks = args.get("tasks")
+    if isinstance(tasks, str):
+        tasks = _parse_json(tasks)
+        if not isinstance(tasks, list):
+            return []  # Hermes rejects the call: nothing is spawned
+    if not (isinstance(tasks, list) and tasks):
+        goal = args.get("goal")
+        tasks = [{"goal": goal, "context": args.get("context")}] if isinstance(goal, str) and goal.strip() else []
     out = []
-    for task in args.get("tasks") or []:
+    for task in tasks:
         if not isinstance(task, dict):
             continue
         goal = str(task.get("goal") or "")
