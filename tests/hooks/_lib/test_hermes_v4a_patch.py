@@ -48,14 +48,14 @@ def test_each_operation_is_its_own_call_in_patch_order():
     assert hermes.claude_calls("patch", args) == [
         ("Write", {"file_path": "new.txt", "content": "hello\nworld"}),
         ("Edit", {"file_path": "a.py", "old_string": "x", "new_string": "y", "replace_all": False}),
-        ("Write", {"file_path": "gone.txt", "content": ""}),
-        ("Write", {"file_path": "old/p.py", "content": ""}),
-        ("Write", {"file_path": "new/p.py", "content": ""}),
+        ("Edit", {"file_path": "gone.txt", "old_string": "", "new_string": "", "replace_all": False}),
+        ("Edit", {"file_path": "old/p.py", "old_string": "", "new_string": "", "replace_all": False}),
+        ("Edit", {"file_path": "new/p.py", "old_string": "", "new_string": "", "replace_all": False}),
     ]
 
 
 def test_markers_are_read_as_hermes_reads_them():
-    """CRLF is tolerated; a content line quoting the end marker does not end the patch;
+    """CRLF is tolerated; a +/- line quoting the end marker does not end the patch;
     a patch with no Begin marker is read from the top."""
     crlf = "*** Begin Patch\r\n*** Update File: a.py\r\n-*** End Patch\r\n+x\r\n*** End Patch\r\n"
     assert hermes.claude_calls("patch", {"mode": "patch", "patch": crlf}) == [
@@ -80,7 +80,7 @@ def test_transcript_renders_one_block_per_file(tmp_path):
     out = hermes.sync_transcript("s1", tmp_path / "t", db)
     blocks = json.loads(out.read_text().splitlines()[-1])["message"]["content"]
     assert [(b["id"], b["name"], b["input"]["file_path"]) for b in blocks] == [
-        ("p1", "Edit", "a.py"), ("p1#1", "Write", "b.py")]
+        ("p1", "Edit", "a.py"), ("p1#1", "Edit", "b.py")]
 
 
 # --- through the bridge --------------------------------------------------------
@@ -126,3 +126,52 @@ def test_second_file_of_a_v4a_patch_is_checked_too(tmp_path):
     v4a = _v4a(f"*** Update File: {repo / 'b.txt'}\n-changed\n+again\n"
                f"*** Update File: {repo / 'a.txt'}\n-a\n+z")
     assert _blocked_by_branch_guard(base._bridge(_patch_payload(v4a, repo), tmp_path))
+
+
+def test_each_hunk_of_an_update_is_its_own_edit():
+    args = _v4a("*** Update File: a.py\n@@ def f @@\n-x\n+y\n@@ def g @@\n keep\n+added")
+    assert hermes.claude_calls("patch", args) == [
+        ("Edit", {"file_path": "a.py", "old_string": "x", "new_string": "y", "replace_all": False}),
+        ("Edit", {"file_path": "a.py", "old_string": "keep", "new_string": "keep\nadded", "replace_all": False}),
+    ]
+
+
+def test_bare_markers_follow_hermes_start_and_stop():
+    """Hermes parses from the LAST Begin line before the first End line, so a second
+    Begin restarts the patch and an End before any Begin leaves nothing to apply."""
+    restarted = {"mode": "patch", "patch": "*** Begin Patch\n*** Update File: dropped.py\n-1\n+2\n"
+                 "*** Begin Patch\n*** Update File: kept.py\n-1\n+2\n*** End Patch"}
+    assert [c[1]["file_path"] for c in hermes.claude_calls("patch", restarted)] == ["kept.py"]
+    early_end = {"mode": "patch", "patch": "*** End Patch\n*** Begin Patch\n*** Update File: a.py\n-1\n+2"}
+    assert hermes.claude_calls("patch", early_end) == []
+
+
+def test_a_patch_hermes_rejects_becomes_no_call():
+    """Hermes applies nothing from a patch with a parse error."""
+    no_hunk = _v4a("*** Update File: a.py\n*** Update File: b.py\n-1\n+2")
+    assert hermes.claude_calls("patch", no_hunk) == []
+
+
+def _memory_payload(args: dict, memory_dir: Path) -> dict:
+    return {"hook_event_name": "pre_tool_call", "tool_name": "patch", "tool_input": args,
+            "session_id": "", "cwd": str(memory_dir), "extra": {"tool_call_id": "p1"}}
+
+
+def test_deleting_a_memory_entry_is_not_read_as_an_empty_write(tmp_path):
+    """memory-distillation-fields-gate checks Write content for frontmatter; a delete
+    must not reach it as a Write of nothing."""
+    memory = tmp_path / "memory"
+    memory.mkdir()
+    entry = memory / "feedback_x.md"
+    entry.write_text("---\nname: x\n---\nbody\n")
+    env = {"PRAXIS_MEMORY_DIR": str(memory)}
+    def memory_gate(response: dict) -> bool:
+        return "MEMORY DISTILLATION" in str(response.get("message", ""))
+
+    # Control: a Write of nothing to the same entry is what the gate blocks.
+    empty_write = {"hook_event_name": "pre_tool_call", "tool_name": "write_file",
+                   "tool_input": {"path": str(entry), "content": ""}, "session_id": "",
+                   "cwd": str(memory), "extra": {"tool_call_id": "w1"}}
+    assert memory_gate(base._bridge(empty_write, tmp_path, env))
+    delete = _v4a(f"*** Delete File: {entry}")
+    assert not memory_gate(base._bridge(_memory_payload(delete, memory), tmp_path, env))

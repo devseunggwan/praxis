@@ -123,14 +123,17 @@ _V4A_OPS: List[Tuple[str, "re.Pattern[str]"]] = [
 
 
 def v4a_calls(patch: str) -> List[Tuple[str, dict]]:
-    """One Claude `Edit` / `Write` per file a V4A `patch` call touches.
+    """One Claude call per hunk or file a V4A `patch` call touches.
 
     A V4A patch (`patch` with `mode: "patch"`) names its files in operation
     headers, not in `path`. Lines are read as Hermes's `parse_v4a_patch` reads
-    them. An update becomes an `Edit` whose old and new strings are its hunk
-    lines; an added file a `Write` of its lines; a deleted file a `Write` of
-    nothing; a move a `Write` of nothing on both paths, so every gate that
-    reads the target path sees each file.
+    them, including where it starts and stops, and a patch Hermes rejects as a
+    parse error (an empty path, an update with no hunk, a move with no
+    destination) becomes no call, as Hermes applies none of it. Each hunk of an
+    update becomes an `Edit` of its lines; an added file a `Write` of its
+    lines; a deleted file, and both paths of a move, an `Edit` with empty
+    strings, so gates that read the target path see every file and gates that
+    read written content are not shown an empty file.
     """
     lines = [line.removesuffix("\r") for line in patch.split("\n")]
     start, end = -1, len(lines)
@@ -141,33 +144,49 @@ def v4a_calls(patch: str) -> List[Tuple[str, dict]]:
             end = i
             break
     ops: List[Dict[str, Any]] = []
-    current: Optional[Dict[str, Any]] = None
+    op: Optional[Dict[str, Any]] = None
+    hunk: Optional[Dict[str, List[str]]] = None
     for line in lines[start + 1:end]:
         hit = next(((kind, m) for kind, rx in _V4A_OPS if (m := rx.match(line))), None)
         if hit:
             kind, m = hit
-            current = {"kind": kind, "path": m.group(1).strip(), "old": [], "new": [],
-                       "to": m.group(2).strip() if kind == "move" else None}
-            ops.append(current)
-            if kind in ("delete", "move"):
-                current = None
-        elif current is None or not line or line.startswith("@@") or line[0] == "\\":
-            continue
-        else:
+            op = {"kind": kind, "path": m.group(1).strip(), "hunks": [],
+                  "to": m.group(2).strip() if kind == "move" else None}
+            ops.append(op)
+            hunk = None
+            if kind == "add":
+                hunk = {"old": [], "new": []}
+                op["hunks"].append(hunk)
+            elif kind in ("delete", "move"):
+                op = None
+        elif line.startswith("@@"):
+            if op is not None:
+                hunk = {"old": [], "new": []}
+                op["hunks"].append(hunk)
+        elif op is not None and line and line[0] != "\\":
+            if hunk is None:
+                hunk = {"old": [], "new": []}
+                op["hunks"].append(hunk)
             mark, text = (line[0], line[1:]) if line[0] in "+- " else (" ", line)
             if mark != "+":
-                current["old"].append(text)
+                hunk["old"].append(text)
             if mark != "-":
-                current["new"].append(text)
+                hunk["new"].append(text)
+    for o in ops:
+        o["hunks"] = [h for h in o["hunks"] if h["old"] or h["new"]]
+        if not o["path"] or (o["kind"] == "update" and not o["hunks"]) or (o["kind"] == "move" and not o["to"]):
+            return []
     calls: List[Tuple[str, dict]] = []
-    for op in ops:
-        if op["kind"] == "update":
-            calls.append(("Edit", {"file_path": op["path"], "old_string": "\n".join(op["old"]),
-                                   "new_string": "\n".join(op["new"]), "replace_all": False}))
-        elif op["kind"] == "add":
-            calls.append(("Write", {"file_path": op["path"], "content": "\n".join(op["new"])}))
+    for o in ops:
+        if o["kind"] == "update":
+            calls.extend(("Edit", {"file_path": o["path"], "old_string": "\n".join(h["old"]),
+                                   "new_string": "\n".join(h["new"]), "replace_all": False}) for h in o["hunks"])
+        elif o["kind"] == "add":
+            content = "\n".join(text for h in o["hunks"] for text in h["new"])
+            calls.append(("Write", {"file_path": o["path"], "content": content}))
         else:
-            calls.extend(("Write", {"file_path": path, "content": ""}) for path in (op["path"], op["to"]) if path)
+            calls.extend(("Edit", {"file_path": path, "old_string": "", "new_string": "", "replace_all": False})
+                         for path in (o["path"], o["to"]) if path)
     return calls
 
 
