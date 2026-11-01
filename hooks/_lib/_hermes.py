@@ -111,6 +111,66 @@ def delegate_tasks(args: dict) -> List[dict]:
     return out
 
 
+# Hermes's V4A patch grammar, byte-identical to `tools/patch_parser.py`
+# (`_BEGIN_MARKER`, `_END_MARKER`, `_OP_MARKERS`).
+_V4A_BEGIN = re.compile(r'^\*\*\*\s*Begin\s+Patch\s*$')
+_V4A_END = re.compile(r'^\*\*\*\s*End\s+Patch\s*$')
+_V4A_OPS: List[Tuple[str, "re.Pattern[str]"]] = [
+    ("update", re.compile(r'\*\*\*\s*Update\s+File:\s*(.+)')),
+    ("add", re.compile(r'\*\*\*\s*Add\s+File:\s*(.+)')),
+    ("delete", re.compile(r'\*\*\*\s*Delete\s+File:\s*(.+)')),
+    ("move", re.compile(r'\*\*\*\s*Move\s+File:\s*(.+?)\s*->\s*(.+)'))]
+
+
+def v4a_calls(patch: str) -> List[Tuple[str, dict]]:
+    """One Claude `Edit` / `Write` per file a V4A `patch` call touches.
+
+    A V4A patch (`patch` with `mode: "patch"`) names its files in operation
+    headers, not in `path`. Lines are read as Hermes's `parse_v4a_patch` reads
+    them. An update becomes an `Edit` whose old and new strings are its hunk
+    lines; an added file a `Write` of its lines; a deleted file a `Write` of
+    nothing; a move a `Write` of nothing on both paths, so every gate that
+    reads the target path sees each file.
+    """
+    lines = [line.removesuffix("\r") for line in patch.split("\n")]
+    start, end = -1, len(lines)
+    for i, line in enumerate(lines):
+        if _V4A_BEGIN.match(line):
+            start = i
+        elif _V4A_END.match(line):
+            end = i
+            break
+    ops: List[Dict[str, Any]] = []
+    current: Optional[Dict[str, Any]] = None
+    for line in lines[start + 1:end]:
+        hit = next(((kind, m) for kind, rx in _V4A_OPS if (m := rx.match(line))), None)
+        if hit:
+            kind, m = hit
+            current = {"kind": kind, "path": m.group(1).strip(), "old": [], "new": [],
+                       "to": m.group(2).strip() if kind == "move" else None}
+            ops.append(current)
+            if kind in ("delete", "move"):
+                current = None
+        elif current is None or not line or line.startswith("@@") or line[0] == "\\":
+            continue
+        else:
+            mark, text = (line[0], line[1:]) if line[0] in "+- " else (" ", line)
+            if mark != "+":
+                current["old"].append(text)
+            if mark != "-":
+                current["new"].append(text)
+    calls: List[Tuple[str, dict]] = []
+    for op in ops:
+        if op["kind"] == "update":
+            calls.append(("Edit", {"file_path": op["path"], "old_string": "\n".join(op["old"]),
+                                   "new_string": "\n".join(op["new"]), "replace_all": False}))
+        elif op["kind"] == "add":
+            calls.append(("Write", {"file_path": op["path"], "content": "\n".join(op["new"])}))
+        else:
+            calls.extend(("Write", {"file_path": path, "content": ""}) for path in (op["path"], op["to"]) if path)
+    return calls
+
+
 # Hermes tool -> (Claude tool, input translator). `delegate_task` is handled by
 # `claude_calls` because one Hermes call becomes several Claude calls.
 TOOLS: Dict[str, Tuple[str, Callable[[dict], dict]]] = {
@@ -127,6 +187,8 @@ def claude_calls(tool: str, args: dict) -> List[Tuple[str, dict]]:
     """The Claude `(tool_name, tool_input)` calls one Hermes call stands for."""
     if not isinstance(args, dict):
         args = {}
+    if tool == "patch" and args.get("mode") == "patch":
+        return v4a_calls(str(args.get("patch") or ""))
     if tool in TOOLS:
         name, translate = TOOLS[tool]
         if tool == "skill_view" and args.get("file_path"):
