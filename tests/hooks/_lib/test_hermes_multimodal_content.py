@@ -122,3 +122,40 @@ def test_missing_prompt_runs_nothing(tmp_path):
     assert base._bridge(dict(_prompt_payload(None), cwd=str(tmp_path)), tmp_path) == {}
 
 
+
+
+# --- content with no text part (review follow-up) --------------------------------
+
+def test_image_only_approval_does_not_reach_back_to_an_older_one(tmp_path):
+    """An image-only reply has no text; it must not be read as an empty message that
+    the last-user-message reader skips, which would surface the earlier 'merge'."""
+    image_only = _stored([{"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA"}}])
+    rows = _merge_rows("merge")[:3] + [
+        (4, "s1", "assistant", "Wait, one more check. PR #7 을 머지할까요?", None, None, None),
+        (5, "s1", "user", image_only, None, None, None),
+        (6, "s1", "assistant", "", None,
+         json.dumps([base._call("m1", "terminal", {"command": "gh pr merge 7 --squash"})]), None)]
+    db = base._db(tmp_path / "state.db", rows)
+    assert '"deny"' in base._merge_gate(hermes.sync_transcript("s1", tmp_path / "t", db))
+
+
+def test_a_stored_object_keeps_its_json():
+    """A non-text tool result must stay parseable, so a failure is still marked is_error."""
+    assert json.loads(hermes.content_text(_stored({"exit_code": 1, "error": "boom"}))) == {
+        "exit_code": 1, "error": "boom"}
+    assert hermes.content_text(_stored(True)) == "true"
+
+
+def test_only_text_parts_are_read():
+    """Same filter as `_transcript.read_last_user_record`: a typed non-text part is not text."""
+    parts = [{"type": "reasoning", "text": "hidden"}, {"type": "text", "text": "shown"}, {"text": "untyped"}]
+    assert hermes.content_text(parts) == "shown\nuntyped"
+
+
+def test_image_only_or_odd_prompt_runs_no_prompt_gate(tmp_path):
+    intent = tmp_path / "intent.json"
+    env = {"PRAXIS_SESSION_INTENT_FILE": str(intent)}
+    image_only = [{"type": "image_url", "image_url": {"url": "data:x"}}]
+    for odd in (image_only, {"role": "user"}, 5):
+        assert base._bridge(dict(_prompt_payload(odd), cwd=str(tmp_path)), tmp_path, env) == {}
+    assert not intent.exists()

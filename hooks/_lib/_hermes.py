@@ -161,12 +161,14 @@ def _parse_json(raw: Any) -> Any:
 _CONTENT_JSON_PREFIX = "\x00json:"
 
 
-def _part_text(part: Any) -> str:
+def part_text(part: Any) -> str:
+    """A part's text, read as `_transcript.read_last_user_record` reads one:
+    a string, or a `text` part (typed `text` or untyped)."""
     if isinstance(part, str):
         return part
-    if isinstance(part, dict) and isinstance(part.get("text"), str):
+    if isinstance(part, dict) and part.get("type", "text") == "text" and isinstance(part.get("text"), str):
         return part["text"]
-    return ""  # an image or other non-text part
+    return ""
 
 
 def content_text(raw: Any) -> str:
@@ -175,7 +177,9 @@ def content_text(raw: Any) -> str:
     Decodes the `\\x00json:` form as Hermes's `_decode_content` does (a
     malformed one stays the raw string; a prefixed literal string is
     double-encoded) and keeps the text parts of a parts list, so gates read
-    what the user wrote, not the stored JSON.
+    what the user wrote, not the stored JSON. Content with no text part (an
+    image-only message, a JSON object, a number) is kept as its JSON, so it is
+    never read as an empty message that a gate skips past.
     """
     if isinstance(raw, str):
         if not raw.startswith(_CONTENT_JSON_PREFIX):
@@ -184,13 +188,16 @@ def content_text(raw: Any) -> str:
             raw = json.loads(raw[len(_CONTENT_JSON_PREFIX):])
         except ValueError:
             return raw
-    if isinstance(raw, list):
-        return "\n".join(text for text in map(_part_text, raw) if text)
-    if isinstance(raw, (str, dict)):
-        return _part_text(raw)
+        if isinstance(raw, str):
+            return raw
+    if raw is None:
+        return ""
     if isinstance(raw, bytes):
         return raw.decode("utf-8", "replace")
-    return "" if raw is None else str(raw)
+    parts = raw if isinstance(raw, list) else [raw] if isinstance(raw, dict) else []
+    text = "\n".join(t for t in map(part_text, parts) if t)
+    return text or json.dumps(raw, ensure_ascii=False, default=str)
+
 
 def _clarify_answer_text(result: Any) -> Optional[str]:
     """Claude's AskUserQuestion result text for a Hermes `clarify` result.
