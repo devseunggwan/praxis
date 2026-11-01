@@ -159,3 +159,42 @@ def test_a_container_path_is_skipped(tmp_path):
         (2, "s1", "tool", _result("/workspace/does-not-exist-here"), "c1", None, "terminal"),
     ])
     assert _asked_by_cross_boundary(base._bridge(_comment_payload(repo), tmp_path))
+
+
+def test_a_sandbox_backend_keeps_the_payload_cwd(tmp_path):
+    """Under docker/ssh the recorded path is inside the sandbox, even when the same
+    path exists on this host."""
+    repo = _github_checkout(tmp_path / "repo")
+    process_cwd = tmp_path / "install-root"
+    process_cwd.mkdir()
+    base._db(tmp_path / "state.db", [
+        (1, "s1", "assistant", "", None, _terminal_call("c1", f"cd {repo}"), None),
+        (2, "s1", "tool", _result(str(repo)), "c1", None, "terminal"),
+    ])
+    env = {"TERMINAL_ENV": "docker", "TERMINAL_CWD": str(repo)}
+    assert not _asked_by_cross_boundary(base._bridge(_comment_payload(process_cwd), tmp_path, env))
+    assert _asked_by_cross_boundary(base._bridge(_comment_payload(process_cwd), tmp_path,
+                                                 {"TERMINAL_ENV": "local"}))
+
+
+def test_workdir_still_wins_over_the_session_cwd(tmp_path):
+    """`cd <checkout>` recorded, but this call passes `workdir` elsewhere: gates run there."""
+    repo = _github_checkout(tmp_path / "repo")
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    base._db(tmp_path / "state.db", [
+        (1, "s1", "assistant", "", None, _terminal_call("c1", f"cd {repo}"), None),
+        (2, "s1", "tool", _result(str(repo)), "c1", None, "terminal"),
+    ])
+    payload = _comment_payload(tmp_path)
+    payload["tool_input"] = dict(payload["tool_input"], workdir=str(elsewhere))
+    assert not _asked_by_cross_boundary(base._bridge(payload, tmp_path))
+
+
+def test_an_id_less_call_is_not_paired_with_an_id_less_result(tmp_path):
+    db = base._db(tmp_path / "state.db", [
+        (1, "s1", "assistant", "", None, json.dumps([{"type": "function", "function": {
+            "name": "terminal", "arguments": json.dumps({"command": "cd /x"})}}]), None),
+        (2, "s1", "tool", json.dumps({"cwd": "/not/a/move"}), None, None, "read_file"),
+    ])
+    assert hermes.session_cwd("s1", db) is None

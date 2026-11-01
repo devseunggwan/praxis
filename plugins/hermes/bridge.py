@@ -85,9 +85,14 @@ def _cwd(hermes: dict, session_id: str) -> str:
     The payload's `cwd` is Hermes's process directory (the install root under
     the gateway). A `terminal` call without `workdir` runs in the directory
     the session last moved to, else in `TERMINAL_CWD` (Hermes's default
-    terminal cwd, exported on every launch path). A path that is not a local
-    directory (a container backend's) is skipped.
+    terminal cwd, exported on every launch path). Both name a directory inside
+    the sandbox when `TERMINAL_ENV` is not `local` (docker, ssh, …), where a
+    path that happens to exist on this host is not the one the command runs
+    in, so then only the payload's `cwd` is used. A path that is not a local
+    directory is skipped.
     """
+    if os.environ.get("TERMINAL_ENV", "local") != "local":
+        return str(hermes.get("cwd") or os.getcwd())
     try:
         moved = _hermes.session_cwd(session_id)
     except Exception:  # noqa: BLE001 - a bad row must not stop the gates

@@ -459,7 +459,10 @@ def session_cwd(session_id: str, db_path: Optional[Path] = None) -> Optional[str
     payload carries. The result of a command that changed directory echoes
     the new one as `"cwd"` (`tools/terminal_tool_result.py`); a call with
     `workdir` is never recorded. The record lives in Hermes's memory for the
-    whole process, so every row of the session counts, active or not.
+    whole process, so every row of the session counts, active or not. A
+    restarted process starts without it (a resumed CLI session starts in its
+    recorded start directory); a move made before the restart is still read
+    here.
     """
     if not session_id:
         return None
@@ -489,8 +492,10 @@ def session_cwd(session_id: str, db_path: Optional[Path] = None) -> Optional[str
                     continue
                 raw = fn.get("arguments")
                 args = _parse_json(raw) if isinstance(raw, str) else raw
-                recorded[str(call.get("id") or "")] = not (isinstance(args, dict) and args.get("workdir"))
-        elif recorded.get(str(row["tool_call_id"] or "")):
+                call_id = str(call.get("id") or "")
+                if call_id:  # an id-less call cannot be paired with its result
+                    recorded[call_id] = not (isinstance(args, dict) and args.get("workdir"))
+        elif row["tool_call_id"] and recorded.get(str(row["tool_call_id"])):
             data = _parse_json(row["content"])
             moved = data.get("cwd") if isinstance(data, dict) else None
             if isinstance(moved, str) and moved.strip():
