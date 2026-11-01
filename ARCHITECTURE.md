@@ -462,6 +462,10 @@ key hashes the reasons with the tool call's arguments and never repeats, so an
 
 **Install.** `plugins/hermes/bridge.py --print-config` prints the `hooks:`
 entries with this clone's path; merge them into Hermes's `config.yaml`. The
+`pre_tool_call` matcher is built from the manifest: it lists only the Hermes
+tools whose Claude counterpart has a `PreToolUse` hook that runs on `hermes`
+(today `read_file` and `skill_view` have none). Adding such a hook for a new
+tool therefore needs the printed entry merged again. The
 `pre_tool_call` entry is `fail_closed: true` with a 25 s timeout, under
 Hermes's 30 s `plugins.hook_callback_timeout`, past which the plugin layer
 blocks the call anyway.

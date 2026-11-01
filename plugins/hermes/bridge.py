@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Hermes Agent shell hook that runs praxis hooks registered for the `hermes` host.
 
-Register it in Hermes's `config.yaml` (`plugins/hermes/hooks.yaml` is the
-generated block). Hermes pipes one event payload on stdin; this script
+Register it in Hermes's `config.yaml`: `bridge.py --print-config` prints the
+`hooks:` entries for this clone. Hermes pipes one event payload on stdin; this script
 translates it to the Claude Code payload praxis hooks read, runs each matching
 manifest group through praxis's own dispatcher with `host="hermes"`, and prints
 one Hermes response object:
