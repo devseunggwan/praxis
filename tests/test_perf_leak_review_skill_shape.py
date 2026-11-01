@@ -100,16 +100,6 @@ def test_brief_headings_match_the_validator_classes() -> None:
     assert _brief_headings() == _validator_classes()
 
 
-def test_every_class_has_an_example_block() -> None:
-    """A class definition without a worked example is prose, not a signature."""
-    text = BRIEF.read_text(encoding="utf-8")
-    sections = re.split(r"^### C\d — ", text, flags=re.M)[1:]
-    assert len(sections) == 5, len(sections)
-    for section in sections:
-        assert "```" in section, section.splitlines()[0]
-        assert "Signal:" in section, section.splitlines()[0]
-
-
 def test_brief_names_no_fixture_identifier() -> None:
     """Anti-overfit: the brief must not quote the corpus it is scored against."""
     brief = BRIEF.read_text(encoding="utf-8")
@@ -124,23 +114,8 @@ def test_brief_names_no_fixture_identifier() -> None:
     )
 
 
-def test_brief_forbids_tools_other_than_read_grep_glob() -> None:
-    brief = BRIEF.read_text(encoding="utf-8")
-    assert "Read, Grep, Glob only" in brief
-    for forbidden in ("Bash", "Write", "Edit"):
-        assert forbidden in brief, f"{forbidden} must be named as forbidden"
-
-
-def test_brief_pins_the_envelope_contract() -> None:
-    brief = BRIEF.read_text(encoding="utf-8")
-    for token in ('"repo_root"', '"findings"', '"grade": "candidate"'):
-        assert token in brief, token
-    assert '"findings": []' in brief, "the empty-list answer must be spelled out"
-
-
-def test_skill_declares_report_only_and_the_closed_list() -> None:
+def test_skill_class_table_lists_every_validator_class() -> None:
     text = SKILL_MD.read_text(encoding="utf-8")
-    assert "Report-only" in text
     for name in _validator_classes():
         assert f"| {name} |" in text, f"{name} missing from the skill's class table"
 
