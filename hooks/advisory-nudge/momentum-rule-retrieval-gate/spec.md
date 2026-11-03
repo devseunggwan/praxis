@@ -233,6 +233,11 @@ before approving). Safety gates on the extension:
   list asks to merge the PR as being about the merge, so `1. hold` to a
   re-asked question withdraws an earlier `1. approve`. A URL's dots do not end
   the ask sentence (`1. Approve merge of https://github.com/o/r/pull/999?`).
+  What follows the ask is read for qualifiers and negation too — the rest of
+  its line, the item's later lines that are not option bullets, and
+  unindented prose after the item (`1. Approve merge of #999? Only after the
+  release.`, or an unindented `Or hold until Monday?` under it). Option
+  bullets under the ask (`   - (추천) 승인합니다`) are choices, not conditions.
 
   The pairing reads the same turn and target `_correlated_prior_turn_text`
   scores (`_last_reply_approves`), and `_answered_after` / `_held_after` pass

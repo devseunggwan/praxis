@@ -513,6 +513,8 @@ _ITEM_ASK_QUALIFIER_RE = re.compile(
 # `_ASK_SENTENCE_RE` is quadratic on a long line with no sentence end.
 _ITEM_LINE_MAX = 400
 _URL_RE = re.compile(r"https?://[^\s?]+")
+# An option bullet under a numbered ask (`   - (추천) 승인합니다`).
+_BULLET_RE = re.compile(r"^\s*[-*+•]\s")
 
 # The harness writes the interrupt as a `role: user` entry with this exact text
 # and no flag distinguishing it from typed input. Anchored at both ends: the
@@ -840,34 +842,46 @@ def _is_bare_approval(raw: str) -> bool:
     return bool(clauses) and clauses[-1] in _APPROVAL_TOKENS
 
 
-def _numbered_items(text: str, strict: bool = True) -> list[tuple[int, str]] | None:
-    """`(number, text)` per top-level numbered item of `text`.
+def _list_items(text: str) -> tuple[list[tuple[int, list[str], list[str]]], bool]:
+    """Top-level numbered items of `text` as `(number, body, after)`, and
+    whether a non-blank line precedes the first item.
 
     Top level is the shallowest marker indent; a deeper marker (a nested
-    sub-list) and an indented line continue the item above. Lines before the
-    first item are dropped. An unindented, unnumbered line after the first
-    item is no item's text: `strict` (a reply) returns None, since what it
-    says answers nothing by number; otherwise (assistant prose around its
-    own list) the line is dropped."""
+    sub-list) and an indented line are body of the item above. An
+    unindented, unnumbered line after an item is not its body but goes to
+    `after`: prose the writer put between or after the items."""
     lines = text.splitlines()
     marks = [_LIST_ITEM_RE.match(line) for line in lines]
     indents = [len(m.group("indent").expandtabs(4)) for m in marks if m]
+    items: list[tuple[int, list[str], list[str]]] = []
+    lead = False
     if not indents:
-        return []
+        return items, lead
     base = min(indents)
-    items: list[tuple[int, list[str]]] = []
     for line, m in zip(lines, marks):
         if m and len(m.group("indent").expandtabs(4)) == base:
-            items.append((int(m.group("paren") or m.group("num")), [m.group("text")]))
+            items.append((int(m.group("paren") or m.group("num")), [m.group("text")], []))
         elif items:
             if line.strip() and not line[:1].isspace() and not m:
-                if strict:
-                    return None
-                continue
-            items[-1][1].append(line)
-        elif strict and line.strip():
-            return None
-    return [(n, "\n".join(body)) for n, body in items]
+                items[-1][2].append(line)
+            else:
+                items[-1][1].append(line)
+        elif line.strip():
+            lead = True
+    return items, lead
+
+
+def _numbered_items(text: str) -> list[tuple[int, str]] | None:
+    """`(number, text)` per top-level item of a numbered reply; `[]` when the
+    reply is not a list, None when text outside the items breaks it — before
+    the first item, or unindented after one — since that text answers
+    nothing by number."""
+    items, lead = _list_items(text)
+    if not items:
+        return []
+    if lead or any(after for _, _, after in items):
+        return None
+    return [(n, "\n".join(body)) for n, body, _ in items]
 
 
 def _strip_fences(text: str) -> str:
@@ -898,7 +912,7 @@ def _merge_question_numbers(asked: str, pr: str) -> set[int] | None:
     questions: the ones the reply answers. Fenced blocks are skipped — log
     output there is not a question."""
     text = _strip_fences(asked)
-    items = _numbered_items(text, strict=False)
+    items, _ = _list_items(text)
     if not items:
         return None
     start = 0
@@ -906,33 +920,41 @@ def _merge_question_numbers(asked: str, pr: str) -> set[int] | None:
         if items[k][0] <= items[k - 1][0]:
             start = k
     only_target = set(_PR_REF_RE.findall(text)) <= {pr}
-    return {n for n, t in items[start:] if _is_item_merge_ask(t, pr, only_target)}
+    return {n for n, body, after in items[start:]
+            if _is_item_merge_ask(body, after, pr, only_target)}
 
 
-def _is_item_merge_ask(item: str, pr: str, only_target: bool) -> bool:
+def _is_item_merge_ask(body: list[str], after: list[str], pr: str, only_target: bool) -> bool:
     """True when a numbered item plainly asks to merge `pr`.
 
     The item's LAST ask sentence is read — a `yes` answers the question asked
     last (`Approve merge of #999? Or wait for the freeze?`). With no ask
     sentence, a first line phrased as a request (`_ITEM_ASK_RE`) is one. The
-    ask must carry no qualifier (`_ITEM_ASK_QUALIFIER_RE`) or negation, and an
-    ask naming no PR counts only when the turn names no PR but `pr`: `1.
-    Approve merge?` in another PR's briefing is that PR's question."""
-    lines = item.splitlines()
-    if any(len(line) > _ITEM_LINE_MAX for line in lines):
+    ask, and what follows it — the rest of its line, the item's later lines
+    that are not option bullets, and prose after the item (`after`) — must
+    carry no qualifier (`_ITEM_ASK_QUALIFIER_RE`) or negation: `Approve merge
+    of #999? Only after the release.` asks for a conditional yes. Option
+    bullets under the ask are choices the answer picks between, not
+    conditions on it. An ask naming no PR counts only when the turn names no
+    PR but `pr`: `1. Approve merge?` in another PR's briefing is that PR's
+    question."""
+    if any(len(line) > _ITEM_LINE_MAX for line in body + after):
         return False
     # A URL's dots are not sentence ends: `Approve merge of
     # https://github.com/o/r/pull/999?` is one ask.
-    lines = [_URL_RE.sub(lambda u: u.group().replace(".", "_"), line) for line in lines]
-    asks = [s for line in lines for s in _ASK_SENTENCE_RE.findall(line)]
+    lines = [_URL_RE.sub(lambda u: u.group().replace(".", "_"), line) for line in body]
+    asks = [(i, m.end(), m.group()) for i, line in enumerate(lines)
+            for m in _ASK_SENTENCE_RE.finditer(line)]
     head = (lines[0] if lines else "").strip().rstrip(" .。:：")
     if asks:
-        ask = asks[-1]
+        i, end, ask = asks[-1]
+        rest = [lines[i][end:], *lines[i + 1:]]
     elif _ITEM_ASK_RE.search(head):
-        ask = head + "?"
+        ask, rest = head + "?", lines[1:]
     else:
         return False
-    if _ITEM_ASK_QUALIFIER_RE.search(ask) or _LABEL_NEGATION_RE.search(ask):
+    condition = "\n".join([ask, *(line for line in rest if not _BULLET_RE.match(line)), *after])
+    if _ITEM_ASK_QUALIFIER_RE.search(condition) or _LABEL_NEGATION_RE.search(condition):
         return False
     if not _PR_REF_RE.findall(ask) and not only_target:
         return False

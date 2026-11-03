@@ -175,6 +175,11 @@ CASES = {
         lambda: _numbered("1. approve\n2. ok",
                           "1. Approve merge of https://github.com/o/r/pull/999?\n"
                           "2. Follow-up: option A or option B?"),
+    # A condition written after the ask makes `yes` a conditional yes.
+    "momentum-merge-numbered-trailing-condition.jsonl":
+        lambda: _numbered("1. yes\n2. B",
+                          "1. Approve merge of #999? Only after the release.\n"
+                          "2. Follow-up: option A or option B?"),
 }
 
 

@@ -1361,6 +1361,8 @@ run_merge_escalation_case "merge_escalation_numbered_serial_rehold_denies" \
   "yes" "" "momentum-merge-numbered-serial-rehold.jsonl" "gh pr merge 1001 --squash"
 run_merge_escalation_case "merge_escalation_numbered_url_ask_passes" \
   "no" "" "momentum-merge-numbered-url-ask.jsonl" "gh pr merge 999 --squash"
+run_merge_escalation_case "merge_escalation_numbered_trailing_condition_denies" \
+  "yes" "" "momentum-merge-numbered-trailing-condition.jsonl" "gh pr merge 999 --squash"
 
 # The parser's own surface (issue #1630): marker spellings, item-level rules
 # kept from the final-clause reader, and the fallbacks. One line per case:
@@ -1461,6 +1463,14 @@ cases = [
     (False, "1. for #1001, approve\n2. b", q1),
     (False, "1. 1001 approve\n2. b", q1),
     (True, "1. approve\n2. ok", "1. Approve merge of https://github.com/o/r/pull/999?\n2. Follow-up?"),
+    # Codex review round 2: a condition or follow-up question after the ask —
+    # same line, an indented line, or unindented prose — keeps it from being a
+    # plain ask; harmless prose and option bullets do not.
+    (False, "1. yes\n2. b", "1. Approve merge of #999?\nOr hold until Monday?\n2. Follow-up?"),
+    (False, "1. yes\n2. b", "1. Approve merge of #999? Only after the release.\n2. Follow-up?"),
+    (False, "1. yes\n2. b", "1. Approve merge of #999?\n   Only after the release.\n2. Follow-up?"),
+    (True, "1. yes\n2. b", "1. Approve merge of #999?\n2. Follow-up?\n\nLet me know."),
+    (False, "1. b\n2. ok", "1. Follow-up A?\n2. Follow-up B?\n\nApprove merge of #999?"),
 ]
 for want, reply, asked in cases:
     got = m._is_approval_reply(reply, asked, "999" if asked else None)
@@ -1480,7 +1490,7 @@ if printf '%s\n' "$numbered_probe" | grep -q '^BAD '; then
   echo "FAIL  [approval_reply_numbered_surface]"
   printf '%s\n' "$numbered_probe" | grep '^BAD ' | sed 's/^/        /'
   FAIL=$((FAIL + 1)); FAILED_NAMES+=("approval_reply_numbered_surface")
-elif [ "$(printf '%s\n' "$numbered_probe" | grep -c '^ok  ')" -eq 67 ]; then
+elif [ "$(printf '%s\n' "$numbered_probe" | grep -c '^ok  ')" -eq 72 ]; then
   echo "PASS  [approval_reply_numbered_surface]"; PASS=$((PASS + 1))
 else
   echo "FAIL  [approval_reply_numbered_surface] probe=<$numbered_probe>"
