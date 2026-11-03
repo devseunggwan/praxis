@@ -188,6 +188,61 @@ before approving). Safety gates on the extension:
   fresh instruction (`머지 진행 상황 알려주고 파서부터 고쳐줘`, `merge it but
   rebase first`) is not an approval, no matter what appears earlier in it.
 
+- **Numbered replies (issue #1630).** A user answering several numbered
+  questions in one message (`1. approve` / `2. go with your recommendation`)
+  puts the merge answer at the merge question's number, which need not be the
+  last line, so the final-clause rule read the answer to another question and
+  the decision flipped with the order of the lines. When the reply is a
+  numbered list (`1.`, `1)`, `(1)`, `1:`, `1번`, with an optional bullet,
+  heading or bold around the marker; `1.5` and `10:30` are not markers) and the
+  turn it answers has one, the reply is read at the number of the merge ask in
+  that turn's **last** numbered list, and that item alone is matched with the
+  rules above (whole-token or final clause, a trailing `?` refuses), with a
+  reference to the target PR inside it set aside (`1. #999 머지`). The
+  whole-reply PR strip in `_is_typed_approval` is skipped for a numbered
+  reply, since it would also blank a list marker equal to the PR number (`2.`
+  for PR #2).
+
+  Reading the turn (`_merge_question_numbers`): fenced blocks are skipped;
+  only top-level items count, so a nested sub-list is text of its parent item;
+  a list restarts where a number does not exceed the one before it, so a
+  numbered six-item briefing followed by numbered questions pairs with the
+  questions. An item is the merge ask (`_is_item_merge_ask`) when its **last**
+  ask sentence — or, with none, a first line that asks with a noun phrase
+  (`1. #999 머지 승인 여부`, `1. Whether to merge #999`) — passes
+  `_is_merge_ask` and carries no qualifier or negation
+  (`_ITEM_ASK_QUALIFIER_RE`, `_LABEL_NEGATION_RE`): an ask about when, around,
+  or instead of the merge (`Re-run CI before merging #999?`, `#999 머지 보류
+  여부`, `merge #999 or close it?`) is answered by `yes` without approving the
+  merge. An ask naming no PR counts only when the turn names no PR but the
+  target, since `1. Approve merge?` in another PR's briefing is that PR's
+  question. An item with a line over 400 characters is no ask (it also bounds
+  `_ASK_SENTENCE_RE`, which is quadratic on a long line).
+
+  Reading the reply: it is not an approval when the turn's list holds no such
+  ask or more than one; when the reply has no item at that number or has it
+  twice; when a non-blank line precedes its first item (a quoted question
+  list included) or an unindented, unnumbered line follows one (`Actually,
+  hold off on the merge`); or when any other item mentions the PR or merging
+  without being an approval token (`2. B, and don't merge yet`) — the latest
+  word on the merge wins inside one message, as `_held_after` applies it
+  across messages.
+
+  The pairing reads the same turn and target `_correlated_prior_turn_text`
+  scores (`_last_reply_approves`), and `_answered_after` / `_held_after` pass
+  the turn each later message answers. On top of the release the issue asked
+  for, two shapes main allowed now deny: `1. hold` / `2. approve` (and `3.
+  approve` / `4. ok`) when item 1 is the merge ask, and a numbered reply when
+  the merge ask sat outside a numbered follow-up list (`Approve merge?` then
+  `1. …?` / `2. …?`, answered `1. ok` / `2. ok`) — those items answer the
+  follow-ups. Unchanged: an unnumbered reply, and a numbered reply to a turn
+  with no numbered list, keep the final-clause rule; with no turn (an
+  `AskUserQuestion` label) `_is_approval_reply` reads as before. Known gaps,
+  each a missed release: items on one line (`1 ok, 2 b`) and `1 ok` without
+  punctuation are not markers, so they fall back to the final-clause rule; the
+  qualifier list is vocabulary (`조건`, `먼저`, `before`, `or`, …), so a plain
+  ask that happens to use one of those words is asked again.
+
 - **PR correlation.** The prior-turn briefing must reference the PR actually
   being merged. The merge target is the segment's *first positional* token
   (value-flag arity skipped, including trailing gh global flags like `-R
@@ -544,7 +599,7 @@ approve blindly.
   | Reason | Check re-asked |
   | ------ | -------------- |
   | one approval releases one merge, and this command runs more than one | `_merge_segments` / `_has_repetition` |
-  | the last user message (`…`) is not an approval reply | `_is_approval_reply` |
+  | the last user message (`…`) is not an approval reply | `_last_reply_approves` |
   | a user message (`…`) came between the briefing and the approval | briefing turn ends before the approval's own prior turn |
   | the briefed turn does not name the PR this merge targets | `_correlated_prior_turn_text` |
   | it precedes a merge that already ran in this session | serial-merge `floor` (marker path only) |
