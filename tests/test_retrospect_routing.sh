@@ -77,6 +77,27 @@ run_anchor_check() {
   fi
 }
 
+# The parser's regex needs the closing `-->` too, so the opener alone is not
+# the format: require a `-->` line after it, before the code fence closes.
+run_comment_block_check() {
+  local name="$1"
+  local path="$2"
+  local opener="$3"
+  if awk -v opener="$opener" '
+    index($0, opener) { open = 1; next }
+    open && /^-->/ { found = 1; exit }
+    open && /^```/ { open = 0 }
+    END { exit !found }
+  ' "$path"; then
+    echo "PASS: $name"
+    PASS=$((PASS + 1))
+  else
+    echo "FAIL: $name — no '-->' closing '$opener' in $path"
+    FAIL=$((FAIL + 1))
+    FAILED_NAMES+=("$name")
+  fi
+}
+
 echo "=== retrospect docs repo-agnosticism checks ==="
 echo ""
 
@@ -91,8 +112,8 @@ echo ""
 echo "=== formats audit-distribution-gates.py parses ==="
 run_anchor_check "stage3 reference keeps distribution fence" "$SKILL_DIR/references/stage3-reporting.md" "retrospect:distribution begin"
 run_anchor_check "stage3 reference keeps memory-scan evidence block" "$SKILL_DIR/references/stage3-reporting.md" "memory_scan finding #<n>"
-run_anchor_check "stage3 reference keeps memory-scan HTML comment" "$SKILL_DIR/references/stage3-reporting.md" "<!-- memory_scan finding #<n>:"
-run_anchor_check "report template includes memory-scan evidence block" "$SKILL_DIR/references/report-template.md" "<!-- memory_scan finding #<n>:"
+run_comment_block_check "stage3 reference keeps memory-scan HTML comment" "$SKILL_DIR/references/stage3-reporting.md" "<!-- memory_scan finding #<n>:"
+run_comment_block_check "report template includes memory-scan evidence block" "$SKILL_DIR/references/report-template.md" "<!-- memory_scan finding #<n>:"
 run_anchor_check "stage1-2 reference keeps backing_repo declaration" "$SKILL_DIR/references/stage1-2-analysis.md" "backing_repo: <owner>/<repo>"
 run_anchor_check "stage1-2 reference keeps memory-scan passable field" "$SKILL_DIR/references/stage1-2-analysis.md" "memory_scan.scanned=true"
 
