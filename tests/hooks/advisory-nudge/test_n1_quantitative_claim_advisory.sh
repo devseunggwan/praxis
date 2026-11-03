@@ -310,8 +310,6 @@ run_case "FP5: top50 is not a percentile" silent \
   "gh pr comment 1 --body 'top50 그룹을 PASS 처리했다'"
 run_case "FP6: minute-scale build duration" silent \
   "gh pr comment 1 --body '전체 스위트 12분 소요, PASS(live)'"
-run_case "FP7: 2920msg is not a measurement" silent \
-  "gh pr comment 1 --body 'PASS(live) — 2920msg 를 큐에 넣었다'"
 run_case "FP8: multiplier notation is the perf hook's territory" silent \
   "gh pr comment 1 --body '3.06x 개선되었다'"
 

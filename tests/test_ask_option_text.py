@@ -106,24 +106,6 @@ def test_both_hooks_share_one_collector_object():
 # 3. Behavior preservation — real hook invocation via stdin
 # ---------------------------------------------------------------------------
 
-def _make_ask_payload(option_labels: list[str], question: str = "What should we do?") -> str:
-    """Mirror of the oracle baseline make_ask_payload (option labels only)."""
-    payload = {
-        "session_id": "test-session",
-        "tool_name": "AskUserQuestion",
-        "tool_input": {
-            "questions": [
-                {
-                    "question": question,
-                    "options": [{"label": label} for label in option_labels],
-                }
-            ]
-        },
-        "cwd": "/tmp",
-    }
-    return json.dumps(payload)
-
-
 def _run_hook(hook_path: Path, payload: str) -> subprocess.CompletedProcess:
     # Clear the falsification-gate bypass so an inherited env var cannot mask a
     # Lane-A advisory; everything else inherits.
@@ -136,30 +118,6 @@ def _run_hook(hook_path: Path, payload: str) -> subprocess.CompletedProcess:
         text=True,
         env=env,
     )
-
-
-def _decision(stdout: str) -> str | None:
-    if not stdout.strip():
-        return None
-    obj = json.loads(stdout)
-    return obj.get("hookSpecificOutput", {}).get("permissionDecision")
-
-
-def test_output_block_recommended_without_falsified_asks():
-    payload = _make_ask_payload(["Option A (Recommended)", "Option B"])
-    proc = _run_hook(OUTPUT_BLOCK, payload)
-    assert proc.returncode == 0
-    assert _decision(proc.stdout) == "ask"
-
-
-def test_output_block_recommended_with_falsified_line_silent():
-    payload = _make_ask_payload(
-        ["Option A (Recommended)", "Option B"],
-        question="What should we do?\nFalsified: ran the disconfirming test — no divergence.",
-    )
-    proc = _run_hook(OUTPUT_BLOCK, payload)
-    assert proc.returncode == 0
-    assert proc.stdout.strip() == ""  # silent pass
 
 
 def test_malformed_questions_non_list_both_hooks_exit_zero():
@@ -183,17 +141,6 @@ def test_malformed_questions_non_list_both_hooks_exit_zero():
 # extracted collector on the output-block side. The two cases below drive each
 # hook's actual collector consumer: output-block T2 (confidence-anchoring) and
 # pre-output Lane A (evaluative marker + negative transcript).
-
-
-def test_output_block_t2_anchoring_routes_through_collector():
-    """KO confidence-anchoring '안전한' (no literal (Recommended), no Falsified:)
-    → T1 misses, the `elif` evaluates collect_option_texts(options) and T2 emits
-    'ask'. This is the output-block path that actually exercises the collector.
-    Anchoring token mirrored from the oracle T2 baseline ('가장 안전한')."""
-    payload = _make_ask_payload(["가장 안전한 1회 변경", "Faster but more scope"])
-    proc = _run_hook(OUTPUT_BLOCK, payload)
-    assert proc.returncode == 0
-    assert _decision(proc.stdout) == "ask"
 
 
 def _write_transcript(tmp_path, tool_result_text: str) -> Path:

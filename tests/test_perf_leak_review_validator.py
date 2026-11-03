@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import copy
 import importlib.util
+import os
 import json
 import subprocess
 import sys
@@ -55,7 +56,9 @@ def _without(key: str) -> dict[str, Any]:
 
 
 def test_validator_is_executable() -> None:
+    """SKILL.md runs the validator directly, not through python3."""
     assert VALIDATOR.is_file()
+    assert os.access(VALIDATOR, os.X_OK), f"{VALIDATOR} is not executable"
 
 
 def test_accepts_a_well_formed_envelope() -> None:

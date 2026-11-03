@@ -18,7 +18,7 @@ allowed-tools:
   - Bash(gh pr view *)
 verified-against-runtime: true
 runtime-verified-at: 2026-07-13
-runtime-verified-note: "tests/test_retrospect_falsify_recommended.sh + test_retrospect_routing.sh + retrospect hook suites, plus audit-distribution-gates.py differential verification (issue #774): 6/6 script-vs-Stop-hook verdict agreement on mirrored gate classes, and a live violation→fix→clean loop on real session-friction drafts."
+runtime-verified-note: "tests/test_retrospect_routing.sh + retrospect hook suites, plus audit-distribution-gates.py differential verification (issue #774): 6/6 script-vs-Stop-hook verdict agreement on mirrored gate classes, and a live violation→fix→clean loop on real session-friction drafts."
 ---
 
 # Retrospect

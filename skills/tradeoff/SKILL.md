@@ -138,9 +138,8 @@ Print the table, then one line per option saying why it was chosen or dropped.
   makes the weakness visible; it does not remove it. `ETHOS.md` names this
   class directly — a schema check on an evidence table confirms the shape of a
   block whose sentence is the part that lied.
-- **No automatic regression.** `scripts/run-tests.sh` does not execute skills.
-  What is locked is the step order and the presence of the examples below
-  (`tests/test_tradeoff_skill_shape.py`), not the quality of any scoring run.
+- **No automatic regression.** `scripts/run-tests.sh` does not execute skills,
+  and no test reads this file's steps or examples.
 - **Report-only.** Nothing here writes to a PR, an issue, or any external
   surface.
 - **Axis review.** These four axes are a starting set. Review them by

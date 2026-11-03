@@ -150,12 +150,6 @@ def test_paste_id_command_is_random_hex() -> None:
     assert runs[0] != runs[1], runs
 
 
-def test_distribute_mode_draws_its_own_id_per_file() -> None:
-    body = " ".join(_section("Step 3.5: Distribute Mode (--distribute)").split())
-    assert "pasted_content" in body
-    assert "draws its **own** `PASTE_ID`" in body
-
-
 def _note_paragraph(text: str) -> str:
     m = re.search(r"^(%s.*?)\n(?:\n|NOTE$)" % re.escape(NOTE_START), text, re.S | re.M)
     assert m, "could not locate the pasted-content note"

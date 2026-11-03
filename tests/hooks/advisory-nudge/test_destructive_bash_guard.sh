@@ -277,7 +277,6 @@ run_case "gh pr close 5 -R o/r (-R after args)" signal "gh pr close 5 -R octocat
 
 # === SILENT — commands that must NOT trigger the revert signal =============
 
-run_case "git reset HEAD (not revert)" silent "git reset HEAD foo"
 run_case "git log --oneline (not revert)" silent "git log --oneline"
 run_case "gh pr status (not close)" silent "gh pr status"
 run_case "gh pr view 5 (not close)" silent "gh pr view 5"

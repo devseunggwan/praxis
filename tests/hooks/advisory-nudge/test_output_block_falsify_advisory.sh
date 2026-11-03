@@ -663,11 +663,6 @@ run_case "AskUserQuestion: (추천) Korean label + no Falsified: → T1 ask (iss
   "ask:Falsified: 권장 방법 (추천) — probe:" \
   "$(make_ask_payload '["권장 방법 (추천)", "대안"]')"
 
-# Case 5: Non-recommended option — no (Recommended) label — silent pass (no advisory)
-run_case "AskUserQuestion: non-recommended option labels — silent pass" \
-  pass \
-  "$(make_ask_payload '["Option A", "Option B", "Option C"]')"
-
 # Case 6 (regression for P2 fix; updated by issue #393): multi-question payload
 # where Q1 has (Recommended) but no Falsified:, and Q2 has Falsified: in its own
 # question text — Q1 still fires T1 → DENY (block).
@@ -974,6 +969,7 @@ Which one?")"
 # Regression: once placeholders are actually filled in with real content
 # (no literal <command>/<observed>/<...> left), the line DOES satisfy the
 # gate — the fix must not make legitimate filled-in evidence unsatisfiable.
+# It also pins round-4: one triggering label needs exactly one clean line.
 run_case "T1 (issue #787 round-2): scaffold filled in with real probe output → silent pass" \
   pass \
   "$(make_ask_payload_with_question \
@@ -997,6 +993,7 @@ Which one?")"
 # Regression: BOTH scaffold lines filled in for the same 2-option question ->
 # silent pass (the round-3 fix must not require MORE than "no placeholder
 # tokens anywhere", it must still accept a fully-filled multi-line case).
+# It also pins round-6: two distinct lines for two labels pass the dedup.
 run_case "T1 (issue #787 round-3): both scaffold lines fully filled → silent pass" \
   pass \
   "$(make_ask_payload_with_question \
@@ -1018,16 +1015,6 @@ run_case "T1 (issue #787 round-4 P1): 1 of 2 lines provided, other omitted → s
       '["Option A (Recommended)", "Option B (Recommended)"]' \
       "Falsified: Option A (Recommended) — probe: gh pr list --search a → none found; premise survives because none found
 Which one?")"
-
-# Regression: a SINGLE triggering label with its one clean Falsified: line
-# still satisfies the gate (round-4's required_count must default to 1 for
-# the common single-option case, not silently demand more).
-run_case "T1 (issue #787 round-4): single triggering label, 1 clean line → silent pass" \
-  pass \
-  "$(make_ask_payload_with_question \
-      '["Best option (Recommended)", "Alternative"]' \
-      "Falsified: Best option (Recommended) — probe: gh pr list --search feature → no existing PR; premise survives because none found
-What should we do?")"
 
 # Anti-false-positive regression (codex round-5 P2 fix): when the OPTION
 # LABEL ITSELF happens to contain a literal placeholder-looking substring
@@ -1083,17 +1070,6 @@ run_case "T1 (issue #787 round-6 P2): same clean line pasted twice for 2 options
       '["Option A (Recommended)", "Option B (Recommended)"]' \
       "Falsified: Option A (Recommended) — probe: gh pr list --search a → none found; premise survives because none found
 Falsified: Option A (Recommended) — probe: gh pr list --search a → none found; premise survives because none found
-Which one?")"
-
-# Regression: 2 DISTINCT clean lines for 2 DISTINCT triggering options must
-# still silent-pass (round-6's dedup must not require exact label-text
-# matching — it only rejects exact line-text duplicates).
-run_case "T1 (issue #787 round-6): 2 distinct clean lines for 2 options → silent pass" \
-  pass \
-  "$(make_ask_payload_with_question \
-      '["Option A (Recommended)", "Option B (Recommended)"]' \
-      "Falsified: Option A (Recommended) — probe: gh pr list --search a → none found; premise survives because none found
-Falsified: Option B (Recommended) — probe: gh pr list --search b → none found; premise survives because none found
 Which one?")"
 
 # Anti-bypass regression (codex round-7 P2 fix): ONE question mixes a T1

@@ -7,8 +7,7 @@
 # readlink loop (capped at 40 hops) before it computes SCRIPT_DIR. This suite
 # runs the script through a symlink in a temp "bin" dir that holds no copy of
 # the scanner, asserts it still finds claude-recover-scan next to the REAL
-# script, and drives the loop against a symlink cycle. The block's presence
-# and hop cap are also guarded in tests/test_cli_scripts_parity.sh.
+# script, and drives the loop against a symlink cycle.
 #
 # Determinism: every run uses --list (which never calls cmux) and an isolated
 # $HOME, so the scan sees an empty session store and exits 0 without touching
@@ -119,6 +118,8 @@ out=$(cat "$CYCLE_OUT")
 run_case "cycle: hop cap bails with exit 1 (no hang, no resolve)" "$rc" "1"
 echo "$out" | grep -q 'symlink resolution exceeded'
 run_case "cycle: error message names the hop cap" "$?" "0"
+printf '%s\n' "$BLOCK" | grep -q 'HOPS.*-gt 40'
+run_case "cycle: hop cap stays at 40" "$?" "0"
 
 # ---------------------------------------------------------------------------
 # Direct (non-symlink) invocation still works.
