@@ -5,6 +5,30 @@ All notable changes to praxis are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.22.1](https://github.com/devseunggwan/praxis/compare/v7.22.0...v7.22.1) (2026-11-03)
+
+
+### Fixed
+
+* **hermes:** keep gates on when transcript fails ([#1627](https://github.com/devseunggwan/praxis/issues/1627)) ([32bf67a](https://github.com/devseunggwan/praxis/commit/32bf67a53e461c91fcb013198374ae3b504e38fc))
+* **hermes:** read every delegate_task shape ([#1626](https://github.com/devseunggwan/praxis/issues/1626)) ([1e13804](https://github.com/devseunggwan/praxis/commit/1e1380447ec5ead06fa2edb6fe156b3956f1f10b))
+* **hermes:** read text of image-attached messages ([#1625](https://github.com/devseunggwan/praxis/issues/1625)) ([83a7e04](https://github.com/devseunggwan/praxis/commit/83a7e04d07e5ce3584599b6b9f09761786d282fd))
+* **hermes:** run gates in the session's cwd ([#1623](https://github.com/devseunggwan/praxis/issues/1623)) ([2d51021](https://github.com/devseunggwan/praxis/commit/2d510218733bb159919b9591118c9e3eb0bfb2a7))
+* **hermes:** split v4a patch calls per file ([#1624](https://github.com/devseunggwan/praxis/issues/1624)) ([e3205e6](https://github.com/devseunggwan/praxis/commit/e3205e6af882bbc9af219a8d4906cea3a0edb7b0))
+* **hooks:** read merge method words and per-section bulk repos ([#1605](https://github.com/devseunggwan/praxis/issues/1605)) ([68cfd34](https://github.com/devseunggwan/praxis/commit/68cfd340c507b3dae96ef16c510f0dadf6a2bc7b)), closes [#1604](https://github.com/devseunggwan/praxis/issues/1604)
+* **hooks:** stop fan-out-scope-gate counting the call it gates ([#1608](https://github.com/devseunggwan/praxis/issues/1608)) ([1c2f480](https://github.com/devseunggwan/praxis/commit/1c2f480c629240c2b656c47ae8b97f2b70de6ce9)), closes [#1607](https://github.com/devseunggwan/praxis/issues/1607)
+* **skills:** re-read before calling a PR unmerged ([#1612](https://github.com/devseunggwan/praxis/issues/1612)) ([6fc9b60](https://github.com/devseunggwan/praxis/commit/6fc9b609dc7a1cb8967ab736c0fe12a57a800381))
+* **skills:** upstream local edits, host-neutral ([#1610](https://github.com/devseunggwan/praxis/issues/1610)) ([cb40287](https://github.com/devseunggwan/praxis/commit/cb402874a3b320fb61e0e31f82349a74050f83ca))
+
+
+### Changed
+
+* bump actions/setup-python from 7.0.0 to 7.1.0 ([#1602](https://github.com/devseunggwan/praxis/issues/1602)) ([6afb115](https://github.com/devseunggwan/praxis/commit/6afb115ccad51ec9510305025b61bec77ce582dd))
+* bump reviewdog/action-actionlint from 1.80.2 to 1.80.8 ([#1615](https://github.com/devseunggwan/praxis/issues/1615)) ([c609bac](https://github.com/devseunggwan/praxis/commit/c609bacfc2301d300483581a23be17cfd4cccc0f))
+* bump the codeql-action group across 1 directory with 2 updates ([#1601](https://github.com/devseunggwan/praxis/issues/1601)) ([8f72822](https://github.com/devseunggwan/praxis/commit/8f7282258e7b7af9bbe71805ae2f7549106e936a))
+* **hermes:** fix bridge install note and explain matcher ([#1617](https://github.com/devseunggwan/praxis/issues/1617)) ([4fdcc76](https://github.com/devseunggwan/praxis/commit/4fdcc76c90318d909b236ef9115240fbaacf721e))
+* sync downstream praxis material ([#1614](https://github.com/devseunggwan/praxis/issues/1614)) ([f12665d](https://github.com/devseunggwan/praxis/commit/f12665d852143fc8260e356d4998c304116f5b7c))
+
 ## [7.22.0](https://github.com/devseunggwan/praxis/compare/v7.21.0...v7.22.0) (2026-10-23)
 
 
