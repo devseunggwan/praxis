@@ -1471,6 +1471,11 @@ cases = [
     (False, "1. yes\n2. b", "1. Approve merge of #999?\n   Only after the release.\n2. Follow-up?"),
     (True, "1. yes\n2. b", "1. Approve merge of #999?\n2. Follow-up?\n\nLet me know."),
     (False, "1. b\n2. ok", "1. Follow-up A?\n2. Follow-up B?\n\nApprove merge of #999?"),
+    # CodeRabbit on 369a2008: a negation in an answer about the merge holds it,
+    # whatever token ends the item.
+    (False, "1. don't merge #999, ok\n2. b", q1),
+    (False, "1. ok\n2. don't merge #999, ok", q1),
+    (False, "1. 머지하지 말고, 승인\n2. b", q1),
 ]
 for want, reply, asked in cases:
     got = m._is_approval_reply(reply, asked, "999" if asked else None)
@@ -1490,7 +1495,7 @@ if printf '%s\n' "$numbered_probe" | grep -q '^BAD '; then
   echo "FAIL  [approval_reply_numbered_surface]"
   printf '%s\n' "$numbered_probe" | grep '^BAD ' | sed 's/^/        /'
   FAIL=$((FAIL + 1)); FAILED_NAMES+=("approval_reply_numbered_surface")
-elif [ "$(printf '%s\n' "$numbered_probe" | grep -c '^ok  ')" -eq 72 ]; then
+elif [ "$(printf '%s\n' "$numbered_probe" | grep -c '^ok  ')" -eq 75 ]; then
   echo "PASS  [approval_reply_numbered_surface]"; PASS=$((PASS + 1))
 else
   echo "FAIL  [approval_reply_numbered_surface] probe=<$numbered_probe>"

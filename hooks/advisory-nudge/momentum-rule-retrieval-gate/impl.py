@@ -995,6 +995,11 @@ def _is_approval_reply(content: object, asked: str | None = None,
     # (`1. For #1001, approve`, `1. 1001 approve`), is not this merge's approval.
     if len(answers) != 1 or set(_REPLY_PR_RE.findall(answers[0])) - {pr}:
         return False
+    # A negation anywhere in an answer about the merge outweighs a trailing
+    # token: `1. don't merge #999, ok` holds the merge.
+    if any(_LABEL_NEGATION_RE.search(t) for n, t in items
+           if n == number or _mentions_pr(t, pr) or _MERGE_WORD_RE.search(t)):
+        return False
     if not _is_bare_approval(_strip_pr_ref(answers[0], pr).strip()):
         return False
     return not any((_mentions_pr(t, pr) or _MERGE_WORD_RE.search(t))
