@@ -134,7 +134,8 @@ run_case "--label enhancement + cited path (silent)" \
 
 # --- Axis A — body-level defect tokens ---------------------------------------
 
-# No transcript_path either: Arm B fails open and Arm A still warns.
+# No Caller-probe line (Arm A) and no transcript_path, so Arm B finds no
+# search probe: the cited path stays unprobed and warns.
 run_case "EN 'fails to' + cited path (warn)" \
   "warn" "advisory" \
   '{"tool_name":"Bash","tool_input":{"command":"gh pr comment 5 --body \"parser.py fails to reset the offset\""}}'
