@@ -450,6 +450,59 @@ def sync_transcript(session_id: str, out_dir: Path, db_path: Optional[Path] = No
     return out
 
 
+def session_cwd(session_id: str, db_path: Optional[Path] = None) -> Optional[str]:
+    """The directory a command moved this session to, or None when none did.
+
+    Hermes runs a `terminal` call without `workdir` in the session's own cwd
+    record, updated after every completed command (`tools/terminal_tool.py`
+    `_resolve_command_cwd`), not in its process cwd, which is what the hook
+    payload carries. The result of a command that changed directory echoes
+    the new one as `"cwd"` (`tools/terminal_tool_result.py`); a call with
+    `workdir` is never recorded. The record lives in Hermes's memory for the
+    whole process, so every row of the session counts, active or not. A
+    restarted process starts without it (a resumed CLI session starts in its
+    recorded start directory); a move made before the restart is still read
+    here.
+    """
+    if not session_id:
+        return None
+    db = db_path or state_db_path()
+    if not db.is_file():
+        return None
+    try:
+        conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=2)
+        conn.row_factory = sqlite3.Row
+        try:
+            rows = conn.execute(
+                "SELECT role, content, tool_call_id, tool_calls FROM messages "
+                "WHERE session_id = ? AND role IN ('assistant', 'tool') ORDER BY id",
+                (session_id,),
+            ).fetchall()
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        return None
+    recorded: Dict[str, bool] = {}  # terminal call id -> its cwd is recorded (no workdir)
+    cwd: Optional[str] = None
+    for row in rows:
+        if row["role"] == "assistant":
+            for call in _parse_json(row["tool_calls"]) or []:
+                fn = call.get("function") if isinstance(call, dict) else None
+                if not isinstance(fn, dict) or fn.get("name") != "terminal":
+                    continue
+                raw = fn.get("arguments")
+                args = _parse_json(raw) if isinstance(raw, str) else raw
+                call_id = str(call.get("id") or "")
+                if call_id:  # an id-less call cannot be paired with its result
+                    recorded[call_id] = not (isinstance(args, dict) and args.get("workdir"))
+        elif row["tool_call_id"] and recorded.get(str(row["tool_call_id"])):
+            data = _parse_json(row["content"])
+            moved = data.get("cwd") if isinstance(data, dict) else None
+            if isinstance(moved, str) and moved.strip():
+                cwd = moved
+    return cwd
+
+
 # --- decisions ----------------------------------------------------------------
 
 def parse_decision(stdout: str) -> Tuple[str, str, str, dict]:

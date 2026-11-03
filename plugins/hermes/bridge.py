@@ -79,13 +79,37 @@ def _transcript(session_id: str) -> str:
     return str(path) if path else ""
 
 
+def _cwd(hermes: dict, session_id: str) -> str:
+    """The directory Hermes runs this session's next command in.
+
+    The payload's `cwd` is Hermes's process directory (the install root under
+    the gateway). A `terminal` call without `workdir` runs in the directory
+    the session last moved to, else in `TERMINAL_CWD` (Hermes's default
+    terminal cwd, exported on every launch path). Both name a directory inside
+    the sandbox when `TERMINAL_ENV` is not `local` (docker, ssh, …), where a
+    path that happens to exist on this host is not the one the command runs
+    in, so then only the payload's `cwd` is used. A path that is not a local
+    directory is skipped.
+    """
+    if os.environ.get("TERMINAL_ENV", "local") != "local":
+        return str(hermes.get("cwd") or os.getcwd())
+    try:
+        moved = _hermes.session_cwd(session_id)
+    except Exception:  # noqa: BLE001 - a bad row must not stop the gates
+        moved = None
+    for candidate in (moved, os.environ.get("TERMINAL_CWD")):
+        if candidate and os.path.isdir(os.path.expanduser(candidate)):
+            return os.path.expanduser(candidate)
+    return str(hermes.get("cwd") or os.getcwd())
+
+
 def _base(hermes: dict, event: str) -> dict:
     session_id = str(hermes.get("session_id") or "")
     return {
         "hook_event_name": event,
         "session_id": session_id,
         "transcript_path": _transcript(session_id),
-        "cwd": str(hermes.get("cwd") or os.getcwd()),
+        "cwd": _cwd(hermes, session_id),
         "permission_mode": "default",
     }
 
