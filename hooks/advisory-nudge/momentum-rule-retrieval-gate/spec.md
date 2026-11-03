@@ -200,8 +200,9 @@ before approving). Safety gates on the extension:
   rules above (whole-token or final clause, a trailing `?` refuses), with a
   reference to the target PR inside it set aside (`1. #999 머지`). The
   whole-reply PR strip in `_is_typed_approval` is skipped for a numbered
-  reply, since it would also blank a list marker equal to the PR number (`2.`
-  for PR #2).
+  reply answering a numbered turn, since it would also blank a list marker
+  equal to the PR number (`2.` for PR #2); a numbered reply to a turn with no
+  numbered list keeps the strip with the final-clause rule.
 
   Reading the turn (`_merge_question_numbers`): fenced blocks are skipped;
   only top-level items count, so a nested sub-list is text of its parent item;

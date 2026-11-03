@@ -1381,9 +1381,12 @@ def _is_typed_approval(content: object, pr: str, asked: str | None = None) -> bo
     reply = _user_message_text(content)
     if _is_approval_reply(content, asked, pr):
         return True
-    # A numbered reply sets its PR references aside per item; blanking them
-    # here would also blank a list marker equal to the PR number (`2.` for #2).
-    if asked is not None and _numbered_items(reply.strip().lower()) != []:
+    # A numbered reply paired with a numbered turn sets its PR references aside
+    # per item; blanking them here would also blank a list marker equal to the
+    # PR number (`2.` for #2). Paired only then: otherwise the reply keeps the
+    # final-clause rule, strip included.
+    if (asked is not None and _numbered_items(reply.strip().lower()) != []
+            and _merge_question_numbers(asked, pr) is not None):
         return False
     return _mentions_pr(reply, pr) and _is_approval_reply(_strip_pr_ref(reply, pr), asked, pr)
 

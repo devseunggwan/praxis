@@ -1458,13 +1458,18 @@ for pr in ("1", "2"):
     asked = f"Briefing for PR #{pr}.\n1. Approve merge of #{pr}?\n2. Follow-up?"
     got = m._is_typed_approval("1. hold\n2. approve", pr, asked)
     print(("ok  " if not got else "BAD ") + f"typed approval, PR #{pr}, merge item holds")
+# A numbered reply to a turn with no numbered list keeps the whole-reply PR
+# strip of the final-clause rule, as on main.
+for asked in ("Briefing for PR #999. Approve merge?", ""):
+    got = m._is_typed_approval("1. #999 머지", "999", asked)
+    print(("ok  " if got else "BAD ") + f"typed approval, prose turn {asked[:12]!r}, PR named")
 PY_N
 )
 if printf '%s\n' "$numbered_probe" | grep -q '^BAD '; then
   echo "FAIL  [approval_reply_numbered_surface]"
   printf '%s\n' "$numbered_probe" | grep '^BAD ' | sed 's/^/        /'
   FAIL=$((FAIL + 1)); FAILED_NAMES+=("approval_reply_numbered_surface")
-elif [ "$(printf '%s\n' "$numbered_probe" | grep -c '^ok  ')" -eq 62 ]; then
+elif [ "$(printf '%s\n' "$numbered_probe" | grep -c '^ok  ')" -eq 64 ]; then
   echo "PASS  [approval_reply_numbered_surface]"; PASS=$((PASS + 1))
 else
   echo "FAIL  [approval_reply_numbered_surface] probe=<$numbered_probe>"
