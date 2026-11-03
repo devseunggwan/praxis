@@ -163,6 +163,18 @@ CASES = {
                  prose("Merge briefing\n\n" + section("PR #1001") + "\n"
                        "1. Approve merge?\n2. Should I start reviewing #999 next?"),
                  user("1. ok\n2. no")],
+    # A numbered hold on a later re-ask withdraws a numbered approval (serial).
+    "momentum-merge-numbered-serial-rehold.jsonl":
+        lambda: [*_numbered_serial("1. approve\n2. B"),
+                 prose("One more check before I merge.\n"
+                       "1. Approve merge of #1001?\n2. Follow-up: option A or option B?"),
+                 user("1. hold\n2. B"),
+                 prose("Merge briefing\n\n" + section("PR #1001") + "\nApprove merge of #1001?")],
+    # A merge ask naming the PR by URL is one sentence, dots and all.
+    "momentum-merge-numbered-url-ask.jsonl":
+        lambda: _numbered("1. approve\n2. ok",
+                          "1. Approve merge of https://github.com/o/r/pull/999?\n"
+                          "2. Follow-up: option A or option B?"),
 }
 
 

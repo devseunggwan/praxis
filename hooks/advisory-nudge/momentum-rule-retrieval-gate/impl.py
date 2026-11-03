@@ -512,6 +512,7 @@ _ITEM_ASK_QUALIFIER_RE = re.compile(
 # A line this long is not a question someone answers by number, and
 # `_ASK_SENTENCE_RE` is quadratic on a long line with no sentence end.
 _ITEM_LINE_MAX = 400
+_URL_RE = re.compile(r"https?://[^\s?]+")
 
 # The harness writes the interrupt as a `role: user` entry with this exact text
 # and no flag distinguishing it from typed input. Anchored at both ends: the
@@ -920,6 +921,9 @@ def _is_item_merge_ask(item: str, pr: str, only_target: bool) -> bool:
     lines = item.splitlines()
     if any(len(line) > _ITEM_LINE_MAX for line in lines):
         return False
+    # A URL's dots are not sentence ends: `Approve merge of
+    # https://github.com/o/r/pull/999?` is one ask.
+    lines = [_URL_RE.sub(lambda u: u.group().replace(".", "_"), line) for line in lines]
     asks = [s for line in lines for s in _ASK_SENTENCE_RE.findall(line)]
     head = (lines[0] if lines else "").strip().rstrip(" .。:：")
     if asks:
@@ -964,8 +968,12 @@ def _is_approval_reply(content: object, asked: str | None = None,
     if items is None or len(asked_numbers) != 1:
         return False
     number = next(iter(asked_numbers))
-    answers = [_strip_pr_ref(t, pr) for n, t in items if n == number]
-    if len(answers) != 1 or not _is_bare_approval(answers[0].strip()):
+    answers = [t for n, t in items if n == number]
+    # The answer may name the PR it approves; naming another one, `#` or bare
+    # (`1. For #1001, approve`, `1. 1001 approve`), is not this merge's approval.
+    if len(answers) != 1 or set(_REPLY_PR_RE.findall(answers[0])) - {pr}:
+        return False
+    if not _is_bare_approval(_strip_pr_ref(answers[0], pr).strip()):
         return False
     return not any((_mentions_pr(t, pr) or _MERGE_WORD_RE.search(t))
                    and not _is_bare_approval(t.strip())
@@ -1403,8 +1411,12 @@ def _held_after(entries: list[dict], idxs: list[int], index: int, pr: str) -> bo
         content = entries[j].get("message", {}).get("content")
         text = _user_message_text(content)
         asked = _assistant_text(entries, idxs[k - 1] + 1 if k else 0, j)
-        if ((_mentions_pr(text, pr) or _MERGE_WORD_RE.search(text))
-                and not _is_typed_approval(content, pr, asked)):
+        # A numbered answer to a numbered merge ask is about this merge even
+        # when it names neither the PR nor merging (`1. hold`).
+        about = (_mentions_pr(text, pr) or _MERGE_WORD_RE.search(text)
+                 or (_numbered_items(text.strip().lower()) != []
+                     and bool(_merge_question_numbers(asked, pr))))
+        if about and not _is_typed_approval(content, pr, asked):
             return True
     return False
 

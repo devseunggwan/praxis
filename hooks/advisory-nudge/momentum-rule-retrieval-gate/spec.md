@@ -227,7 +227,12 @@ before approving). Safety gates on the extension:
   hold off on the merge`); or when any other item mentions the PR or merging
   without being an approval token (`2. B, and don't merge yet`) — the latest
   word on the merge wins inside one message, as `_held_after` applies it
-  across messages.
+  across messages. An answer naming another PR, with `#` or bare (`1. For
+  #1001, approve`, `1. 1001 approve`), approves nothing here. Across messages,
+  `_held_after` also counts a numbered reply to a later turn whose numbered
+  list asks to merge the PR as being about the merge, so `1. hold` to a
+  re-asked question withdraws an earlier `1. approve`. A URL's dots do not end
+  the ask sentence (`1. Approve merge of https://github.com/o/r/pull/999?`).
 
   The pairing reads the same turn and target `_correlated_prior_turn_text`
   scores (`_last_reply_approves`), and `_answered_after` / `_held_after` pass

@@ -1355,6 +1355,12 @@ run_merge_escalation_case "merge_escalation_numbered_prep_ask_denies" \
   "yes" "" "momentum-merge-numbered-prep-ask.jsonl" "gh pr merge 999 --squash"
 run_merge_escalation_case "merge_escalation_numbered_other_pr_ask_denies" \
   "yes" "" "momentum-merge-numbered-other-pr-ask.jsonl" "gh pr merge 999 --squash"
+# Codex review of #1631: a later `1. hold` to a re-asked numbered merge question
+# withdraws the earlier `1. approve`, and a URL-named ask is still an ask.
+run_merge_escalation_case "merge_escalation_numbered_serial_rehold_denies" \
+  "yes" "" "momentum-merge-numbered-serial-rehold.jsonl" "gh pr merge 1001 --squash"
+run_merge_escalation_case "merge_escalation_numbered_url_ask_passes" \
+  "no" "" "momentum-merge-numbered-url-ask.jsonl" "gh pr merge 999 --squash"
 
 # The parser's own surface (issue #1630): marker spellings, item-level rules
 # kept from the final-clause reader, and the fallbacks. One line per case:
@@ -1450,6 +1456,11 @@ cases = [
     # list marker is never read as one (PR #2's `2.`).
     (True, "1. #999 머지\n2. b", q1),
     (False, "1. approve #1001\n2. b", q1),
+    # Codex review: an answer naming another PR, `#` or bare, approves nothing
+    # here; a URL in the merge ask does not split it.
+    (False, "1. for #1001, approve\n2. b", q1),
+    (False, "1. 1001 approve\n2. b", q1),
+    (True, "1. approve\n2. ok", "1. Approve merge of https://github.com/o/r/pull/999?\n2. Follow-up?"),
 ]
 for want, reply, asked in cases:
     got = m._is_approval_reply(reply, asked, "999" if asked else None)
@@ -1469,7 +1480,7 @@ if printf '%s\n' "$numbered_probe" | grep -q '^BAD '; then
   echo "FAIL  [approval_reply_numbered_surface]"
   printf '%s\n' "$numbered_probe" | grep '^BAD ' | sed 's/^/        /'
   FAIL=$((FAIL + 1)); FAILED_NAMES+=("approval_reply_numbered_surface")
-elif [ "$(printf '%s\n' "$numbered_probe" | grep -c '^ok  ')" -eq 64 ]; then
+elif [ "$(printf '%s\n' "$numbered_probe" | grep -c '^ok  ')" -eq 67 ]; then
   echo "PASS  [approval_reply_numbered_surface]"; PASS=$((PASS + 1))
 else
   echo "FAIL  [approval_reply_numbered_surface] probe=<$numbered_probe>"
