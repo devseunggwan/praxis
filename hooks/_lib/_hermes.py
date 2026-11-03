@@ -111,6 +111,85 @@ def delegate_tasks(args: dict) -> List[dict]:
     return out
 
 
+# Hermes's V4A patch grammar, byte-identical to `tools/patch_parser.py`
+# (`_BEGIN_MARKER`, `_END_MARKER`, `_OP_MARKERS`).
+_V4A_BEGIN = re.compile(r'^\*\*\*\s*Begin\s+Patch\s*$')
+_V4A_END = re.compile(r'^\*\*\*\s*End\s+Patch\s*$')
+_V4A_OPS: List[Tuple[str, "re.Pattern[str]"]] = [
+    ("update", re.compile(r'\*\*\*\s*Update\s+File:\s*(.+)')),
+    ("add", re.compile(r'\*\*\*\s*Add\s+File:\s*(.+)')),
+    ("delete", re.compile(r'\*\*\*\s*Delete\s+File:\s*(.+)')),
+    ("move", re.compile(r'\*\*\*\s*Move\s+File:\s*(.+?)\s*->\s*(.+)'))]
+
+
+def v4a_calls(patch: str) -> List[Tuple[str, dict]]:
+    """One Claude call per hunk or file a V4A `patch` call touches.
+
+    A V4A patch (`patch` with `mode: "patch"`) names its files in operation
+    headers, not in `path`. Lines are read as Hermes's `parse_v4a_patch` reads
+    them, including where it starts and stops, and a patch Hermes rejects as a
+    parse error (an empty path, an update with no hunk, a move with no
+    destination) becomes no call, as Hermes applies none of it. Each hunk of an
+    update becomes an `Edit` of its lines; an added file a `Write` of its
+    lines; a deleted file, and both paths of a move, an `Edit` with empty
+    strings, so gates that read the target path see every file and gates that
+    read written content are not shown an empty file.
+    """
+    lines = [line.removesuffix("\r") for line in patch.split("\n")]
+    start, end = -1, len(lines)
+    for i, line in enumerate(lines):
+        if _V4A_BEGIN.match(line):
+            start = i
+        elif _V4A_END.match(line):
+            end = i
+            break
+    ops: List[Dict[str, Any]] = []
+    op: Optional[Dict[str, Any]] = None
+    hunk: Optional[Dict[str, List[str]]] = None
+    for line in lines[start + 1:end]:
+        hit = next(((kind, m) for kind, rx in _V4A_OPS if (m := rx.match(line))), None)
+        if hit:
+            kind, m = hit
+            op = {"kind": kind, "path": m.group(1).strip(), "hunks": [],
+                  "to": m.group(2).strip() if kind == "move" else None}
+            ops.append(op)
+            hunk = None
+            if kind == "add":
+                hunk = {"old": [], "new": []}
+                op["hunks"].append(hunk)
+            elif kind in ("delete", "move"):
+                op = None
+        elif line.startswith("@@"):
+            if op is not None:
+                hunk = {"old": [], "new": []}
+                op["hunks"].append(hunk)
+        elif op is not None and line and line[0] != "\\":
+            if hunk is None:
+                hunk = {"old": [], "new": []}
+                op["hunks"].append(hunk)
+            mark, text = (line[0], line[1:]) if line[0] in "+- " else (" ", line)
+            if mark != "+":
+                hunk["old"].append(text)
+            if mark != "-":
+                hunk["new"].append(text)
+    for o in ops:
+        o["hunks"] = [h for h in o["hunks"] if h["old"] or h["new"]]
+        if not o["path"] or (o["kind"] == "update" and not o["hunks"]) or (o["kind"] == "move" and not o["to"]):
+            return []
+    calls: List[Tuple[str, dict]] = []
+    for o in ops:
+        if o["kind"] == "update":
+            calls.extend(("Edit", {"file_path": o["path"], "old_string": "\n".join(h["old"]),
+                                   "new_string": "\n".join(h["new"]), "replace_all": False}) for h in o["hunks"])
+        elif o["kind"] == "add":
+            content = "\n".join(text for h in o["hunks"] for text in h["new"])
+            calls.append(("Write", {"file_path": o["path"], "content": content}))
+        else:
+            calls.extend(("Edit", {"file_path": path, "old_string": "", "new_string": "", "replace_all": False})
+                         for path in (o["path"], o["to"]) if path)
+    return calls
+
+
 # Hermes tool -> (Claude tool, input translator). `delegate_task` is handled by
 # `claude_calls` because one Hermes call becomes several Claude calls.
 TOOLS: Dict[str, Tuple[str, Callable[[dict], dict]]] = {
@@ -127,6 +206,8 @@ def claude_calls(tool: str, args: dict) -> List[Tuple[str, dict]]:
     """The Claude `(tool_name, tool_input)` calls one Hermes call stands for."""
     if not isinstance(args, dict):
         args = {}
+    if tool == "patch" and args.get("mode") == "patch":
+        return v4a_calls(str(args.get("patch") or ""))
     if tool in TOOLS:
         name, translate = TOOLS[tool]
         if tool == "skill_view" and args.get("file_path"):

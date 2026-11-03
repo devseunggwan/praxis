@@ -196,10 +196,11 @@ def _hermes_matcher() -> str:
     matchers = [h.get("matcher") or "" for h in manifest.get("hooks", [])
                 if h.get("event") == "PreToolUse"
                 and (h.get("hosts") is None or _hermes.HOST_ID in h["hosts"])]
-    probes = {tool: name for tool, (name, _t) in _hermes.TOOLS.items()}
-    probes.update({"delegate_task": "Agent", "mcp__.*": "mcp__server__tool"})
-    tools = [tool for tool, name in probes.items()
-             if any(m and re.fullmatch(m, name) for m in matchers)]
+    probes = {tool: [name] for tool, (name, _t) in _hermes.TOOLS.items()}
+    # A V4A `patch` also becomes `Write` calls (added files).
+    probes.update({"patch": ["Edit", "Write"], "delegate_task": ["Agent"], "mcp__.*": ["mcp__server__tool"]})
+    tools = [tool for tool, names in probes.items()
+             if any(m and re.fullmatch(m, name) for m in matchers for name in names)]
     return "^(?:" + "|".join(tools) + ")$"
 
 

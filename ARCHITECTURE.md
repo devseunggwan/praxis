@@ -410,6 +410,13 @@ manifest's `hosts` field, the same filter the other platforms use.
 | `skill_view` (no `file_path`) | `Skill` |
 | `mcp__*` | unchanged |
 
+A `patch` call in V4A mode (`mode: "patch"`) names its files in
+`*** Update/Add/Delete/Move File:` headers. It is parsed with Hermes's own
+header grammar: each hunk of an update becomes an `Edit` of its lines, an added
+file a `Write` of its lines, and a deleted file, or both paths of a move, an
+`Edit` with empty strings. A patch Hermes rejects as a parse error becomes no
+call.
+
 **Transcript.** Hermes keeps each session's messages in `state.db` and writes
 the assistant message carrying a tool call before the call runs. On every call
 the bridge rewrites a Claude-shaped JSONL under
