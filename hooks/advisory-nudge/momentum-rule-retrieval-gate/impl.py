@@ -483,6 +483,36 @@ _APPROVAL_TOKENS = frozenset({
 # still fails, which is the property exact equality was protecting.
 _CLAUSE_TAIL_RE = re.compile(r"[.!?。…\n,;·]+")
 
+# A numbered-list line (`1. …`, `1) …`, `(1) …`, `1: …`, `1번 …`, with an
+# optional bullet, heading or bold around the marker). A reply that answers
+# numbered questions item by item puts the merge answer at the merge question's
+# number, not necessarily last, so the final-clause rule above would read the
+# answer to some other question (issue #1630). `1.5` and `10:30` are not markers.
+_LIST_ITEM_RE = re.compile(
+    r"^(?P<indent>[ \t>]*)(?:[-*+][ \t]+|#{1,6}[ \t]+)?[*_]{0,2}"
+    r"(?:\((?P<paren>\d{1,3})\)|(?P<num>\d{1,3})(?:\.(?!\d)|\)|:(?!\d)|[ \t]*번(?:[ \t]*[.):])?))"
+    r"[*_]{0,2}[ \t]*(?P<text>.*)$")
+# A numbered request list often asks with a noun phrase instead of a question
+# mark: `1. #999 머지 승인 여부`, `1. Whether to merge #999`. Only an item's
+# first line is read this way, and it still has to pass `_is_merge_ask` with
+# the `?` it leaves out — so `머지 완료 여부` stays a status question.
+_ITEM_ASK_RE = re.compile(r"(?:여부|할지요?)$|^whether(?![A-Za-z])", re.IGNORECASE)
+# Words that make a question about merging ask something else: when or under
+# what condition (`before merging #999?`, `#999 머지 전 CI 재실행 여부`), a hold
+# or delay, a step around the merge (rebase, rerun, delete the branch), or a
+# choice (`merge #999 or close it?`). `_is_merge_ask` accepts these, which an
+# unnumbered `yes` already relies on; a numbered reply is read only against a
+# plain ask. A match here only costs one more ask.
+_ITEM_ASK_QUALIFIER_RE = re.compile(
+    r"(?<![A-Za-z])(?:before|after|once|until|when|then|first|or|if|unless|wait|hold"
+    r"|defer|delay|postpone|later|rebase|re-?run|delete|close|instead)(?![A-Za-z])"
+    r"|(?:머지|병합)\s*(?:전|후|뒤)|전에|후에|뒤에|먼저|미루|미룰|대기|기다|보류|나중"
+    r"|리베이스|재실행|삭제|닫|아니면|또는|대신|말고|조건",
+    re.IGNORECASE)
+# A line this long is not a question someone answers by number, and
+# `_ASK_SENTENCE_RE` is quadratic on a long line with no sentence end.
+_ITEM_LINE_MAX = 400
+
 # The harness writes the interrupt as a `role: user` entry with this exact text
 # and no flag distinguishing it from typed input. Anchored at both ends: the
 # same phrase inside a longer message is the user quoting it, not an interrupt.
@@ -792,9 +822,8 @@ def _user_message_text(content: object) -> str:
     return ""
 
 
-def _is_approval_reply(content: object) -> bool:
-    """True when a user message is a short bare approval token (ok / 진행 / 승인 …)."""
-    raw = _user_message_text(content).strip().lower()
+def _is_bare_approval(raw: str) -> bool:
+    """True when lowercased `raw` is an approval token whole, or by its final clause."""
     # A reply that ends in a question asks rather than agrees: "Approve merge?"
     # typed back is the ask itself, and "ok?" is checking, not consent.
     if raw.endswith(("?", "？")):
@@ -808,6 +837,139 @@ def _is_approval_reply(content: object) -> bool:
     clauses = [re.sub(r"\s+", " ", c).strip(" .!~,·") for c in _CLAUSE_TAIL_RE.split(raw)]
     clauses = [c for c in clauses if c]
     return bool(clauses) and clauses[-1] in _APPROVAL_TOKENS
+
+
+def _numbered_items(text: str, strict: bool = True) -> list[tuple[int, str]] | None:
+    """`(number, text)` per top-level numbered item of `text`.
+
+    Top level is the shallowest marker indent; a deeper marker (a nested
+    sub-list) and an indented line continue the item above. Lines before the
+    first item are dropped. An unindented, unnumbered line after the first
+    item is no item's text: `strict` (a reply) returns None, since what it
+    says answers nothing by number; otherwise (assistant prose around its
+    own list) the line is dropped."""
+    lines = text.splitlines()
+    marks = [_LIST_ITEM_RE.match(line) for line in lines]
+    indents = [len(m.group("indent").expandtabs(4)) for m in marks if m]
+    if not indents:
+        return []
+    base = min(indents)
+    items: list[tuple[int, list[str]]] = []
+    for line, m in zip(lines, marks):
+        if m and len(m.group("indent").expandtabs(4)) == base:
+            items.append((int(m.group("paren") or m.group("num")), [m.group("text")]))
+        elif items:
+            if line.strip() and not line[:1].isspace() and not m:
+                if strict:
+                    return None
+                continue
+            items[-1][1].append(line)
+        elif strict and line.strip():
+            return None
+    return [(n, "\n".join(body)) for n, body in items]
+
+
+def _strip_fences(text: str) -> str:
+    """`text` without its fenced blocks (closed the CommonMark way, as
+    `_pr_sections` closes them); an unclosed fence runs to the end."""
+    kept: list[str] = []
+    fence: str | None = None
+    for line in text.splitlines():
+        f = _FENCE_LINE_RE.match(line)
+        if f is not None:
+            run = f.group("fence")
+            if fence is None:
+                fence = run
+            elif run[0] == fence[0] and len(run) >= len(fence) and not f.group("rest").strip():
+                fence = None
+            continue
+        if fence is None:
+            kept.append(line)
+    return "\n".join(kept)
+
+
+def _merge_question_numbers(asked: str, pr: str) -> set[int] | None:
+    """Numbers of the items in `asked`'s LAST numbered list that ask to merge
+    `pr`; None when `asked` has no numbered list at all.
+
+    A list restarts where a number does not exceed the one before it, so a
+    numbered six-item briefing followed by numbered questions yields the
+    questions: the ones the reply answers. Fenced blocks are skipped — log
+    output there is not a question."""
+    text = _strip_fences(asked)
+    items = _numbered_items(text, strict=False)
+    if not items:
+        return None
+    start = 0
+    for k in range(1, len(items)):
+        if items[k][0] <= items[k - 1][0]:
+            start = k
+    only_target = set(_PR_REF_RE.findall(text)) <= {pr}
+    return {n for n, t in items[start:] if _is_item_merge_ask(t, pr, only_target)}
+
+
+def _is_item_merge_ask(item: str, pr: str, only_target: bool) -> bool:
+    """True when a numbered item plainly asks to merge `pr`.
+
+    The item's LAST ask sentence is read — a `yes` answers the question asked
+    last (`Approve merge of #999? Or wait for the freeze?`). With no ask
+    sentence, a first line phrased as a request (`_ITEM_ASK_RE`) is one. The
+    ask must carry no qualifier (`_ITEM_ASK_QUALIFIER_RE`) or negation, and an
+    ask naming no PR counts only when the turn names no PR but `pr`: `1.
+    Approve merge?` in another PR's briefing is that PR's question."""
+    lines = item.splitlines()
+    if any(len(line) > _ITEM_LINE_MAX for line in lines):
+        return False
+    asks = [s for line in lines for s in _ASK_SENTENCE_RE.findall(line)]
+    head = (lines[0] if lines else "").strip().rstrip(" .。:：")
+    if asks:
+        ask = asks[-1]
+    elif _ITEM_ASK_RE.search(head):
+        ask = head + "?"
+    else:
+        return False
+    if _ITEM_ASK_QUALIFIER_RE.search(ask) or _LABEL_NEGATION_RE.search(ask):
+        return False
+    if not _PR_REF_RE.findall(ask) and not only_target:
+        return False
+    return _is_merge_ask(ask, pr)
+
+
+def _is_approval_reply(content: object, asked: str | None = None,
+                       pr: str | None = None) -> bool:
+    """True when a user message is a short bare approval token (ok / 진행 / 승인 …).
+
+    With `asked` (the assistant turn the message answers) and `pr`, a reply
+    written as a numbered list is read at the number of the item in that turn
+    asking to merge `pr` (issue #1630): `1. approve` / `2. go with your
+    recommendation` approves question 1 whichever line comes last. It fails
+    when the turn's last numbered list holds no single plain merge ask for
+    `pr`; when the reply has no item at that number, has it twice, starts
+    with text, or has an unindented line outside its items; or when another
+    item mentions the PR or merging without approving — the latest word on
+    the merge wins inside one message too. A turn with no numbered list
+    leaves the reply to the final-clause rule, as does an unnumbered reply.
+    A reference to `pr` in the answer is set aside (`1. #999 머지`), as
+    `_is_typed_approval` does for a whole reply.
+    """
+    raw = _user_message_text(content).strip().lower()
+    if asked is None or pr is None:
+        return _is_bare_approval(raw)
+    items = _numbered_items(raw)
+    if items == []:
+        return _is_bare_approval(raw)
+    asked_numbers = _merge_question_numbers(asked, pr)
+    if asked_numbers is None:
+        return _is_bare_approval(raw)
+    if items is None or len(asked_numbers) != 1:
+        return False
+    number = next(iter(asked_numbers))
+    answers = [_strip_pr_ref(t, pr) for n, t in items if n == number]
+    if len(answers) != 1 or not _is_bare_approval(answers[0].strip()):
+        return False
+    return not any((_mentions_pr(t, pr) or _MERGE_WORD_RE.search(t))
+                   and not _is_bare_approval(t.strip())
+                   for n, t in items if n != number)
 
 
 def _first_positional(tokens: list[str], value_flags: frozenset[str]) -> str | None:
@@ -1215,10 +1377,15 @@ def _merge_target_pr(entries: list[dict], command: object, floor: int) -> str | 
     return (m.group(1) or m.group(2)) if m else None
 
 
-def _is_typed_approval(content: object, pr: str) -> bool:
+def _is_typed_approval(content: object, pr: str, asked: str | None = None) -> bool:
     reply = _user_message_text(content)
-    return _is_approval_reply(content) or (
-        _mentions_pr(reply, pr) and _is_approval_reply(_strip_pr_ref(reply, pr)))
+    if _is_approval_reply(content, asked, pr):
+        return True
+    # A numbered reply sets its PR references aside per item; blanking them
+    # here would also blank a list marker equal to the PR number (`2.` for #2).
+    if asked is not None and _numbered_items(reply.strip().lower()) != []:
+        return False
+    return _mentions_pr(reply, pr) and _is_approval_reply(_strip_pr_ref(reply, pr), asked, pr)
 
 
 def _held_after(entries: list[dict], idxs: list[int], index: int, pr: str) -> bool:
@@ -1227,13 +1394,14 @@ def _held_after(entries: list[dict], idxs: list[int], index: int, pr: str) -> bo
     picked or declined AskUserQuestion answer withdraws it the same way."""
     if _ask_held_after(entries, index, pr):
         return True
-    for j in idxs:
+    for k, j in enumerate(idxs):
         if j <= index:
             continue
         content = entries[j].get("message", {}).get("content")
         text = _user_message_text(content)
+        asked = _assistant_text(entries, idxs[k - 1] + 1 if k else 0, j)
         if ((_mentions_pr(text, pr) or _MERGE_WORD_RE.search(text))
-                and not _is_typed_approval(content, pr)):
+                and not _is_typed_approval(content, pr, asked)):
             return True
     return False
 
@@ -1258,9 +1426,9 @@ def _answered_after(entries: list[dict], idxs: list[int], index: int,
         if i <= index:
             continue
         reply = _user_message_text(content)
-        if not _is_typed_approval(content, pr):
-            continue
         replied_to = _assistant_text(entries, max(index + 1, idxs[k - 1] + 1 if k else 0), i)
+        if not _is_typed_approval(content, pr, replied_to):
+            continue
         merge_named = _is_merge_ask(replied_to, pr) or _MERGE_WORD_RE.search(reply)
         if ((_mentions_pr(reply, pr) or (merge_named and _mentions_pr(replied_to, pr)))
                 and not _held_after(entries, idxs, i, pr)):
@@ -1295,6 +1463,19 @@ def _has_repetition(command: object) -> bool:
     return any(tok in _LOOP_KEYWORDS for tok in safe_tokenize(command))
 
 
+def _last_reply_approves(entries: list[dict], idxs: list[int], command: object,
+                         floor: int = 0) -> bool:
+    """True when the last user message approves, read against the turn it answers.
+
+    That turn is the one `_correlated_prior_turn_text` scores, and the merge
+    target is resolved the way it resolves it, so a numbered reply is paired
+    with the numbered merge ask the user actually saw (issue #1630)."""
+    prev_lo = max(idxs[-2] + 1 if len(idxs) >= 2 else 0, floor)
+    asked = _assistant_text(entries, prev_lo, idxs[-1])
+    return _is_approval_reply(entries[idxs[-1]].get("message", {}).get("content"),
+                              asked, _merge_target_pr(entries, command, prev_lo))
+
+
 def _correlated_prior_turn_text(entries: list[dict], idxs: list[int],
                                 command: object, floor: int = 0) -> str | None:
     """The prior-turn assistant text the gate may score, else None (issue #826).
@@ -1321,7 +1502,7 @@ def _correlated_prior_turn_text(entries: list[dict], idxs: list[int],
     # must not ride a single approval (No Approval Transfer) → no extension.
     if len(segments) != 1 or _has_repetition(command) or not idxs:
         return None
-    if not _is_approval_reply(entries[idxs[-1]].get("message", {}).get("content")):
+    if not _last_reply_approves(entries, idxs, command, floor):
         return None
 
     # On a long turn the briefing turn's opening message scrolls past the bounded
@@ -1405,7 +1586,7 @@ def _excluded_briefing_reason(entries: list[dict], idxs: list[int], command: obj
         return None
     if len(_merge_segments(command)) != 1 or _has_repetition(command):
         return "one approval releases one merge, and this command runs more than one"
-    if not _is_approval_reply(entries[idxs[-1]].get("message", {}).get("content")):
+    if not _last_reply_approves(entries, idxs, command, floor):
         return (f"the last user message (`{_excerpt(entries, idxs[-1])}`) is not an "
                 "approval reply, so no earlier turn was scored")
     if len(idxs) >= 2 and lo < idxs[-2] + 1:
