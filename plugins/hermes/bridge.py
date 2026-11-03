@@ -72,9 +72,16 @@ def _run(event: str, matcher: Optional[str], payload: dict) -> Tuple[int, str, s
 
 
 def _transcript(session_id: str) -> str:
+    """The rebuilt transcript's path, or "" when it cannot be built.
+
+    Any failure leaves the transcript empty, which the transcript-reading
+    gates treat as fail-open; the other gates still run. Letting it escape
+    would reach `main`'s last-resort `{}` and run no gate at all.
+    """
     try:
         path = _hermes.sync_transcript(session_id, Path(praxis_cache_dir()) / "hermes-transcripts")
-    except OSError:
+    except Exception as exc:  # noqa: BLE001 - one bad row must not turn every gate off
+        sys.stderr.write(f"praxis hermes bridge: transcript unavailable: {exc!r}\n")
         path = None
     return str(path) if path else ""
 

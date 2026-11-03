@@ -449,7 +449,8 @@ other tool result whose JSON carries a truthy `error` (a gate block) or a
 non-zero `exit_code` is marked `is_error`, as Claude Code marks a failed or
 denied call. `state.db` is Hermes-internal; an
 unreadable or changed schema leaves the transcript empty, which the
-transcript-reading gates already treat as fail-open.
+transcript-reading gates already treat as fail-open. Any other error while
+building it does the same, so the gates that do not read it still run.
 
 **Working directory.** The payload's `cwd` is Hermes's process directory (the
 install root under the gateway), but a `terminal` call without `workdir` runs
