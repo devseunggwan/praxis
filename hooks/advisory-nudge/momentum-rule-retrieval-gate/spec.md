@@ -237,7 +237,7 @@ before approving). Safety gates on the extension:
   its line, the item's later lines that are not option bullets, and
   unindented prose after the item (`1. Approve merge of #999? Only after the
   release.`, or an unindented `Or hold until Monday?` under it). Option
-  bullets under the ask (`   - (추천) 승인합니다`) are choices, not conditions.
+  bullets under the ask (`- (추천) 승인합니다`) are choices, not conditions.
 
   The pairing reads the same turn and target `_correlated_prior_turn_text`
   scores (`_last_reply_approves`), and `_answered_after` / `_held_after` pass
