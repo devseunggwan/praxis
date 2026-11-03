@@ -77,22 +77,30 @@ run_anchor_check() {
   fi
 }
 
-# The parser's regex needs the closing `-->` too, so the opener alone is not
-# the format: require a `-->` line after it, before the code fence closes.
+# The parser's regex needs the closing `-->` too, and Gate-5 reads the keys
+# inside: require `-->` before the fence closes, `scanned: true`, and the
+# three other keys (their values are placeholders here).
 run_comment_block_check() {
   local name="$1"
   local path="$2"
   local opener="$3"
   if awk -v opener="$opener" '
-    index($0, opener) { open = 1; next }
+    index($0, opener) { open = 1; body = ""; next }
     open && /^-->/ { found = 1; exit }
     open && /^```/ { open = 0 }
-    END { exit !found }
+    open { body = body "\n" $0 }
+    END {
+      if (!found) exit 1
+      if (body !~ /\n[ \t]*scanned: true[ \t]*(\n|$)/) exit 1
+      if (body !~ /\n[ \t]*candidates_reviewed:/) exit 1
+      if (body !~ /\n[ \t]*repeat:/) exit 1
+      if (body !~ /\n[ \t]*repeat_count:/) exit 1
+    }
   ' "$path"; then
     echo "PASS: $name"
     PASS=$((PASS + 1))
   else
-    echo "FAIL: $name — no '-->' closing '$opener' in $path"
+    echo "FAIL: $name — '$opener' block in $path lacks '-->' or a Gate-5 key"
     FAIL=$((FAIL + 1))
     FAILED_NAMES+=("$name")
   fi
