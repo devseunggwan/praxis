@@ -1311,6 +1311,197 @@ run_merge_escalation_case "merge_escalation_sentence_approval_en_passes" \
 run_merge_escalation_case "merge_escalation_trailing_instruction_denies" \
   "yes" "" "momentum-merge-sentence-trailing-instruction.jsonl" "gh pr merge 833 --squash"
 
+# A numbered reply to numbered questions is read at the merge question's number,
+# not by its final clause (issue #1630). Fixtures: tests/fixtures/merge_gate_fixtures.py.
+#
+#   first-item      Q1 merge, `1. approve / 2. go with your recommendation` → allow
+#   last-item       Q2 merge, `1. go with … / 2. approve`                   → allow
+#   first-item-ko   Q1 merge, `1. 머지 승인 / 2. 추천대로 진행해 주세요`        → allow
+#   hold-at-merge   Q1 merge, `1. hold / 2. approve` (main allowed it)      → deny
+#   hold-at-merge-ko  Q1 merge, `1. 보류 / 2. 진행` (main allowed it)         → deny
+#   unmatched       Q1 merge, `3. approve / 4. ok`                          → deny
+#   request-ko      `1. #999 머지 승인 여부` (no `?`), `1. 승인 / 2. 추천방향대로` → allow
+#   request-ko-hold same list, `1. 보류 / 2. 추천방향대로`                     → deny
+#   serial          #999 merged, Q1 merge #1001, `1. approve / 2. …`        → allow
+#   serial-hold     #999 merged, Q1 merge #1001, `1. hold / 2. approve`     → deny
+run_merge_escalation_case "merge_escalation_numbered_first_item_passes" \
+  "no" "" "momentum-merge-numbered-first-item.jsonl" "gh pr merge 999 --squash"
+run_merge_escalation_case "merge_escalation_numbered_last_item_passes" \
+  "no" "" "momentum-merge-numbered-last-item.jsonl" "gh pr merge 999 --squash"
+run_merge_escalation_case "merge_escalation_numbered_first_item_ko_passes" \
+  "no" "" "momentum-merge-numbered-first-item-ko.jsonl" "gh pr merge 999 --squash"
+run_merge_escalation_case "merge_escalation_numbered_hold_at_merge_item_denies" \
+  "yes" "" "momentum-merge-numbered-hold-at-merge-item.jsonl" "gh pr merge 999 --squash"
+run_merge_escalation_case "merge_escalation_numbered_hold_at_merge_item_ko_denies" \
+  "yes" "" "momentum-merge-numbered-hold-at-merge-item-ko.jsonl" "gh pr merge 999 --squash"
+run_merge_escalation_case "merge_escalation_numbered_unmatched_denies" \
+  "yes" "" "momentum-merge-numbered-unmatched.jsonl" "gh pr merge 999 --squash"
+# A request list asking `1. #999 머지 승인 여부` with option bullets and no `?`.
+run_merge_escalation_case "merge_escalation_numbered_request_ko_passes" \
+  "no" "" "momentum-merge-numbered-request-ko.jsonl" "gh pr merge 999 --squash"
+run_merge_escalation_case "merge_escalation_numbered_request_ko_hold_denies" \
+  "yes" "" "momentum-merge-numbered-request-ko-hold.jsonl" "gh pr merge 999 --squash"
+run_merge_escalation_case "merge_escalation_numbered_serial_passes" \
+  "no" "" "momentum-merge-numbered-serial.jsonl" "gh pr merge 1001 --squash"
+run_merge_escalation_case "merge_escalation_numbered_serial_hold_denies" \
+  "yes" "" "momentum-merge-numbered-serial-hold.jsonl" "gh pr merge 1001 --squash"
+# Same approving reply, different target: the answer to #999's question does
+# not release #1001.
+run_merge_escalation_case "merge_escalation_numbered_other_pr_denies" \
+  "yes" "" "momentum-merge-numbered-first-item.jsonl" "gh pr merge 1001 --squash"
+run_merge_escalation_case "merge_escalation_numbered_trailing_hold_denies" \
+  "yes" "" "momentum-merge-numbered-trailing-hold.jsonl" "gh pr merge 999 --squash"
+run_merge_escalation_case "merge_escalation_numbered_prep_ask_denies" \
+  "yes" "" "momentum-merge-numbered-prep-ask.jsonl" "gh pr merge 999 --squash"
+run_merge_escalation_case "merge_escalation_numbered_other_pr_ask_denies" \
+  "yes" "" "momentum-merge-numbered-other-pr-ask.jsonl" "gh pr merge 999 --squash"
+# Codex review of #1631: a later `1. hold` to a re-asked numbered merge question
+# withdraws the earlier `1. approve`, and a URL-named ask is still an ask.
+run_merge_escalation_case "merge_escalation_numbered_serial_rehold_denies" \
+  "yes" "" "momentum-merge-numbered-serial-rehold.jsonl" "gh pr merge 1001 --squash"
+run_merge_escalation_case "merge_escalation_numbered_url_ask_passes" \
+  "no" "" "momentum-merge-numbered-url-ask.jsonl" "gh pr merge 999 --squash"
+run_merge_escalation_case "merge_escalation_numbered_trailing_condition_denies" \
+  "yes" "" "momentum-merge-numbered-trailing-condition.jsonl" "gh pr merge 999 --squash"
+
+# The parser's own surface (issue #1630): marker spellings, item-level rules
+# kept from the final-clause reader, and the fallbacks. One line per case:
+# expected, reply, asked turn (`-` = none).
+numbered_probe=$(python3 - "$ROOT_DIR" <<'PY_N'
+import importlib.util as u, sys
+spec = u.spec_from_file_location(
+    "m", f"{sys.argv[1]}/hooks/advisory-nudge/momentum-rule-retrieval-gate/impl.py")
+m = u.module_from_spec(spec); spec.loader.exec_module(m)
+q1 = "Briefing for PR #999.\n\n1. Approve merge of #999?\n2. Follow-up: A or B?"
+q2 = "Briefing for PR #999.\n\n1. Follow-up: A or B?\n2. Approve merge of #999?"
+qko = "PR #999 브리핑.\n\n1. #999 머지할까요?\n2. 후속 작업은 A, B 중 무엇으로 할까요?"
+q_unnumbered = "Briefing for PR #999. Approve merge?"
+q_followups_only = "Briefing for PR #999. Approve merge?\n\n1. Follow-up A?\n2. Follow-up B?"
+q_two_merge = "1. Merge #999 now?\n2. Approve merging #999 tonight?"
+q_brief_then_q = ("1. What changed: x\n2. Verified: y\n3. Approve merge of #999?\n\n"
+                  "1. Approve merge of #999?\n2. Follow-up: A or B?")
+q_fenced = q1 + "\n```\n1. log line\n2. log line\n```"
+q_other_pr = "1. Approve merge of #1001?\n2. Follow-up: A or B?"
+q_request_ko = ("1. #999 머지 승인 여부\n   - (추천) 승인합니다.\n   - 보류합니다.\n"
+                "2. 머지 뒤 체크아웃 갱신 순서\n   - (추천) 재시작한 뒤 갱신합니다.")
+cases = [
+    (True, "approve", None),
+    (False, "1. approve\n2. go with your recommendation", None),
+    (True, "2. go with your recommendation\n1. approve", None),
+    (True, "1. approve", None),
+    (True, "1. approve\n2. go with your recommendation", q1),
+    (True, "1. go with your recommendation\n2. approve", q2),
+    (True, "2. approve\n1. go with your recommendation", q2),
+    (False, "1. hold\n2. approve", q1),
+    (False, "3. approve\n4. ok", q1),
+    (False, "2. ok", q1),
+    (True, "1. 머지 승인\n2. 추천대로 진행해 주세요", qko),
+    (False, "1. 보류\n2. 진행", qko),
+    (True, "1) 진행\n2) b", qko),
+    (True, "(1) 진행\n(2) b", qko),
+    (True, "1: ok\n2: b", qko),
+    (True, "1번 승인\n2번 b", qko),
+    (True, "1번: 승인\n2번: b", qko),
+    (True, "- 1. ok\n- 2. b", q1),
+    (True, "**1.** approve\n**2.** b", q1),
+    (True, "01. approve\n02. b", q1),
+    (False, "1. 머지 진행 상황 알려주고 파서부터 고쳐줘\n2. ok", q1),
+    (False, "1. approve?\n2. ok", q1),
+    (False, "1. approve\n1. hold\n2. ok", q1),
+    (False, "answers:\n1. approve\n2. ok", q1),
+    (False, "1. approve\n   but rebase first\n2. ok", q1),
+    (True, "1. approve", q_unnumbered),
+    (False, "1. ok\n2. ok", q_followups_only),
+    (False, "1. ok\n2. b", q_two_merge),
+    # Item 2 asks around the merge (`or`, `after`), so item 1 is the only ask.
+    (True, "1. ok\n2. b", "1. Merge #999 now?\n2. Or merge #999 after the rebase?"),
+    (True, "1. approve\n2. b", q_brief_then_q),
+    (False, "3. approve\n2. b", q_brief_then_q),
+    (True, "1. approve\n2. b", q_fenced),
+    (False, "1. approve\n2. b", q_other_pr),
+    (True, "ok, merge it", q1),
+    (False, "merge it but rebase first", q1),
+    # `1.5` is not a list marker, so this is a free-form reply (final clause).
+    (True, "1.5 seconds\napprove", q1),
+    # A request list asks with a noun phrase, not a `?`.
+    (True, "1. 승인\n2. 추천방향대로", q_request_ko),
+    (False, "1. 보류\n2. 추천방향대로", q_request_ko),
+    (True, "1. approve\n2. b", "1. Whether to merge #999.\n2. Follow-up order"),
+    (False, "1. ok\n2. b", "1. #999 머지 완료 여부\n2. 후속 순서"),
+    (False, "1. ok\n2. b", "1. #999 리뷰 여부\n2. 후속 순서"),
+    # Review round 1: a later word on the merge in the same reply wins.
+    (False, "1. approve\n2. b\n\nactually, hold off on the merge for now.", q1),
+    (False, "1. 승인\n2. b\n\n아 잠깐, 머지는 내일 할게요. 보류", qko),
+    (False, "1. approve\n2. b, and actually don't merge yet", q1),
+    (False, "1. ok\n   - but only after the release, hold for now\n2. b", q1),
+    # ...an ask about when, around, or instead of the merge is not the merge ask.
+    (False, "1. yes\n2. b", "1. Hold the merge of #999 until Monday?\n2. Follow-up?"),
+    (False, "1. yes\n2. b", "1. Re-run CI before merging #999?\n2. Follow-up?"),
+    (False, "1. yes\n2. b", "1. Delete the branch after merging #999?\n2. Follow-up?"),
+    (False, "1. 네\n2. b", "1. #999 머지 전에 리베이스할까요?\n2. 후속?"),
+    (False, "1. 승인\n2. b", "1. #999 머지 보류 여부\n2. 후속 작업 선택"),
+    (False, "1. 승인\n2. b", "1. #999 머지 후 브랜치 삭제 여부\n2. 후속 작업 선택"),
+    (False, "1. yes\n2. b", "1. Whether to merge #999 or close it\n2. Follow-up"),
+    # ...the item's last ask is what `yes` answers.
+    (False, "1. yes\n2. b", "1. Approve merge of #999? Or should I wait for the freeze?\n2. Follow-up?"),
+    # ...an unnamed ask belongs to this PR only when the turn names no other.
+    (True, "1. ok\n2. b", "Briefing for PR #999.\n1. Approve merge?\n2. Follow-up?"),
+    (False, "1. ok\n2. no", "## PR #1001\n1. Approve merge?\n2. Should I start reviewing #999 next?"),
+    # ...a nested sub-list is part of its parent item, not the last list.
+    (False, "1. yes\n2. no, hold",
+     "1. Should I rebase onto main first?\n2. Merge plan:\n   1. Approve merge of #999?\n   2. Delete the branch after?"),
+    # ...a quoted question list before the answers is text before the first item.
+    (False, "> 1. approve merge of #999?\n> 2. follow-up?\n1. ok\n2. b", q1),
+    # ...an over-long line voids the item (and bounds _ASK_SENTENCE_RE's cost).
+    (False, "1. ok\n2. b", "1. Approve merge of #999?\n   " + "x" * 500 + " Or wait?\n2. Follow-up?"),
+    # Review round 2: a PR reference inside the answer is set aside, but the
+    # list marker is never read as one (PR #2's `2.`).
+    (True, "1. #999 머지\n2. b", q1),
+    (False, "1. approve #1001\n2. b", q1),
+    # Codex review: an answer naming another PR, `#` or bare, approves nothing
+    # here; a URL in the merge ask does not split it.
+    (False, "1. for #1001, approve\n2. b", q1),
+    (False, "1. 1001 approve\n2. b", q1),
+    (True, "1. approve\n2. ok", "1. Approve merge of https://github.com/o/r/pull/999?\n2. Follow-up?"),
+    # Codex review round 2: a condition or follow-up question after the ask —
+    # same line, an indented line, or unindented prose — keeps it from being a
+    # plain ask; harmless prose and option bullets do not.
+    (False, "1. yes\n2. b", "1. Approve merge of #999?\nOr hold until Monday?\n2. Follow-up?"),
+    (False, "1. yes\n2. b", "1. Approve merge of #999? Only after the release.\n2. Follow-up?"),
+    (False, "1. yes\n2. b", "1. Approve merge of #999?\n   Only after the release.\n2. Follow-up?"),
+    (True, "1. yes\n2. b", "1. Approve merge of #999?\n2. Follow-up?\n\nLet me know."),
+    (False, "1. b\n2. ok", "1. Follow-up A?\n2. Follow-up B?\n\nApprove merge of #999?"),
+    # CodeRabbit on 369a2008: a negation in an answer about the merge holds it,
+    # whatever token ends the item.
+    (False, "1. don't merge #999, ok\n2. b", q1),
+    (False, "1. ok\n2. don't merge #999, ok", q1),
+    (False, "1. 머지하지 말고, 승인\n2. b", q1),
+]
+for want, reply, asked in cases:
+    got = m._is_approval_reply(reply, asked, "999" if asked else None)
+    print(("ok  " if got == want else "BAD ") + repr(reply) + " asked=" + repr((asked or "-")[:30]))
+for pr in ("1", "2"):
+    asked = f"Briefing for PR #{pr}.\n1. Approve merge of #{pr}?\n2. Follow-up?"
+    got = m._is_typed_approval("1. hold\n2. approve", pr, asked)
+    print(("ok  " if not got else "BAD ") + f"typed approval, PR #{pr}, merge item holds")
+# A numbered reply to a turn with no numbered list keeps the whole-reply PR
+# strip of the final-clause rule, as on main.
+for asked in ("Briefing for PR #999. Approve merge?", ""):
+    got = m._is_typed_approval("1. #999 머지", "999", asked)
+    print(("ok  " if got else "BAD ") + f"typed approval, prose turn {asked[:12]!r}, PR named")
+PY_N
+)
+if printf '%s\n' "$numbered_probe" | grep -q '^BAD '; then
+  echo "FAIL  [approval_reply_numbered_surface]"
+  printf '%s\n' "$numbered_probe" | grep '^BAD ' | sed 's/^/        /'
+  FAIL=$((FAIL + 1)); FAILED_NAMES+=("approval_reply_numbered_surface")
+elif [ "$(printf '%s\n' "$numbered_probe" | grep -c '^ok  ')" -eq 75 ]; then
+  echo "PASS  [approval_reply_numbered_surface]"; PASS=$((PASS + 1))
+else
+  echo "FAIL  [approval_reply_numbered_surface] probe=<$numbered_probe>"
+  FAIL=$((FAIL + 1)); FAILED_NAMES+=("approval_reply_numbered_surface")
+fi
+
 # The deny message must not present the env bypass as an inline prefix (issue
 # #1087). The hook is spawned by the harness, not as a child of the command, so
 # `PRAXIS_MOMENTUM_MERGE_ADVISORY=1 gh pr merge …` can never reach it — guidance
