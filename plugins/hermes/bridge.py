@@ -72,11 +72,42 @@ def _run(event: str, matcher: Optional[str], payload: dict) -> Tuple[int, str, s
 
 
 def _transcript(session_id: str) -> str:
+    """The rebuilt transcript's path, or "" when it cannot be built.
+
+    Any failure leaves the transcript empty, which the transcript-reading
+    gates treat as fail-open; the other gates still run. Letting it escape
+    would reach `main`'s last-resort `{}` and run no gate at all.
+    """
     try:
         path = _hermes.sync_transcript(session_id, Path(praxis_cache_dir()) / "hermes-transcripts")
-    except OSError:
+    except Exception as exc:  # noqa: BLE001 - one bad row must not turn every gate off
+        sys.stderr.write(f"praxis hermes bridge: transcript unavailable: {exc!r}\n")
         path = None
     return str(path) if path else ""
+
+
+def _cwd(hermes: dict, session_id: str) -> str:
+    """The directory Hermes runs this session's next command in.
+
+    The payload's `cwd` is Hermes's process directory (the install root under
+    the gateway). A `terminal` call without `workdir` runs in the directory
+    the session last moved to, else in `TERMINAL_CWD` (Hermes's default
+    terminal cwd, exported on every launch path). Both name a directory inside
+    the sandbox when `TERMINAL_ENV` is not `local` (docker, ssh, …), where a
+    path that happens to exist on this host is not the one the command runs
+    in, so then only the payload's `cwd` is used. A path that is not a local
+    directory is skipped.
+    """
+    if os.environ.get("TERMINAL_ENV", "local") != "local":
+        return str(hermes.get("cwd") or os.getcwd())
+    try:
+        moved = _hermes.session_cwd(session_id)
+    except Exception:  # noqa: BLE001 - a bad row must not stop the gates
+        moved = None
+    for candidate in (moved, os.environ.get("TERMINAL_CWD")):
+        if candidate and os.path.isdir(os.path.expanduser(candidate)):
+            return os.path.expanduser(candidate)
+    return str(hermes.get("cwd") or os.getcwd())
 
 
 def _base(hermes: dict, event: str) -> dict:
@@ -85,7 +116,7 @@ def _base(hermes: dict, event: str) -> dict:
         "hook_event_name": event,
         "session_id": session_id,
         "transcript_path": _transcript(session_id),
-        "cwd": str(hermes.get("cwd") or os.getcwd()),
+        "cwd": _cwd(hermes, session_id),
         "permission_mode": "default",
     }
 
@@ -142,9 +173,13 @@ def pre_tool_call(hermes: dict) -> dict:
 
 def pre_llm_call(hermes: dict) -> dict:
     extra = hermes.get("extra") or {}
-    prompt = extra.get("user_message")
-    if not isinstance(prompt, str):
+    raw = extra.get("user_message")
+    if not isinstance(raw, (str, list)):
         return {}
+    # A message with an image arrives as a list of parts; gates read its text.
+    prompt = raw if isinstance(raw, str) else "\n".join(t for t in map(_hermes.part_text, raw) if t)
+    if isinstance(raw, list) and not prompt.strip():
+        return {}  # an image-only message: no text for the prompt gates
     payload = dict(_base(hermes, "UserPromptSubmit"), prompt=prompt)
     contexts: List[str] = []
     for matcher in _groups("UserPromptSubmit", None):
@@ -172,10 +207,11 @@ def _hermes_matcher() -> str:
     matchers = [h.get("matcher") or "" for h in manifest.get("hooks", [])
                 if h.get("event") == "PreToolUse"
                 and (h.get("hosts") is None or _hermes.HOST_ID in h["hosts"])]
-    probes = {tool: name for tool, (name, _t) in _hermes.TOOLS.items()}
-    probes.update({"delegate_task": "Agent", "mcp__.*": "mcp__server__tool"})
-    tools = [tool for tool, name in probes.items()
-             if any(m and re.fullmatch(m, name) for m in matchers)]
+    probes = {tool: [name] for tool, (name, _t) in _hermes.TOOLS.items()}
+    # A V4A `patch` also becomes `Write` calls (added files).
+    probes.update({"patch": ["Edit", "Write"], "delegate_task": ["Agent"], "mcp__.*": ["mcp__server__tool"]})
+    tools = [tool for tool, names in probes.items()
+             if any(m and re.fullmatch(m, name) for m in matchers for name in names)]
     return "^(?:" + "|".join(tools) + ")$"
 
 

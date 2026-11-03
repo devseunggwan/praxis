@@ -94,21 +94,119 @@ def delegate_tasks(args: dict) -> List[dict]:
     `delegate_task` spawns a batch; Claude spawns each subagent with its own
     `Agent` call. Fan-out gates count those calls, so a batch of N becomes N
     inputs. Control actions (`list` / `steer` / `stop`) spawn nothing.
+
+    The batch is read as Hermes's `_normalize_task_list` reads it
+    (`tools/delegate_tool_tasks.py`): `tasks` sent as a JSON string is parsed,
+    an empty `tasks` counts as none, and then a top-level `goal` (the legacy
+    single-goal shape) is a one-task batch. A batch Hermes rejects outright (a
+    task that is not an object, or has no goal) spawns nothing. Its batch
+    quality checks (too many tasks, placeholder or very short goals) are not
+    copied: such a batch still reaches the gates, which can only ask too often.
     """
     if (args.get("action") or "spawn") != "spawn":
         return []
+    tasks = args.get("tasks")
+    if isinstance(tasks, str):
+        tasks = _parse_json(tasks)
+        if not isinstance(tasks, list):
+            return []  # Hermes rejects the call: nothing is spawned
+    if not (isinstance(tasks, list) and tasks):
+        goal = args.get("goal")
+        tasks = [{"goal": goal, "context": args.get("context")}] if isinstance(goal, str) and goal.strip() else []
+    # Hermes rejects the whole call when any task is not an object or has no goal.
+    if not all(isinstance(t, dict) and isinstance(t.get("goal"), str) and t["goal"].strip() for t in tasks):
+        return []
     out = []
-    for task in args.get("tasks") or []:
-        if not isinstance(task, dict):
-            continue
-        goal = str(task.get("goal") or "")
-        context = str(task.get("context") or "")
+    for task in tasks:
+        goal = task["goal"]
+        raw_context = task.get("context")
+        context = raw_context if isinstance(raw_context, str) else (
+            "" if raw_context is None else json.dumps(raw_context, ensure_ascii=False, default=str))
         out.append({
             "description": goal[:80],
             "prompt": goal + ("\n\n" + context if context else ""),
             "subagent_type": "general-purpose",
         })
     return out
+
+
+# Hermes's V4A patch grammar, byte-identical to `tools/patch_parser.py`
+# (`_BEGIN_MARKER`, `_END_MARKER`, `_OP_MARKERS`).
+_V4A_BEGIN = re.compile(r'^\*\*\*\s*Begin\s+Patch\s*$')
+_V4A_END = re.compile(r'^\*\*\*\s*End\s+Patch\s*$')
+_V4A_OPS: List[Tuple[str, "re.Pattern[str]"]] = [
+    ("update", re.compile(r'\*\*\*\s*Update\s+File:\s*(.+)')),
+    ("add", re.compile(r'\*\*\*\s*Add\s+File:\s*(.+)')),
+    ("delete", re.compile(r'\*\*\*\s*Delete\s+File:\s*(.+)')),
+    ("move", re.compile(r'\*\*\*\s*Move\s+File:\s*(.+?)\s*->\s*(.+)'))]
+
+
+def v4a_calls(patch: str) -> List[Tuple[str, dict]]:
+    """One Claude call per hunk or file a V4A `patch` call touches.
+
+    A V4A patch (`patch` with `mode: "patch"`) names its files in operation
+    headers, not in `path`. Lines are read as Hermes's `parse_v4a_patch` reads
+    them, including where it starts and stops, and a patch Hermes rejects as a
+    parse error (an empty path, an update with no hunk, a move with no
+    destination) becomes no call, as Hermes applies none of it. Each hunk of an
+    update becomes an `Edit` of its lines; an added file a `Write` of its
+    lines; a deleted file, and both paths of a move, an `Edit` with empty
+    strings, so gates that read the target path see every file and gates that
+    read written content are not shown an empty file.
+    """
+    lines = [line.removesuffix("\r") for line in patch.split("\n")]
+    start, end = -1, len(lines)
+    for i, line in enumerate(lines):
+        if _V4A_BEGIN.match(line):
+            start = i
+        elif _V4A_END.match(line):
+            end = i
+            break
+    ops: List[Dict[str, Any]] = []
+    op: Optional[Dict[str, Any]] = None
+    hunk: Optional[Dict[str, List[str]]] = None
+    for line in lines[start + 1:end]:
+        hit = next(((kind, m) for kind, rx in _V4A_OPS if (m := rx.match(line))), None)
+        if hit:
+            kind, m = hit
+            op = {"kind": kind, "path": m.group(1).strip(), "hunks": [],
+                  "to": m.group(2).strip() if kind == "move" else None}
+            ops.append(op)
+            hunk = None
+            if kind == "add":
+                hunk = {"old": [], "new": []}
+                op["hunks"].append(hunk)
+            elif kind in ("delete", "move"):
+                op = None
+        elif line.startswith("@@"):
+            if op is not None:
+                hunk = {"old": [], "new": []}
+                op["hunks"].append(hunk)
+        elif op is not None and line and line[0] != "\\":
+            if hunk is None:
+                hunk = {"old": [], "new": []}
+                op["hunks"].append(hunk)
+            mark, text = (line[0], line[1:]) if line[0] in "+- " else (" ", line)
+            if mark != "+":
+                hunk["old"].append(text)
+            if mark != "-":
+                hunk["new"].append(text)
+    for o in ops:
+        o["hunks"] = [h for h in o["hunks"] if h["old"] or h["new"]]
+        if not o["path"] or (o["kind"] == "update" and not o["hunks"]) or (o["kind"] == "move" and not o["to"]):
+            return []
+    calls: List[Tuple[str, dict]] = []
+    for o in ops:
+        if o["kind"] == "update":
+            calls.extend(("Edit", {"file_path": o["path"], "old_string": "\n".join(h["old"]),
+                                   "new_string": "\n".join(h["new"]), "replace_all": False}) for h in o["hunks"])
+        elif o["kind"] == "add":
+            content = "\n".join(text for h in o["hunks"] for text in h["new"])
+            calls.append(("Write", {"file_path": o["path"], "content": content}))
+        else:
+            calls.extend(("Edit", {"file_path": path, "old_string": "", "new_string": "", "replace_all": False})
+                         for path in (o["path"], o["to"]) if path)
+    return calls
 
 
 # Hermes tool -> (Claude tool, input translator). `delegate_task` is handled by
@@ -127,6 +225,8 @@ def claude_calls(tool: str, args: dict) -> List[Tuple[str, dict]]:
     """The Claude `(tool_name, tool_input)` calls one Hermes call stands for."""
     if not isinstance(args, dict):
         args = {}
+    if tool == "patch" and args.get("mode") == "patch":
+        return v4a_calls(str(args.get("patch") or ""))
     if tool in TOOLS:
         name, translate = TOOLS[tool]
         if tool == "skill_view" and args.get("file_path"):
@@ -153,6 +253,50 @@ def _parse_json(raw: Any) -> Any:
         return json.loads(raw)
     except ValueError:
         return None
+
+
+# Hermes stores non-string message content (a user message with an image is a
+# list of parts) as this prefix plus JSON: `_CONTENT_JSON_PREFIX` in
+# `hermes_state.py`, written by `_encode_content` in `hermes_state_messages.py`.
+_CONTENT_JSON_PREFIX = "\x00json:"
+
+
+def part_text(part: Any) -> str:
+    """A part's text, read as `_transcript.read_last_user_record` reads one:
+    a string, or a `text` part (typed `text` or untyped)."""
+    if isinstance(part, str):
+        return part
+    if isinstance(part, dict) and part.get("type", "text") == "text" and isinstance(part.get("text"), str):
+        return part["text"]
+    return ""
+
+
+def content_text(raw: Any) -> str:
+    """The text of one Hermes message content, stored in `state.db` or passed to a hook.
+
+    Decodes the `\\x00json:` form as Hermes's `_decode_content` does (a
+    malformed one stays the raw string; a prefixed literal string is
+    double-encoded) and keeps the text parts of a parts list, so gates read
+    what the user wrote, not the stored JSON. Content with no text part (an
+    image-only message, a JSON object, a number) is kept as its JSON, so it is
+    never read as an empty message that a gate skips past.
+    """
+    if isinstance(raw, str):
+        if not raw.startswith(_CONTENT_JSON_PREFIX):
+            return raw
+        try:
+            raw = json.loads(raw[len(_CONTENT_JSON_PREFIX):])
+        except ValueError:
+            return raw
+        if isinstance(raw, str):
+            return raw
+    if raw is None:
+        return ""
+    if isinstance(raw, bytes):
+        return raw.decode("utf-8", "replace")
+    parts = raw if isinstance(raw, list) else [raw] if isinstance(raw, dict) else []
+    text = "\n".join(t for t in map(part_text, parts) if t)
+    return text or json.dumps(raw, ensure_ascii=False, default=str)
 
 
 def _clarify_answer_text(result: Any) -> Optional[str]:
@@ -190,8 +334,8 @@ def tool_use_id(call_id: str, index: int) -> str:
 def _assistant_event(row: sqlite3.Row) -> Tuple[dict, Dict[str, str]]:
     """Claude assistant event for one Hermes assistant row, plus id -> Hermes tool."""
     blocks: List[dict] = []
-    text = row["content"]
-    if isinstance(text, str) and text.strip():
+    text = content_text(row["content"])
+    if text.strip():
         blocks.append({"type": "text", "text": text})
     names: Dict[str, str] = {}
     for call in _parse_json(row["tool_calls"]) or []:
@@ -211,7 +355,7 @@ def _assistant_event(row: sqlite3.Row) -> Tuple[dict, Dict[str, str]]:
 
 
 def _tool_event(row: sqlite3.Row, tool: str) -> dict:
-    content = row["content"] if isinstance(row["content"], str) else ""
+    content = content_text(row["content"])
     block: Dict[str, Any] = {"type": "tool_result", "tool_use_id": str(row["tool_call_id"] or "")}
     if tool == "clarify":
         answer = _clarify_answer_text(content)
@@ -357,11 +501,11 @@ def transcript_events(rows: List[sqlite3.Row], names: Dict[str, str]) -> Iterato
             if notice is not None:
                 # Claude Code tags its own notifications with `origin.kind`
                 # (#1410), and the gates skip any kind but `human`.
-                event = _user_message(row["content"] or "")
+                event = _user_message(content_text(row["content"]))
                 event["origin"] = {"kind": notice}
                 yield event
                 continue
-            yield from _user_events(row["content"] or "")
+            yield from _user_events(content_text(row["content"]))
         elif role == "assistant":
             event, ids = _assistant_event(row)
             names.update(ids)
@@ -448,6 +592,59 @@ def sync_transcript(session_id: str, out_dir: Path, db_path: Optional[Path] = No
             os.unlink(tmp)
         raise
     return out
+
+
+def session_cwd(session_id: str, db_path: Optional[Path] = None) -> Optional[str]:
+    """The directory a command moved this session to, or None when none did.
+
+    Hermes runs a `terminal` call without `workdir` in the session's own cwd
+    record, updated after every completed command (`tools/terminal_tool.py`
+    `_resolve_command_cwd`), not in its process cwd, which is what the hook
+    payload carries. The result of a command that changed directory echoes
+    the new one as `"cwd"` (`tools/terminal_tool_result.py`); a call with
+    `workdir` is never recorded. The record lives in Hermes's memory for the
+    whole process, so every row of the session counts, active or not. A
+    restarted process starts without it (a resumed CLI session starts in its
+    recorded start directory); a move made before the restart is still read
+    here.
+    """
+    if not session_id:
+        return None
+    db = db_path or state_db_path()
+    if not db.is_file():
+        return None
+    try:
+        conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=2)
+        conn.row_factory = sqlite3.Row
+        try:
+            rows = conn.execute(
+                "SELECT role, content, tool_call_id, tool_calls FROM messages "
+                "WHERE session_id = ? AND role IN ('assistant', 'tool') ORDER BY id",
+                (session_id,),
+            ).fetchall()
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        return None
+    recorded: Dict[str, bool] = {}  # terminal call id -> its cwd is recorded (no workdir)
+    cwd: Optional[str] = None
+    for row in rows:
+        if row["role"] == "assistant":
+            for call in _parse_json(row["tool_calls"]) or []:
+                fn = call.get("function") if isinstance(call, dict) else None
+                if not isinstance(fn, dict) or fn.get("name") != "terminal":
+                    continue
+                raw = fn.get("arguments")
+                args = _parse_json(raw) if isinstance(raw, str) else raw
+                call_id = str(call.get("id") or "")
+                if call_id:  # an id-less call cannot be paired with its result
+                    recorded[call_id] = not (isinstance(args, dict) and args.get("workdir"))
+        elif row["tool_call_id"] and recorded.get(str(row["tool_call_id"])):
+            data = _parse_json(row["content"])
+            moved = data.get("cwd") if isinstance(data, dict) else None
+            if isinstance(moved, str) and moved.strip():
+                cwd = moved
+    return cwd
 
 
 # --- decisions ----------------------------------------------------------------

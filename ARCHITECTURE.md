@@ -406,9 +406,16 @@ manifest's `hosts` field, the same filter the other platforms use.
 | `terminal` | `Bash` |
 | `write_file` / `patch` / `read_file` | `Write` / `Edit` / `Read` |
 | `clarify` | `AskUserQuestion` (`choices` → `options[].label`) |
-| `delegate_task` (spawn) | one `Agent` call per task |
+| `delegate_task` (spawn) | one `Agent` call per task (`tasks` as a list or a JSON string; a legacy top-level `goal` is one task; none when a task is not an object or has no goal, as Hermes rejects the call) |
 | `skill_view` (no `file_path`) | `Skill` |
 | `mcp__*` | unchanged |
+
+A `patch` call in V4A mode (`mode: "patch"`) names its files in
+`*** Update/Add/Delete/Move File:` headers. It is parsed with Hermes's own
+header grammar: each hunk of an update becomes an `Edit` of its lines, an added
+file a `Write` of its lines, and a deleted file, or both paths of a move, an
+`Edit` with empty strings. A patch Hermes rejects as a parse error becomes no
+call.
 
 **Transcript.** Hermes keeps each session's messages in `state.db` and writes
 the assistant message carrying a tool call before the call runs. On every call
@@ -423,7 +430,11 @@ Hermes wrote itself (`display_kind` `process_complete`,
 `async_delegation_complete`, or `internal_notification`: a background process
 or subagent finishing) gets `origin.kind` set to that kind, the field Claude
 Code puts on its own notifications, so the gates skip it as a human message
-on both hosts; `steer`, the user's out-of-band message, stays human. A slash-skill
+on both hosts; `steer`, the user's out-of-band message, stays human. Content
+Hermes stored as a parts list (a message with an image, saved as `\x00json:`
+plus JSON) is reduced to its text parts, in the transcript and in
+`pre_llm_call`'s `user_message`; content with no text part (an image-only
+message) stays as its JSON, so it is never read as an empty message. A slash-skill
 invocation, which Hermes stores as one row (activation header, skill body, the
 user's instruction), is split into two user entries: the expanded body as an
 `isMeta` entry, then the instruction (or the bare `/<skill>`) as plain text.
@@ -438,7 +449,20 @@ other tool result whose JSON carries a truthy `error` (a gate block) or a
 non-zero `exit_code` is marked `is_error`, as Claude Code marks a failed or
 denied call. `state.db` is Hermes-internal; an
 unreadable or changed schema leaves the transcript empty, which the
-transcript-reading gates already treat as fail-open.
+transcript-reading gates already treat as fail-open. Any other error while
+building it does the same, so the gates that do not read it still run.
+
+**Working directory.** The payload's `cwd` is Hermes's process directory (the
+install root under the gateway), but a `terminal` call without `workdir` runs
+in the directory the session last moved to. The bridge runs the gates in
+`workdir`, else the last `"cwd"` a `terminal` result of the session echoed
+(Hermes echoes it when a command changes directory and never records it for a
+`workdir` call; every row counts, since Hermes keeps the record across
+compaction), else `TERMINAL_CWD`, else the payload's `cwd`. A path that is not
+a local directory is skipped, and when `TERMINAL_ENV` is not `local` (docker,
+ssh, …) only the payload's `cwd` is used, since the other two name a directory
+inside the sandbox. A restarted Hermes process forgets the session's moves; the
+bridge still reads the last one from `state.db`.
 
 **Asks.** A praxis `ask` tells the agent to stop and re-check the call; it is
 not a question for the human. The dispatcher emits only the first ask of a
