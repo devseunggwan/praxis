@@ -270,8 +270,9 @@ window.
 does not name the ref; resolving the current branch would need the effective
 cwd after any `cd` in the command. `git push -uq origin <branch>` (bundled
 flags), `--dry-run`, a push chained after `git fetch` / `git rebase`, and any
-command with a redirection (`2>&1 | tail`) or a quoted title containing `#`
-also still ask.
+command with a redirection (`2>&1 | tail`) or a quoted argument that starts
+with `#` (`--title "#12 fix"`; `--title "fix #12"` does not count) also
+still ask.
 
 ### Response
 
