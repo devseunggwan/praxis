@@ -15,7 +15,9 @@ The gate emits `ask` when **all** of the following hold:
    on queries becomes the noise it exists to replace. The two branches ask the
    question from opposite ends, and the section below says why.
 2. The call's arguments carry a production phase marker (`PROD_MARKER_RE`).
-3. No acknowledgement is present. Each surface is read only where it is
+3. For `Bash`, a segment that **reaches beyond this machine** can act on that
+   marker: see [A local write is not a production call](#a-local-write-is-not-a-production-call).
+4. No acknowledgement is present. Each surface is read only where it is
    declared: the `# approval-premise:ack <premise>` **unquoted comment** in the
    Bash command, and for MCP a **hook-owned file** at
    `~/.praxis/cache/approval-premise-ack-<session_id>.json` (`PRAXIS_HOME`- and
@@ -317,13 +319,121 @@ every verb the service has and a write is one flag away:
   a flag added by a future gh release must fall through to `ask`, not through
   the gate.
 
+## A local write is not a production call
+
+Issue #1634: over 14 days on one install the gate asked 29 times, and 26 of
+those calls reached nothing in production. They were local `git commit` /
+`git merge --no-commit`, `cmp`, `grep`, `ls`, and reads redirected into a
+scratch file, and they asked because a directory, a file, a branch or a commit
+message held `prod`. "Not provably read-only" was standing in for "acts on
+production", and a local write is the first.
+
+So after the whole command has carried a marker and failed the read-only test,
+`_bash_reaches_prod` splits it into segments and sorts each one:
+
+- **read-only**: the shared `_segment_is_readonly`. A redirect into a file
+  is a write on this machine, so it does not move a read-only segment out of
+  this class here. That keeps `echo x > prod-x/f` quiet while `tee` and `cp`
+  to the same path ask: reads redirected into scratch files were the largest
+  share of the false asks, and the shared classifier does not say which
+  redirect targets already exist;
+- **local**: writes that stay on this machine, cannot start another program,
+  and cannot overwrite an arbitrary path: `cmp`, `mkdir`, `touch`, `mktemp`, and
+  the git subcommands that write only the local repository (`add`, `commit`,
+  `merge`, `fetch`, `pull`, `checkout`, `switch`, `restore`, `reset`,
+  `stash`, `branch`, `tag`, `worktree`, ...). `git reset --hard` and
+  `git restore` stay local: they discard uncommitted work, but only inside
+  the repository, while `cp` / `tee` / `ln` write to any path;
+- **remote**: everything else, including any binary the gate does not know.
+
+What a git call runs is set by more than its subcommand: global options
+(`-c`, `--config-env`, `--exec-path`, `--git-dir`, ...), the environment
+(`GIT_SSH_COMMAND`, `GIT_CONFIG_*`, `HOME`, `XDG_CONFIG_HOME`, `PAGER`, ...),
+and config written by an earlier `git config` in the same command
+(`core.hooksPath`, `core.sshCommand`). Three review rounds each found another
+way in, so the rule is closed rather than listed. A git segment is local only
+when all of these hold:
+
+- its global part (before the subcommand) is nothing or `-C <dir>`;
+- its own options name no `--upload-pack` and no `--unsafe-paths` (which lets
+  `git apply` write outside the repository), in full or as any unambiguous
+  prefix, which the subcommand's option parser accepts (`--upload=cmd`);
+- the command contains no variable assignment anywhere (`VAR=x`, `VAR+=x`,
+  after `env`, `export` or `declare`, or on its own);
+- every other non-read-only git segment in the command is local too, so a
+  `git config core.hooksPath ...` takes the `git commit` after it along.
+
+After the subcommand `-c` is the subcommand's own flag (`git switch -c
+<branch>`) and stays local. A repository's own hooks can still run a program
+on `git commit`, and `git merge -s <name>` runs `git-merge-<name>` from the
+PATH; `main` is quiet on a `git commit` without a marker as well, so that
+reach is not new here.
+
+The gate asks only when a remote segment exists **and** the first segment
+naming production sits in that remote segment, in its pipeline, or before it.
+The "before" matters: `kubectl --context prod-x get pods && kubectl delete pod
+x` deletes in whatever context is current, and a `cd /srv/prod-infra` or a
+`K=prod-x` assignment carries the target into the segment after it. A marker
+that only *follows* every remote segment names something the call has already
+finished acting on (`python3 gen.py; mkdir -p prod/plan`).
+
+A segment names production when the marker matches its joined tokens, or when
+one of its tokens is `prod` (any case), alone or as the value after its last
+`=`: the tokenizer drops quotes, so `--context "prod"`, `--stage="prod"` and
+`ENV="prod"` reach the segment as `prod`, `--stage=prod` and `ENV=prod`, which
+the quoted-form alternative was written for and no longer sees.
+
+Out of the local list on purpose: `rm`, `mv`, `cp`, `tee`, `ln` and
+`git clean` (each can destroy a file in place, and a network mount does not
+announce itself in its path), `git push` / `remote` / `config` / `submodule`
+(they reach or configure elsewhere), and `git rebase` (`--exec` runs a command
+per commit).
+
+The split falls back to the old whole-command answer (ask) wherever it cannot
+see the order of execution:
+
+- a substitution or a heredoc anywhere: the tokenizer blanks heredoc bodies
+  and keeps a substitution inside one word, so the command the shell runs
+  there is not a segment;
+- a loop, a function, a trap or a coprocess (`for`, `while`, `until`,
+  `select`, `do`, `function`, `trap`, `coproc`, `name()`, `name(){`, a lone
+  `()`, `name ( )`), read from every token rather than a segment's first, so
+  `builtin trap`, a function defined inside `{ ...; }` and an `if` body are
+  seen: a loop body runs again after the segment that follows it, a function
+  body where it is called, a trap body at exit;
+- a background `&`: the backgrounded segment is still running when the next
+  one starts;
+- a `/dev/tcp/` or `/dev/udp/` path anywhere: bash opens it as a socket, so
+  a redirect into it (`echo x > /dev/tcp/<host>/<port>`) is a network write,
+  not a file write on this machine;
+- a marker that no segment carries: it sat in text the tokenizer dropped,
+  such as a trailing comment.
+
+Measured on the 29 inputs (local replay, not committed): main asks 29,
+this branch asks 13. The prod writes among them still ask: a preview deploy,
+a `kubectl create configmap` / `apply` against a production context, and a
+load script under a `prod-load/` path. What still asks without a production
+target is mostly the fallback (substitution, heredoc) and unknown binaries
+run with `--env prod`; an `aws <service> describe-*` call asks because the
+shared classifier admits only `aws sts` as read-only.
+
+One accepted loss, measured on a wider local corpus: a write whose own target
+the marker cannot see (`kubectl --context ops-prod exec ...`, where `prod`
+ends the context name rather than starting a word) used to ask when some
+*later* text in the same command happened to carry `prod-`, such as another
+gate's ack comment. It is now quiet, as the same write already was on its own.
+Recognising `prod` at the end of a `--context` / `--cluster` value would close
+that, but on the same corpus it added several hundred asks on read-only
+`kubectl exec` and scripted reads, which is the noise this change removes, so
+it is left to a separate decision.
+
 ## Operator notes
 
 - **A name you create can carry the marker.** `\bprod-` also matches inside a
-  branch, worktree directory or file name, so every call that names it and is
-  not a read-only shape asks although nothing reaches production:
-  `git push origin issue-12-prod-flag` and
-  `git worktree add ../wt-prod-ops <sha>` ask, while
+  branch, worktree directory or file name. A local write that names it is
+  quiet (`git worktree add ../wt-prod-ops <sha>`, `git commit` inside it), but
+  a call that reaches elsewhere still asks although nothing reaches
+  production: `git push origin issue-12-prod-flag` asks, while
   `git push origin issue-12-flag` passes. Keep `prod-` out of names you
   create, and name a production ref's commit by SHA.
 - **Read-only shapes stay quiet even when they name production**
