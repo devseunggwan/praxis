@@ -334,11 +334,14 @@ So after the whole command has carried a marker and failed the read-only test,
 - **read-only**: the shared `_segment_is_readonly`. A redirect into a file
   is a write on this machine, so it does not move a read-only segment out of
   this class here;
-- **local**: writes that stay on this machine and cannot start another
-  program: `cmp`, `mkdir`, `cp`, `touch`, `ln`, `tee`, `mktemp`, and the git
-  subcommands that write only the local repository (`add`, `commit`, `merge`,
-  `fetch`, `pull`, `checkout`, `switch`, `restore`, `reset`, `stash`,
-  `branch`, `tag`, `worktree`, ...);
+- **local**: writes that stay on this machine, cannot start another program,
+  and do not replace existing data: `cmp`, `mkdir`, `touch`, `mktemp`, and
+  the git subcommands that write only the local repository (`add`, `commit`,
+  `merge`, `fetch`, `pull`, `checkout`, `switch`, `restore`, `reset`,
+  `stash`, `branch`, `tag`, `worktree`, ...), unless the call carries `-c`,
+  `--config-env` or `--upload-pack`, which make git run a program of the
+  caller's choosing (`core.fsmonitor`, `core.sshCommand`, a pager). `-c` is
+  matched anywhere, so `git commit -c <commit>` also asks: one extra question;
 - **remote**: everything else, including any binary the gate does not know.
 
 The gate asks only when a remote segment exists **and** the first segment
@@ -350,14 +353,16 @@ that only *follows* every remote segment names something the call has already
 finished acting on (`python3 gen.py; mkdir -p prod/plan`).
 
 A segment names production when the marker matches its joined tokens, or when
-one of its tokens is exactly `prod`: the tokenizer drops quotes, so
-`--context "prod"` reaches the segment as a bare word the quoted-form
-alternative was written for.
+one of its tokens is `prod` (any case), alone or as the value after its last
+`=`: the tokenizer drops quotes, so `--context "prod"`, `--stage="prod"` and
+`ENV="prod"` reach the segment as `prod`, `--stage=prod` and `ENV=prod`, which
+the quoted-form alternative was written for and no longer sees.
 
-Out of the local list on purpose: `rm` and `mv` (a deletion is the irreversible
-local write, and a network mount does not announce itself in its path),
-`git push` / `remote` / `config` / `submodule` (they reach or configure
-elsewhere), and `git rebase` (`--exec` runs a command per commit).
+Out of the local list on purpose: `rm`, `mv`, `cp`, `tee`, `ln` and
+`git clean` (each can destroy a file in place, and a network mount does not
+announce itself in its path), `git push` / `remote` / `config` / `submodule`
+(they reach or configure elsewhere), and `git rebase` (`--exec` runs a command
+per commit).
 
 The split falls back to the old whole-command answer (ask) wherever it cannot
 see the order of execution:
@@ -367,11 +372,13 @@ see the order of execution:
   there is not a segment;
 - a loop or a function (`for`, `while`, `until`, `select`, `do`, `function`,
   `name()`): a loop body runs again after the segment that follows it;
+- a background `&`: the backgrounded segment is still running when the next
+  one starts;
 - a marker that no segment carries: it sat in text the tokenizer dropped,
   such as a trailing comment.
 
 Measured on the 29 inputs (local replay, not committed): main asks 29,
-this branch asks 12. The prod writes among them still ask: a preview deploy,
+this branch asks 13. The prod writes among them still ask: a preview deploy,
 a `kubectl create configmap` / `apply` against a production context, and a
 load script under a `prod-load/` path. What still asks without a production
 target is mostly the fallback (substitution, heredoc) and unknown binaries

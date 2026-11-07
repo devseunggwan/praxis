@@ -193,27 +193,42 @@ def _bash_marker_text(command: str) -> str:
     return stripped
 
 
-# Writes that land on this machine and cannot start another program. A
-# production call reaches something else, so a command made only of these and
-# read-only segments has no production target, whatever its paths are named:
-# `git commit -m "... prod-x ..."`, `git merge origin/prod`, `cmp a prod-load/b`
-# (issue #1634). `rm` and `mv` stay out: a deletion is the irreversible local
-# write, and a network mount does not announce itself in the path.
-_LOCAL_BINARIES = frozenset(("cmp", "mkdir", "cp", "touch", "ln", "tee", "mktemp"))
+# Writes that land on this machine, cannot start another program, and do not
+# replace existing data. A production call reaches something else, so a
+# command made only of these and read-only segments has no production target,
+# whatever its paths are named: `git commit -m "... prod-x ..."`, `git merge
+# origin/prod`, `cmp a prod-load/b` (issue #1634). `rm`, `mv`, `cp`, `tee` and
+# `ln` stay out: each can destroy a file in place, and a network mount does not
+# announce itself in the path.
+_LOCAL_BINARIES = frozenset(("cmp", "mkdir", "touch", "mktemp"))
 
 # git subcommands that write only the local repository. `push`, `remote`,
 # `config`, `submodule` and `send-email` reach elsewhere or configure what
-# does; `rebase` is out because `--exec` runs a command per commit.
+# does; `rebase` is out because `--exec` runs a command per commit, and
+# `clean` because it deletes untracked files the way `rm` does.
 _LOCAL_GIT = frozenset((
-    "add", "am", "apply", "branch", "checkout", "cherry-pick", "clean",
+    "add", "am", "apply", "branch", "checkout", "cherry-pick",
     "commit", "fetch", "init", "merge", "merge-base", "mv", "pull", "reset",
     "restore", "revert", "rm", "stash", "switch", "tag", "worktree",
 ))
+
+# Options that make a local git subcommand run a program of the caller's
+# choosing: `-c` / `--config-env` before the subcommand can set
+# `core.fsmonitor`, `core.sshCommand` or a pager, and `--upload-pack` names the
+# command `fetch` / `pull` runs.
+_GIT_RUNS_PROGRAM = ("-c", "--config-env", "--upload-pack")
 
 # Segments that make the order of the command meaningless: a loop body runs
 # again after the segment that follows it, a function body runs where it is
 # called.
 _REORDERING = frozenset(("for", "while", "until", "select", "do", "function"))
+
+
+def _git_is_local(argv: list[str]) -> bool:
+    if _subcommand("git", argv) not in _LOCAL_GIT:
+        return False
+    return not any(tok == flag or tok.startswith(flag + "=")
+                   for tok in argv for flag in _GIT_RUNS_PROGRAM)
 
 
 def _segment_is_local(argv: list[str]) -> bool:
@@ -225,14 +240,15 @@ def _segment_is_local(argv: list[str]) -> bool:
     binary = argv[0].rsplit("/", 1)[-1]
     if binary in _LOCAL_BINARIES:
         return True
-    return binary == "git" and _subcommand("git", argv) in _LOCAL_GIT
+    return binary == "git" and _git_is_local(argv)
 
 
 def _segment_names_prod(argv: list[str]) -> bool:
     # The tokenizer drops quotes, so `--context "prod"` arrives as a bare
-    # `prod` token; the quoted-form alternative of the marker would miss it.
+    # `prod` token and `--stage="prod"` / `ENV="prod"` as `...=prod`; the
+    # quoted-form alternative of the marker would miss both.
     return (_carries_prod_marker(" ".join(argv))
-            or any(tok.lower() == "prod" for tok in argv))
+            or any(tok.rsplit("=", 1)[-1].lower() == "prod" for tok in argv))
 
 
 def _segments_with_pipes(tokens: list[str]) -> list[tuple[list[str], bool]]:
@@ -266,12 +282,16 @@ def _bash_reaches_prod(command: str) -> bool:
 
     Anything this split cannot see keeps the old whole-command answer: a
     substitution or heredoc (the tokenizer blanks bodies the shell runs or
-    feeds), a loop or function (order stops meaning anything), and a marker
-    that no segment carries (it sat in text the tokenizer dropped).
+    feeds), a loop or function (order stops meaning anything), a background
+    `&` (the backgrounded segment is still running when the next one starts),
+    and a marker that no segment carries (it sat in text the tokenizer
+    dropped).
     """
     if _SUBSTITUTION_RE.search(command) or heredoc_sources(command):
         return True
     tokens = safe_tokenize(_NONWRITING_REDIRECT_RE.sub(" ", command))
+    if "&" in tokens:
+        return True
     segments = _segments_with_pipes(tokens)
     if not segments:
         return True

@@ -222,8 +222,8 @@ run_case "local_fetch_then_show" \
   "$(verdict "$(bash_payload 'git fetch -q origin && git show origin/main:docs/prod-ops.md > /tmp/o.md')")" "quiet"
 run_case "local_cmp" \
   "$(verdict "$(bash_payload 'wc -l a/mapping.csv prod-load/mapping.csv; cmp a/mapping.csv prod-load/mapping.csv && echo SAME')")" "quiet"
-run_case "local_mkdir_cp" \
-  "$(verdict "$(bash_payload 'mkdir -p prod-x/plan && cp plans/a.csv prod-x/plan/')")" "quiet"
+run_case "local_mkdir_touch" \
+  "$(verdict "$(bash_payload 'mkdir -p prod-x/plan && touch prod-x/plan/.keep')")" "quiet"
 # The marker follows every remote segment: it names something the call has
 # already finished with, not that segment's target.
 run_case "marker_after_remote" \
@@ -254,6 +254,28 @@ run_case "remote_git_push"   "$(verdict "$(bash_payload 'git push origin issue-1
 run_case "remote_git_rebase_exec" \
   "$(verdict "$(bash_payload 'git rebase -x "kubectl delete pod p" prod-base')")" "ask"
 run_case "remote_rm"         "$(verdict "$(bash_payload 'rm -rf prod-cache')")" "ask"
+# Local writes that can replace a file in place, or make git run a program,
+# stay off the local list.
+run_case "remote_cp_overwrite"  "$(verdict "$(bash_payload 'cp a.yaml prod-x/config.yaml')")" "ask"
+run_case "remote_tee_overwrite" "$(verdict "$(bash_payload 'echo x | tee prod-x/config.yaml')")" "ask"
+run_case "remote_git_clean" "$(verdict "$(bash_payload 'cd /srv/prod-x && git clean -fdx')")" "ask"
+run_case "remote_git_upload_pack" \
+  "$(verdict "$(bash_payload 'git fetch --upload-pack="sh deploy.sh" origin prod-x')")" "ask"
+run_case "remote_git_config_program" \
+  "$(verdict "$(bash_payload 'git -c core.fsmonitor=./hook.sh commit -m "fix prod-x"')")" "ask"
+# A value the tokenizer unquotes after `=` still names production.
+run_case "remote_quoted_eq_value" \
+  "$(verdict "$(bash_payload './deploy.sh --stage="prod" && git tag prod-1')")" "ask"
+run_case "remote_quoted_assignment" \
+  "$(verdict "$(bash_payload 'ENV="prod" make deploy && echo prod-x')")" "ask"
+run_case "remote_quoted_upper_prod" \
+  "$(verdict "$(bash_payload 'kubectl --context "PROD" delete pod p; ls prod-x')")" "ask"
+# A trailing backslash is a continuation the shell still runs.
+run_case "remote_trailing_backslash" \
+  "$(verdict "$(bash_payload 'kubectl delete pod p --context prod-x \')")" "ask"
+# A backgrounded segment is still running when the next one starts.
+run_case "remote_backgrounded" \
+  "$(verdict "$(bash_payload 'kubectl delete pod p & ls prod-x')")" "ask"
 # A marker the tokenizer drops (a trailing comment) leaves nothing to bind,
 # so the whole-command answer stands.
 run_case "marker_in_comment" "$(verdict "$(bash_payload 'kubectl delete pod x # in prod-x')")" "ask"
