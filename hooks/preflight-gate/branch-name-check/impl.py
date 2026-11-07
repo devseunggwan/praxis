@@ -47,6 +47,7 @@ import sys as _sys
 from pathlib import Path as _Path
 
 _sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
+from _branch_names import base_branch_names, work_branch_regex  # type: ignore[import-not-found]  # noqa: E402
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
 from _hook_io import emit_decision  # type: ignore[import-not-found]  # noqa: E402
 from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
@@ -69,14 +70,6 @@ def _is_git_binary(token: str) -> bool:
     stripped = token.lstrip(_GROUP_PREFIX_CHARS)
     return stripped == "git" or stripped.endswith("/git")
 
-# ---------------------------------------------------------------------------
-# Configuration defaults
-# ---------------------------------------------------------------------------
-
-DEFAULT_REGEX = (
-    r"^(hub|issue)-[0-9]+-(feat|fix|docs|style|refactor|chore|test|perf|ci|build|hotfix)-[a-z0-9-]+$"
-)
-DEFAULT_WHITELIST = {"main", "master", "dev", "prod", "staging"}
 
 # Git global flags that appear between `git` and the subcommand and consume the next token.
 _GIT_GLOBAL_FLAGS_WITH_ARG = frozenset({
@@ -121,13 +114,8 @@ _REDIRECT_OPERATOR_RE = re.compile(r"^(?:&>>?|\d*>>?|\d*<<?<?|\d*[<>]&)")
 # Config helpers
 # ---------------------------------------------------------------------------
 
-def _get_regex() -> re.Pattern:
-    raw = os.environ.get("PRAXIS_BRANCH_NAME_REGEX", "").strip()
-    pattern = raw if raw else DEFAULT_REGEX
-    try:
-        return re.compile(pattern)
-    except re.error:
-        return re.compile(DEFAULT_REGEX)
+_get_regex = work_branch_regex
+_get_whitelist = base_branch_names
 
 
 def _get_strict() -> bool:
@@ -162,13 +150,6 @@ def _extract_allowed_types(pattern: str) -> str | None:
     if len(groups) < 2:
         return None
     return groups[-1].replace("|", ", ")
-
-
-def _get_whitelist() -> frozenset[str]:
-    raw = os.environ.get("PRAXIS_BRANCH_NAME_WHITELIST", "").strip()
-    if raw:
-        return frozenset(name.strip() for name in raw.split(",") if name.strip())
-    return frozenset(DEFAULT_WHITELIST)
 
 
 # ---------------------------------------------------------------------------
