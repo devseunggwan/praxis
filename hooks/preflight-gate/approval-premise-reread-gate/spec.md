@@ -338,10 +338,11 @@ So after the whole command has carried a marker and failed the read-only test,
   and do not replace existing data: `cmp`, `mkdir`, `touch`, `mktemp`, and
   the git subcommands that write only the local repository (`add`, `commit`,
   `merge`, `fetch`, `pull`, `checkout`, `switch`, `restore`, `reset`,
-  `stash`, `branch`, `tag`, `worktree`, ...), unless the call carries `-c`,
-  `--config-env` or `--upload-pack`, which make git run a program of the
-  caller's choosing (`core.fsmonitor`, `core.sshCommand`, a pager). `-c` is
-  matched anywhere, so `git commit -c <commit>` also asks: one extra question;
+  `stash`, `branch`, `tag`, `worktree`, ...), unless the call carries
+  `--upload-pack`, or `-c` / `--config-env` before the subcommand, which make
+  git run a program of the caller's choosing (`core.fsmonitor`,
+  `core.sshCommand`, a pager). After the subcommand `-c` is its own flag
+  (`git switch -c <branch>`) and stays local;
 - **remote**: everything else, including any binary the gate does not know.
 
 The gate asks only when a remote segment exists **and** the first segment

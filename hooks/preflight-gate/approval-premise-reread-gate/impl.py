@@ -215,8 +215,11 @@ _LOCAL_GIT = frozenset((
 # Options that make a local git subcommand run a program of the caller's
 # choosing: `-c` / `--config-env` before the subcommand can set
 # `core.fsmonitor`, `core.sshCommand` or a pager, and `--upload-pack` names the
-# command `fetch` / `pull` runs.
-_GIT_RUNS_PROGRAM = ("-c", "--config-env", "--upload-pack")
+# command `fetch` / `pull` runs. After the subcommand, `-c` is that
+# subcommand's own flag (`git switch -c <branch>`), so only the global part is
+# read for the first two.
+_GIT_GLOBAL_RUNS_PROGRAM = ("-c", "--config-env")
+_GIT_RUNS_PROGRAM = ("--upload-pack",)
 
 # Segments that make the order of the command meaningless: a loop body runs
 # again after the segment that follows it, a function body runs where it is
@@ -224,11 +227,21 @@ _GIT_RUNS_PROGRAM = ("-c", "--config-env", "--upload-pack")
 _REORDERING = frozenset(("for", "while", "until", "select", "do", "function"))
 
 
+def _has_flag(tokens: list[str], flags: tuple[str, ...]) -> bool:
+    return any(tok == flag or tok.startswith(flag + "=")
+               for tok in tokens for flag in flags)
+
+
 def _git_is_local(argv: list[str]) -> bool:
-    if _subcommand("git", argv) not in _LOCAL_GIT:
+    sub = _subcommand("git", argv)
+    if sub not in _LOCAL_GIT:
         return False
-    return not any(tok == flag or tok.startswith(flag + "=")
-                   for tok in argv for flag in _GIT_RUNS_PROGRAM)
+    # The last occurrence bounds the global part: a value spelled like the
+    # subcommand (`git -C commit -c ... commit`) then still counts as global.
+    last = len(argv) - 1 - argv[::-1].index(sub)
+    global_part = argv[1:last]
+    return not (_has_flag(global_part, _GIT_GLOBAL_RUNS_PROGRAM)
+                or _has_flag(argv, _GIT_RUNS_PROGRAM))
 
 
 def _segment_is_local(argv: list[str]) -> bool:

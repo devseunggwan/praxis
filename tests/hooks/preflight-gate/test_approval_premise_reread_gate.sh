@@ -263,6 +263,11 @@ run_case "remote_git_upload_pack" \
   "$(verdict "$(bash_payload 'git fetch --upload-pack="sh deploy.sh" origin prod-x')")" "ask"
 run_case "remote_git_config_program" \
   "$(verdict "$(bash_payload 'git -c core.fsmonitor=./hook.sh commit -m "fix prod-x"')")" "ask"
+run_case "remote_git_config_program_value_named_like_sub" \
+  "$(verdict "$(bash_payload 'git -C commit -c core.fsmonitor=./hook.sh commit -m "fix prod-x"')")" "ask"
+# After the subcommand, `-c` is the subcommand's own flag.
+run_case "local_git_switch_create" \
+  "$(verdict "$(bash_payload 'git switch -c issue-12-prod-flag && git add -A && git commit -m x')")" "quiet"
 # A value the tokenizer unquotes after `=` still names production.
 run_case "remote_quoted_eq_value" \
   "$(verdict "$(bash_payload './deploy.sh --stage="prod" && git tag prod-1')")" "ask"
