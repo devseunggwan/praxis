@@ -340,3 +340,44 @@ def test_bridge_sweeps_transcripts_past_the_cache_ttl(tmp_path, monkeypatch):
     os.utime(late, (old, old))
     bridge._transcript("s1")
     assert late.exists()
+
+
+def test_a_live_transcript_swept_for_age_is_rebuilt_in_the_same_call(tmp_path, monkeypatch):
+    # A session idle past the TTL whose next call adds no row: the sweep
+    # removes its transcript and state, and the sync that follows rebuilds them.
+    praxis_home, hermes_home = tmp_path / "praxis", tmp_path / "hermes"
+    hermes_home.mkdir()
+    db = _db(hermes_home)
+    _turn(db, 1)
+    monkeypatch.setenv("PRAXIS_HOME", str(praxis_home))
+    monkeypatch.setenv("HERMES_HOME", str(hermes_home))
+    monkeypatch.delenv("PRAXIS_CACHE_TTL_DAYS", raising=False)
+    monkeypatch.delenv("PRAXIS_CACHE_PRUNE_INTERVAL_HOURS", raising=False)
+    bridge = _load("hermes_bridge_transcript_resweep", base.BRIDGE)
+    out = Path(bridge._transcript("s1"))
+    old = time.time() - 8 * 86400
+    for p in out.parent.iterdir():
+        os.utime(p, (old, old))
+    (out.parent / ".prune-stamp").unlink(missing_ok=True)  # make the sweep due again
+    assert Path(bridge._transcript("s1")).read_bytes() == _fresh(db, tmp_path)
+
+
+def test_sweep_runs_when_the_sync_raises(tmp_path, monkeypatch):
+    praxis_home = tmp_path / "praxis"
+    out_dir = praxis_home / "cache" / "hermes-transcripts"
+    out_dir.mkdir(parents=True)
+    stale = out_dir / "gone-0000.jsonl"
+    stale.write_text("{}\n")
+    old = time.time() - 8 * 86400
+    os.utime(stale, (old, old))
+    monkeypatch.setenv("PRAXIS_HOME", str(praxis_home))
+    monkeypatch.delenv("PRAXIS_CACHE_TTL_DAYS", raising=False)
+    monkeypatch.delenv("PRAXIS_CACHE_PRUNE_INTERVAL_HOURS", raising=False)
+    bridge = _load("hermes_bridge_transcript_sweep_on_error", base.BRIDGE)
+
+    def boom(*_args, **_kwargs):
+        raise ValueError("bad row")
+
+    monkeypatch.setattr(bridge._hermes, "sync_transcript", boom)
+    assert bridge._transcript("s1") == ""
+    assert not stale.exists()
