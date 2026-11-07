@@ -92,13 +92,17 @@ did not move them:
 | `gh-label-cache.json`                                              | `preflight-gate/gh-label-verify` (per-repo label sets, #1182 — pre-#1182 XDG location not migrated) |
 | `stop-scan-<hook>-<sid>.json`                                      | Stop gates' resumable reduction cursors (`reduce_transcript_resumable`, #1237)               |
 | `scan-<hook>-<part>-<sid>.json`                                    | Resumable scan cursors of the three commit-path scanners (#1280)                             |
+| `hermes-transcripts/`                                              | `plugins/hermes/bridge.py`: Hermes session transcripts and their sync state (#1633)          |
 
 ### Sweeping
 
 `${TMPDIR}` came with an OS janitor; `~/.praxis/cache/` does not, and these
 entries are session-keyed — one per session, indefinitely. `prune_stale` runs
 opportunistically from `resolve_writable("cache", …)` and drops entries past
-`PRAXIS_CACHE_TTL_DAYS` (default 7; `0` disables).
+`PRAXIS_CACHE_TTL_DAYS` (default 7; `0` disables). It judges a directory by
+its newest file, so `hermes-transcripts/`, where the live session's file is
+always fresh, is swept file by file from the bridge instead (`sweep_stale`,
+same TTL and daily throttle).
 
 ### Back-compat (#903)
 
