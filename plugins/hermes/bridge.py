@@ -32,7 +32,7 @@ os.environ.setdefault("CLAUDE_PLUGIN_ROOT", str(PRAXIS_ROOT))
 
 import _hermes  # noqa: E402
 from _dispatch import run_group  # noqa: E402
-from _paths import praxis_cache_dir  # noqa: E402
+from _paths import praxis_cache_dir, sweep_stale  # noqa: E402
 
 MANIFEST = PRAXIS_ROOT / "hooks" / "manifest.json"
 
@@ -78,8 +78,14 @@ def _transcript(session_id: str) -> str:
     gates treat as fail-open; the other gates still run. Letting it escape
     would reach `main`'s last-resort `{}` and run no gate at all.
     """
+    out_dir = Path(praxis_cache_dir()) / "hermes-transcripts"
+    # The cache root's own sweep sees this directory as one entry whose newest
+    # file is always fresh, so its files are aged out here. Before the sync, so
+    # a live session's file swept for age is rebuilt in this same call, and
+    # apart from it, so a sync that keeps failing does not stop the sweep.
+    sweep_stale(str(out_dir))
     try:
-        path = _hermes.sync_transcript(session_id, Path(praxis_cache_dir()) / "hermes-transcripts")
+        path = _hermes.sync_transcript(session_id, out_dir)
     except Exception as exc:  # noqa: BLE001 - one bad row must not turn every gate off
         sys.stderr.write(f"praxis hermes bridge: transcript unavailable: {exc!r}\n")
         path = None
