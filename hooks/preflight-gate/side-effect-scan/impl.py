@@ -314,34 +314,36 @@ _PUSH_PLAIN_FLAGS = frozenset({
 })
 _OWN_BRANCH_REMOTE = "origin"
 
-# A token that starts a redirection: shlex keeps `2>` and `>` as words.
-_REDIRECT_START = re.compile(r"^(?:&>>?|\d*>>?|\d*<)")
-# A `#` the shell would not read as a comment start (quoted or escaped).
-_QUOTED_HASH = re.compile(r"""['"\\]#""")
 # What a plain branch name can look like before the convention is consulted.
-# Refspec syntax (`+`, `:`), expansions (`$`, `` ` ``), globs and `refs/...`
-# never pass, whatever PRAXIS_BRANCH_NAME_REGEX allows.
+# Refspec syntax (`+`, `:`), expansions (`$`), globs and `refs/...` never
+# pass, whatever PRAXIS_BRANCH_NAME_REGEX allows.
 _PLAIN_BRANCH = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/-]*")
 _SYMBOLIC_REF = re.compile(r"[A-Z_]*HEAD")
 
+# Shell syntax the tokenizer cannot place reliably. A redirection can be
+# followed by more arguments (`&>/dev/null --force`) and `&>` / `2>&1` make
+# the segmenter split at the `&`; `<(...)`, `>(...)`, `$(...)`, backticks and
+# heredoc bodies run commands the per-segment check never sees; a backslash
+# can continue the line or escape a `#`; a quoted `#` is an argument, not a
+# comment. Rather than model each form, a command carrying any of them keeps
+# the ask (issue #1635 review rounds 1-2 found one gap per form).
+_OPAQUE_SHELL = re.compile(r"""[<>`\\]|\$\(|['"]#""")
 
-def _command_args(argv: list[str], command: str) -> list[str] | None:
-    """argv up to a shell comment, or None when its words cannot be trusted.
 
-    Arguments can follow a redirection (`> log --force`), and `2>&1` makes
-    the segmenter split at its `&`, so any redirection token gives None.
-    The tokenizer keeps `#` as a word whether or not it is quoted; when the
-    command quotes or escapes a `#` anywhere, a `#` token may be an argument
-    (`'#' --force`), so that gives None as well.
+def has_opaque_shell_syntax(command: str) -> bool:
+    return _OPAQUE_SHELL.search(command) is not None
+
+
+def _command_args(argv: list[str]) -> list[str]:
+    """argv up to a shell comment.
+
+    Only called when `has_opaque_shell_syntax` is false, so every `#` token
+    is an unquoted comment start.
     """
     out: list[str] = []
     for tok in argv:
         if tok.startswith("#"):
-            if _QUOTED_HASH.search(command):
-                return None
             break
-        if _REDIRECT_START.match(tok):
-            return None
         out.append(tok)
     return out
 
@@ -356,18 +358,18 @@ def _is_plain_branch_name(ref: str) -> bool:
     )
 
 
-def is_own_branch_push(argv: list[str], command: str) -> bool:
+def is_own_branch_push(argv: list[str]) -> bool:
     """`git push [-u|-q|-v...] origin <work branch>` and nothing else.
 
     The branch must be a plain branch name, match the work-branch convention
     (`_branch_names`, the same pattern `branch-name-check` gates new branches
     with) and not be a base branch. A bare `git push`, `HEAD`, a refspec with
-    `:` or `+`, `refs/...`, a variable, a second refspec, a remote other than
-    `origin`, a redirection, or a quoted `#` keeps the ask: the argv then does
-    not reliably name the ref that moves, or how.
+    `:` or `+`, `refs/...`, a variable, a second refspec, or a remote other
+    than `origin` keeps the ask: the argv then does not name the ref that
+    moves, or how.
     """
-    args = _command_args(strip_prefix(argv), command)
-    if args is None or len(args) < 2 or args[0].rsplit("/", 1)[-1] != "git" or args[1] != "push":
+    args = _command_args(strip_prefix(argv))
+    if len(args) < 2 or args[0].rsplit("/", 1)[-1] != "git" or args[1] != "push":
         return False
     positionals: list[str] = []
     for tok in args[2:]:
@@ -384,20 +386,16 @@ def is_own_branch_push(argv: list[str], command: str) -> bool:
     return work_branch_regex().fullmatch(ref) is not None
 
 
-def is_routine_publish(argv: list[str], command: str) -> bool:
+def is_routine_publish(argv: list[str]) -> bool:
     """An own-branch push or a `gh pr create` (issue #1635).
 
     Opening a PR moves no branch and deploys nothing; the merge that does is
-    still asked here and gated by `pre-merge-approval-gate`.
+    still asked here and gated by `pre-merge-approval-gate`. Callers check
+    `has_opaque_shell_syntax` on the whole command first.
     """
-    if is_own_branch_push(argv, command):
+    if is_own_branch_push(argv):
         return True
-    args = strip_prefix(argv)
-    # The tokenizer does not open `$(...)` or backticks, so a `gh pr merge`
-    # inside one is not its own command start; keep the ask for those.
-    if any("$(" in tok or "`" in tok for tok in args):
-        return False
-    return _gh_subcommand_pair(args) == ("pr", "create")
+    return _gh_subcommand_pair(strip_prefix(argv)) == ("pr", "create")
 
 
 def has_prod_scope(tokens: list[str]) -> bool:
@@ -492,7 +490,7 @@ def main() -> int:
     if not tokens:
         return 0
 
-    demote = member_host() in SELF_CHECK_HOSTS
+    demote = member_host() in SELF_CHECK_HOSTS and not has_opaque_shell_syntax(command)
     matched: list[str] = []
     asks = False
     for argv in iter_command_starts(tokens):
@@ -503,7 +501,7 @@ def main() -> int:
         ask_categories = {c for c in categories if CATEGORIES[c]["tier"] == TIER_ASK}
         if not ask_categories:
             continue
-        if demote and ask_categories <= _ROUTINE_PUBLISH_CATEGORIES and is_routine_publish(argv, command):
+        if demote and ask_categories <= _ROUTINE_PUBLISH_CATEGORIES and is_routine_publish(argv):
             continue
         asks = True
 

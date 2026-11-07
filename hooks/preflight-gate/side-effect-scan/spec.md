@@ -204,8 +204,8 @@ So on the `hermes` host, and only there, two shapes advise instead of asking:
 
 | Shape | Accepted form | Still asks |
 | ----- | ------------- | ---------- |
-| own work-branch push | `git push [-u\|--set-upstream\|-q\|--quiet\|-v\|--verbose\|--progress\|--no-progress] origin <branch>`, where `<branch>` fully matches the work-branch convention (`PRAXIS_BRANCH_NAME_REGEX`, default `^(hub\|issue)-<N>-<type>-<slug>$`, the pattern `branch-name-check` gates new branches with) and is not a base branch (`PRAXIS_BRANCH_NAME_WHITELIST`, default `main,master,dev,prod,staging`) | bare `git push`, `origin` alone, `HEAD`, a refspec with `:` or `+`, `refs/...`, a variable or `$(…)`, two refspecs, any other option (`--force*`, `-f`, `--delete`/`-d`, `--mirror`, `--all`, `--tags`, `--no-verify`, `-o`, bundled short flags such as `-uf`), a remote other than `origin` (`upstream`, a URL), a redirection, a quoted or escaped `#` |
-| PR create | `gh [global flags] pr create ...` with any flags, `--base prod` included | a `$(...)` or backtick in the argv (a `gh pr merge` inside one is not its own command start); otherwise none (the merge is the step that moves a branch; `gh pr merge` keeps the ask here and is consent-gated by `pre-merge-approval-gate`) |
+| own work-branch push | `git push [-u\|--set-upstream\|-q\|--quiet\|-v\|--verbose\|--progress\|--no-progress] origin <branch>`, where `<branch>` fully matches the work-branch convention (`PRAXIS_BRANCH_NAME_REGEX`, default `^(hub\|issue)-<N>-<type>-<slug>$`, the pattern `branch-name-check` gates new branches with) and is not a base branch (`PRAXIS_BRANCH_NAME_WHITELIST`, default `main,master,dev,prod,staging`) | bare `git push`, `origin` alone, `HEAD`, a refspec with `:` or `+`, `refs/...`, a variable or `$(…)`, two refspecs, any other option (`--force*`, `-f`, `--delete`/`-d`, `--mirror`, `--all`, `--tags`, `--no-verify`, `-o`, bundled short flags such as `-uf`), a remote other than `origin` (`upstream`, a URL); any opaque shell syntax in the command (below) |
+| PR create | `gh [global flags] pr create ...` with any flags, `--base prod` included | any opaque shell syntax in the command (below); otherwise none (the merge is the step that moves a branch; `gh pr merge` keeps the ask here and is consent-gated by `pre-merge-approval-gate`) |
 
 The demotion is per command segment: a command advises only when every segment
 that asks is one of these shapes. `git push origin issue-1-fix-x && git push
@@ -213,15 +213,26 @@ origin main`, `gh pr create … && gh pr merge 3`, or a push chained with
 `kubectl apply` still ask and name every matched category. A wrapper CLI
 configured under the same argv (`PRAXIS_WRAPPER_COMMIT_CMDS="git push"`) adds
 its own `wrapper-commit` category, which no shape covers, so it still asks.
-Arguments end at an unquoted comment (`# cross-boundary:ack`). A redirection
-anywhere in the push (`> log`, `2>&1`) or a quoted or escaped `#` keeps the
-ask: the shell passes words after a redirection to git (`> /dev/null
---force`), `2>&1` makes the segmenter split the command at its `&`, and the
-tokenizer does not tell a quoted `#` argument from a comment. The ref must
-also be a plain branch name (`[A-Za-z0-9][A-Za-z0-9._/-]*`, not `HEAD` or
-another `*HEAD`, not `refs/...`, no `..`, no trailing `.`, `/` or `.lock`)
-before `PRAXIS_BRANCH_NAME_REGEX` is consulted, so a permissive convention
-such as `^.+$` cannot admit `+main`, `x:main` or `HEAD:main`.
+
+**Opaque shell syntax keeps the ask for the whole command.** If the raw
+command contains `<`, `>`, a backtick, a backslash, `$(`, or a quoted `#`
+(`'#`, `"#`), nothing in it is demoted. Each of these hides words or commands
+from the per-segment check: arguments can follow a redirection
+(`&>/dev/null --force`), `&>` and `2>&1` make the segmenter split at the
+`&`, `<(...)` / `>(...)` / `$(...)` / backticks / heredoc bodies run commands
+that are never their own command start, a backslash can continue the line,
+and the tokenizer does not tell a quoted `#` argument from a comment. Two
+review rounds each found one more of these forms, so the rule is a
+character test rather than a model of each form. None of the 12 recorded
+self-checks contains any of them. Arguments otherwise end at an unquoted
+comment (`# cross-boundary:ack`).
+
+The ref must also be a plain branch name (`[A-Za-z0-9][A-Za-z0-9._/-]*`,
+not `HEAD` or another `*HEAD`, not `refs/...`, no `..`, no trailing `.`, `/`
+or `.lock`) before `PRAXIS_BRANCH_NAME_REGEX` is consulted, so a permissive
+convention such as `^.+$` cannot admit `+main`, `x:main` or `HEAD:main`.
+With such a convention a tag name (`v1.2.3`) or a case variant of a base
+branch (`Main`) does pass; the default convention admits neither.
 
 **How the hook knows the host.** The dispatcher publishes the host it runs a
 group for (`run_group(..., host)`, from `_dispatch.sh`'s third argument or the
@@ -242,7 +253,8 @@ never changed a call in the measured window.
 (the usual "add commits to my open PR" step) still asks, because the argv
 does not name the ref; resolving the current branch would need the effective
 cwd after any `cd` in the command. `git push -uq origin <branch>` (bundled
-flags), `--dry-run`, and a push with `2>&1 | tail` also still ask.
+flags), `--dry-run`, and any command with a redirection (`2>&1 | tail`) or
+a quoted title containing `#` also still ask.
 
 ### Response
 

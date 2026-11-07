@@ -58,6 +58,7 @@ ROUTINE = [
     "/usr/bin/git push origin issue-5-feat-sending-state",
     "git fetch origin && git rebase origin/main && git push -u origin issue-5-feat-sending-state",
     "gh pr create --repo o/r --base main --head hub-1-feat-x --title t --body-file b.md",
+    'gh pr create --title "feat(x): add y" --body-file b.md',
     "gh --repo o/r pr create --title t --body-file b.md",
     "gh pr create --repo o/r --base prod --head hub-1-fix-x --title t --body-file b.md # cross-boundary:ack",
     "git push -u origin issue-1-fix-x && gh pr create --title t --body-file b.md",
@@ -106,6 +107,15 @@ STILL_ASKS = [
     "git push origin issue-1-fix-x '#' --force",
     'git push origin issue-1-fix-x "#" --force',
     "git push origin issue-1-fix-x \\# --force",
+    # review round 2: `&>` splits at `&`, process substitution, heredoc
+    # bodies and line continuation (any opaque syntax keeps the ask)
+    "git push origin issue-1-fix-x &>/dev/null --force",
+    "git push origin issue-1-fix-x &>>log --delete",
+    "git push origin issue-1-fix-x &>/dev/null +main",
+    "git push origin issue-1-fix-x \\\n--force",
+    "gh pr create --title t --body-file <(gh pr merge 1 --squash)",
+    "gh pr create --title t --body-file b.md > >(gh pr merge 1)",
+    "gh pr create --title t --body-file - <<EOF\n$(gh pr merge 1 --squash)\nEOF",
     # a routine step chained with a non-routine one
     "git push origin issue-1-fix-x && git push origin main",
     "gh pr create --title t --body-file b.md && gh pr merge 3 --squash",
