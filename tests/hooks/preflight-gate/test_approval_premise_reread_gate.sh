@@ -198,11 +198,69 @@ run_case "py_unquoted_heredoc_nested_cmdsub" \
 run_case "mut_pipe_tail"   "$(verdict "$(bash_payload 'kubectl get pods --profile prod | xargs kubectl delete pod')")" "ask"
 run_case "mut_chain_tail"  "$(verdict "$(bash_payload 'kubectl get pods --profile prod && kubectl delete pod x')")"    "ask"
 run_case "mut_semicolon"   "$(verdict "$(bash_payload 'aws sts get-caller-identity --profile prod; rm -rf /tmp/x')")"  "ask"
-run_case "mut_redirect"    "$(verdict "$(bash_payload 'kubectl get pods --profile prod > /tmp/out')")"                 "ask"
 run_case "mut_kubectl_del" "$(verdict "$(bash_payload 'kubectl delete pod x --profile prod')")"                        "ask"
 run_case "mut_aws_rm"      "$(verdict "$(bash_payload 'aws s3 rm s3://b/k --profile prod')")"                          "ask"
 run_case "mut_gh_api_post" "$(verdict "$(bash_payload 'gh api -X POST repos/o/r/issues --profile prod')")"             "ask"
 run_case "mut_unknown_bin" "$(verdict "$(bash_payload 'some-unknown-binary --phase prod')")"                           "ask"
+
+# --- Bash: a write that stays on this machine is not a production call -----
+# Issue #1634: 26 of 29 asks on one install were local commits, merges,
+# compares and reads whose path or message held `prod`. A segment that is
+# neither read-only nor a local write is what reaches production, so the gate
+# asks only when one exists and the marker sits in it, in its pipeline, or
+# before it.
+run_case "local_read_redirect" "$(verdict "$(bash_payload 'kubectl get pods --profile prod > /tmp/out')")" "quiet"
+run_case "local_commit_in_prod_dir" \
+  "$(verdict "$(bash_payload 'cd /tmp/wt-prod-ops && git commit -m x')")" "quiet"
+run_case "local_commit_message" \
+  "$(verdict "$(bash_payload 'git add -A && git commit -q -m "fix: reload the prod-x token"')")" "quiet"
+run_case "local_commit_msg_log" "$(verdict "$(bash_payload 'git commit -m log --phase prod')")" "quiet"
+run_case "local_branch_delete"  "$(verdict "$(bash_payload 'git branch -D x --phase prod')")"   "quiet"
+run_case "local_merge_prod_branch" \
+  "$(verdict "$(bash_payload "git merge --no-ff origin/prod -m \"Merge branch 'prod' into x\" --no-commit 2>&1 | tail -30")")" "quiet"
+run_case "local_fetch_then_show" \
+  "$(verdict "$(bash_payload 'git fetch -q origin && git show origin/main:docs/prod-ops.md > /tmp/o.md')")" "quiet"
+run_case "local_cmp" \
+  "$(verdict "$(bash_payload 'wc -l a/mapping.csv prod-load/mapping.csv; cmp a/mapping.csv prod-load/mapping.csv && echo SAME')")" "quiet"
+run_case "local_mkdir_cp" \
+  "$(verdict "$(bash_payload 'mkdir -p prod-x/plan && cp plans/a.csv prod-x/plan/')")" "quiet"
+# The marker follows every remote segment: it names something the call has
+# already finished with, not that segment's target.
+run_case "marker_after_remote" \
+  "$(verdict "$(bash_payload 'python3 gen.py; mkdir -p prod/plan && ls prod/plan')")" "quiet"
+run_case "marker_in_later_read_pipeline" \
+  "$(verdict "$(bash_payload 'python3 x.py; ls prod-load canary | head -50')")" "quiet"
+
+# The remote segment names nothing, but something before it set its target.
+run_case "remote_after_read" \
+  "$(verdict "$(bash_payload 'kubectl --context prod-x get pods && kubectl delete pod x')")" "ask"
+run_case "remote_after_cd" \
+  "$(verdict "$(bash_payload 'cd /srv/prod-infra && terraform apply -auto-approve')")" "ask"
+run_case "remote_after_assignment" \
+  "$(verdict "$(bash_payload 'K=prod-x; kubectl --context $K delete pod p')")" "ask"
+run_case "remote_reads_local_write" \
+  "$(verdict "$(bash_payload 'kubectl get cm c -n prod-x -o yaml > /tmp/c.yaml && kubectl apply -f /tmp/c.yaml')")" "ask"
+run_case "remote_marker_later_in_pipeline" \
+  "$(verdict "$(bash_payload 'kubectl delete pods -l app=x | grep prod-')")" "ask"
+run_case "remote_quoted_bare_prod" \
+  "$(verdict "$(bash_payload 'kubectl --context "prod" delete pod p; ls prod-x')")" "ask"
+# Order stops meaning anything once a loop or a function is involved.
+run_case "remote_in_loop" \
+  "$(verdict "$(bash_payload 'for p in a b; do kubectl delete pod $p; done; ls prod-x')")" "ask"
+run_case "remote_in_function" \
+  "$(verdict "$(bash_payload 'f() { kubectl delete pod p; }; ls prod-x; f')")" "ask"
+# Local-looking verbs that are not on the local list.
+run_case "remote_git_push"   "$(verdict "$(bash_payload 'git push origin issue-12-prod-flag')")" "ask"
+run_case "remote_git_rebase_exec" \
+  "$(verdict "$(bash_payload 'git rebase -x "kubectl delete pod p" prod-base')")" "ask"
+run_case "remote_rm"         "$(verdict "$(bash_payload 'rm -rf prod-cache')")" "ask"
+# A marker the tokenizer drops (a trailing comment) leaves nothing to bind,
+# so the whole-command answer stands.
+run_case "marker_in_comment" "$(verdict "$(bash_payload 'kubectl delete pod x # in prod-x')")" "ask"
+# A heredoc body is blanked before segmenting, so the manifest's namespace is
+# invisible to the split; a later read that names prod must not decide it.
+run_case "heredoc_target_then_read" \
+  "$(verdict "$(bash_payload $'kubectl apply -f - <<\'EOF\'\nmetadata:\n  namespace: prod-a\nEOF\nls prod-x')")" "ask"
 
 # --- Bash: a binary whose read-onlyness depends on its flags is not on the
 # allowlist at all. Each of these writes under a flag or a second positional,
@@ -217,8 +275,7 @@ run_case "wr_date_set"     "$(verdict "$(bash_payload 'date -s "2020-01-01" --pr
 # Scanning every token for a read-only word would call these read-only, because
 # the word appears as an argument value rather than as the verb.
 run_case "pos_gh_create_titled_view" "$(verdict "$(bash_payload 'gh pr create --title view --profile prod')")" "ask"
-run_case "pos_git_commit_msg_log"    "$(verdict "$(bash_payload 'git commit -m log --phase prod')")"           "ask"
-run_case "pos_git_branch_delete"     "$(verdict "$(bash_payload 'git branch -D x --phase prod')")"             "ask"
+run_case "pos_git_push_ref_log"      "$(verdict "$(bash_payload 'git push origin log --phase prod')")"        "ask"
 
 # --- `gh api` reaches every verb, so the flags decide. The surface below is
 # the whole `gh api --help` flag list; the classifier admits a call only when it

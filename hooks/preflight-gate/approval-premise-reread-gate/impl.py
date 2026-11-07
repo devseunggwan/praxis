@@ -52,10 +52,15 @@ from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E
 from _payload import read_payload  # type: ignore[import-not-found]  # noqa: E402
 from block_message import format_block  # type: ignore[import-not-found]  # noqa: E402
 from _mutating_call import (  # type: ignore[import-not-found]  # noqa: E402
+    _NONWRITING_REDIRECT_RE,
+    _SUBSTITUTION_RE,
+    _segment_is_readonly,
+    _subcommand,
     bash_is_readonly,
     mcp_is_mutating,
 )
 from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
+    SHELL_SEPARATORS,
     heredoc_sources,
     iter_command_starts,
     safe_tokenize,
@@ -186,6 +191,108 @@ def _bash_marker_text(command: str) -> str:
         if not quoted and _SHELL_RUNS_RE.search(body):
             return command
     return stripped
+
+
+# Writes that land on this machine and cannot start another program. A
+# production call reaches something else, so a command made only of these and
+# read-only segments has no production target, whatever its paths are named:
+# `git commit -m "... prod-x ..."`, `git merge origin/prod`, `cmp a prod-load/b`
+# (issue #1634). `rm` and `mv` stay out: a deletion is the irreversible local
+# write, and a network mount does not announce itself in the path.
+_LOCAL_BINARIES = frozenset(("cmp", "mkdir", "cp", "touch", "ln", "tee", "mktemp"))
+
+# git subcommands that write only the local repository. `push`, `remote`,
+# `config`, `submodule` and `send-email` reach elsewhere or configure what
+# does; `rebase` is out because `--exec` runs a command per commit.
+_LOCAL_GIT = frozenset((
+    "add", "am", "apply", "branch", "checkout", "cherry-pick", "clean",
+    "commit", "fetch", "init", "merge", "merge-base", "mv", "pull", "reset",
+    "restore", "revert", "rm", "stash", "switch", "tag", "worktree",
+))
+
+# Segments that make the order of the command meaningless: a loop body runs
+# again after the segment that follows it, a function body runs where it is
+# called.
+_REORDERING = frozenset(("for", "while", "until", "select", "do", "function"))
+
+
+def _segment_is_local(argv: list[str]) -> bool:
+    if _segment_is_readonly(argv):
+        return True
+    argv = strip_prefix(argv)
+    if not argv:
+        return False
+    binary = argv[0].rsplit("/", 1)[-1]
+    if binary in _LOCAL_BINARIES:
+        return True
+    return binary == "git" and _subcommand("git", argv) in _LOCAL_GIT
+
+
+def _segment_names_prod(argv: list[str]) -> bool:
+    # The tokenizer drops quotes, so `--context "prod"` arrives as a bare
+    # `prod` token; the quoted-form alternative of the marker would miss it.
+    return (_carries_prod_marker(" ".join(argv))
+            or any(tok.lower() == "prod" for tok in argv))
+
+
+def _segments_with_pipes(tokens: list[str]) -> list[tuple[list[str], bool]]:
+    """Each command segment, and whether a `|` feeds it into the next one."""
+    out: list[tuple[list[str], bool]] = []
+    start = 0
+    for i, tok in enumerate(tokens):
+        if tok in SHELL_SEPARATORS:
+            if start < i:
+                out.append((tokens[start:i], tok == "|"))
+            start = i + 1
+    if start < len(tokens):
+        out.append((tokens[start:], False))
+    return out
+
+
+def _bash_reaches_prod(command: str) -> bool:
+    """True when a segment that reaches beyond this machine can act on the
+    production target the command names.
+
+    Called only after the whole command has carried a marker and failed the
+    read-only test. A local write is not a production call (issue #1634: 26
+    of 29 asks on one install were local commits, merges, compares and reads
+    of a path with `prod` in it), so the gate asks only when a segment that
+    is neither read-only nor local exists, and the marker sits in that
+    segment, in its pipeline, or before it -- `kubectl --context prod-x get
+    pods && kubectl delete pod x` deletes in whatever context is current, and
+    a `cd` or assignment carries the target forward. A marker that only
+    follows every such segment names something the call already finished
+    acting on.
+
+    Anything this split cannot see keeps the old whole-command answer: a
+    substitution or heredoc (the tokenizer blanks bodies the shell runs or
+    feeds), a loop or function (order stops meaning anything), and a marker
+    that no segment carries (it sat in text the tokenizer dropped).
+    """
+    if _SUBSTITUTION_RE.search(command) or heredoc_sources(command):
+        return True
+    tokens = safe_tokenize(_NONWRITING_REDIRECT_RE.sub(" ", command))
+    segments = _segments_with_pipes(tokens)
+    if not segments:
+        return True
+    if any(seg[0] in _REORDERING or seg[0].endswith("()")
+           for seg, _pipe in segments):
+        return True
+    named = [i for i, (seg, _p) in enumerate(segments) if _segment_names_prod(seg)]
+    if not named:
+        return True
+    remote = [i for i, (seg, _p) in enumerate(segments) if not _segment_is_local(seg)]
+    if not remote:
+        return False
+    # A pipeline runs its members together, so a remote segment acts for the
+    # whole pipeline it belongs to: extend it to the pipeline's last member.
+    reach_end = 0
+    for i in remote:
+        end = i
+        while end < len(segments) - 1 and segments[end][1]:
+            end += 1
+        reach_end = max(reach_end, end)
+    return named[0] <= reach_end
 
 
 # The two questions are the whole point of the gate, so they live in the
@@ -345,6 +452,8 @@ def main() -> int:
         if not _carries_prod_marker(_bash_marker_text(command)):
             return 0
         if bash_is_readonly(command):
+            return 0
+        if not _bash_reaches_prod(command):
             return 0
         target = command.strip().splitlines()[0][:120]
     elif mcp_is_mutating(tool_name):
