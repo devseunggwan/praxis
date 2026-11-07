@@ -333,16 +333,26 @@ So after the whole command has carried a marker and failed the read-only test,
 
 - **read-only**: the shared `_segment_is_readonly`. A redirect into a file
   is a write on this machine, so it does not move a read-only segment out of
-  this class here;
+  this class here. That keeps `echo x > prod-x/f` quiet while `tee` and `cp`
+  to the same path ask: reads redirected into scratch files were the largest
+  share of the false asks, and the shared classifier does not say which
+  redirect targets already exist;
 - **local**: writes that stay on this machine, cannot start another program,
-  and do not replace existing data: `cmp`, `mkdir`, `touch`, `mktemp`, and
+  and cannot overwrite an arbitrary path: `cmp`, `mkdir`, `touch`, `mktemp`, and
   the git subcommands that write only the local repository (`add`, `commit`,
   `merge`, `fetch`, `pull`, `checkout`, `switch`, `restore`, `reset`,
   `stash`, `branch`, `tag`, `worktree`, ...), unless the call carries
   `--upload-pack`, or `-c` / `--config-env` before the subcommand, which make
   git run a program of the caller's choosing (`core.fsmonitor`,
   `core.sshCommand`, a pager). After the subcommand `-c` is its own flag
-  (`git switch -c <branch>`) and stays local;
+  (`git switch -c <branch>`) and stays local. An assignment anywhere in the
+  command to `GIT_*` (`GIT_SSH_COMMAND`, `GIT_CONFIG_COUNT` / `_KEY_n` /
+  `_VALUE_n`, `GIT_CONFIG_PARAMETERS`, `GIT_EXTERNAL_DIFF`, ...), `PAGER`,
+  `EDITOR` or `VISUAL` reaches the same programs through the environment
+  (`VAR=x git ...`, `env VAR=x git ...`, `export VAR=x; git ...`), so it takes
+  every git segment off the local list. `git reset --hard` and `git restore`
+  stay local: they discard uncommitted work, but only inside the repository,
+  while `cp` / `tee` / `ln` write to any path;
 - **remote**: everything else, including any binary the gate does not know.
 
 The gate asks only when a remote segment exists **and** the first segment
@@ -371,8 +381,9 @@ see the order of execution:
 - a substitution or a heredoc anywhere: the tokenizer blanks heredoc bodies
   and keeps a substitution inside one word, so the command the shell runs
   there is not a segment;
-- a loop or a function (`for`, `while`, `until`, `select`, `do`, `function`,
-  `name()`): a loop body runs again after the segment that follows it;
+- a loop, a function or a trap (`for`, `while`, `until`, `select`, `do`,
+  `function`, `name()`, `trap`): a loop body runs again after the segment
+  that follows it, a trap body at exit;
 - a background `&`: the backgrounded segment is still running when the next
   one starts;
 - a marker that no segment carries: it sat in text the tokenizer dropped,

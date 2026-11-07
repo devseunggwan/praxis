@@ -268,6 +268,25 @@ run_case "remote_git_config_program_value_named_like_sub" \
 # After the subcommand, `-c` is the subcommand's own flag.
 run_case "local_git_switch_create" \
   "$(verdict "$(bash_payload 'git switch -c issue-12-prod-flag && git add -A && git commit -m x')")" "quiet"
+# The environment reaches the same config and programs `-c` does.
+run_case "remote_git_env_ssh" \
+  "$(verdict "$(bash_payload 'GIT_SSH_COMMAND="sh deploy.sh" git fetch origin prod-x')")" "ask"
+run_case "remote_git_env_config_count" \
+  "$(verdict "$(bash_payload 'GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.fsmonitor GIT_CONFIG_VALUE_0=./h.sh git commit -m "fix prod-x"')")" "ask"
+run_case "remote_git_env_config_parameters" \
+  "$(verdict "$(bash_payload "GIT_CONFIG_PARAMETERS=\"'core.fsmonitor'='./h.sh'\" git commit -m 'fix prod-x'")")" "ask"
+run_case "remote_git_env_wrapper" \
+  "$(verdict "$(bash_payload 'env GIT_SSH_COMMAND="sh deploy.sh" git pull origin prod-x')")" "ask"
+run_case "remote_git_env_exported" \
+  "$(verdict "$(bash_payload 'export GIT_SSH_COMMAND="sh deploy.sh"; git fetch origin prod-x')")" "ask"
+run_case "remote_git_env_pager" \
+  "$(verdict "$(bash_payload 'PAGER="sh deploy.sh" git branch -D prod-x')")" "ask"
+# A trap body runs at exit, after every segment that follows it.
+run_case "remote_in_trap" \
+  "$(verdict "$(bash_payload "trap 'terraform apply -auto-approve' EXIT; cd /srv/prod-infra")")" "ask"
+# A function named like a local command is the function, not the command.
+run_case "remote_function_named_like_local" \
+  "$(verdict "$(bash_payload 'mkdir() { kubectl delete pod p; }; mkdir prod-x')")" "ask"
 # A value the tokenizer unquotes after `=` still names production.
 run_case "remote_quoted_eq_value" \
   "$(verdict "$(bash_payload './deploy.sh --stage="prod" && git tag prod-1')")" "ask"

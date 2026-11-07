@@ -193,8 +193,8 @@ def _bash_marker_text(command: str) -> str:
     return stripped
 
 
-# Writes that land on this machine, cannot start another program, and do not
-# replace existing data. A production call reaches something else, so a
+# Writes that land on this machine, cannot start another program, and cannot
+# overwrite an arbitrary path. A production call reaches something else, so a
 # command made only of these and read-only segments has no production target,
 # whatever its paths are named: `git commit -m "... prod-x ..."`, `git merge
 # origin/prod`, `cmp a prod-load/b` (issue #1634). `rm`, `mv`, `cp`, `tee` and
@@ -221,10 +221,17 @@ _LOCAL_GIT = frozenset((
 _GIT_GLOBAL_RUNS_PROGRAM = ("-c", "--config-env")
 _GIT_RUNS_PROGRAM = ("--upload-pack",)
 
+# The same reach through the environment: `GIT_SSH_COMMAND`, `GIT_CONFIG_*`
+# / `GIT_CONFIG_PARAMETERS` (any config, `core.fsmonitor` included),
+# `GIT_EXTERNAL_DIFF`, and the pager or editor git starts. An assignment
+# anywhere in the command (`VAR=x git ...`, `env VAR=x git ...`,
+# `export VAR=x; git ...`) takes every git segment off the local list.
+_PROGRAM_ENV_RE = re.compile(r"(?:GIT_[A-Z0-9_]+|PAGER|EDITOR|VISUAL)=")
+
 # Segments that make the order of the command meaningless: a loop body runs
 # again after the segment that follows it, a function body runs where it is
-# called.
-_REORDERING = frozenset(("for", "while", "until", "select", "do", "function"))
+# called, and a trap runs at a signal or at exit.
+_REORDERING = frozenset(("for", "while", "until", "select", "do", "function", "trap"))
 
 
 def _has_flag(tokens: list[str], flags: tuple[str, ...]) -> bool:
@@ -244,7 +251,7 @@ def _git_is_local(argv: list[str]) -> bool:
                 or _has_flag(argv, _GIT_RUNS_PROGRAM))
 
 
-def _segment_is_local(argv: list[str]) -> bool:
+def _segment_is_local(argv: list[str], git_env_set: bool = False) -> bool:
     if _segment_is_readonly(argv):
         return True
     argv = strip_prefix(argv)
@@ -253,7 +260,7 @@ def _segment_is_local(argv: list[str]) -> bool:
     binary = argv[0].rsplit("/", 1)[-1]
     if binary in _LOCAL_BINARIES:
         return True
-    return binary == "git" and _git_is_local(argv)
+    return binary == "git" and not git_env_set and _git_is_local(argv)
 
 
 def _segment_names_prod(argv: list[str]) -> bool:
@@ -314,7 +321,9 @@ def _bash_reaches_prod(command: str) -> bool:
     named = [i for i, (seg, _p) in enumerate(segments) if _segment_names_prod(seg)]
     if not named:
         return True
-    remote = [i for i, (seg, _p) in enumerate(segments) if not _segment_is_local(seg)]
+    git_env_set = any(_PROGRAM_ENV_RE.match(tok) for seg, _p in segments for tok in seg)
+    remote = [i for i, (seg, _p) in enumerate(segments)
+              if not _segment_is_local(seg, git_env_set)]
     if not remote:
         return False
     # A pipeline runs its members together, so a remote segment acts for the
