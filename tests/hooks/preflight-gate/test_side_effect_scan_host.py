@@ -109,6 +109,8 @@ STILL_ASKS = [
     # a routine step chained with a non-routine one
     "git push origin issue-1-fix-x && git push origin main",
     "gh pr create --title t --body-file b.md && gh pr merge 3 --squash",
+    'gh pr create --title t --body "$(gh pr merge 3 --squash)"',
+    "gh pr create --title t --body `gh pr merge 3`",
     "git push origin issue-1-fix-x && kubectl apply -f x.yaml",
     # other gh writes
     "gh pr merge 7 --repo o/r --squash # briefing-surfaced: approved",

@@ -205,7 +205,7 @@ So on the `hermes` host, and only there, two shapes advise instead of asking:
 | Shape | Accepted form | Still asks |
 | ----- | ------------- | ---------- |
 | own work-branch push | `git push [-u\|--set-upstream\|-q\|--quiet\|-v\|--verbose\|--progress\|--no-progress] origin <branch>`, where `<branch>` fully matches the work-branch convention (`PRAXIS_BRANCH_NAME_REGEX`, default `^(hub\|issue)-<N>-<type>-<slug>$`, the pattern `branch-name-check` gates new branches with) and is not a base branch (`PRAXIS_BRANCH_NAME_WHITELIST`, default `main,master,dev,prod,staging`) | bare `git push`, `origin` alone, `HEAD`, a refspec with `:` or `+`, `refs/...`, a variable or `$(…)`, two refspecs, any other option (`--force*`, `-f`, `--delete`/`-d`, `--mirror`, `--all`, `--tags`, `--no-verify`, `-o`, bundled short flags such as `-uf`), a remote other than `origin` (`upstream`, a URL), a redirection, a quoted or escaped `#` |
-| PR create | `gh [global flags] pr create ...` with any flags, `--base prod` included | — (the merge is the step that moves a branch; `gh pr merge` keeps the ask here and is consent-gated by `pre-merge-approval-gate`) |
+| PR create | `gh [global flags] pr create ...` with any flags, `--base prod` included | a `$(...)` or backtick in the argv (a `gh pr merge` inside one is not its own command start); otherwise none (the merge is the step that moves a branch; `gh pr merge` keeps the ask here and is consent-gated by `pre-merge-approval-gate`) |
 
 The demotion is per command segment: a command advises only when every segment
 that asks is one of these shapes. `git push origin issue-1-fix-x && git push

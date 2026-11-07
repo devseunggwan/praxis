@@ -392,7 +392,12 @@ def is_routine_publish(argv: list[str], command: str) -> bool:
     """
     if is_own_branch_push(argv, command):
         return True
-    return _gh_subcommand_pair(strip_prefix(argv)) == ("pr", "create")
+    args = strip_prefix(argv)
+    # The tokenizer does not open `$(...)` or backticks, so a `gh pr merge`
+    # inside one is not its own command start; keep the ask for those.
+    if any("$(" in tok or "`" in tok for tok in args):
+        return False
+    return _gh_subcommand_pair(args) == ("pr", "create")
 
 
 def has_prod_scope(tokens: list[str]) -> bool:
