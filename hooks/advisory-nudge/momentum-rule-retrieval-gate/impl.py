@@ -53,6 +53,7 @@ from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
     safe_tokenize,
     strip_prefix,
 )
+import _host_merge_approval as _host_approval  # type: ignore[import-not-found]  # noqa: E402
 from _memory_dir import resolve_memory_dir  # type: ignore[import-not-found]  # noqa: E402
 from _payload import read_bash_payload  # type: ignore[import-not-found]  # noqa: E402
 from _transcript import (  # type: ignore[import-not-found]  # noqa: E402
@@ -2028,7 +2029,67 @@ def bulk_merge_approved(payload: dict) -> bool:
         return False
 
 
+def _call_failed(entries: list[dict], tool_use_id: str) -> bool:
+    """True when the transcript holds a failed tool_result for `tool_use_id`."""
+    for ev in entries:
+        msg = ev.get("message")
+        content = msg.get("content") if isinstance(msg, dict) else None
+        if not isinstance(content, list) or ev.get("isSidechain"):
+            continue
+        for b in content:
+            if (isinstance(b, dict) and b.get("type") == "tool_result"
+                    and b.get("tool_use_id") == tool_use_id and b.get("is_error")):
+                return True
+    return False
+
+
+def host_merge_decision(payload: dict) -> _host_approval.Decision:
+    """Public entry for both merge gates: the host approval provider's verdict
+    on the merge in `payload` (see `_lib/_host_merge_approval.py`).
+
+    Only a single merge naming its PR number and `--repo` (or a …/pull/N URL)
+    is sent to the provider. A merge with no repo would run against whatever
+    checkout the shell sits in, which a `cd` or the host's working directory
+    can change between the approval and the call. Never raises: any error is
+    a refusal, so neither gate releases on a crash.
+    """
+    try:
+        command = (payload.get("tool_input") or {}).get("command")
+        code = _split_shell_comment(command)[0] if isinstance(command, str) else ""
+        pr = _merge_pr_number(code) if code else None
+        repo = _merge_target_repo(code) if pr else None
+        refusal = None
+        if pr is None:
+            refusal = "the command is not one merge naming its PR number"
+        elif repo is None:
+            refusal = "the merge does not name its repo (--repo owner/name)"
+        entries = _load_turn_entries(payload.get("transcript_path", "") or "") or []
+        return _host_approval.decide(
+            session_id=str(payload.get("session_id") or ""),
+            tool_use_id=str(payload.get("tool_use_id") or ""),
+            repo=repo, pr=pr, refusal=refusal,
+            count_items=_briefing_item_count, min_items=MERGE_BRIEFING_MIN_ITEMS,
+            call_failed=lambda tid: _call_failed(entries, tid))
+    except Exception as exc:  # noqa: BLE001 - a crash must refuse, not release
+        return _host_approval.Decision(False, f"the provider check failed ({type(exc).__name__})")
+
+
 def _merge_escalation_reason(payload: dict) -> str | None:
+    """Return a deny reason when the merge is not approved, else None.
+
+    The transcript decides first; a host approval provider, when the host
+    configured one, is asked only about a merge the transcript would stop.
+    """
+    reason = _transcript_merge_reason(payload)
+    if reason is None or not _host_approval.configured():
+        return reason
+    decision = host_merge_decision(payload)
+    if decision.released:
+        return None
+    return f"{reason}\n{decision.note()}"
+
+
+def _transcript_merge_reason(payload: dict) -> str | None:
     """Return a deny reason when the pre-merge briefing is incomplete, else None."""
     # Demote-to-advisory escape hatch (false-positive relief without full bypass).
     if os.environ.get(MERGE_ADVISORY_ENV) == "1":

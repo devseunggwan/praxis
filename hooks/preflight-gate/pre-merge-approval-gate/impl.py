@@ -16,9 +16,18 @@ meant to enforce. The background-agent exemption that #180 originally carved out
 was removed in #1055: a delegated worker now runs as an ordinary session with a
 live stdin, so the human at the pane answers the prompt just as in a direct
 session.
+
+Host approval provider (issue #1639). A host that collects the human's merge
+answer in its own channel can name an executable in this hook process's
+environment (`PRAXIS_MERGE_APPROVAL_PROVIDER`); a merge it verifies skips the
+prompt. This is not an agent-attachable bypass: an inline env prefix on the
+command never reaches the hook, and the verdict comes from the same function
+momentum-rule-retrieval-gate uses (`host_merge_decision`), which still checks
+the briefing and spends one approval per merge. Unset, nothing changes.
 """
 from __future__ import annotations
 
+import os
 import sys
 import sys as _sys
 from pathlib import Path as _Path
@@ -98,6 +107,9 @@ def emit_ask(reason: str) -> None:
 
 _MOMENTUM_IMPL = (_Path(__file__).resolve().parent.parent.parent
                   / "advisory-nudge" / "momentum-rule-retrieval-gate" / "impl.py")
+# Read here only to skip loading the sibling when no provider is configured;
+# _lib/_host_merge_approval.py owns the contract.
+HOST_PROVIDER_ENV = "PRAXIS_MERGE_APPROVAL_PROVIDER"
 
 
 def bulk_approved(payload: dict) -> bool:
@@ -121,6 +133,27 @@ def bulk_approved(payload: dict) -> bool:
         return False
 
 
+def host_approval(payload: dict) -> tuple[bool, str]:
+    """(released, note) from the host approval provider, decided by the same
+    function momentum-rule-retrieval-gate uses, so the provider is asked and
+    the approval spent once per tool call. Only called when the host set
+    `PRAXIS_MERGE_APPROVAL_PROVIDER`. Any failure keeps the prompt.
+    """
+    try:
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location(
+            "_praxis_momentum_host_approval", _MOMENTUM_IMPL)
+        if spec is None or spec.loader is None:
+            return False, "host approval provider: momentum gate not loadable"
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        decision = module.host_merge_decision(payload)
+        return bool(decision.released), str(decision.note())
+    except Exception as exc:
+        return False, f"host approval provider: check failed ({type(exc).__name__})"
+
+
 def main() -> int:
     parsed = read_bash_payload()
     if parsed is None:
@@ -141,8 +174,16 @@ def main() -> int:
     # briefing gate was built against.
     if bulk_approved(payload):
         return 0
+    # A host that collects the human's merge answer in its own channel names
+    # a provider in the hook environment; unset, this block never runs.
+    note = ""
+    if os.environ.get(HOST_PROVIDER_ENV):
+        released, note = host_approval(payload)
+        if released:
+            return 0
+        note = "\n" + note
 
-    emit_ask(REASON + compound_cascade_hint(command))
+    emit_ask(REASON + compound_cascade_hint(command) + note)
     return 0
 
 

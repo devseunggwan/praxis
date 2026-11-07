@@ -166,6 +166,7 @@ per-hook `spec.md` before promoting any of them.
 | `PRAXIS_INTENT_PIVOT_MODE` | `session-intent` | Pivot-detection mode |
 | `PRAXIS_SKIP_JEV_ROUTING` | `cmux-delegate` (skill, not a hook) | `1` stops the delegation route script from calling TypeSafe's System One API, so an omitted `--model` keeps the pre-jev default. See [`../PRIVACY.md`](../PRIVACY.md) Direct egress (issue #1481) |
 | `PRAXIS_RESPONSE_LANGUAGE` | `postcompact-context`, `response-language-nudge` | User's response-language instruction. `postcompact-context` echoes it verbatim as one context line; `response-language-nudge` additionally requires it to normalize to Korean before it runs its drift check. No default, no hardcoded language — unset or blank leaves both hooks' output unchanged (issue #1476) |
+| `PRAXIS_MERGE_APPROVAL_PROVIDER` | `momentum-rule-retrieval-gate`, `pre-merge-approval-gate` | Absolute path to a host approval provider that reports a merge answer the human gave in the host's own channel. Not an opt-out: praxis still checks the briefing and spends one approval per merge, and the hook process environment is set by the host, never by an inline prefix. Unset leaves both gates unchanged (issue #1639; contract in the momentum gate's spec → *Host approval provider*) |
 
 ## Path / test (relocate state, caches, logs)
 

@@ -774,10 +774,90 @@ pins both channels per gate name.
 | `PRAXIS_MOMENTUM_MERGE_ADVISORY=1` | Demote the merge-briefing escalation to advisory only (stderr reminder still fires, no `deny`). Read from the hook process env, so it must be set in the **session** environment — an inline `VAR=1 gh pr merge …` prefix never reaches the hook, and the deny message says so (issue #1087). See also the in-band `# briefing-surfaced` command marker (issue #826) |
 | `PRAXIS_MOMENTUM_STRICT=1` | Exit 2 (block) instead of exit 0, unless `PRAXIS_MOMENTUM_ACK=1` is also set |
 | `PRAXIS_MOMENTUM_ACK=1` | Acknowledge the surface in strict mode; exit 0 after emitting the advisory |
+| `PRAXIS_MERGE_APPROVAL_PROVIDER=<path>` | Host approval provider for a merge the transcript path would deny; see *Host approval provider* below. Not a bypass: it names where the answer comes from |
 
 Default mode (no env vars): advisory for `dispatch` / `force-push`; the `merge`
 trigger blocks with `deny` only when the pre-merge briefing is incomplete
 (above), otherwise advisory.
+
+### Host approval provider (issue #1639)
+
+A host can collect the human's merge answer in a channel of its own (a
+dashboard button, a chat thread) and relay it into the session as a row the
+host wrote. The transcript path cannot read that as an approval: the last user
+message is the host's text, whatever the human answered. Replayed through the
+Hermes bridge on `main`, a relayed answer was denied with and without
+`# briefing-surfaced`.
+
+The host can instead name an executable in the hook process environment:
+
+```text
+PRAXIS_MERGE_APPROVAL_PROVIDER=<absolute path>
+```
+
+Unset (the default), nothing below runs and every decision is the one `main`
+makes. Set, the provider is asked only about a merge the transcript path would
+deny, and only when the command is one `gh pr merge` naming its PR number and
+its repo (`--repo owner/name`, `-R`, or a `…/pull/N` URL), with no chain, loop
+or `GH_REPO=` prefix. A merge with no repo runs against whatever checkout the
+shell or the host's working directory points at, which can change between the
+answer and the call, so the provider is not asked about it.
+
+```text
+<provider> merge-approval --repo <owner/name> --pr <N> --session <session_id>
+```
+
+stdin is closed; the call is cut off after 5 s. On exit 0 its stdout must be
+one JSON object:
+
+```json
+{"approved": true, "ref": "<unique per approval>", "repo": "owner/name",
+ "pr": 999, "briefing": "<text the human saw>", "approved_at": 1767225600}
+```
+
+The provider vouches for who answered; praxis still judges the answer and
+releases only when all of these hold:
+
+- `approved` is the JSON `true`, `pr` is a JSON integer equal to the merge's
+  number, and `repo` equals the merge's repo (case-insensitive);
+- `briefing` scores at least `MERGE_BRIEFING_MIN_ITEMS` (4) of 6 items with
+  `_briefing_item_count`, the counter the transcript path uses;
+- `approved_at` is a number no older than 30 days (the time spent refs are
+  kept, so a forgotten ref cannot be replayed);
+- `ref` has not released another merge.
+
+Any other outcome (non-zero exit, timeout, output that is not one JSON object,
+a mismatch) keeps the deny and appends one line naming the reason:
+`host approval provider did not release this merge: <reason>`.
+
+**One approval, one merge.** The release spends the ref, under `state_lock`,
+in `$PRAXIS_STATE_DIR` (default `~/.praxis/state`) `merge-approval.json`, with
+the session and `tool_use_id` of the call it released. The ref is freed again
+only when that call's `tool_result` in the same session's transcript is
+`is_error`: a sibling gate blocked it or `gh` failed, so nothing merged. A
+call still in flight, or one whose result is not in the transcript, keeps it
+spent. A payload without `session_id` or `tool_use_id` is never released.
+
+**Both gates, one decision.** `pre-merge-approval-gate` asks the same
+function, `host_merge_decision(payload)`. The first gate to ask for a tool call
+records the outcome, refusals included, keyed by session, `tool_use_id`, repo
+and PR, for 10 minutes; the second reads it. In one dispatch the gates run in
+sequence, so the provider runs once per tool call in either order, and a
+provider that would answer differently on a second call cannot split them.
+
+**Not a bypass.** The agent cannot set the hook process environment: an
+inline `PRAXIS_MERGE_APPROVAL_PROVIDER=… gh pr merge` prefix never reaches the
+hook, as with the other variables here. The provider replaces where the answer
+comes from; the briefing check and one-answer-one-merge still hold. A crash in
+the check refuses (`host_merge_decision` catches every exception), so it
+never releases on an error even though the hook itself is `@fail_open`.
+The provider executable and `merge-approval.json` are as safe as the user's
+filesystem, like every praxis state file; a host that runs agents able to
+write there keeps the provider outside their reach.
+
+Tests: `tests/hooks/_lib/test_host_merge_approval.py`, on the fixtures
+`momentum-merge-host-relayed*.jsonl` from
+`tests/fixtures/merge_gate_fixtures.py`.
 
 ### Scope (Phase 1 vs Phase 2)
 
@@ -823,7 +903,7 @@ prefix-matched form).
 
 | Hook | Overlap |
 | ------ | --------- |
-| `pre-merge-approval-gate` | Both fire on `gh pr merge`. The sibling surfaces an **unconditional** `permissionDecision: ask` (per-PR user approval, content-blind). This hook emits the stderr rule reminder and, when the pre-merge briefing is incomplete, a **content-aware** `permissionDecision: deny` (blocks so the agent produces the briefing). Different checks — the sibling gates *user* approval, this hook gates *briefing existence*. When both fire, `deny` wins (more restrictive), and the agent self-corrects. |
+| `pre-merge-approval-gate` | Both fire on `gh pr merge`. The sibling surfaces an **unconditional** `permissionDecision: ask` (per-PR user approval, content-blind). This hook emits the stderr rule reminder and, when the pre-merge briefing is incomplete, a **content-aware** `permissionDecision: deny` (blocks so the agent produces the briefing). Different checks — the sibling gates *user* approval, this hook gates *briefing existence*. When both fire, `deny` wins (more restrictive), and the agent self-corrects. The sibling skips its ask on this hook's `bulk_merge_approved` and, with a host provider set, `host_merge_decision`. |
 | `side-effect-scan` | Fires on `gh pr merge` / `git push` collateral side effects. Complementary. |
 | `verify-commit-flag-override` | Fires on `git commit --no-verify`. Different trigger, no overlap. |
 | `memory-hint` | Surfaces `hookable: true` memory entries by keyword. The momentum gate specifically surfaces the entries most relevant to merge / dispatch / force-push momentum, as a targeted complement to the general memory-hint scan. |

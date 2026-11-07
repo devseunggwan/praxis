@@ -226,6 +226,21 @@ tool rows keyed by `tool_call_id`, and the pending call's assistant row last.
 Then run the bridge probe above with that `session_id` and the pending call's
 id, and print the action plus the `[praxis:<gate>]` names.
 
+### Host approval provider probe
+
+A merge answer the human gave in the host's own channel reaches `state.db`
+as a user row the host wrote, so the transcript gates cannot read it as an
+approval (`momentum-rule-retrieval-gate` spec → *Host approval provider*).
+To check the provider path end to end, build the `state.db` above with a
+briefing turn followed by such a host row, write a stand-in provider (an
+executable that prints one JSON record and logs its argv), and run the bridge
+probe twice with the same scratch `PRAXIS_HOME`: once without
+`PRAXIS_MERGE_APPROVAL_PROVIDER` (expect `block`), once with it set in the
+bridge process's environment (expect `{}`, no `approve`, one logged provider
+call). Then send the same merge again under a new `tool_call_id` and expect
+`block` naming the spent approval. The payload's `session_id` is what the
+provider receives as `--session`.
+
 ### Transcript timing at PreToolUse
 
 Hermes persists the assistant row carrying a tool call before any tool in it

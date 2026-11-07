@@ -126,8 +126,36 @@ def _numbered_serial(reply: str) -> list[dict]:
     ]
 
 
+def _host_relayed(merge_result: dict | None = None) -> list[dict]:
+    """Prior-turn briefing of o/r#999, then the host's own row relaying an
+    answer given in another channel; the transcript path never reads it as an
+    approval (issue #1639). ``merge_result`` appends an earlier
+    ``gh pr merge 999 --repo o/r`` call ``m1`` with that result row."""
+    rows = [
+        user("prepare o/r#999 for merge"),
+        bash("c1", "gh pr checks 999 --repo o/r"), result("c1", "all checks passing"),
+        prose("Merge briefing\n\n" + section("o/r#999") + "\nApprove merge of #999?"),
+        user("[host notice] An answer for your question arrived in another channel. "
+             "Read it there before you continue."),
+    ]
+    if merge_result is not None:
+        rows += [bash("m1", "gh pr merge 999 --repo o/r --squash"), merge_result]
+    return rows
+
+
+def _failed_result(tid: str, text: str) -> dict:
+    return {"type": "user", "message": {"role": "user", "content": [
+        {"type": "tool_result", "tool_use_id": tid, "content": text, "is_error": True}]}}
+
+
 CASES = {
     "momentum-merge-example.jsonl": _example,
+    # Issue #1639: an answer relayed by the host, for the approval provider.
+    "momentum-merge-host-relayed.jsonl": _host_relayed,
+    "momentum-merge-host-relayed-failed-merge.jsonl":
+        lambda: _host_relayed(_failed_result("m1", "blocked by another gate")),
+    "momentum-merge-host-relayed-merged.jsonl":
+        lambda: _host_relayed(result("m1", "merged")),
     # Issue #1630: a numbered reply is read at the merge question's number.
     "momentum-merge-numbered-first-item.jsonl":
         lambda: _numbered("1. approve\n2. go with your recommendation", _Q_MERGE_FIRST),
