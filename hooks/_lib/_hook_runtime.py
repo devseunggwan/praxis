@@ -74,6 +74,32 @@ def remaining_budget(default_sec: float) -> float:
     return max(0.0, _MEMBER_DEADLINE - time.monotonic())
 
 
+# ---------------------------------------------------------------------------
+# Host the group runs for
+# ---------------------------------------------------------------------------
+# The dispatcher knows which platform it serves (`_dispatch.sh <event>
+# <matcher> <host>`, or the Hermes bridge's `run_group(..., host="hermes")`),
+# but a member only sees the payload. A member whose verdict depends on how
+# the host delivers it reads the host here, published the same way as the
+# deadline above. Standalone (a direct `python3 impl.py`) nothing is published
+# and `member_host()` is None, so a member keeps its host-independent default.
+# In-process members only: a shell member does not see it.
+
+_MEMBER_HOST: Optional[str] = None
+
+
+def set_member_host(host: Optional[str]) -> None:
+    """Publish the host of the group being run, or clear it with None.
+    Called only by the dispatcher around a group run."""
+    global _MEMBER_HOST
+    _MEMBER_HOST = host
+
+
+def member_host() -> Optional[str]:
+    """The host the dispatcher runs this member for; None when standalone."""
+    return _MEMBER_HOST
+
+
 # Floor below which spawning a subprocess probe is pointless: the fork/exec is
 # guaranteed dead on arrival and only burns what little budget remains. Shared
 # by the dispatcher's skip floor (_dispatch._MEMBER_SKIP_FLOOR_SEC) and every

@@ -264,6 +264,33 @@ def test_bypass_telemetry_is_not_the_member_the_deadline_skips(tmp_path, monkeyp
     assert members[0][1] == "bypass-telemetry"
 
 
+def test_run_group_publishes_its_host_to_members(tmp_path, monkeypatch, capsys):
+    # A member reads the host it runs for through `_hook_runtime.member_host`
+    # (issue #1635); the value is cleared once the group returns, so a later
+    # standalone call sees None.
+    impl = tmp_path / "host-reader" / "impl.py"
+    impl.parent.mkdir()
+    impl.write_text(
+        "import sys\n"
+        "from _hook_runtime import member_host\n"
+        "def main():\n"
+        "    sys.stderr.write(f'host={member_host()}\\n')\n"
+        "    return 0\n"
+    )
+    roster = [("advisory-nudge", "host-reader", impl)]
+    monkeypatch.setattr(
+        _dispatch, "load_group",
+        lambda e, m, h=None, i=None: (roster, 25.0, {("advisory-nudge", "host-reader"): 5.0}),
+    )
+    monkeypatch.setattr(_dispatch, "_record_fires", lambda *a, **k: None)
+
+    assert _dispatch.run_group("PreToolUse", "Bash", NOOP_PAYLOAD, "hermes") == 0
+    import _hook_runtime
+    assert _hook_runtime.member_host() is None  # cleared on return, not by the next call
+    assert _dispatch.run_group("PreToolUse", "Bash", NOOP_PAYLOAD) == 0
+    assert capsys.readouterr().err.splitlines() == ["host=hermes", "host=None"]
+
+
 def test_posttooluse_group_forwards_member_stderr_and_context(tmp_path, monkeypatch, capsys):
     # A PostToolUse member speaks through stderr (advisory text) and through
     # `hookSpecificOutput.additionalContext`; the group must forward both
