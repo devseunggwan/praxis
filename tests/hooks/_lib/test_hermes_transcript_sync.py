@@ -1,4 +1,4 @@
-"""Incremental transcript sync (#1633).
+"""Incremental transcript sync and the transcript cache sweep (#1633).
 
 `sync_transcript` appends only the rows newer than its last sync when every
 earlier row is unchanged, and rebuilds the file otherwise. The invariant every
@@ -17,6 +17,7 @@ import os
 import sqlite3
 import sys
 import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -285,3 +286,31 @@ def test_empty_session_then_rows(tmp_path):
     _, _, after = _sync(db, tmp_path)
     assert after == _fresh(db, tmp_path) and after
 
+
+# --- cache sweep -----------------------------------------------------------------
+
+def test_bridge_sweeps_transcripts_past_the_cache_ttl(tmp_path, monkeypatch):
+    praxis_home = tmp_path / "praxis"
+    out_dir = praxis_home / "cache" / "hermes-transcripts"
+    out_dir.mkdir(parents=True)
+    old = time.time() - 8 * 86400
+    stale = [out_dir / "gone-0000.jsonl", out_dir / "gone-0000.jsonl.state", out_dir / "x.jsonl1234.tmp"]
+    for p in stale:
+        p.write_text("{}\n")
+        os.utime(p, (old, old))
+    recent = out_dir / "kept-0000.jsonl"
+    recent.write_text("{}\n")
+    monkeypatch.setenv("PRAXIS_HOME", str(praxis_home))
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hermes"))
+    monkeypatch.delenv("PRAXIS_CACHE_TTL_DAYS", raising=False)
+    monkeypatch.delenv("PRAXIS_CACHE_PRUNE_INTERVAL_HOURS", raising=False)
+    bridge = _load("hermes_bridge_transcript_sweep", base.BRIDGE)
+    bridge._transcript("s1")  # no state.db: no transcript, the sweep still runs
+    assert [p for p in stale if p.exists()] == []
+    assert recent.exists() and (out_dir / ".prune-stamp").exists()
+    # Throttled: a file that ages out after this sweep stays until the next day's.
+    late = out_dir / "late-0000.jsonl"
+    late.write_text("{}\n")
+    os.utime(late, (old, old))
+    bridge._transcript("s1")
+    assert late.exists()

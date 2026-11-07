@@ -111,7 +111,10 @@ with the active rows on every call (appending new rows, rebuilding when an
 earlier row changed), so after a context compaction the same
 file holds the compacted session and an earlier row number points somewhere
 else. When a reproduction cuts a transcript at a row, copy the file out of
-the cache the first time you reproduce, and cut the copy.
+the cache the first time you reproduce, and cut the copy. Files untouched
+for `PRAXIS_CACHE_TTL_DAYS` (default 7) are swept; rebuild an older session
+from `state.db` with `_hermes.sync_transcript` (as
+`scripts/replay-session-merges.py` does).
 
 ## 5. Fixing an ambiguous marker parse
 

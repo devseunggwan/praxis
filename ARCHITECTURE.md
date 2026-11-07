@@ -426,7 +426,8 @@ gate that reads the text written just before the call (the merge-briefing
 gate) works the same way. The sync appends only the rows added since the
 last call while every earlier row is unchanged, so the file is append-only
 and the gates' resumable scan cursors carry over between calls; a
-deactivated or rewritten row rebuilds the whole file under a new inode. A prompt the user typed while a turn runs is
+deactivated or rewritten row rebuilds the whole file under a new inode.
+Files untouched for `PRAXIS_CACHE_TTL_DAYS` are swept once a day. A prompt the user typed while a turn runs is
 written at once with `display_metadata._queued_prompt` set; it is skipped
 until Hermes delivers it, because the model has not seen it yet. A user row
 Hermes wrote itself (`display_kind` `process_complete`,
