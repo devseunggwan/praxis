@@ -17,7 +17,7 @@ Three translations:
     Hermes keeps each session's messages in `state.db`, and writes the
     assistant message carrying a tool call before that call runs, so a gate on
     the call can read the text written just before it. `sync_transcript`
-    rewrites a Claude-shaped JSONL file from the session's active rows.
+    keeps a Claude-shaped JSONL file in step with the session's active rows.
   - Decisions. A praxis deny becomes `{"action": "block"}`, an ask becomes
     Hermes's human approval (`{"action": "approve"}`), additionalContext and
     advisory stderr become `{"context": ...}`, and a Bash `updatedInput`
@@ -486,14 +486,18 @@ def _user_events(content: str) -> Iterator[dict]:
         yield _user_message(typed)
 
 
-def transcript_events(rows: List[sqlite3.Row], names: Dict[str, str]) -> Iterator[dict]:
+def transcript_events(rows: List[sqlite3.Row], names: Dict[str, str],
+                      widths: Optional[Dict[str, int]] = None) -> Iterator[dict]:
     """Claude transcript events for Hermes message rows, in order.
 
     `names` collects tool-call id -> Hermes tool name as assistant rows are
-    read, so each tool row is rendered by the tool that produced it.
+    read, so each tool row is rendered by the tool that produced it. `widths`
+    collects Hermes call id -> how many Claude tool_use blocks it was rendered
+    as. Passing both back in renders rows that follow ones already rendered,
+    exactly as one pass over all of them would.
     """
-    # Hermes call id -> how many Claude tool_use blocks it was rendered as.
-    widths: Dict[str, int] = {}
+    if widths is None:
+        widths = {}
     for row in rows:
         role = row["role"]
         if role == "user":
@@ -547,27 +551,15 @@ def _is_queued(row: sqlite3.Row) -> bool:
     return isinstance(meta, dict) and meta.get("_queued_prompt") == 1
 
 
-def sync_transcript(session_id: str, out_dir: Path, db_path: Optional[Path] = None) -> Optional[Path]:
-    """Write the session's active Hermes messages as a Claude JSONL; return its path.
-
-    None when nothing usable exists (no session id, no database, an unknown
-    schema). The file is rebuilt from the active rows on every call and swapped
-    in with `os.replace`: a row Hermes later deactivates (a rewind, an edit)
-    leaves the transcript, and an interrupted write can neither duplicate nor
-    truncate events. A 469-row session rebuilds in about 5 ms.
-    """
-    if not session_id:
-        return None
-    db = db_path or state_db_path()
-    if not db.is_file():
-        return None
+def _active_rows(session_id: str, db: Path) -> Optional[List[sqlite3.Row]]:
+    """The session's active rows, in id order; None when the database is unusable."""
     try:
         conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=2)
         conn.row_factory = sqlite3.Row
         try:
             columns = {row[1] for row in conn.execute("PRAGMA table_info(messages)")}
             meta = "".join(f", {c}" for c in ("display_metadata", "display_kind") if c in columns)
-            rows = conn.execute(
+            return conn.execute(
                 f"SELECT id, role, content, tool_call_id, tool_calls, tool_name{meta} FROM messages "
                 "WHERE session_id = ? AND active = 1 ORDER BY id",
                 (session_id,),
@@ -576,21 +568,143 @@ def sync_transcript(session_id: str, out_dir: Path, db_path: Optional[Path] = No
             conn.close()
     except sqlite3.Error:
         return None
-    rows = [row for row in rows if not _is_queued(row)]
-    safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in session_id)[:120]
-    digest = hashlib.sha256(session_id.encode()).hexdigest()[:8]
-    out = out_dir / f"{safe}-{digest}.jsonl"
-    out_dir.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=out_dir, prefix=out.name, suffix=".tmp")
+
+
+_SYNC_STATE_VERSION = 1
+
+
+def _rows_digests(rows: List[sqlite3.Row], last_id: int) -> Tuple[str, str]:
+    """-> (digest of the rows up to `last_id`, digest of all rows).
+
+    Every column read goes in, so a row Hermes rewrites in place (a repair, a
+    redaction, a queued prompt's metadata) changes the digest even when the
+    row count and the highest id stay put.
+    """
+    h = hashlib.sha256()
+    prefix: Optional[str] = None
+    for row in rows:
+        if prefix is None and row["id"] > last_id:
+            prefix = h.hexdigest()
+        h.update(repr(tuple(row)).encode("utf-8", "backslashreplace"))
+    full = h.hexdigest()
+    return prefix or full, full
+
+
+def _load_sync_state(path: Path) -> Optional[dict]:
     try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    shape = {"version": int, "last_id": int, "digest": str, "ino": int, "size": int,
+             "names": dict, "widths": dict}
+    if not isinstance(data, dict) or any(type(data.get(k)) is not t for k, t in shape.items()):
+        return None
+    return data if data["version"] == _SYNC_STATE_VERSION else None
+
+
+def _save_sync_state(path: Path, state: dict) -> None:
+    """Write the sync state; a failure only costs the next call a full rebuild."""
+    tmp = ""
+    try:
+        fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=path.name, suffix=".tmp")
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            for event in transcript_events(rows, {}):
-                fh.write(json.dumps(event, ensure_ascii=False) + "\n")
+            json.dump(state, fh)
+        os.replace(tmp, path)
+    except OSError:
+        if tmp:
+            with contextlib.suppress(OSError):
+                os.unlink(tmp)
+
+
+def _render(rows: List[sqlite3.Row], names: Dict[str, str], widths: Dict[str, int]) -> bytes:
+    events = transcript_events([row for row in rows if not _is_queued(row)], names, widths)
+    return "".join(json.dumps(event, ensure_ascii=False) + "\n" for event in events).encode("utf-8")
+
+
+def _append(out: Path, rows: List[sqlite3.Row], state: dict) -> Optional[Tuple[int, int]]:
+    """Append `rows` (all newer than the last sync) to `out`; -> (inode, size) after.
+
+    None when `out` is not the file the state describes (removed, replaced,
+    grown or cut by anything else), so the caller rebuilds. The check and the
+    write go through one descriptor, so a file swapped in between is never
+    written to; a swap after the write leaves an inode the next call rejects.
+    """
+    try:
+        fd = os.open(out, os.O_WRONLY | os.O_APPEND)
+    except OSError:
+        return None
+    try:
+        st = os.fstat(fd)
+        if st.st_ino != state["ino"] or st.st_size != state["size"]:
+            return None
+        data = memoryview(_render(rows, state["names"], state["widths"]))
+        while data:
+            data = data[os.write(fd, data):]
+        st = os.fstat(fd)
+        return st.st_ino, st.st_size
+    except OSError:
+        return None  # a part-written tail is replaced by the rebuild that follows
+    finally:
+        os.close(fd)
+
+
+def _rebuild(out: Path, rows: List[sqlite3.Row], names: Dict[str, str], widths: Dict[str, int]) -> Tuple[int, int]:
+    """Write all of `rows` to a temp file and swap it in; -> (inode, size)."""
+    fd, tmp = tempfile.mkstemp(dir=out.parent, prefix=out.name, suffix=".tmp")
+    try:
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(_render(rows, names, widths))
         os.replace(tmp, out)
     except BaseException:
         with contextlib.suppress(OSError):
             os.unlink(tmp)
         raise
+    st = out.stat()
+    return st.st_ino, st.st_size
+
+
+def sync_transcript(session_id: str, out_dir: Path, db_path: Optional[Path] = None) -> Optional[Path]:
+    """Write the session's active Hermes messages as a Claude JSONL; return its path.
+
+    None when nothing usable exists (no session id, no database, an unknown
+    schema). A state file beside the transcript records the last row id it
+    holds and a digest of the rows up to it. When those rows are unchanged,
+    only the newer rows are rendered and appended, so the file stays
+    append-only and the gates' resumable scans (`scan_transcript_resumable`)
+    pick up where they stopped. Anything else (a row Hermes deactivated or
+    rewrote, a missing or foreign state, a file changed underneath) rebuilds
+    the whole file and swaps it in with `os.replace`, under a new inode, so a
+    removed row leaves the transcript and no reader keeps a stale offset.
+    A 492-row session rebuilds in about 10 ms and writes 0.7 MB; an append
+    writes only the new rows.
+    """
+    if not session_id:
+        return None
+    db = db_path or state_db_path()
+    if not db.is_file():
+        return None
+    rows = _active_rows(session_id, db)
+    if rows is None:
+        return None
+    safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in session_id)[:120]
+    digest = hashlib.sha256(session_id.encode()).hexdigest()[:8]
+    out = out_dir / f"{safe}-{digest}.jsonl"
+    state_path = out_dir / f"{out.name}.state"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    last_id = rows[-1]["id"] if rows else 0
+    # Two calls of one session (parallel tool calls) must not both append the
+    # same rows; without the lock the call rebuilds, which is safe unlocked.
+    with state_lock(str(state_path)) as locked:
+        state = _load_sync_state(state_path) if locked else None
+        prefix, full = _rows_digests(rows, state["last_id"] if state else last_id)
+        written: Optional[Tuple[int, int]] = None
+        if state is not None and prefix == state["digest"]:
+            written = _append(out, [row for row in rows if row["id"] > state["last_id"]], state)
+        if state is None or written is None:
+            state = {"version": _SYNC_STATE_VERSION, "names": {}, "widths": {}}
+            written = _rebuild(out, rows, state["names"], state["widths"])
+        state.update(last_id=last_id, digest=full, ino=written[0], size=written[1])
+        _save_sync_state(state_path, state)
     return out
 
 

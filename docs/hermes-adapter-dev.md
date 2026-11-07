@@ -106,8 +106,9 @@ real data. Grade the evidence:
 | Unit tests and CI | `PASS(mock)` |
 | Gate replay carried from an earlier body, not re-run on HEAD | `Unverified` |
 
-The bridge rewrites `~/.praxis/cache/hermes-transcripts/<session_id>.jsonl`
-from the active rows on every call, so after a context compaction the same
+The bridge syncs `~/.praxis/cache/hermes-transcripts/<session_id>.jsonl`
+with the active rows on every call (appending new rows, rebuilding when an
+earlier row changed), so after a context compaction the same
 file holds the compacted session and an earlier row number points somewhere
 else. When a reproduction cuts a transcript at a row, copy the file out of
 the cache the first time you reproduce, and cut the copy.
@@ -299,8 +300,8 @@ into the configured bridge and expect `block-ask-end-option`'s block.
 - **Registration.** `hermes hooks list` must show `plugins/hermes/bridge.py`
   under `pre_tool_call` as allowed.
 - **Firing.** When the session has an id and `$HERMES_HOME/state.db` exists
-  with a readable `messages` table, the bridge rewrites the session transcript
-  on every call, so `ls -lt ~/.praxis/cache/hermes-transcripts | head` shows
+  with a readable `messages` table, the bridge syncs the session transcript
+  on every call (an append, or a rebuild after an earlier row changed), so `ls -lt ~/.praxis/cache/hermes-transcripts | head` shows
   the current session's file with a fresh mtime. `sync_transcript` returns
   `None` without writing when any of those is missing or unreadable, and the
   bridge still runs the gates with an empty `transcript_path`. So no fresh

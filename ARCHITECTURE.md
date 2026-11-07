@@ -419,11 +419,14 @@ call.
 
 **Transcript.** Hermes keeps each session's messages in `state.db` and writes
 the assistant message carrying a tool call before the call runs. On every call
-the bridge rewrites a Claude-shaped JSONL under
-`~/.praxis/cache/hermes-transcripts/` from the session's active rows (rows
+the bridge syncs a Claude-shaped JSONL under
+`~/.praxis/cache/hermes-transcripts/` with the session's active rows (rows
 Hermes later deactivates drop out) and passes it as `transcript_path`, so a
 gate that reads the text written just before the call (the merge-briefing
-gate) works the same way. A prompt the user typed while a turn runs is
+gate) works the same way. The sync appends only the rows added since the
+last call while every earlier row is unchanged, so the file is append-only
+and the gates' resumable scan cursors carry over between calls; a
+deactivated or rewritten row rebuilds the whole file under a new inode. A prompt the user typed while a turn runs is
 written at once with `display_metadata._queued_prompt` set; it is skipped
 until Hermes delivers it, because the model has not seen it yet. A user row
 Hermes wrote itself (`display_kind` `process_complete`,
