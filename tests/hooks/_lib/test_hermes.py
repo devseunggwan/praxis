@@ -402,8 +402,31 @@ def test_ask_becomes_an_agent_self_check_not_a_human_approval(tmp_path):
 def test_self_check_is_per_call(tmp_path):
     """Re-checking one call does not let a different call through."""
     assert _bridge(_terminal("git push origin main", tmp_path), tmp_path)["action"] == "block"
-    other = _bridge(_terminal("git push origin issue-1-fix-other", tmp_path), tmp_path)
+    # A base branch: an own work-branch push no longer asks on Hermes (#1635).
+    other = _bridge(_terminal("git push origin dev", tmp_path), tmp_path)
     assert other["action"] == "block"
+
+
+@pytest.mark.parametrize("command", [
+    "git push -u origin issue-1-fix-other",
+    "gh pr create --base prod --head issue-1-fix-other --title t --body-file b.md",
+])
+def test_routine_publish_gets_no_side_effect_self_check(tmp_path, command):
+    """Own work-branch push and PR create reach the agent without a side-effect-scan self-check (#1635)."""
+    response = _bridge(_terminal(command, tmp_path), tmp_path)
+    assert "[praxis:side-effect-scan]" not in response.get("message", ""), response
+
+
+@pytest.mark.parametrize("command", [
+    "git push --force origin issue-1-fix-other",
+    "git push origin issue-1-fix-other:main",
+    "git push upstream issue-1-fix-other",
+    "git push --delete origin issue-1-fix-other",
+])
+def test_other_pushes_keep_the_side_effect_self_check(tmp_path, command):
+    response = _bridge(_terminal(command, tmp_path), tmp_path)
+    assert response["action"] == "block"
+    assert "[praxis:side-effect-scan]" in response["message"]
 
 
 def test_self_check_lists_every_gate_that_asked(tmp_path):

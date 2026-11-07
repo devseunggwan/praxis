@@ -13,8 +13,10 @@ matching command from the detector.
 Opt-out: embed the marker `# side-effect:ack` anywhere in the command to
 signal an intentional invocation — the hook then exits 0 without prompting.
 
-Tiers (issue #874). `git-commit` is ADVISE; every other category is ASK. The
-observation behind the demotion: one 2026-07-27 session (`5d46110f`) spent 23
+Tiers (issue #874). `git-commit` is ADVISE; every other category is ASK,
+except two routine publish shapes on the Hermes host (issue #1635, see
+`SELF_CHECK_HOSTS`). The
+observation behind the `git-commit` demotion: one 2026-07-27 session (`5d46110f`) spent 23
 of its 37 total ask prompts on this single hook — 62% — and an approval gate
 that becomes habitual stops functioning as a gate. `git-commit` is the one
 category that can absorb that reduction, and the ground is reversibility
@@ -72,11 +74,14 @@ hardcoded here live in the author's env now).
 from __future__ import annotations
 
 import os
+import re
 import sys
 import sys as _sys
 from pathlib import Path as _Path
 _sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
+from _branch_names import base_branch_names, work_branch_regex  # type: ignore[import-not-found]  # noqa: E402
 from _hook_io import emit_decision  # type: ignore[import-not-found]  # noqa: E402
+from _hook_runtime import member_host  # type: ignore[import-not-found]  # noqa: E402
 from _payload import read_bash_payload  # type: ignore[import-not-found]  # noqa: E402
 from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
     GH_MERGE_VALUE_FLAGS,
@@ -281,6 +286,87 @@ def detect(argv: list[str]) -> list[str]:
     return matched
 
 
+# Hosts whose `ask` is a self-check the agent answers, not a prompt the user
+# answers: the Hermes adapter turns every ask outside its consent gates into
+# "re-check and re-issue" (ARCHITECTURE.md, Hermes adapter, *Asks*). On those
+# hosts the routine publish steps of the issue workflow advise instead of
+# asking (issue #1635): over 14 days on one Hermes install all 12 of this
+# gate's self-checks were re-issued with only the ack marker added, and every
+# one was a push of the session's own issue branch or a `gh pr create`. The
+# argv already names the target the checklist asks to re-check, so the
+# re-check found nothing. Elsewhere the ask is a permission prompt, and this
+# change leaves it alone.
+SELF_CHECK_HOSTS = frozenset({"hermes"})
+
+# Only these ask categories can be demoted, and only for the argv shapes
+# `is_routine_publish` accepts. A wrapper CLI configured under the same argv
+# still asks.
+_ROUTINE_PUBLISH_CATEGORIES = frozenset({"git-push", "gh-merge"})
+
+# `git push` options that change neither which ref is written nor how. Any
+# other option (`--force*`, `--delete`, `--mirror`, `--all`, `--tags`,
+# `--prune`, `-o`, `--no-verify`, bundled short flags, ...) keeps the ask.
+_PUSH_PLAIN_FLAGS = frozenset({
+    "-u", "--set-upstream",
+    "-q", "--quiet",
+    "-v", "--verbose",
+    "--progress", "--no-progress",
+})
+_OWN_BRANCH_REMOTE = "origin"
+
+# A token that starts a redirection ends the command's arguments: shlex keeps
+# `2>` and `>` as words (`2>&1` splits into `2>`, `&`, `1`).
+_REDIRECT_START = re.compile(r"^(?:&>>?|\d*>>?|\d*<)")
+
+
+def _command_args(argv: list[str]) -> list[str]:
+    """argv up to the first comment or redirection token."""
+    out: list[str] = []
+    for tok in argv:
+        if tok.startswith("#") or _REDIRECT_START.match(tok):
+            break
+        out.append(tok)
+    return out
+
+
+def is_own_branch_push(argv: list[str]) -> bool:
+    """`git push [-u|-q|-v...] origin <work branch>` and nothing else.
+
+    The branch must match the work-branch convention (`_branch_names`,
+    the same pattern `branch-name-check` gates new branches with) and not be
+    a base branch. A bare `git push`, `HEAD`, a refspec with `:` or `+`, a
+    variable, a second refspec, or a remote other than `origin` keeps the ask:
+    the argv then does not name the ref that moves.
+    """
+    args = _command_args(strip_prefix(argv))
+    if len(args) < 2 or args[0].rsplit("/", 1)[-1] != "git" or args[1] != "push":
+        return False
+    positionals: list[str] = []
+    for tok in args[2:]:
+        if tok.startswith("-"):
+            if tok not in _PUSH_PLAIN_FLAGS:
+                return False
+            continue
+        positionals.append(tok)
+    if len(positionals) != 2:
+        return False
+    remote, ref = positionals
+    if remote != _OWN_BRANCH_REMOTE or ref in base_branch_names():
+        return False
+    return work_branch_regex().fullmatch(ref) is not None
+
+
+def is_routine_publish(argv: list[str]) -> bool:
+    """An own-branch push or a `gh pr create` (issue #1635).
+
+    Opening a PR moves no branch and deploys nothing; the merge that does is
+    still asked here and gated by `pre-merge-approval-gate`.
+    """
+    if is_own_branch_push(argv):
+        return True
+    return _gh_subcommand_pair(strip_prefix(argv)) == ("pr", "create")
+
+
 def has_prod_scope(tokens: list[str]) -> bool:
     for raw in tokens:
         t = raw.lower()
@@ -373,11 +459,20 @@ def main() -> int:
     if not tokens:
         return 0
 
+    demote = member_host() in SELF_CHECK_HOSTS
     matched: list[str] = []
+    asks = False
     for argv in iter_command_starts(tokens):
-        for cat in detect(argv):
+        categories = detect(argv)
+        for cat in categories:
             if cat not in matched:
                 matched.append(cat)
+        ask_categories = {c for c in categories if CATEGORIES[c]["tier"] == TIER_ASK}
+        if not ask_categories:
+            continue
+        if demote and ask_categories <= _ROUTINE_PUBLISH_CATEGORIES and is_routine_publish(argv):
+            continue
+        asks = True
 
     if not matched:
         return 0
@@ -386,9 +481,10 @@ def main() -> int:
 
     # Mixed matches stay at ASK and keep EVERY matched category in the reason —
     # `git commit -am x && git push` is unchanged from its pre-#874 text. Only
-    # a match consisting solely of ADVISE-tier categories is demoted, so the
-    # demotion can never quiet a command that also touches shared state.
-    if any(CATEGORIES[c]["tier"] == TIER_ASK for c in matched):
+    # a match whose every asking segment was demoted (an ADVISE-tier category,
+    # or a routine publish on a self-check host) advises, so the demotion can
+    # never quiet a command that also touches other shared state.
+    if asks:
         emit_ask(build_reason(matched, prod, command))
         return 0
 
