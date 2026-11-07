@@ -402,7 +402,7 @@ every routine shape advises on `hermes` and still asks on `claude`, `codex`,
 mixes, a wrapper configured under `git push`, and `gh pr merge` /
 `gh workflow run` / `kubectl apply` still ask on `hermes`; a custom
 `PRAXIS_BRANCH_NAME_REGEX` is honoured and never admits a base branch.
-`tests/hooks/_lib/test_hermes.py` drives a subset (two routine shapes, five
+`tests/hooks/_lib/test_hermes.py` drives a subset (two routine shapes, six
 non-routine pushes) through the real bridge, and
 `tests/hooks/_lib/test_dispatch.py` pins that `run_group` publishes the host
 and clears it.
