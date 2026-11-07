@@ -298,9 +298,8 @@ def detect(argv: list[str]) -> list[str]:
 # change leaves it alone.
 SELF_CHECK_HOSTS = frozenset({"hermes"})
 
-# Only these ask categories can be demoted, and only for the argv shapes
-# `is_routine_publish` accepts. A wrapper CLI configured under the same argv
-# still asks.
+# Only these ask categories can be demoted. A wrapper CLI configured under the
+# same argv (`PRAXIS_WRAPPER_COMMIT_CMDS`) adds its own category and still asks.
 _ROUTINE_PUBLISH_CATEGORIES = frozenset({"git-push", "gh-merge"})
 
 # `git push` options that change neither which ref is written nor how. Any
@@ -320,14 +319,13 @@ _OWN_BRANCH_REMOTE = "origin"
 _PLAIN_BRANCH = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/-]*")
 _SYMBOLIC_REF = re.compile(r"[A-Z_]*HEAD")
 
-# Shell syntax the tokenizer cannot place reliably. A redirection can be
-# followed by more arguments (`&>/dev/null --force`) and `&>` / `2>&1` make
-# the segmenter split at the `&`; `<(...)`, `>(...)`, `$(...)`, backticks and
-# heredoc bodies run commands the per-segment check never sees; a backslash
-# can continue the line or escape a `#`; a quoted `#` is an argument, not a
-# comment. Rather than model each form, a command carrying any of them keeps
-# the ask (issue #1635 review rounds 1-2 found one gap per form).
+# Shell syntax the tokenizer cannot place reliably: a redirection can be
+# followed by more arguments (`&>/dev/null --force`); `<(...)`, `>(...)`,
+# `$(...)`, backticks and heredoc bodies run commands; a backslash can
+# continue the line; a quoted `#` is an argument, not a comment.
 _OPAQUE_SHELL = re.compile(r"""[<>`\\]|\$\(|['"]#""")
+# A tokenizer word made only of `;`, `|`, `&` is a control operator.
+_OPERATOR = re.compile(r"[;|&]+")
 
 
 def has_opaque_shell_syntax(command: str) -> bool:
@@ -358,18 +356,16 @@ def _is_plain_branch_name(ref: str) -> bool:
     )
 
 
-def is_own_branch_push(argv: list[str]) -> bool:
+def is_own_branch_push(args: list[str]) -> bool:
     """`git push [-u|-q|-v...] origin <work branch>` and nothing else.
 
-    The branch must be a plain branch name, match the work-branch convention
-    (`_branch_names`, the same pattern `branch-name-check` gates new branches
-    with) and not be a base branch. A bare `git push`, `HEAD`, a refspec with
-    `:` or `+`, `refs/...`, a variable, a second refspec, or a remote other
-    than `origin` keeps the ask: the argv then does not name the ref that
-    moves, or how.
+    `args` is the literal argv: the command word must be `git` itself, so an
+    env assignment (`GIT_CONFIG_*=...`) or a wrapper (`env`, `timeout`,
+    `xargs`, ...) keeps the ask. The branch must be a plain branch name, match
+    the work-branch convention (`_branch_names`, the pattern `branch-name-check`
+    gates new branches with) and not be a base branch.
     """
-    args = _command_args(strip_prefix(argv))
-    if len(args) < 2 or args[0].rsplit("/", 1)[-1] != "git" or args[1] != "push":
+    if len(args) < 2 or args[0] != "git" or args[1] != "push":
         return False
     positionals: list[str] = []
     for tok in args[2:]:
@@ -386,16 +382,43 @@ def is_own_branch_push(argv: list[str]) -> bool:
     return work_branch_regex().fullmatch(ref) is not None
 
 
-def is_routine_publish(argv: list[str]) -> bool:
-    """An own-branch push or a `gh pr create` (issue #1635).
+def _is_routine_segment(argv: list[str]) -> bool:
+    args = _command_args(argv)
+    if not args:
+        return False
+    if args[0] == "git":
+        return is_own_branch_push(args)
+    if args[0] == "gh":
+        return _gh_subcommand_pair(args) == ("pr", "create")
+    return False
 
-    Opening a PR moves no branch and deploys nothing; the merge that does is
-    still asked here and gated by `pre-merge-approval-gate`. Callers check
-    `has_opaque_shell_syntax` on the whole command first.
+
+def is_routine_command(tokens: list[str]) -> bool:
+    """The whole command is one routine publish step, optionally after `cd`.
+
+    Accepted: `<step>` or `cd <dir> && <step>`, where `<step>` is an own
+    work-branch push or a `gh pr create` written with the bare command word.
+    Anything else in the command (another step, a pipe, `;`, `|&`, `&|`, a
+    background `&`, a subshell, a wrapper or an env assignment) keeps the ask:
+    review rounds 1-3 showed that a merge or push the detector cannot see
+    (`timeout ... gh pr merge`, `(git push origin main)`) rode along once the
+    visible step stopped asking, so the demotion is an allowlist of whole
+    commands rather than a list of dangerous forms. Callers check
+    `has_opaque_shell_syntax` first.
     """
-    if is_own_branch_push(argv):
-        return True
-    return _gh_subcommand_pair(strip_prefix(argv)) == ("pr", "create")
+    segments: list[list[str]] = [[]]
+    operators: list[str] = []
+    for tok in tokens:
+        if _OPERATOR.fullmatch(tok):
+            operators.append(tok)
+            segments.append([])
+        else:
+            segments[-1].append(tok)
+    if not operators:
+        return _is_routine_segment(segments[0])
+    if operators == ["&&"] and len(segments[0]) == 2 and segments[0][0] == "cd":
+        return _is_routine_segment(segments[1])
+    return False
 
 
 def has_prod_scope(tokens: list[str]) -> bool:
@@ -490,7 +513,11 @@ def main() -> int:
     if not tokens:
         return 0
 
-    demote = member_host() in SELF_CHECK_HOSTS and not has_opaque_shell_syntax(command)
+    demote = (
+        member_host() in SELF_CHECK_HOSTS
+        and not has_opaque_shell_syntax(command)
+        and is_routine_command(tokens)
+    )
     matched: list[str] = []
     asks = False
     for argv in iter_command_starts(tokens):
@@ -501,7 +528,7 @@ def main() -> int:
         ask_categories = {c for c in categories if CATEGORIES[c]["tier"] == TIER_ASK}
         if not ask_categories:
             continue
-        if demote and ask_categories <= _ROUTINE_PUBLISH_CATEGORIES and is_routine_publish(argv):
+        if demote and ask_categories <= _ROUTINE_PUBLISH_CATEGORIES:
             continue
         asks = True
 
@@ -512,8 +539,8 @@ def main() -> int:
 
     # Mixed matches stay at ASK and keep EVERY matched category in the reason —
     # `git commit -am x && git push` is unchanged from its pre-#874 text. Only
-    # a match whose every asking segment was demoted (an ADVISE-tier category,
-    # or a routine publish on a self-check host) advises, so the demotion can
+    # a match with no ASK-tier category, or a whole command that is one
+    # routine publish step on a self-check host, advises, so the demotion can
     # never quiet a command that also touches other shared state.
     if asks:
         emit_ask(build_reason(matched, prod, command))

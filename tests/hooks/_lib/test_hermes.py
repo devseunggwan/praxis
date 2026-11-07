@@ -424,6 +424,7 @@ def test_routine_publish_gets_no_side_effect_self_check(tmp_path, command):
     "git push --delete origin issue-1-fix-other",
     "git push origin issue-1-fix-other > /dev/null --force",
     "git push origin issue-1-fix-other &>/dev/null --force",
+    "git push -u origin issue-1-fix-other && timeout 600 gh pr merge 1 --squash",
 ])
 def test_other_pushes_keep_the_side_effect_self_check(tmp_path, command):
     response = _bridge(_terminal(command, tmp_path), tmp_path)
