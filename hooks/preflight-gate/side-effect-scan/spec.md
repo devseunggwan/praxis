@@ -225,10 +225,15 @@ it: a second step (`git fetch && git rebase && git push ...`,
 `git push ... && gh pr create ...`), `;`, a pipe, `|&`, `&|`, `||`, a
 background `&`, a `{ ...; }` group, `cd` with an option, or two `cd`s. And
 it keeps the ask whenever the raw command contains `<`, `>`, a backtick, a
-backslash, `$(`, or a quoted `#` (`'#`, `"#`): arguments can follow a
-redirection (`&>/dev/null --force`), `<(...)` / `>(...)` / `$(...)` /
-backticks / heredoc bodies run commands, a backslash can continue the line,
-and the tokenizer does not tell a quoted `#` argument from a comment.
+backslash, `$`, a quoted `#` (`'#`, `"#`), or a `(` / `)` outside quotes:
+arguments can follow a redirection (`&>/dev/null --force`); `<(...)`,
+`>(...)`, `$(...)`, backticks and heredoc bodies run commands; in zsh (the
+shell Hermes runs background commands in on this kind of install) a `$`
+runs one even inside double quotes (`"${(e)...}"`), and an unquoted
+parenthesis does as a glob qualifier (`*(e:'cmd':)`) or `=(cmd)`; a
+backslash can continue the line; the tokenizer does not tell a quoted `#`
+argument from a comment. A quoted title such as `"feat(x): add y"` is
+still allowed.
 
 **Why an allowlist of whole commands.** Earlier revisions demoted per segment
 and rejected dangerous forms one at a time. Each of three review rounds found
@@ -260,7 +265,9 @@ fast-forward is not rejected), no longer gets the re-check. The argv names the
 target only when no push mapping is configured: an earlier
 `git config remote.origin.push ...` or `git remote set-url` in another call
 redirects the same `git push origin <branch>`, and that earlier call is not
-re-checked here. External repos keep `cross-boundary-preflight` for `gh`
+re-checked here. The same holds for a variable exported in an earlier call
+(`export GIT_CONFIG_COUNT=...`): Hermes keeps exported variables between
+terminal calls. External repos keep `cross-boundary-preflight` for `gh`
 writes; a plain `git push` to one has no other gate on Hermes. That is the
 trade the issue accepted: the re-check never changed a call in the measured
 window.

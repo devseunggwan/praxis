@@ -82,6 +82,17 @@ STILL_ASKS = [
     "cd -P a && git push origin issue-1-fix-x",
     "cd a; git push origin issue-1-fix-x",
     "cd a || git push origin issue-1-fix-x",
+    # review round 4: zsh runs commands from words with no `$(`, backtick or
+    # redirection (glob qualifier, `=(...)`, `${(e)...}` even in double quotes)
+    "gh pr create --title *(e:'gh pr merge 1 --squash':)",
+    "cd *(e:'git push -f origin main':) && git push -u origin issue-1-fix-a",
+    "gh pr create --body-file =(gh pr merge 1)",
+    'gh pr create --title "${(e)x}"',
+    "gh pr create --title $x",
+    # the cd / step checks themselves
+    "sh x && gh pr create --title t",
+    "cd x && gh pr merge 1",
+    "cd x && git push -f origin main",
     # the ref that moves is not named, or is not a work branch
     "git push",
     "git push origin",

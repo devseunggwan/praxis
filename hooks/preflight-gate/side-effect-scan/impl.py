@@ -321,15 +321,32 @@ _SYMBOLIC_REF = re.compile(r"[A-Z_]*HEAD")
 
 # Shell syntax the tokenizer cannot place reliably: a redirection can be
 # followed by more arguments (`&>/dev/null --force`); `<(...)`, `>(...)`,
-# `$(...)`, backticks and heredoc bodies run commands; a backslash can
-# continue the line; a quoted `#` is an argument, not a comment.
-_OPAQUE_SHELL = re.compile(r"""[<>`\\]|\$\(|['"]#""")
+# `$(...)`, backticks and heredoc bodies run commands, and so does a `$` in
+# zsh even inside double quotes (`"${(e)...}"`); a backslash can continue the
+# line; a quoted `#` is an argument, not a comment.
+_OPAQUE_SHELL = re.compile(r"""[<>`\\$]|['"]#""")
 # A tokenizer word made only of `;`, `|`, `&` is a control operator.
 _OPERATOR = re.compile(r"[;|&]+")
 
 
+def _has_unquoted_paren(command: str) -> bool:
+    """`(` or `)` outside quotes: a subshell, or in zsh a glob qualifier
+    (`*(e:'cmd':)`) or `=(cmd)`, both of which run a command. A quoted
+    `"feat(x): y"` title stays allowed."""
+    quote = ""
+    for ch in command:
+        if quote:
+            if ch == quote:
+                quote = ""
+        elif ch in "'\"":
+            quote = ch
+        elif ch in "()":
+            return True
+    return False
+
+
 def has_opaque_shell_syntax(command: str) -> bool:
-    return _OPAQUE_SHELL.search(command) is not None
+    return _OPAQUE_SHELL.search(command) is not None or _has_unquoted_paren(command)
 
 
 def _command_args(argv: list[str]) -> list[str]:
