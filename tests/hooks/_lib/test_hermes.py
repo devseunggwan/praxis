@@ -163,7 +163,7 @@ def test_sync_rebuilds_from_active_rows(tmp_path):
     conn.close()
     hermes.sync_transcript("s1", tmp_path / "t", db)
     assert "gh pr merge 7" not in out.read_text()
-    assert [p.name for p in (tmp_path / "t").iterdir()] == [out.name]  # no temp file left
+    assert not list((tmp_path / "t").glob("*.tmp"))  # no temp file left
 
 
 def test_sync_fails_open_without_a_usable_database(tmp_path):

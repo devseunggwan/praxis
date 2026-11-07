@@ -168,6 +168,7 @@ around it were deleted — the #1034 measurement of the old write
 | `preflight-gate/approval-premise-reread-gate` | single-use premise ack file | consumed by an atomic `os.rename` claim; no read-modify-write to lose | no — classified from the impl, not measured |
 | `_lib/block_message` and `_lib/_hook_io` (counting in `_lib/_block_repeat`) | per-session gate-block count, keyed by `rule_name` for the five-field message and by the deny reason's gate marker for `permissionDecision` (#1420) | the repeat notice fires on the `count >= 2` boundary — Q1 | yes — classified from the impl, not measured; per-pid staging floor |
 | `completion-verify/early-stop-advisory` (block mode, `PRAXIS_UNATTENDED=1` only) | per-session `{turn, blocks}` count of automatic continuations, keyed by the human message that opened the turn | the block stops at `blocks >= 2` — Q1; a lost increment is one extra continuation, and a count that cannot be written never blocks | yes — classified from the impl, not measured; per-pid staging floor |
+| `plugins/hermes/bridge.py` (`_hermes.sync_transcript`, not a `resolve_cache_file` consumer) | per-session sync state (last row id, row digest, the transcript's inode, size and tail digest) beside an append-only Hermes transcript | two calls appending the same rows duplicate them in the transcript every gate reads (Q2); without the lock the call rebuilds the file instead of appending | yes: forced-interleave thread test with an unlocked control (#1633), not measured across processes; per-pid staging |
 
 ### Q0, measured (issue #1034)
 
@@ -182,7 +183,10 @@ control arm that can fail it is not a measurement** — it cannot distinguish
 
 `hooks/_lib/_state_lock.py` is the primitive: `with state_lock(path):` around
 the read *and* the write, `fcntl.flock` on a `<path>.lock` sibling. Readers
-take no lock — `os.replace` already gives them a whole file.
+take no lock — `os.replace` already gives them a whole file. The Hermes
+transcript is the one appended file: a reader may see a last line still being
+written, which `load_transcript` skips as malformed and the resumable scans
+never consume (they advance only past complete lines).
 
 It yields False rather than raising or waiting when the lock cannot be taken,
 and the body runs regardless. That is the fail-open contract above, applied
