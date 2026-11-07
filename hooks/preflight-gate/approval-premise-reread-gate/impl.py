@@ -219,10 +219,11 @@ _LOCAL_GIT = frozenset((
 # command (`core.hooksPath`, `core.sshCommand`). Listing the ways in one at a
 # time kept missing the next one, so the rule is closed instead: a git segment
 # is local only when its global part is at most `-C <dir>`, its own options
-# do not name `--upload-pack` (any unambiguous prefix, which the subcommand's
-# option parser accepts), and the command contains no variable assignment and
-# no git segment that is not local.
-_GIT_RUNS_PROGRAM = ("--upload-pack",)
+# do not name `--upload-pack` or `--unsafe-paths` (which lets `git apply`
+# write outside the repository), in full or as any unambiguous prefix the
+# subcommand's option parser accepts, and the command contains no variable
+# assignment and no git segment that is not local.
+_GIT_RUNS_PROGRAM = ("--upload-pack", "--unsafe-paths")
 
 # `VAR=x`, `VAR+=x`, and the same after `env`, `export`, `declare`.
 _ASSIGNMENT_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\+?=")
@@ -237,6 +238,10 @@ _REORDERING = frozenset((
 ))
 # `f()`, `f(){`, and the `()` of `f () {`.
 _FUNCTION_DEF_RE = re.compile(r"[^\s=()]*\(\)\{?")
+
+# Bash opens these paths as sockets, so a redirect into one sends data to
+# another host rather than writing a file on this machine.
+_NETWORK_REDIRECT_RE = re.compile(r"/dev/(?:tcp|udp)/")
 
 
 def _abbreviates(tokens: list[str], flags: tuple[str, ...]) -> bool:
@@ -277,8 +282,10 @@ def _git_reconfigured(segments: list[list[str]]) -> bool:
 
 
 def _reorders(segments: list[list[str]]) -> bool:
+    # `f ( ) {` reaches the tokenizer as separate `(` and `)` tokens.
     return any(tok in _REORDERING or _FUNCTION_DEF_RE.fullmatch(tok)
-               for seg in segments for tok in seg)
+               or (tok == "(" and seg[i + 1:i + 2] == [")"])
+               for seg in segments for i, tok in enumerate(seg))
 
 
 def _segment_is_local(argv: list[str], git_reconfigured: bool = False) -> bool:
@@ -334,10 +341,12 @@ def _bash_reaches_prod(command: str) -> bool:
     substitution or heredoc (the tokenizer blanks bodies the shell runs or
     feeds), a loop, function, trap or coprocess (order stops meaning
     anything), a background `&` (the backgrounded segment is still running
-    when the next one starts), and a marker that no segment carries (it sat in
-    text the tokenizer dropped).
+    when the next one starts), a `/dev/tcp` or `/dev/udp` path (a redirect
+    into it is a network write), and a marker that no segment carries (it sat
+    in text the tokenizer dropped).
     """
-    if _SUBSTITUTION_RE.search(command) or heredoc_sources(command):
+    if (_SUBSTITUTION_RE.search(command) or heredoc_sources(command)
+            or _NETWORK_REDIRECT_RE.search(command)):
         return True
     tokens = safe_tokenize(_NONWRITING_REDIRECT_RE.sub(" ", command))
     if "&" in tokens:

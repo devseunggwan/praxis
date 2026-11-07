@@ -355,7 +355,8 @@ way in, so the rule is closed rather than listed. A git segment is local only
 when all of these hold:
 
 - its global part (before the subcommand) is nothing or `-C <dir>`;
-- its own options name no `--upload-pack`, in full or as any unambiguous
+- its own options name no `--upload-pack` and no `--unsafe-paths` (which lets
+  `git apply` write outside the repository), in full or as any unambiguous
   prefix, which the subcommand's option parser accepts (`--upload=cmd`);
 - the command contains no variable assignment anywhere (`VAR=x`, `VAR+=x`,
   after `env`, `export` or `declare`, or on its own);
@@ -364,8 +365,9 @@ when all of these hold:
 
 After the subcommand `-c` is the subcommand's own flag (`git switch -c
 <branch>`) and stays local. A repository's own hooks can still run a program
-on `git commit`; `main` is quiet on a `git commit` without a marker as well,
-so that reach is not new here.
+on `git commit`, and `git merge -s <name>` runs `git-merge-<name>` from the
+PATH; `main` is quiet on a `git commit` without a marker as well, so that
+reach is not new here.
 
 The gate asks only when a remote segment exists **and** the first segment
 naming production sits in that remote segment, in its pipeline, or before it.
@@ -395,12 +397,15 @@ see the order of execution:
   there is not a segment;
 - a loop, a function, a trap or a coprocess (`for`, `while`, `until`,
   `select`, `do`, `function`, `trap`, `coproc`, `name()`, `name(){`, a lone
-  `()`), read from every token rather than a segment's first, so
+  `()`, `name ( )`), read from every token rather than a segment's first, so
   `builtin trap`, a function defined inside `{ ...; }` and an `if` body are
   seen: a loop body runs again after the segment that follows it, a function
   body where it is called, a trap body at exit;
 - a background `&`: the backgrounded segment is still running when the next
   one starts;
+- a `/dev/tcp/` or `/dev/udp/` path anywhere: bash opens it as a socket, so
+  a redirect into it (`echo x > /dev/tcp/<host>/<port>`) is a network write,
+  not a file write on this machine;
 - a marker that no segment carries: it sat in text the tokenizer dropped,
   such as a trailing comment.
 

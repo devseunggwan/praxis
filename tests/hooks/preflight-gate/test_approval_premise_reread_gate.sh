@@ -315,6 +315,21 @@ run_case "remote_git_config_env_global" \
   "$(verdict "$(bash_payload "git --config-env=core.fsmonitor=H commit -m 'fix prod-x'")")" "ask"
 run_case "local_git_dash_C" \
   "$(verdict "$(bash_payload "git -C /tmp/wt-prod-ops commit -m 'fix prod-x'")")" "quiet"
+# Review round 4: a spaced `( )` function definition, a socket path, and
+# `git apply --unsafe-paths`; plus a read-only git segment that must not take
+# the local commit after it off the local list.
+run_case "remote_function_spaced_parens" \
+  "$(verdict "$(bash_payload 'mkdir ( ) { terraform apply -auto-approve; }; cd /srv/prod-infra && mkdir x')")" "ask"
+run_case "local_subshell_commit" \
+  "$(verdict "$(bash_payload '(git commit -m x); ls prod-x')")" "quiet"
+run_case "remote_dev_tcp_redirect" \
+  "$(verdict "$(bash_payload 'echo FLUSHALL > /dev/tcp/prod-redis/6379')")" "ask"
+run_case "remote_dev_udp_redirect" \
+  "$(verdict "$(bash_payload 'cat dump.sql > /dev/udp/prod-db/5432')")" "ask"
+run_case "remote_git_apply_unsafe_paths" \
+  "$(verdict "$(bash_payload 'git apply --unsafe-paths --directory=/srv/prod-x p.diff')")" "ask"
+run_case "local_git_read_then_commit" \
+  "$(verdict "$(bash_payload "git log -1 && git commit -m 'fix prod-x'")")" "quiet"
 # A value the tokenizer unquotes after `=` still names production.
 run_case "remote_quoted_eq_value" \
   "$(verdict "$(bash_payload './deploy.sh --stage="prod" && git tag prod-1')")" "ask"
