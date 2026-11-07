@@ -599,6 +599,11 @@ def _load_sync_state(path: Path) -> Optional[dict]:
              "names": dict, "widths": dict}
     if not isinstance(data, dict) or any(type(data.get(k)) is not t for k, t in shape.items()):
         return None
+    # The renderer reads these back as call id -> tool name and -> block count.
+    if not all(type(k) is str and type(v) is str for k, v in data["names"].items()):
+        return None
+    if not all(type(k) is str and type(v) is int for k, v in data["widths"].items()):
+        return None
     return data if data["version"] == _SYNC_STATE_VERSION else None
 
 

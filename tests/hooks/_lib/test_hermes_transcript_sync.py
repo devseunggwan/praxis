@@ -175,6 +175,7 @@ def test_a_queued_prompt_delivered_later_lands_where_a_full_rebuild_puts_it(tmp_
 
 
 @pytest.mark.parametrize("damage", ["state-garbage", "state-foreign-version", "state-missing",
+                                    "state-missing-key", "state-widths-not-int", "state-names-not-str",
                                     "file-missing", "file-appended", "file-truncated", "file-replaced",
                                     "file-rewritten-same-size"])
 def test_a_state_that_does_not_describe_the_file_rebuilds(tmp_path, damage):
@@ -182,12 +183,26 @@ def test_a_state_that_does_not_describe_the_file_rebuilds(tmp_path, damage):
     _turn(db, 1)
     out, _, _ = _sync(db, tmp_path)
     state = out.with_name(out.name + ".state")
+    saved = json.loads(state.read_text())
     if damage == "state-garbage":
         state.write_text("{not json")
     elif damage == "state-foreign-version":
-        state.write_text(json.dumps(dict(json.loads(state.read_text()), version=99)))
+        state.write_text(json.dumps(dict(saved, version=99)))
     elif damage == "state-missing":
         state.unlink()
+    elif damage == "state-missing-key":
+        del saved["tail"]
+        state.write_text(json.dumps(saved))
+    elif damage == "state-widths-not-int":
+        # The call is synced first; its failed result arrives later and is
+        # rendered with the saved width.
+        _add(db, "assistant", "", tool_calls=[base._call("c9", "terminal", {"command": "false"})])
+        _sync(db, tmp_path)
+        saved = json.loads(state.read_text())
+        state.write_text(json.dumps(dict(saved, widths={"c9": "x"})))
+        _add(db, "tool", json.dumps({"error": "blocked"}), tool_call_id="c9", tool_name="terminal")
+    elif damage == "state-names-not-str":
+        state.write_text(json.dumps(dict(saved, names={"c1": 1})))
     elif damage == "file-missing":
         out.unlink()
     elif damage == "file-appended":
