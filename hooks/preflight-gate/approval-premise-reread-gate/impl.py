@@ -52,10 +52,15 @@ from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E
 from _payload import read_payload  # type: ignore[import-not-found]  # noqa: E402
 from block_message import format_block  # type: ignore[import-not-found]  # noqa: E402
 from _mutating_call import (  # type: ignore[import-not-found]  # noqa: E402
+    _NONWRITING_REDIRECT_RE,
+    _SUBSTITUTION_RE,
+    _segment_is_readonly,
+    _subcommand,
     bash_is_readonly,
     mcp_is_mutating,
 )
 from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
+    SHELL_SEPARATORS,
     heredoc_sources,
     iter_command_starts,
     safe_tokenize,
@@ -186,6 +191,179 @@ def _bash_marker_text(command: str) -> str:
         if not quoted and _SHELL_RUNS_RE.search(body):
             return command
     return stripped
+
+
+# Writes that land on this machine, cannot start another program, and cannot
+# overwrite an arbitrary path. A production call reaches something else, so a
+# command made only of these and read-only segments has no production target,
+# whatever its paths are named: `git commit -m "... prod-x ..."`, `git merge
+# origin/prod`, `cmp a prod-load/b` (issue #1634). `rm`, `mv`, `cp`, `tee` and
+# `ln` stay out: each can destroy a file in place, and a network mount does not
+# announce itself in the path.
+_LOCAL_BINARIES = frozenset(("cmp", "mkdir", "touch", "mktemp"))
+
+# git subcommands that write only the local repository. `push`, `remote`,
+# `config`, `submodule` and `send-email` reach elsewhere or configure what
+# does; `rebase` is out because `--exec` runs a command per commit, and
+# `clean` because it deletes untracked files the way `rm` does.
+_LOCAL_GIT = frozenset((
+    "add", "am", "apply", "branch", "checkout", "cherry-pick",
+    "commit", "fetch", "init", "merge", "merge-base", "mv", "pull", "reset",
+    "restore", "revert", "rm", "stash", "switch", "tag", "worktree",
+))
+
+# What git runs is set by more than its subcommand: global options before the
+# subcommand (`-c`, `--config-env`, `--exec-path`, `--git-dir`, ...), the
+# environment (`GIT_SSH_COMMAND`, `GIT_CONFIG_*`, `HOME`, `XDG_CONFIG_HOME`,
+# `PAGER`, ...), and config written by an earlier `git config` in the same
+# command (`core.hooksPath`, `core.sshCommand`). Listing the ways in one at a
+# time kept missing the next one, so the rule is closed instead: a git segment
+# is local only when its global part is at most `-C <dir>`, its own options
+# do not name `--upload-pack` (any unambiguous prefix, which the subcommand's
+# option parser accepts), and the command contains no variable assignment and
+# no git segment that is not local.
+_GIT_RUNS_PROGRAM = ("--upload-pack",)
+
+# `VAR=x`, `VAR+=x`, and the same after `env`, `export`, `declare`.
+_ASSIGNMENT_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\+?=")
+
+# Segments that make the order of the command meaningless: a loop body runs
+# again after the segment that follows it, a function body runs where it is
+# called, a trap runs at a signal or at exit, and a coprocess runs alongside
+# what follows. Read from every token, not only a segment's first one, so a
+# `builtin trap`, a `{ f() { ...; }; }` group or an `if` body is still seen.
+_REORDERING = frozenset((
+    "for", "while", "until", "select", "do", "function", "trap", "coproc",
+))
+# `f()`, `f(){`, and the `()` of `f () {`.
+_FUNCTION_DEF_RE = re.compile(r"[^\s=()]*\(\)\{?")
+
+
+def _abbreviates(tokens: list[str], flags: tuple[str, ...]) -> bool:
+    """A subcommand's parse-options accepts any unambiguous prefix of a long
+    option, so `--upload=cmd` is `--upload-pack=cmd`."""
+    names = (tok.split("=", 1)[0] for tok in tokens)
+    return any(name.startswith("--") and len(name) > 2 and flag.startswith(name)
+               for name in names for flag in flags)
+
+
+def _git_is_local(argv: list[str]) -> bool:
+    sub = _subcommand("git", argv)
+    if sub not in _LOCAL_GIT:
+        return False
+    # The last occurrence bounds the global part: a value spelled like the
+    # subcommand (`git -C commit -c ... commit`) then still counts as global.
+    last = len(argv) - 1 - argv[::-1].index(sub)
+    global_part = argv[1:last]
+    i = 0
+    while i < len(global_part):
+        if global_part[i] != "-C":
+            return False
+        i += 2
+    return not _abbreviates(argv[last + 1:], _GIT_RUNS_PROGRAM)
+
+
+def _is_git(argv: list[str]) -> bool:
+    argv = strip_prefix(argv)
+    return bool(argv) and argv[0].rsplit("/", 1)[-1] == "git"
+
+
+def _git_reconfigured(segments: list[list[str]]) -> bool:
+    """True when something in the command can change what a git call runs."""
+    if any(_ASSIGNMENT_RE.match(tok) for seg in segments for tok in seg):
+        return True
+    return any(_is_git(seg) and not _segment_is_readonly(seg)
+               and not _git_is_local(strip_prefix(seg)) for seg in segments)
+
+
+def _reorders(segments: list[list[str]]) -> bool:
+    return any(tok in _REORDERING or _FUNCTION_DEF_RE.fullmatch(tok)
+               for seg in segments for tok in seg)
+
+
+def _segment_is_local(argv: list[str], git_reconfigured: bool = False) -> bool:
+    if _segment_is_readonly(argv):
+        return True
+    argv = strip_prefix(argv)
+    if not argv:
+        return False
+    binary = argv[0].rsplit("/", 1)[-1]
+    if binary in _LOCAL_BINARIES:
+        return True
+    return binary == "git" and not git_reconfigured and _git_is_local(argv)
+
+
+def _segment_names_prod(argv: list[str]) -> bool:
+    # The tokenizer drops quotes, so `--context "prod"` arrives as a bare
+    # `prod` token and `--stage="prod"` / `ENV="prod"` as `...=prod`; the
+    # quoted-form alternative of the marker would miss both.
+    return (_carries_prod_marker(" ".join(argv))
+            or any(tok.rsplit("=", 1)[-1].lower() == "prod" for tok in argv))
+
+
+def _segments_with_pipes(tokens: list[str]) -> list[tuple[list[str], bool]]:
+    """Each command segment, and whether a `|` feeds it into the next one."""
+    out: list[tuple[list[str], bool]] = []
+    start = 0
+    for i, tok in enumerate(tokens):
+        if tok in SHELL_SEPARATORS:
+            if start < i:
+                out.append((tokens[start:i], tok == "|"))
+            start = i + 1
+    if start < len(tokens):
+        out.append((tokens[start:], False))
+    return out
+
+
+def _bash_reaches_prod(command: str) -> bool:
+    """True when a segment that reaches beyond this machine can act on the
+    production target the command names.
+
+    Called only after the whole command has carried a marker and failed the
+    read-only test. A local write is not a production call (issue #1634: 26
+    of 29 asks on one install were local commits, merges, compares and reads
+    of a path with `prod` in it), so the gate asks only when a segment that
+    is neither read-only nor local exists, and the marker sits in that
+    segment, in its pipeline, or before it -- `kubectl --context prod-x get
+    pods && kubectl delete pod x` deletes in whatever context is current, and
+    a `cd` or assignment carries the target forward. A marker that only
+    follows every such segment names something the call already finished
+    acting on.
+
+    Anything this split cannot see keeps the old whole-command answer: a
+    substitution or heredoc (the tokenizer blanks bodies the shell runs or
+    feeds), a loop, function, trap or coprocess (order stops meaning
+    anything), a background `&` (the backgrounded segment is still running
+    when the next one starts), and a marker that no segment carries (it sat in
+    text the tokenizer dropped).
+    """
+    if _SUBSTITUTION_RE.search(command) or heredoc_sources(command):
+        return True
+    tokens = safe_tokenize(_NONWRITING_REDIRECT_RE.sub(" ", command))
+    if "&" in tokens:
+        return True
+    segments = _segments_with_pipes(tokens)
+    if not segments:
+        return True
+    if _reorders([seg for seg, _pipe in segments]):
+        return True
+    named = [i for i, (seg, _p) in enumerate(segments) if _segment_names_prod(seg)]
+    if not named:
+        return True
+    git_reconfigured = _git_reconfigured([seg for seg, _p in segments])
+    remote = [i for i, (seg, _p) in enumerate(segments)
+              if not _segment_is_local(seg, git_reconfigured)]
+    if not remote:
+        return False
+    # A pipeline runs its members together, so a remote segment acts for the
+    # whole pipeline it belongs to: extend it to the pipeline's last member.
+    reach_end = 0
+    for i in remote:
+        end = i
+        while end < len(segments) - 1 and segments[end][1]:
+            end += 1
+        reach_end = max(reach_end, end)
+    return named[0] <= reach_end
 
 
 # The two questions are the whole point of the gate, so they live in the
@@ -345,6 +523,8 @@ def main() -> int:
         if not _carries_prod_marker(_bash_marker_text(command)):
             return 0
         if bash_is_readonly(command):
+            return 0
+        if not _bash_reaches_prod(command):
             return 0
         target = command.strip().splitlines()[0][:120]
     elif mcp_is_mutating(tool_name):
