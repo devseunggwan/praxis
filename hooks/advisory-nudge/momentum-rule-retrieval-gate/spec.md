@@ -828,7 +828,9 @@ releases only when all of these hold:
 
 Any other outcome (non-zero exit, timeout, output that is not one JSON object,
 a mismatch) keeps the deny and appends one line naming the reason:
-`host approval provider did not release this merge: <reason>`.
+`host approval provider did not release this merge: <reason>`. When a
+provider that exits non-zero prints a JSON object with a string `reason`, that
+reason is quoted too, cut to 200 printable characters.
 
 **One approval, one merge.** The release spends the ref, under `state_lock`,
 in `$PRAXIS_STATE_DIR` (default `~/.praxis/state`) `merge-approval.json`, with

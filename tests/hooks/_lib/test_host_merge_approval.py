@@ -141,6 +141,7 @@ def test_record_that_does_not_match_the_merge_is_refused(env, tmp_path, record, 
 
 @pytest.mark.parametrize("stdout, code, why", [
     (None, 3, "exited 3"),
+    (json.dumps({"approved": False, "reason": "stale-head\nx"}), 1, "exited 1 (reason: stale-head x)"),
     ("not json", 0, "not one JSON object"),
     ("[1, 2]", 0, "not one JSON object"),
     (json.dumps(_record()) + "\n" + json.dumps(_record()), 0, "not one JSON object"),

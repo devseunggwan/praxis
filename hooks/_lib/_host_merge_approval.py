@@ -52,6 +52,7 @@ from _state_lock import state_lock  # type: ignore[import-not-found]
 PROVIDER_ENV = "PRAXIS_MERGE_APPROVAL_PROVIDER"
 PROVIDER_TIMEOUT_SEC = 5.0
 PROVIDER_OUTPUT_CAP = 64 * 1024
+REASON_CAP = 200
 STATE_FILE = "merge-approval.json"
 # Long enough for every gate of one tool call to read the same outcome.
 CALL_RECORD_TTL_SEC = 600
@@ -136,7 +137,7 @@ def _ask_provider(provider: str, repo: str, pr: str, session_id: str,
     except OSError as exc:
         return Decision(False, f"the provider could not be run ({type(exc).__name__})")
     if proc.returncode != 0:
-        return Decision(False, f"the provider exited {proc.returncode}")
+        return Decision(False, f"the provider exited {proc.returncode}{_stated_reason(proc.stdout)}")
     try:
         record = json.loads(proc.stdout[:PROVIDER_OUTPUT_CAP].decode("utf-8"))
     except (UnicodeDecodeError, ValueError):
@@ -164,6 +165,20 @@ def _ask_provider(provider: str, repo: str, pr: str, session_id: str,
         return Decision(False, f"the briefing the human approved has {items} of 6 items, "
                                f"fewer than {min_items}")
     return {"ref": ref}
+
+
+def _stated_reason(stdout: bytes) -> str:
+    """` (reason: …)` when a refusing provider printed a JSON object with a
+    string `reason`, so the block message says why; empty otherwise."""
+    try:
+        record = json.loads(stdout[:PROVIDER_OUTPUT_CAP].decode("utf-8"))
+    except (UnicodeDecodeError, ValueError):
+        return ""
+    reason = record.get("reason") if isinstance(record, dict) else None
+    if not isinstance(reason, str) or not reason.strip():
+        return ""
+    clean = "".join(ch if ch.isprintable() else " " for ch in reason).strip()
+    return f" (reason: {clean[:REASON_CAP]})"
 
 
 def _spend(state: dict, candidate: dict, now: float, session_id: str, tool_use_id: str,
