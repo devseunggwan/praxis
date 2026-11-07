@@ -268,6 +268,18 @@ def test_provider_timeout_is_refused(env, tmp_path, monkeypatch):
     assert not decision.released and "did not answer within 0.5 s" in decision.detail
 
 
+def test_short_hook_budget_is_refused_without_calling(env, tmp_path, monkeypatch):
+    """Under the dispatcher the provider gets only what is left of the group
+    deadline; below the subprocess floor it is not started at all."""
+    import _hook_runtime
+    _provider(env)
+    transcript = _transcript(tmp_path)
+    monkeypatch.setattr(_hook_runtime, "_MEMBER_DEADLINE", time.monotonic() + 0.2)
+    decision = _decide_in_process(env)(session_id="s1", tool_use_id="t1", transcript=transcript)
+    assert not decision.released and "too little hook time" in decision.detail
+    assert _calls(env) == []
+
+
 def test_unlocked_state_never_releases(env, tmp_path, monkeypatch):
     @contextlib.contextmanager
     def no_lock(path, timeout=None):

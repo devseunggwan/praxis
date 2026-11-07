@@ -807,8 +807,9 @@ answer and the call, so the provider is not asked about it.
 <provider> merge-approval --repo <owner/name> --pr <N> --session <session_id>
 ```
 
-stdin is closed; the call is cut off after 5 s. On exit 0 its stdout must be
-one JSON object:
+stdin is closed; the call is cut off after 5 s, or sooner when the dispatch
+group's shared deadline leaves less (below 0.5 s it is not started, a
+refusal). On exit 0 its stdout must be one JSON object:
 
 ```json
 {"approved": true, "ref": "<unique per approval>", "repo": "owner/name",

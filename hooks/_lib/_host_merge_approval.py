@@ -11,7 +11,8 @@ the gates call it only for a merge they would otherwise stop:
 
     <provider> merge-approval --repo <owner/name> --pr <N> --session <session_id>
 
-with stdin closed and a 5 s timeout. Exit 0 with one JSON object
+with stdin closed and a 5 s timeout (less when the dispatch group's deadline
+leaves less). Exit 0 with one JSON object
 
     {"approved": true, "ref": "<unique per approval>", "repo": "owner/name",
      "pr": N, "briefing": "<text the human saw>", "approved_at": <epoch s>}
@@ -46,6 +47,7 @@ import time
 from dataclasses import dataclass
 from typing import Callable, Optional
 
+from _hook_runtime import MIN_SUBPROC_BUDGET_SEC, remaining_budget  # type: ignore[import-not-found]
 from _paths import praxis_state_dir  # type: ignore[import-not-found]
 from _state_lock import state_lock  # type: ignore[import-not-found]
 
@@ -129,11 +131,16 @@ def _ask_provider(provider: str, repo: str, pr: str, session_id: str,
                   count_items: Callable[[str], int], min_items: int) -> Decision | dict:
     """The validated record, or a refusal."""
     argv = [provider, "merge-approval", "--repo", repo, "--pr", str(pr), "--session", session_id]
+    # Under the dispatcher the gate shares the group's deadline; outliving it
+    # gets the whole dispatcher killed, so the provider gets what is left.
+    timeout = min(PROVIDER_TIMEOUT_SEC, remaining_budget(PROVIDER_TIMEOUT_SEC))
+    if timeout < MIN_SUBPROC_BUDGET_SEC:
+        return Decision(False, "too little hook time was left to ask the provider")
     try:
         proc = subprocess.run(argv, stdin=subprocess.DEVNULL, capture_output=True,
-                              timeout=PROVIDER_TIMEOUT_SEC, check=False)
+                              timeout=timeout, check=False)
     except subprocess.TimeoutExpired:
-        return Decision(False, f"the provider did not answer within {PROVIDER_TIMEOUT_SEC:g} s")
+        return Decision(False, f"the provider did not answer within {timeout:.2g} s")
     except OSError as exc:
         return Decision(False, f"the provider could not be run ({type(exc).__name__})")
     if proc.returncode != 0:
