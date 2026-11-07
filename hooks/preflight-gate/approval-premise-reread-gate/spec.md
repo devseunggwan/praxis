@@ -342,7 +342,8 @@ So after the whole command has carried a marker and failed the read-only test,
   the git subcommands that write only the local repository (`add`, `commit`,
   `merge`, `fetch`, `pull`, `checkout`, `switch`, `restore`, `reset`,
   `stash`, `branch`, `tag`, `worktree`, ...), unless the call carries
-  `--upload-pack`, or `-c` / `--config-env` before the subcommand, which make
+  `--upload-pack` (or any unambiguous prefix of it, which the subcommand's
+  option parser accepts), or `-c` / `--config-env` before the subcommand, which make
   git run a program of the caller's choosing (`core.fsmonitor`,
   `core.sshCommand`, a pager). After the subcommand `-c` is its own flag
   (`git switch -c <branch>`) and stays local. An assignment anywhere in the

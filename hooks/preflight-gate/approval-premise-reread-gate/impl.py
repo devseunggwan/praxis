@@ -239,6 +239,14 @@ def _has_flag(tokens: list[str], flags: tuple[str, ...]) -> bool:
                for tok in tokens for flag in flags)
 
 
+def _abbreviates(tokens: list[str], flags: tuple[str, ...]) -> bool:
+    """A subcommand's parse-options accepts any unambiguous prefix of a long
+    option, so `--upload=cmd` is `--upload-pack=cmd`."""
+    names = (tok.split("=", 1)[0] for tok in tokens)
+    return any(name.startswith("--") and len(name) > 2 and flag.startswith(name)
+               for name in names for flag in flags)
+
+
 def _git_is_local(argv: list[str]) -> bool:
     sub = _subcommand("git", argv)
     if sub not in _LOCAL_GIT:
@@ -248,7 +256,7 @@ def _git_is_local(argv: list[str]) -> bool:
     last = len(argv) - 1 - argv[::-1].index(sub)
     global_part = argv[1:last]
     return not (_has_flag(global_part, _GIT_GLOBAL_RUNS_PROGRAM)
-                or _has_flag(argv, _GIT_RUNS_PROGRAM))
+                or _abbreviates(argv, _GIT_RUNS_PROGRAM))
 
 
 def _segment_is_local(argv: list[str], git_env_set: bool = False) -> bool:

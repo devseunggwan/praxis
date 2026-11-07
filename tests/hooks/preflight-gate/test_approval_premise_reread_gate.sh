@@ -261,6 +261,8 @@ run_case "remote_tee_overwrite" "$(verdict "$(bash_payload 'echo x | tee prod-x/
 run_case "remote_git_clean" "$(verdict "$(bash_payload 'cd /srv/prod-x && git clean -fdx')")" "ask"
 run_case "remote_git_upload_pack" \
   "$(verdict "$(bash_payload 'git fetch --upload-pack="sh deploy.sh" origin prod-x')")" "ask"
+run_case "remote_git_upload_pack_abbrev" \
+  "$(verdict "$(bash_payload 'git pull --upload="sh deploy.sh" origin prod-x')")" "ask"
 run_case "remote_git_config_program" \
   "$(verdict "$(bash_payload 'git -c core.fsmonitor=./hook.sh commit -m "fix prod-x"')")" "ask"
 run_case "remote_git_config_program_value_named_like_sub" \
