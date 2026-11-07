@@ -212,31 +212,31 @@ _LOCAL_GIT = frozenset((
     "restore", "revert", "rm", "stash", "switch", "tag", "worktree",
 ))
 
-# Options that make a local git subcommand run a program of the caller's
-# choosing: `-c` / `--config-env` before the subcommand can set
-# `core.fsmonitor`, `core.sshCommand` or a pager, and `--upload-pack` names the
-# command `fetch` / `pull` runs. After the subcommand, `-c` is that
-# subcommand's own flag (`git switch -c <branch>`), so only the global part is
-# read for the first two.
-_GIT_GLOBAL_RUNS_PROGRAM = ("-c", "--config-env")
+# What git runs is set by more than its subcommand: global options before the
+# subcommand (`-c`, `--config-env`, `--exec-path`, `--git-dir`, ...), the
+# environment (`GIT_SSH_COMMAND`, `GIT_CONFIG_*`, `HOME`, `XDG_CONFIG_HOME`,
+# `PAGER`, ...), and config written by an earlier `git config` in the same
+# command (`core.hooksPath`, `core.sshCommand`). Listing the ways in one at a
+# time kept missing the next one, so the rule is closed instead: a git segment
+# is local only when its global part is at most `-C <dir>`, its own options
+# do not name `--upload-pack` (any unambiguous prefix, which the subcommand's
+# option parser accepts), and the command contains no variable assignment and
+# no git segment that is not local.
 _GIT_RUNS_PROGRAM = ("--upload-pack",)
 
-# The same reach through the environment: `GIT_SSH_COMMAND`, `GIT_CONFIG_*`
-# / `GIT_CONFIG_PARAMETERS` (any config, `core.fsmonitor` included),
-# `GIT_EXTERNAL_DIFF`, and the pager or editor git starts. An assignment
-# anywhere in the command (`VAR=x git ...`, `env VAR=x git ...`,
-# `export VAR=x; git ...`) takes every git segment off the local list.
-_PROGRAM_ENV_RE = re.compile(r"(?:GIT_[A-Z0-9_]+|PAGER|EDITOR|VISUAL)=")
+# `VAR=x`, `VAR+=x`, and the same after `env`, `export`, `declare`.
+_ASSIGNMENT_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\+?=")
 
 # Segments that make the order of the command meaningless: a loop body runs
 # again after the segment that follows it, a function body runs where it is
-# called, and a trap runs at a signal or at exit.
-_REORDERING = frozenset(("for", "while", "until", "select", "do", "function", "trap"))
-
-
-def _has_flag(tokens: list[str], flags: tuple[str, ...]) -> bool:
-    return any(tok == flag or tok.startswith(flag + "=")
-               for tok in tokens for flag in flags)
+# called, a trap runs at a signal or at exit, and a coprocess runs alongside
+# what follows. Read from every token, not only a segment's first one, so a
+# `builtin trap`, a `{ f() { ...; }; }` group or an `if` body is still seen.
+_REORDERING = frozenset((
+    "for", "while", "until", "select", "do", "function", "trap", "coproc",
+))
+# `f()`, `f(){`, and the `()` of `f () {`.
+_FUNCTION_DEF_RE = re.compile(r"[^\s=()]*\(\)\{?")
 
 
 def _abbreviates(tokens: list[str], flags: tuple[str, ...]) -> bool:
@@ -255,11 +255,33 @@ def _git_is_local(argv: list[str]) -> bool:
     # subcommand (`git -C commit -c ... commit`) then still counts as global.
     last = len(argv) - 1 - argv[::-1].index(sub)
     global_part = argv[1:last]
-    return not (_has_flag(global_part, _GIT_GLOBAL_RUNS_PROGRAM)
-                or _abbreviates(argv, _GIT_RUNS_PROGRAM))
+    i = 0
+    while i < len(global_part):
+        if global_part[i] != "-C":
+            return False
+        i += 2
+    return not _abbreviates(argv[last + 1:], _GIT_RUNS_PROGRAM)
 
 
-def _segment_is_local(argv: list[str], git_env_set: bool = False) -> bool:
+def _is_git(argv: list[str]) -> bool:
+    argv = strip_prefix(argv)
+    return bool(argv) and argv[0].rsplit("/", 1)[-1] == "git"
+
+
+def _git_reconfigured(segments: list[list[str]]) -> bool:
+    """True when something in the command can change what a git call runs."""
+    if any(_ASSIGNMENT_RE.match(tok) for seg in segments for tok in seg):
+        return True
+    return any(_is_git(seg) and not _segment_is_readonly(seg)
+               and not _git_is_local(strip_prefix(seg)) for seg in segments)
+
+
+def _reorders(segments: list[list[str]]) -> bool:
+    return any(tok in _REORDERING or _FUNCTION_DEF_RE.fullmatch(tok)
+               for seg in segments for tok in seg)
+
+
+def _segment_is_local(argv: list[str], git_reconfigured: bool = False) -> bool:
     if _segment_is_readonly(argv):
         return True
     argv = strip_prefix(argv)
@@ -268,7 +290,7 @@ def _segment_is_local(argv: list[str], git_env_set: bool = False) -> bool:
     binary = argv[0].rsplit("/", 1)[-1]
     if binary in _LOCAL_BINARIES:
         return True
-    return binary == "git" and not git_env_set and _git_is_local(argv)
+    return binary == "git" and not git_reconfigured and _git_is_local(argv)
 
 
 def _segment_names_prod(argv: list[str]) -> bool:
@@ -310,10 +332,10 @@ def _bash_reaches_prod(command: str) -> bool:
 
     Anything this split cannot see keeps the old whole-command answer: a
     substitution or heredoc (the tokenizer blanks bodies the shell runs or
-    feeds), a loop or function (order stops meaning anything), a background
-    `&` (the backgrounded segment is still running when the next one starts),
-    and a marker that no segment carries (it sat in text the tokenizer
-    dropped).
+    feeds), a loop, function, trap or coprocess (order stops meaning
+    anything), a background `&` (the backgrounded segment is still running
+    when the next one starts), and a marker that no segment carries (it sat in
+    text the tokenizer dropped).
     """
     if _SUBSTITUTION_RE.search(command) or heredoc_sources(command):
         return True
@@ -323,15 +345,14 @@ def _bash_reaches_prod(command: str) -> bool:
     segments = _segments_with_pipes(tokens)
     if not segments:
         return True
-    if any(seg[0] in _REORDERING or seg[0].endswith("()")
-           for seg, _pipe in segments):
+    if _reorders([seg for seg, _pipe in segments]):
         return True
     named = [i for i, (seg, _p) in enumerate(segments) if _segment_names_prod(seg)]
     if not named:
         return True
-    git_env_set = any(_PROGRAM_ENV_RE.match(tok) for seg, _p in segments for tok in seg)
+    git_reconfigured = _git_reconfigured([seg for seg, _p in segments])
     remote = [i for i, (seg, _p) in enumerate(segments)
-              if not _segment_is_local(seg, git_env_set)]
+              if not _segment_is_local(seg, git_reconfigured)]
     if not remote:
         return False
     # A pipeline runs its members together, so a remote segment acts for the

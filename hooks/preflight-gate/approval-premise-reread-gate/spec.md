@@ -341,20 +341,31 @@ So after the whole command has carried a marker and failed the read-only test,
   and cannot overwrite an arbitrary path: `cmp`, `mkdir`, `touch`, `mktemp`, and
   the git subcommands that write only the local repository (`add`, `commit`,
   `merge`, `fetch`, `pull`, `checkout`, `switch`, `restore`, `reset`,
-  `stash`, `branch`, `tag`, `worktree`, ...), unless the call carries
-  `--upload-pack` (or any unambiguous prefix of it, which the subcommand's
-  option parser accepts), or `-c` / `--config-env` before the subcommand, which make
-  git run a program of the caller's choosing (`core.fsmonitor`,
-  `core.sshCommand`, a pager). After the subcommand `-c` is its own flag
-  (`git switch -c <branch>`) and stays local. An assignment anywhere in the
-  command to `GIT_*` (`GIT_SSH_COMMAND`, `GIT_CONFIG_COUNT` / `_KEY_n` /
-  `_VALUE_n`, `GIT_CONFIG_PARAMETERS`, `GIT_EXTERNAL_DIFF`, ...), `PAGER`,
-  `EDITOR` or `VISUAL` reaches the same programs through the environment
-  (`VAR=x git ...`, `env VAR=x git ...`, `export VAR=x; git ...`), so it takes
-  every git segment off the local list. `git reset --hard` and `git restore`
-  stay local: they discard uncommitted work, but only inside the repository,
-  while `cp` / `tee` / `ln` write to any path;
+  `stash`, `branch`, `tag`, `worktree`, ...). `git reset --hard` and
+  `git restore` stay local: they discard uncommitted work, but only inside
+  the repository, while `cp` / `tee` / `ln` write to any path;
 - **remote**: everything else, including any binary the gate does not know.
+
+What a git call runs is set by more than its subcommand: global options
+(`-c`, `--config-env`, `--exec-path`, `--git-dir`, ...), the environment
+(`GIT_SSH_COMMAND`, `GIT_CONFIG_*`, `HOME`, `XDG_CONFIG_HOME`, `PAGER`, ...),
+and config written by an earlier `git config` in the same command
+(`core.hooksPath`, `core.sshCommand`). Three review rounds each found another
+way in, so the rule is closed rather than listed. A git segment is local only
+when all of these hold:
+
+- its global part (before the subcommand) is nothing or `-C <dir>`;
+- its own options name no `--upload-pack`, in full or as any unambiguous
+  prefix, which the subcommand's option parser accepts (`--upload=cmd`);
+- the command contains no variable assignment anywhere (`VAR=x`, `VAR+=x`,
+  after `env`, `export` or `declare`, or on its own);
+- every other non-read-only git segment in the command is local too, so a
+  `git config core.hooksPath ...` takes the `git commit` after it along.
+
+After the subcommand `-c` is the subcommand's own flag (`git switch -c
+<branch>`) and stays local. A repository's own hooks can still run a program
+on `git commit`; `main` is quiet on a `git commit` without a marker as well,
+so that reach is not new here.
 
 The gate asks only when a remote segment exists **and** the first segment
 naming production sits in that remote segment, in its pipeline, or before it.
@@ -382,9 +393,12 @@ see the order of execution:
 - a substitution or a heredoc anywhere: the tokenizer blanks heredoc bodies
   and keeps a substitution inside one word, so the command the shell runs
   there is not a segment;
-- a loop, a function or a trap (`for`, `while`, `until`, `select`, `do`,
-  `function`, `name()`, `trap`): a loop body runs again after the segment
-  that follows it, a trap body at exit;
+- a loop, a function, a trap or a coprocess (`for`, `while`, `until`,
+  `select`, `do`, `function`, `trap`, `coproc`, `name()`, `name(){`, a lone
+  `()`), read from every token rather than a segment's first, so
+  `builtin trap`, a function defined inside `{ ...; }` and an `if` body are
+  seen: a loop body runs again after the segment that follows it, a function
+  body where it is called, a trap body at exit;
 - a background `&`: the backgrounded segment is still running when the next
   one starts;
 - a marker that no segment carries: it sat in text the tokenizer dropped,

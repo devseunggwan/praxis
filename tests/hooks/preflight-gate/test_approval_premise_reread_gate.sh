@@ -289,6 +289,32 @@ run_case "remote_in_trap" \
 # A function named like a local command is the function, not the command.
 run_case "remote_function_named_like_local" \
   "$(verdict "$(bash_payload 'mkdir() { kubectl delete pod p; }; mkdir prod-x')")" "ask"
+# Review round 3: the function, trap and coprocess shapes are read from every
+# token, and anything that can change what git runs takes git off the local
+# list (any assignment, a non-local git segment, a global option but `-C`).
+run_case "remote_function_spaced"   "$(verdict "$(bash_payload 'mkdir () { kubectl delete pod p; }; mkdir prod-x')")" "ask"
+run_case "remote_function_brace"    "$(verdict "$(bash_payload 'mkdir(){ kubectl delete pod p; }; mkdir prod-x')")" "ask"
+run_case "remote_function_in_group" "$(verdict "$(bash_payload '{ mkdir() { kubectl delete pod p; }; }; mkdir prod-x')")" "ask"
+run_case "remote_builtin_trap" \
+  "$(verdict "$(bash_payload "builtin trap 'terraform apply' EXIT; cd /srv/prod-infra")")" "ask"
+run_case "remote_command_trap" \
+  "$(verdict "$(bash_payload "command trap 'terraform apply' EXIT; cd /srv/prod-infra")")" "ask"
+run_case "remote_coproc"     "$(verdict "$(bash_payload 'coproc kubectl delete pod p; ls prod-x')")" "ask"
+run_case "remote_git_home"   "$(verdict "$(bash_payload "HOME=/tmp/h git commit -m 'fix prod-x'")")" "ask"
+run_case "remote_git_xdg"    "$(verdict "$(bash_payload "XDG_CONFIG_HOME=/tmp/x git commit -m 'fix prod-x'")")" "ask"
+run_case "remote_git_env_append" \
+  "$(verdict "$(bash_payload "export GIT_SSH_COMMAND+=' sh d.sh'; git fetch origin prod-x")")" "ask"
+run_case "remote_git_config_hookspath" \
+  "$(verdict "$(bash_payload "git config core.hooksPath ./h; git commit -m 'fix prod-x'")")" "ask"
+run_case "remote_git_config_sshcommand" \
+  "$(verdict "$(bash_payload "git config core.sshCommand 'sh d.sh'; git fetch origin prod-x")")" "ask"
+run_case "remote_git_exec_path" "$(verdict "$(bash_payload 'git --exec-path=/tmp/x pull origin prod-x')")" "ask"
+run_case "remote_git_git_dir" \
+  "$(verdict "$(bash_payload "git --git-dir=/tmp/r/.git commit -m 'fix prod-x'")")" "ask"
+run_case "remote_git_config_env_global" \
+  "$(verdict "$(bash_payload "git --config-env=core.fsmonitor=H commit -m 'fix prod-x'")")" "ask"
+run_case "local_git_dash_C" \
+  "$(verdict "$(bash_payload "git -C /tmp/wt-prod-ops commit -m 'fix prod-x'")")" "quiet"
 # A value the tokenizer unquotes after `=` still names production.
 run_case "remote_quoted_eq_value" \
   "$(verdict "$(bash_payload './deploy.sh --stage="prod" && git tag prod-1')")" "ask"
