@@ -175,7 +175,8 @@ def test_a_queued_prompt_delivered_later_lands_where_a_full_rebuild_puts_it(tmp_
 
 
 @pytest.mark.parametrize("damage", ["state-garbage", "state-foreign-version", "state-missing",
-                                    "file-missing", "file-appended", "file-truncated", "file-replaced"])
+                                    "file-missing", "file-appended", "file-truncated", "file-replaced",
+                                    "file-rewritten-same-size"])
 def test_a_state_that_does_not_describe_the_file_rebuilds(tmp_path, damage):
     db = _db(tmp_path)
     _turn(db, 1)
@@ -195,10 +196,16 @@ def test_a_state_that_does_not_describe_the_file_rebuilds(tmp_path, damage):
     elif damage == "file-truncated":
         out.write_bytes(out.read_bytes()[:10])
     elif damage == "file-replaced":
-        # Same size, other bytes, other inode: only the inode tells it apart.
+        # Same size, other bytes, at the same name. Some filesystems reuse the
+        # freed inode for the new file, so the tail, not the inode, tells it apart.
         size = out.stat().st_size
         out.unlink()
         out.write_bytes(b"x" * (size - 1) + b"\n")
+    elif damage == "file-rewritten-same-size":
+        # The inode reuse above made deterministic: same inode, same size.
+        size = out.stat().st_size
+        with out.open("r+b") as fh:
+            fh.write(b"x" * (size - 1) + b"\n")
     _turn(db, 2)
     _, _, after = _sync(db, tmp_path)
     assert after == _fresh(db, tmp_path)
@@ -210,8 +217,12 @@ def test_failed_append_write_rebuilds_in_the_same_call(tmp_path, monkeypatch):
     _sync(db, tmp_path)
     _turn(db, 2)
     real_write = os.write
+    calls = []
 
     def half_then_fail(fd, data):
+        calls.append(fd)
+        if len(calls) > 1:  # the rebuild that follows writes normally
+            return real_write(fd, data)
         real_write(fd, bytes(data[: len(data) // 2]))
         raise OSError(28, "No space left on device")
 

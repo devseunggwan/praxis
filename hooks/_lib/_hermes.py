@@ -595,7 +595,7 @@ def _load_sync_state(path: Path) -> Optional[dict]:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
-    shape = {"version": int, "last_id": int, "digest": str, "ino": int, "size": int,
+    shape = {"version": int, "last_id": int, "digest": str, "ino": int, "size": int, "tail": str,
              "names": dict, "widths": dict}
     if not isinstance(data, dict) or any(type(data.get(k)) is not t for k, t in shape.items()):
         return None
@@ -621,46 +621,71 @@ def _render(rows: List[sqlite3.Row], names: Dict[str, str], widths: Dict[str, in
     return "".join(json.dumps(event, ensure_ascii=False) + "\n" for event in events).encode("utf-8")
 
 
-def _append(out: Path, rows: List[sqlite3.Row], state: dict) -> Optional[Tuple[int, int]]:
-    """Append `rows` (all newer than the last sync) to `out`; -> (inode, size) after.
+_TAIL_BYTES = 4096
+
+
+def _identity(fd: int) -> Tuple[int, int, str]:
+    """(inode, size, digest of the last 4 KiB) of an open transcript.
+
+    Inode and size alone do not tell a file apart: a filesystem that reuses
+    a freed inode can put a same-size file at the name, which would then be
+    appended to. The tail digest catches that, and a file cut or grown by
+    anything else changes the size.
+    """
+    st = os.fstat(fd)
+    n = min(st.st_size, _TAIL_BYTES)
+    tail = os.pread(fd, n, st.st_size - n) if n else b""
+    return st.st_ino, st.st_size, hashlib.sha256(tail).hexdigest()
+
+
+def _append(out: Path, rows: List[sqlite3.Row], state: dict) -> Optional[Tuple[int, int, str]]:
+    """Append `rows` (all newer than the last sync) to `out`; -> its identity after.
 
     None when `out` is not the file the state describes (removed, replaced,
     grown or cut by anything else), so the caller rebuilds. The check and the
     write go through one descriptor, so a file swapped in between is never
-    written to; a swap after the write leaves an inode the next call rejects.
+    written to; a swap after the write leaves an identity the next call rejects.
     """
     try:
-        fd = os.open(out, os.O_WRONLY | os.O_APPEND)
+        fd = os.open(out, os.O_RDWR | os.O_APPEND)
     except OSError:
         return None
     try:
-        st = os.fstat(fd)
-        if st.st_ino != state["ino"] or st.st_size != state["size"]:
+        if _identity(fd) != (state["ino"], state["size"], state["tail"]):
             return None
         data = memoryview(_render(rows, state["names"], state["widths"]))
         while data:
             data = data[os.write(fd, data):]
-        st = os.fstat(fd)
-        return st.st_ino, st.st_size
+        return _identity(fd)
     except OSError:
         return None  # a part-written tail is replaced by the rebuild that follows
     finally:
         os.close(fd)
 
 
-def _rebuild(out: Path, rows: List[sqlite3.Row], names: Dict[str, str], widths: Dict[str, int]) -> Tuple[int, int]:
-    """Write all of `rows` to a temp file and swap it in; -> (inode, size)."""
+def _rebuild(out: Path, rows: List[sqlite3.Row], names: Dict[str, str],
+             widths: Dict[str, int]) -> Tuple[int, int, str]:
+    """Write all of `rows` to a temp file and swap it in; -> its identity.
+
+    The identity is read off the temp file's own descriptor, so a racing
+    rebuild that replaces `out` right after cannot be recorded as this one.
+    """
     fd, tmp = tempfile.mkstemp(dir=out.parent, prefix=out.name, suffix=".tmp")
     try:
-        with os.fdopen(fd, "wb") as fh:
-            fh.write(_render(rows, names, widths))
+        data = memoryview(_render(rows, names, widths))
+        while data:
+            data = data[os.write(fd, data):]
+        identity = _identity(fd)
+        os.close(fd)
+        fd = -1
         os.replace(tmp, out)
     except BaseException:
+        if fd >= 0:
+            os.close(fd)
         with contextlib.suppress(OSError):
             os.unlink(tmp)
         raise
-    st = out.stat()
-    return st.st_ino, st.st_size
+    return identity
 
 
 def sync_transcript(session_id: str, out_dir: Path, db_path: Optional[Path] = None) -> Optional[Path]:
@@ -697,13 +722,13 @@ def sync_transcript(session_id: str, out_dir: Path, db_path: Optional[Path] = No
     with state_lock(str(state_path)) as locked:
         state = _load_sync_state(state_path) if locked else None
         prefix, full = _rows_digests(rows, state["last_id"] if state else last_id)
-        written: Optional[Tuple[int, int]] = None
+        written: Optional[Tuple[int, int, str]] = None
         if state is not None and prefix == state["digest"]:
             written = _append(out, [row for row in rows if row["id"] > state["last_id"]], state)
         if state is None or written is None:
             state = {"version": _SYNC_STATE_VERSION, "names": {}, "widths": {}}
             written = _rebuild(out, rows, state["names"], state["widths"])
-        state.update(last_id=last_id, digest=full, ino=written[0], size=written[1])
+        state.update(last_id=last_id, digest=full, ino=written[0], size=written[1], tail=written[2])
         _save_sync_state(state_path, state)
     return out
 
