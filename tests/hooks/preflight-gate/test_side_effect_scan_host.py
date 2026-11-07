@@ -54,7 +54,6 @@ ROUTINE = [
     "git push origin issue-5-feat-sending-state",
     "git push -q -u origin issue-5-feat-sending-state",
     "GIT_TRACE=1 git push origin issue-5-feat-sending-state",
-    "git push origin issue-5-feat-sending-state 2>&1 | tail -3",
     "git push origin issue-5-feat-sending-state # cross-boundary:ack",
     "/usr/bin/git push origin issue-5-feat-sending-state",
     "git fetch origin && git rebase origin/main && git push -u origin issue-5-feat-sending-state",
@@ -99,6 +98,14 @@ STILL_ASKS = [
     # another remote
     "git push upstream issue-1-fix-x",
     "git push https://github.com/o/r issue-1-fix-x",
+    # words the tokenizer cannot place: arguments after a redirection, and a
+    # quoted or escaped `#` that the shell passes to git as an argument
+    "git push origin issue-1-fix-x > /dev/null --force",
+    "git push origin issue-1-fix-x 2>&1 --delete",
+    "git push origin issue-1-fix-x 2>&1 | tail -3",
+    "git push origin issue-1-fix-x '#' --force",
+    'git push origin issue-1-fix-x "#" --force',
+    "git push origin issue-1-fix-x \\# --force",
     # a routine step chained with a non-routine one
     "git push origin issue-1-fix-x && git push origin main",
     "gh pr create --title t --body-file b.md && gh pr merge 3 --squash",
@@ -140,6 +147,27 @@ def test_base_branch_never_counts_as_a_work_branch(monkeypatch):
     monkeypatch.setenv("PRAXIS_BRANCH_NAME_REGEX", r"^.+$")
     assert _verdict("git push origin main", "hermes") == "ask"
     assert _verdict("git push origin release-1", "hermes") == "advise"
+
+
+@pytest.mark.parametrize("regex, ref", [
+    (r"^.+$", "+main"),
+    (r"^.+$", ":main"),
+    (r"^.+$", "issue-1-fix-x:main"),
+    (r"^.+$", "+release-1"),
+    (r"^.+$", "HEAD"),
+    (r"^.+$", "HEAD:main"),
+    (r"^.+$", "ORIG_HEAD"),
+    (r"^.+$", "refs/heads/main"),
+    (r"^.+$", "$BRANCH"),
+    (r"^.+$", "release-*"),
+    (r"^.+$", "a..b"),
+    (r"^.+$", "-"),
+    (r"^feature/.+$", "feature/login:main"),
+    (r"^feature/.+$", "feature/login:refs/heads/main"),
+])
+def test_refspec_syntax_asks_whatever_the_convention_allows(monkeypatch, regex, ref):
+    monkeypatch.setenv("PRAXIS_BRANCH_NAME_REGEX", regex)
+    assert _verdict(f"git push origin '{ref}'", "hermes") == "ask"
 
 
 def test_wrapper_cli_on_the_same_argv_still_asks(monkeypatch, capsys):

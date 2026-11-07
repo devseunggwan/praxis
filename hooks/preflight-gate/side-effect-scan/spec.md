@@ -204,7 +204,7 @@ So on the `hermes` host, and only there, two shapes advise instead of asking:
 
 | Shape | Accepted form | Still asks |
 | ----- | ------------- | ---------- |
-| own work-branch push | `git push [-u\|--set-upstream\|-q\|--quiet\|-v\|--verbose\|--progress\|--no-progress] origin <branch>`, where `<branch>` fully matches the work-branch convention (`PRAXIS_BRANCH_NAME_REGEX`, default `^(hub\|issue)-<N>-<type>-<slug>$`, the pattern `branch-name-check` gates new branches with) and is not a base branch (`PRAXIS_BRANCH_NAME_WHITELIST`, default `main,master,dev,prod,staging`) | bare `git push`, `origin` alone, `HEAD`, a refspec with `:` or `+`, `refs/...`, a variable or `$(…)`, two refspecs, any other option (`--force*`, `-f`, `--delete`/`-d`, `--mirror`, `--all`, `--tags`, `--no-verify`, `-o`, bundled short flags such as `-uf`), a remote other than `origin` (`upstream`, a URL) |
+| own work-branch push | `git push [-u\|--set-upstream\|-q\|--quiet\|-v\|--verbose\|--progress\|--no-progress] origin <branch>`, where `<branch>` fully matches the work-branch convention (`PRAXIS_BRANCH_NAME_REGEX`, default `^(hub\|issue)-<N>-<type>-<slug>$`, the pattern `branch-name-check` gates new branches with) and is not a base branch (`PRAXIS_BRANCH_NAME_WHITELIST`, default `main,master,dev,prod,staging`) | bare `git push`, `origin` alone, `HEAD`, a refspec with `:` or `+`, `refs/...`, a variable or `$(…)`, two refspecs, any other option (`--force*`, `-f`, `--delete`/`-d`, `--mirror`, `--all`, `--tags`, `--no-verify`, `-o`, bundled short flags such as `-uf`), a remote other than `origin` (`upstream`, a URL), a redirection, a quoted or escaped `#` |
 | PR create | `gh [global flags] pr create ...` with any flags, `--base prod` included | — (the merge is the step that moves a branch; `gh pr merge` keeps the ask here and is consent-gated by `pre-merge-approval-gate`) |
 
 The demotion is per command segment: a command advises only when every segment
@@ -213,9 +213,15 @@ origin main`, `gh pr create … && gh pr merge 3`, or a push chained with
 `kubectl apply` still ask and name every matched category. A wrapper CLI
 configured under the same argv (`PRAXIS_WRAPPER_COMMIT_CMDS="git push"`) adds
 its own `wrapper-commit` category, which no shape covers, so it still asks.
-Arguments end at the first comment (`# cross-boundary:ack`) or redirection
-token (`2>&1`, `> log`), so those suffixes do not turn a routine push into an
-unknown shape.
+Arguments end at an unquoted comment (`# cross-boundary:ack`). A redirection
+anywhere in the push (`> log`, `2>&1`) or a quoted or escaped `#` keeps the
+ask: the shell passes words after a redirection to git (`> /dev/null
+--force`), `2>&1` makes the segmenter split the command at its `&`, and the
+tokenizer does not tell a quoted `#` argument from a comment. The ref must
+also be a plain branch name (`[A-Za-z0-9][A-Za-z0-9._/-]*`, not `HEAD` or
+another `*HEAD`, not `refs/...`, no `..`, no trailing `.`, `/` or `.lock`)
+before `PRAXIS_BRANCH_NAME_REGEX` is consulted, so a permissive convention
+such as `^.+$` cannot admit `+main`, `x:main` or `HEAD:main`.
 
 **How the hook knows the host.** The dispatcher publishes the host it runs a
 group for (`run_group(..., host)`, from `_dispatch.sh`'s third argument or the
@@ -236,7 +242,7 @@ never changed a call in the measured window.
 (the usual "add commits to my open PR" step) still asks, because the argv
 does not name the ref; resolving the current branch would need the effective
 cwd after any `cd` in the command. `git push -uq origin <branch>` (bundled
-flags) and `--dry-run` also still ask.
+flags), `--dry-run`, and a push with `2>&1 | tail` also still ask.
 
 ### Response
 
@@ -384,7 +390,7 @@ every routine shape advises on `hermes` and still asks on `claude`, `codex`,
 mixes, a wrapper configured under `git push`, and `gh pr merge` /
 `gh workflow run` / `kubectl apply` still ask on `hermes`; a custom
 `PRAXIS_BRANCH_NAME_REGEX` is honoured and never admits a base branch.
-`tests/hooks/_lib/test_hermes.py` drives a subset (two routine shapes, four
+`tests/hooks/_lib/test_hermes.py` drives a subset (two routine shapes, five
 non-routine pushes) through the real bridge, and
 `tests/hooks/_lib/test_dispatch.py` pins that `run_group` publishes the host
 and clears it.

@@ -314,32 +314,60 @@ _PUSH_PLAIN_FLAGS = frozenset({
 })
 _OWN_BRANCH_REMOTE = "origin"
 
-# A token that starts a redirection ends the command's arguments: shlex keeps
-# `2>` and `>` as words (`2>&1` splits into `2>`, `&`, `1`).
+# A token that starts a redirection: shlex keeps `2>` and `>` as words.
 _REDIRECT_START = re.compile(r"^(?:&>>?|\d*>>?|\d*<)")
+# A `#` the shell would not read as a comment start (quoted or escaped).
+_QUOTED_HASH = re.compile(r"""['"\\]#""")
+# What a plain branch name can look like before the convention is consulted.
+# Refspec syntax (`+`, `:`), expansions (`$`, `` ` ``), globs and `refs/...`
+# never pass, whatever PRAXIS_BRANCH_NAME_REGEX allows.
+_PLAIN_BRANCH = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/-]*")
+_SYMBOLIC_REF = re.compile(r"[A-Z_]*HEAD")
 
 
-def _command_args(argv: list[str]) -> list[str]:
-    """argv up to the first comment or redirection token."""
+def _command_args(argv: list[str], command: str) -> list[str] | None:
+    """argv up to a shell comment, or None when its words cannot be trusted.
+
+    Arguments can follow a redirection (`> log --force`), and `2>&1` makes
+    the segmenter split at its `&`, so any redirection token gives None.
+    The tokenizer keeps `#` as a word whether or not it is quoted; when the
+    command quotes or escapes a `#` anywhere, a `#` token may be an argument
+    (`'#' --force`), so that gives None as well.
+    """
     out: list[str] = []
     for tok in argv:
-        if tok.startswith("#") or _REDIRECT_START.match(tok):
+        if tok.startswith("#"):
+            if _QUOTED_HASH.search(command):
+                return None
             break
+        if _REDIRECT_START.match(tok):
+            return None
         out.append(tok)
     return out
 
 
-def is_own_branch_push(argv: list[str]) -> bool:
+def _is_plain_branch_name(ref: str) -> bool:
+    return (
+        _PLAIN_BRANCH.fullmatch(ref) is not None
+        and _SYMBOLIC_REF.fullmatch(ref) is None
+        and not ref.startswith("refs/")
+        and ".." not in ref
+        and not ref.endswith((".", "/", ".lock"))
+    )
+
+
+def is_own_branch_push(argv: list[str], command: str) -> bool:
     """`git push [-u|-q|-v...] origin <work branch>` and nothing else.
 
-    The branch must match the work-branch convention (`_branch_names`,
-    the same pattern `branch-name-check` gates new branches with) and not be
-    a base branch. A bare `git push`, `HEAD`, a refspec with `:` or `+`, a
-    variable, a second refspec, or a remote other than `origin` keeps the ask:
-    the argv then does not name the ref that moves.
+    The branch must be a plain branch name, match the work-branch convention
+    (`_branch_names`, the same pattern `branch-name-check` gates new branches
+    with) and not be a base branch. A bare `git push`, `HEAD`, a refspec with
+    `:` or `+`, `refs/...`, a variable, a second refspec, a remote other than
+    `origin`, a redirection, or a quoted `#` keeps the ask: the argv then does
+    not reliably name the ref that moves, or how.
     """
-    args = _command_args(strip_prefix(argv))
-    if len(args) < 2 or args[0].rsplit("/", 1)[-1] != "git" or args[1] != "push":
+    args = _command_args(strip_prefix(argv), command)
+    if args is None or len(args) < 2 or args[0].rsplit("/", 1)[-1] != "git" or args[1] != "push":
         return False
     positionals: list[str] = []
     for tok in args[2:]:
@@ -351,18 +379,18 @@ def is_own_branch_push(argv: list[str]) -> bool:
     if len(positionals) != 2:
         return False
     remote, ref = positionals
-    if remote != _OWN_BRANCH_REMOTE or ref in base_branch_names():
+    if remote != _OWN_BRANCH_REMOTE or ref in base_branch_names() or not _is_plain_branch_name(ref):
         return False
     return work_branch_regex().fullmatch(ref) is not None
 
 
-def is_routine_publish(argv: list[str]) -> bool:
+def is_routine_publish(argv: list[str], command: str) -> bool:
     """An own-branch push or a `gh pr create` (issue #1635).
 
     Opening a PR moves no branch and deploys nothing; the merge that does is
     still asked here and gated by `pre-merge-approval-gate`.
     """
-    if is_own_branch_push(argv):
+    if is_own_branch_push(argv, command):
         return True
     return _gh_subcommand_pair(strip_prefix(argv)) == ("pr", "create")
 
@@ -470,7 +498,7 @@ def main() -> int:
         ask_categories = {c for c in categories if CATEGORIES[c]["tier"] == TIER_ASK}
         if not ask_categories:
             continue
-        if demote and ask_categories <= _ROUTINE_PUBLISH_CATEGORIES and is_routine_publish(argv):
+        if demote and ask_categories <= _ROUTINE_PUBLISH_CATEGORIES and is_routine_publish(argv, command):
             continue
         asks = True
 
