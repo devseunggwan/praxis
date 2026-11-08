@@ -13,8 +13,8 @@ prod deploys, and stray auto-commits from CLIs that write to git internally.
 | ---------- | ------ | ------------------ | ------ |
 | `git-commit` | **advise** | `git commit`, `git merge`, `git rebase`, `git cherry-pick`, `git revert` | Commits to the wrong branch or under the wrong author |
 | `wrapper-commit` | ask | commands from `PRAXIS_WRAPPER_COMMIT_CMDS` (e.g. `iceberg-schema migrate\|promote, omc ralph`); shipped default empty → category silent until configured (#1157) | A commit (or catalog write) made inside another process, where no `git commit` gate can see it |
-| `git-push` | ask | `git push` | Remote published without intent |
-| `gh-merge` | ask | `gh pr merge`, `gh pr create`, `gh workflow run` (including a leading global flag, e.g. `gh --repo o/r pr merge`, `gh -R o/r workflow run`) | Unintended PR state change or workflow dispatch |
+| `git-push` | ask (advise on Hermes for an own work-branch push, #1635) | `git push` | Remote published without intent |
+| `gh-merge` | ask (advise on Hermes for `gh pr create`, #1635) | `gh pr merge`, `gh pr create`, `gh workflow run` (including a leading global flag, e.g. `gh --repo o/r pr merge`, `gh -R o/r workflow run`) | Unintended PR state change or workflow dispatch |
 | `kubectl-apply` | ask | `kubectl apply`, `kubectl delete`, `kubectl replace`, `kubectl patch` | Shared cluster mutation |
 
 ### Tiers — why `git-commit` advises instead of asking (issue #874)
@@ -83,7 +83,8 @@ keeps the ask and names every matched category (see [Response](#response)), so
 CLIs all publish to state another party can already be reading, so there is no
 local undo to point at. That asymmetry is the whole tier split, and it holds on
 every host because it is a property of the commands, not of which hooks happen
-to be installed beside them.
+to be installed beside them. The one host-scoped exception below rests on a
+different ground (what an ask *is* on that host), not on reversibility.
 
 #### The sibling gates are context, not ground
 
@@ -185,9 +186,105 @@ that used to ship hardcoded here). Malformed entries are dropped silently —
 a typo must not widen into a broad match. The shipped default is empty, so
 the category is inert until configured.
 
+### Hermes: routine publish steps advise (issue #1635)
+
+On Hermes a praxis `ask` is not a permission prompt. The adapter sends every
+ask outside its consent gates (`HUMAN_APPROVAL_HOOKS`) back to the agent as a
+self-check: "re-check this call, then re-issue it unchanged or with the ack
+marker" (ARCHITECTURE.md, *Hermes Agent adapter*, **Asks**). Measured with
+`scripts/hermes-gate-effectiveness.py --since-days 14` on one Hermes install,
+this gate sent 12 self-checks and all 12 were re-issued `ack-only`: every one
+was `git push -u origin <issue branch>` or `gh pr create` from that branch,
+plus one `gh pr merge` already carrying an approval marker. None led to a
+changed call. The checklist asks to re-check the target branch and upstream,
+and in those shapes the argv already names both, so the re-check has nothing
+to find.
+
+So on the `hermes` host, and only there, a command advises instead of asking
+when **the whole command** is exactly one of:
+
+```text
+<step>
+cd <dir> && <step>
+```
+
+where `<step>` is one of:
+
+| Step | Accepted form |
+| ---- | ------------- |
+| own work-branch push | `git push [-u\|--set-upstream\|-q\|--quiet\|-v\|--verbose\|--progress\|--no-progress] origin <branch>`, where `<branch>` is a plain branch name (`[A-Za-z0-9][A-Za-z0-9._/-]*`, not `HEAD` or another `*HEAD`, not `refs/...`, no `..`, no trailing `.`, `/` or `.lock`), fully matches the work-branch convention (`PRAXIS_BRANCH_NAME_REGEX`, default `^(hub\|issue)-<N>-<type>-<slug>$`, the pattern `branch-name-check` gates new branches with) and is not a base branch (`PRAXIS_BRANCH_NAME_WHITELIST`, default `main,master,dev,prod,staging`) |
+| PR create | `gh [global flags] pr create ...` with any flags, `--base prod` included (the merge is the step that moves a branch; `gh pr merge` keeps the ask here and is consent-gated by `pre-merge-approval-gate`) |
+
+The command word is the literal `git` / `gh`: an env assignment
+(`GIT_CONFIG_COUNT=1 git push ...`), a path (`/usr/bin/git`) or a wrapper
+(`env`, `timeout`, `xargs`, ...) keeps the ask. A trailing unquoted comment
+(`# cross-boundary:ack`) is allowed.
+
+Everything else keeps the ask, including a routine step with anything beside
+it: a second step (`git fetch && git rebase && git push ...`,
+`git push ... && gh pr create ...`), `;`, a pipe, `|&`, `&|`, `||`, a
+background `&`, a `{ ...; }` group, `cd` with an option, or two `cd`s. And
+it keeps the ask whenever the raw command contains `<`, `>`, a backtick, a
+backslash, `$`, a quoted `#` (`'#`, `"#`), or a `(` / `)` outside quotes:
+arguments can follow a redirection (`&>/dev/null --force`); `<(...)`,
+`>(...)`, `$(...)`, backticks and heredoc bodies run commands; in zsh (the
+shell Hermes runs background commands in on this kind of install) a `$`
+runs one even inside double quotes (`"${(e)...}"`), and an unquoted
+parenthesis does as a glob qualifier (`*(e:'cmd':)`) or `=(cmd)`; a
+backslash can continue the line; the tokenizer does not tell a quoted `#`
+argument from a comment. A quoted title such as `"feat(x): add y"` is
+still allowed.
+
+**Why an allowlist of whole commands.** Earlier revisions demoted per segment
+and rejected dangerous forms one at a time. Each of three review rounds found
+another form that slipped through: words after a redirection, refspec syntax
+under a permissive convention, `&>`, process substitution, and finally a merge
+or push the detector cannot see at all (`... && timeout 600 gh pr merge`,
+`... && (git push origin main)`, `|&`). On `main` those rode along unnoticed
+only because the visible push or PR create in the same command asked. Demoting
+only a command that is the routine step and nothing else closes that class:
+nothing can ride along. On the measured window this keeps 10 of the 12
+self-checks away (the one `git fetch && git rebase && git push` chain and the
+`gh pr merge` still ask).
+
+With a permissive convention such as `^.+$` a tag name (`v1.2.3`) or a case
+variant of a base branch (`Main`) passes the branch check; the default
+convention admits neither.
+
+**How the hook knows the host.** The dispatcher publishes the host it runs a
+group for (`run_group(..., host)`, from `_dispatch.sh`'s third argument or the
+Hermes bridge) through `_hook_runtime.member_host()`. Standalone
+(`python3 impl.py`) it is `None`, and the shell suite below runs that way, so
+every expectation there is the host-independent behavior. On `claude`,
+`codex` and `cursor` the ask is a permission prompt to the user, and this
+change leaves it as it was.
+
+**What is given up.** On Hermes a push of a work-named branch in a repo the
+user does not own, or onto a same-named branch someone else pushed (a
+fast-forward is not rejected), no longer gets the re-check. The argv names the
+target only when no push mapping is configured: an earlier
+`git config remote.origin.push ...` or `git remote set-url` in another call
+redirects the same `git push origin <branch>`, and that earlier call is not
+re-checked here. The same holds for a variable exported in an earlier call
+(`export GIT_CONFIG_COUNT=...`): Hermes keeps exported variables between
+terminal calls. External repos keep `cross-boundary-preflight` for `gh`
+writes; a plain `git push` to one has no other gate on Hermes. That is the
+trade the issue accepted: the re-check never changed a call in the measured
+window.
+
+**Deliberate misses.** A bare `git push` on a work branch with an upstream
+(the usual "add commits to my open PR" step) still asks, because the argv
+does not name the ref; resolving the current branch would need the effective
+cwd after any `cd` in the command. `git push -uq origin <branch>` (bundled
+flags), `--dry-run`, a push chained after `git fetch` / `git rebase`, and any
+command with a redirection (`2>&1 | tail`) or a quoted argument that starts
+with `#` (`--title "#12 fix"`; `--title "fix #12"` does not count) also
+still ask.
+
 ### Response
 
-**ASK tier** — any matched category at tier `ask`:
+**ASK tier** — any matched category at tier `ask`, unless the whole command is
+a routine publish step on Hermes ([above](#hermes-routine-publish-steps-advise-issue-1635)):
 
 ```json
 {
@@ -207,7 +304,8 @@ A *mixed* match keeps the ask **and every matched category in the reason** —
 `[git-commit]` and `[git-push]`. The demotion can therefore never quiet a
 command that also touches shared state.
 
-**ADVISE tier** — the match consists solely of `advise`-tier categories:
+**ADVISE tier** — the match consists solely of `advise`-tier categories, or
+the whole command is a routine publish step on Hermes:
 
 ```text
 stderr: "[side-effect-scan] [git-commit] local git state mutation — … 의도한 실행이면 …"
@@ -322,3 +420,17 @@ hook writes to stderr at all. Run before editing the hook:
 ```bash
 bash tests/hooks/preflight-gate/test_side_effect_scan.sh
 ```
+
+The Hermes demotion (#1635) is covered in-process, through `_dispatch.run_one`
+with the host published, by `tests/hooks/preflight-gate/test_side_effect_scan_host.py`:
+every routine shape advises on `hermes` and still asks on `claude`, `codex`,
+`cursor` and standalone; every other shape the section above lists (other
+push forms, a routine step with anything beside it, wrappers and env
+assignments, opaque shell syntax, a wrapper configured under `git push`, and
+`gh pr merge` / `gh workflow run` / `kubectl apply`) still asks on `hermes`;
+a custom `PRAXIS_BRANCH_NAME_REGEX` is honoured and never admits a base
+branch or refspec syntax.
+`tests/hooks/_lib/test_hermes.py` drives a subset (two routine shapes, seven
+non-routine commands) through the real bridge, and
+`tests/hooks/_lib/test_dispatch.py` pins that `run_group` publishes the host
+and clears it.

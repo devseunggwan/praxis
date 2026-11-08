@@ -13,8 +13,10 @@ matching command from the detector.
 Opt-out: embed the marker `# side-effect:ack` anywhere in the command to
 signal an intentional invocation — the hook then exits 0 without prompting.
 
-Tiers (issue #874). `git-commit` is ADVISE; every other category is ASK. The
-observation behind the demotion: one 2026-07-27 session (`5d46110f`) spent 23
+Tiers (issue #874). `git-commit` is ADVISE; every other category is ASK,
+except two routine publish shapes on the Hermes host (issue #1635, see
+`SELF_CHECK_HOSTS`). The
+observation behind the `git-commit` demotion: one 2026-07-27 session (`5d46110f`) spent 23
 of its 37 total ask prompts on this single hook — 62% — and an approval gate
 that becomes habitual stops functioning as a gate. `git-commit` is the one
 category that can absorb that reduction, and the ground is reversibility
@@ -72,11 +74,14 @@ hardcoded here live in the author's env now).
 from __future__ import annotations
 
 import os
+import re
 import sys
 import sys as _sys
 from pathlib import Path as _Path
 _sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
+from _branch_names import base_branch_names, work_branch_regex  # type: ignore[import-not-found]  # noqa: E402
 from _hook_io import emit_decision  # type: ignore[import-not-found]  # noqa: E402
+from _hook_runtime import member_host  # type: ignore[import-not-found]  # noqa: E402
 from _payload import read_bash_payload  # type: ignore[import-not-found]  # noqa: E402
 from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
     GH_MERGE_VALUE_FLAGS,
@@ -281,6 +286,158 @@ def detect(argv: list[str]) -> list[str]:
     return matched
 
 
+# Hosts whose `ask` is a self-check the agent answers, not a prompt the user
+# answers: the Hermes adapter turns every ask outside its consent gates into
+# "re-check and re-issue" (ARCHITECTURE.md, Hermes adapter, *Asks*). On those
+# hosts the routine publish steps of the issue workflow advise instead of
+# asking (issue #1635): over 14 days on one Hermes install all 12 of this
+# gate's self-checks were re-issued with only the ack marker added, and every
+# one was a push of the session's own issue branch or a `gh pr create`. The
+# argv already names the target the checklist asks to re-check, so the
+# re-check found nothing. Elsewhere the ask is a permission prompt, and this
+# change leaves it alone.
+SELF_CHECK_HOSTS = frozenset({"hermes"})
+
+# Only these ask categories can be demoted. A wrapper CLI configured under the
+# same argv (`PRAXIS_WRAPPER_COMMIT_CMDS`) adds its own category and still asks.
+_ROUTINE_PUBLISH_CATEGORIES = frozenset({"git-push", "gh-merge"})
+
+# `git push` options that change neither which ref is written nor how. Any
+# other option (`--force*`, `--delete`, `--mirror`, `--all`, `--tags`,
+# `--prune`, `-o`, `--no-verify`, bundled short flags, ...) keeps the ask.
+_PUSH_PLAIN_FLAGS = frozenset({
+    "-u", "--set-upstream",
+    "-q", "--quiet",
+    "-v", "--verbose",
+    "--progress", "--no-progress",
+})
+_OWN_BRANCH_REMOTE = "origin"
+
+# What a plain branch name can look like before the convention is consulted.
+# Refspec syntax (`+`, `:`), expansions (`$`), globs and `refs/...` never
+# pass, whatever PRAXIS_BRANCH_NAME_REGEX allows.
+_PLAIN_BRANCH = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/-]*")
+_SYMBOLIC_REF = re.compile(r"[A-Z_]*HEAD")
+
+# Shell syntax the tokenizer cannot place reliably: a redirection can be
+# followed by more arguments (`&>/dev/null --force`); `<(...)`, `>(...)`,
+# `$(...)`, backticks and heredoc bodies run commands, and so does a `$` in
+# zsh even inside double quotes (`"${(e)...}"`); a backslash can continue the
+# line; a quoted `#` is an argument, not a comment.
+_OPAQUE_SHELL = re.compile(r"""[<>`\\$]|['"]#""")
+# A tokenizer word made only of `;`, `|`, `&` is a control operator.
+_OPERATOR = re.compile(r"[;|&]+")
+
+
+def _has_unquoted_paren(command: str) -> bool:
+    """`(` or `)` outside quotes: a subshell, or in zsh a glob qualifier
+    (`*(e:'cmd':)`) or `=(cmd)`, both of which run a command. A quoted
+    `"feat(x): y"` title stays allowed."""
+    quote = ""
+    for ch in command:
+        if quote:
+            if ch == quote:
+                quote = ""
+        elif ch in "'\"":
+            quote = ch
+        elif ch in "()":
+            return True
+    return False
+
+
+def has_opaque_shell_syntax(command: str) -> bool:
+    return _OPAQUE_SHELL.search(command) is not None or _has_unquoted_paren(command)
+
+
+def _command_args(argv: list[str]) -> list[str]:
+    """argv up to a shell comment.
+
+    Only called when `has_opaque_shell_syntax` is false, so every `#` token
+    is an unquoted comment start.
+    """
+    out: list[str] = []
+    for tok in argv:
+        if tok.startswith("#"):
+            break
+        out.append(tok)
+    return out
+
+
+def _is_plain_branch_name(ref: str) -> bool:
+    return (
+        _PLAIN_BRANCH.fullmatch(ref) is not None
+        and _SYMBOLIC_REF.fullmatch(ref) is None
+        and not ref.startswith("refs/")
+        and ".." not in ref
+        and not ref.endswith((".", "/", ".lock"))
+    )
+
+
+def is_own_branch_push(args: list[str]) -> bool:
+    """`git push [-u|-q|-v...] origin <work branch>` and nothing else.
+
+    `args` is the literal argv: the command word must be `git` itself, so an
+    env assignment (`GIT_CONFIG_*=...`) or a wrapper (`env`, `timeout`,
+    `xargs`, ...) keeps the ask. The branch must be a plain branch name, match
+    the work-branch convention (`_branch_names`, the pattern `branch-name-check`
+    gates new branches with) and not be a base branch.
+    """
+    if len(args) < 2 or args[0] != "git" or args[1] != "push":
+        return False
+    positionals: list[str] = []
+    for tok in args[2:]:
+        if tok.startswith("-"):
+            if tok not in _PUSH_PLAIN_FLAGS:
+                return False
+            continue
+        positionals.append(tok)
+    if len(positionals) != 2:
+        return False
+    remote, ref = positionals
+    if remote != _OWN_BRANCH_REMOTE or ref in base_branch_names() or not _is_plain_branch_name(ref):
+        return False
+    return work_branch_regex().fullmatch(ref) is not None
+
+
+def _is_routine_segment(argv: list[str]) -> bool:
+    args = _command_args(argv)
+    if not args:
+        return False
+    if args[0] == "git":
+        return is_own_branch_push(args)
+    if args[0] == "gh":
+        return _gh_subcommand_pair(args) == ("pr", "create")
+    return False
+
+
+def is_routine_command(tokens: list[str]) -> bool:
+    """The whole command is one routine publish step, optionally after `cd`.
+
+    Accepted: `<step>` or `cd <dir> && <step>`, where `<step>` is an own
+    work-branch push or a `gh pr create` written with the bare command word.
+    Anything else in the command (another step, a pipe, `;`, `|&`, `&|`, a
+    background `&`, a subshell, a wrapper or an env assignment) keeps the ask:
+    review rounds 1-3 showed that a merge or push the detector cannot see
+    (`timeout ... gh pr merge`, `(git push origin main)`) rode along once the
+    visible step stopped asking, so the demotion is an allowlist of whole
+    commands rather than a list of dangerous forms. Callers check
+    `has_opaque_shell_syntax` first.
+    """
+    segments: list[list[str]] = [[]]
+    operators: list[str] = []
+    for tok in tokens:
+        if _OPERATOR.fullmatch(tok):
+            operators.append(tok)
+            segments.append([])
+        else:
+            segments[-1].append(tok)
+    if not operators:
+        return _is_routine_segment(segments[0])
+    if operators == ["&&"] and len(segments[0]) == 2 and segments[0][0] == "cd":
+        return _is_routine_segment(segments[1])
+    return False
+
+
 def has_prod_scope(tokens: list[str]) -> bool:
     for raw in tokens:
         t = raw.lower()
@@ -373,11 +530,24 @@ def main() -> int:
     if not tokens:
         return 0
 
+    demote = (
+        member_host() in SELF_CHECK_HOSTS
+        and not has_opaque_shell_syntax(command)
+        and is_routine_command(tokens)
+    )
     matched: list[str] = []
+    asks = False
     for argv in iter_command_starts(tokens):
-        for cat in detect(argv):
+        categories = detect(argv)
+        for cat in categories:
             if cat not in matched:
                 matched.append(cat)
+        ask_categories = {c for c in categories if CATEGORIES[c]["tier"] == TIER_ASK}
+        if not ask_categories:
+            continue
+        if demote and ask_categories <= _ROUTINE_PUBLISH_CATEGORIES:
+            continue
+        asks = True
 
     if not matched:
         return 0
@@ -386,9 +556,10 @@ def main() -> int:
 
     # Mixed matches stay at ASK and keep EVERY matched category in the reason —
     # `git commit -am x && git push` is unchanged from its pre-#874 text. Only
-    # a match consisting solely of ADVISE-tier categories is demoted, so the
-    # demotion can never quiet a command that also touches shared state.
-    if any(CATEGORIES[c]["tier"] == TIER_ASK for c in matched):
+    # a match with no ASK-tier category, or a whole command that is one
+    # routine publish step on a self-check host, advises, so the demotion can
+    # never quiet a command that also touches other shared state.
+    if asks:
         emit_ask(build_reason(matched, prod, command))
         return 0
 

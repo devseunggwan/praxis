@@ -95,6 +95,7 @@ from _hook_runtime import (  # type: ignore[import-not-found]  # noqa: E402
     MIN_SUBPROC_BUDGET_SEC,
     fail_open,
     set_member_deadline,
+    set_member_host,
 )
 
 _ASK_MARKER = '"permissionDecision": "ask"'
@@ -511,8 +512,10 @@ def run_group(
         except Exception:
             pass
     try:
+        set_member_host(host)
         return _run_group(event, matcher, payload_raw, host, if_pattern, asked_by)
     finally:
+        set_member_host(None)
         if _transcript is not None:
             try:
                 _transcript.disable_turn_memo()
