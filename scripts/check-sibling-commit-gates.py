@@ -37,7 +37,7 @@ Three things the canary verifies beyond that bare name diff:
    filter is therefore right on `claude` and wrong on `codex` / `cursor`,
    which is the same class of drift this canary exists to catch. `derive()` takes a `host`, the host list is read from
    ``manifests/platforms/*.json`` (only platforms that emit a ``hooks``
-   output; every shipped platform does today), and the spec's host table is checked
+   output; `gemini` ships skills only), and the spec's host table is checked
    row by row, in both directions, against every one of them. A bare
    "<n> sibling" claim in the prose is the canonical, host-unfiltered count;
    the per-host numbers live only in that table.
@@ -253,7 +253,7 @@ def hook_hosts(repo: Path = REPO) -> tuple[list[str], list[str]]:
 
     Read from `manifests/platforms/*.json` rather than hard-coded, so adding a
     platform automatically widens what the host table has to account for. A
-    platform with no `hooks` output (none today) ships skills only and
+    platform with no `hooks` output (today: `gemini`) ships skills only and
     never runs `side-effect-scan`, so it is not a host the demotion applies to.
     """
     drifts: list[str] = []

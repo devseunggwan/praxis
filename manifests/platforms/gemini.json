@@ -1,0 +1,10 @@
+{
+  "platform": "gemini",
+  "host_id": "gemini",
+  "outputs": [
+    {
+      "kind": "gemini-extension",
+      "path": "gemini-extension.json"
+    }
+  ]
+}
