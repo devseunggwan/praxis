@@ -187,6 +187,24 @@ def test_baseline_entry_without_a_skill_is_drift(monkeypatch: pytest.MonkeyPatch
     assert len(orphans) == 1 and "gone-skill" in orphans[0] and "30g" in orphans[0]
 
 
+def test_manifest_check_reports_an_injected_violation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # Guards the wiring: the rule tests above call skill_authoring directly and
+    # would keep passing if check-plugin-manifests.py stopped running Rule 30.
+    check_spec = importlib.util.spec_from_file_location(
+        "check_plugin_manifests", REPO_ROOT / "scripts" / "check-plugin-manifests.py"
+    )
+    assert check_spec and check_spec.loader
+    check = importlib.util.module_from_spec(check_spec)
+    check_spec.loader.exec_module(check)
+    real_dirs = check._skill_dirs()
+    bad = _write(tmp_path, frontmatter={"description": "Do it. Use when asked."})
+    monkeypatch.setattr(check, "_skill_dirs", lambda: [*real_dirs, bad])
+    assert check.main() == 1
+    assert "SKILL SHAPE fixture-skill (30b)" in capsys.readouterr().out
+
+
 def test_repository_skills_pass() -> None:
     skill_dirs = sorted(
         p.parent for p in (REPO_ROOT / "skills").glob("*/SKILL.md")
