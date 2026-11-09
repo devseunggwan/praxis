@@ -5,6 +5,27 @@ All notable changes to praxis are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.23.0](https://github.com/devseunggwan/praxis/compare/v7.22.1...v7.23.0) (2026-11-09)
+
+
+### Added
+
+* **ci:** gate SKILL.md shape in manifest check ([#1644](https://github.com/devseunggwan/praxis/issues/1644)) ([5fc9bc6](https://github.com/devseunggwan/praxis/commit/5fc9bc609b1ceee0fd92e88e7798d0d897af2447))
+* **hooks:** accept a host-verified merge approval ([#1642](https://github.com/devseunggwan/praxis/issues/1642)) ([7cb1816](https://github.com/devseunggwan/praxis/commit/7cb18168812cf06bdb6ee18c8396b60cc292b71d)), closes [#1639](https://github.com/devseunggwan/praxis/issues/1639)
+* **packaging:** restore gemini cli extension ([#1646](https://github.com/devseunggwan/praxis/issues/1646)) ([e2e0505](https://github.com/devseunggwan/praxis/commit/e2e05056642b2ed8fcc84edec6333c015232b234))
+
+
+### Fixed
+
+* **hermes:** advise on own-branch push, PR create ([#1636](https://github.com/devseunggwan/praxis/issues/1636)) ([5497d73](https://github.com/devseunggwan/praxis/commit/5497d732a08d33bde14bb042c054a8e17fad9e71)), closes [#1635](https://github.com/devseunggwan/praxis/issues/1635)
+* **hooks:** read numbered reply at merge item ([#1631](https://github.com/devseunggwan/praxis/issues/1631)) ([af44a5d](https://github.com/devseunggwan/praxis/commit/af44a5df32b58d094c49a5cc895e8ba1db4ebc6c)), closes [#1630](https://github.com/devseunggwan/praxis/issues/1630)
+* **hooks:** skip local writes in premise gate ([#1637](https://github.com/devseunggwan/praxis/issues/1637)) ([98137ef](https://github.com/devseunggwan/praxis/commit/98137ef431ddefecfd8dbf114a11dc56e669a673))
+
+
+### Changed
+
+* **hermes:** append-only bridge transcript sync ([#1638](https://github.com/devseunggwan/praxis/issues/1638)) ([2a29170](https://github.com/devseunggwan/praxis/commit/2a291707647dfa0c48086c90e7728df9f47aa470)), closes [#1633](https://github.com/devseunggwan/praxis/issues/1633)
+
 ## [7.22.1](https://github.com/devseunggwan/praxis/compare/v7.22.0...v7.22.1) (2026-11-03)
 
 
