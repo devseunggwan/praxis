@@ -108,6 +108,7 @@ def test_clean_skill_has_no_findings(tmp_path: Path) -> None:
         ({"extra_frontmatter": "allowed-tools:\n  - Read\n  - Bash"}, "30e"),
         ({"extra_frontmatter": "allowed-tools:\n  - Bash(git push *)"}, "30e"),
         ({"extra_frontmatter": "allowed-tools: Read, Bash(gh pr merge *)"}, "30e"),
+        ({"extra_frontmatter": "allowed-tools:\n- Read\n- Bash"}, "30e"),
         ({"body": CLEAN_BODY.replace("Done when: the report is out.", "")}, "30f"),
         ({"body": CLEAN_BODY + "\n" + "padding line\n" * 1500}, "30g"),
         ({"body": CLEAN_BODY.replace("## Overview", "## Background")}, "30h"),

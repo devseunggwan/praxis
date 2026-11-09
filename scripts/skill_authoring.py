@@ -73,9 +73,13 @@ _FENCE_RE = re.compile(r"(?ms)^\s*```.*?^\s*```")
 
 
 def _field(frontmatter: str, key: str) -> str | None:
-    """Raw text of one top-level frontmatter field, or None when absent."""
+    """Raw text of one top-level frontmatter field, or None when absent.
+
+    A YAML block list may put its `- item` lines at column zero, so those
+    lines still belong to the field.
+    """
     match = re.search(
-        rf"^{re.escape(key)}:(.*?)(?=^\S|\Z)", frontmatter, re.DOTALL | re.MULTILINE
+        rf"^{re.escape(key)}:(.*?)(?=^(?!-\s)\S|\Z)", frontmatter, re.DOTALL | re.MULTILINE
     )
     return None if match is None else match.group(1)
 
