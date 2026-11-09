@@ -156,6 +156,8 @@ CASES = {
         lambda: _host_relayed(_failed_result("m1", "blocked by another gate")),
     "momentum-merge-host-relayed-merged.jsonl":
         lambda: _host_relayed(result("m1", "merged")),
+    "momentum-merge-host-relayed-gh-host.jsonl":
+        lambda: [bash("e1", "export GH_HOST=ghe.example.com"), result("e1", ""), *_host_relayed()],
     # Issue #1630: a numbered reply is read at the merge question's number.
     "momentum-merge-numbered-first-item.jsonl":
         lambda: _numbered("1. approve\n2. go with your recommendation", _Q_MERGE_FIRST),

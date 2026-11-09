@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import subprocess
 import tempfile
@@ -61,6 +62,11 @@ CALL_RECORD_TTL_SEC = 600
 # Spent refs are kept this long; an approval older than that is refused, so a
 # pruned ref can never be replayed.
 REF_RETENTION_SEC = 30 * 24 * 3600
+# Tolerated provider clock lead. A later approved_at would outlive the spent-ref
+# record and let the same ref release again once that record is pruned.
+CLOCK_SKEW_SEC = 300
+# Kept back from the hook budget for recording the outcome after the provider.
+STATE_WRITE_MARGIN_SEC = 0.25
 
 
 @dataclass(frozen=True)
@@ -133,7 +139,8 @@ def _ask_provider(provider: str, repo: str, pr: str, session_id: str,
     argv = [provider, "merge-approval", "--repo", repo, "--pr", str(pr), "--session", session_id]
     # Under the dispatcher the gate shares the group's deadline; outliving it
     # gets the whole dispatcher killed, so the provider gets what is left.
-    timeout = min(PROVIDER_TIMEOUT_SEC, remaining_budget(PROVIDER_TIMEOUT_SEC))
+    timeout = min(PROVIDER_TIMEOUT_SEC,
+                  remaining_budget(PROVIDER_TIMEOUT_SEC + STATE_WRITE_MARGIN_SEC) - STATE_WRITE_MARGIN_SEC)
     if timeout < MIN_SUBPROC_BUDGET_SEC:
         return Decision(False, "too little hook time was left to ask the provider")
     try:
@@ -163,9 +170,12 @@ def _ask_provider(provider: str, repo: str, pr: str, session_id: str,
     if isinstance(got_pr, bool) or not isinstance(got_pr, int) or str(got_pr) != str(pr):
         return Decision(False, f"the approval names PR {got_pr!r}, not {pr}")
     approved_at = record.get("approved_at")
-    if (isinstance(approved_at, bool) or not isinstance(approved_at, (int, float))
-            or time.time() - approved_at > REF_RETENTION_SEC):
-        return Decision(False, "the approval has no approved_at, or is older than 30 days")
+    age = (time.time() - approved_at
+           if isinstance(approved_at, (int, float)) and not isinstance(approved_at, bool)
+           and math.isfinite(approved_at) else None)
+    if age is None or not -CLOCK_SKEW_SEC <= age <= REF_RETENTION_SEC:
+        return Decision(False, "the approval has no approved_at, is in the future, "
+                               "or is older than 30 days")
     briefing = record.get("briefing")
     items = count_items(briefing) if isinstance(briefing, str) else 0
     if items < min_items:

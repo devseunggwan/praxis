@@ -21,8 +21,13 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO_ROOT / "hooks" / "_lib"))
 sys.path.insert(0, str(REPO_ROOT / "tests" / "fixtures"))
 
+# tests/test_no_live_keys_in_fixtures.sh scans every file under tests/fixtures,
+# so importing the generator must not leave a __pycache__ there.
+_saved_dont_write = sys.dont_write_bytecode
+sys.dont_write_bytecode = True
 import _host_merge_approval as host  # noqa: E402
 import merge_gate_fixtures as fx  # noqa: E402
+sys.dont_write_bytecode = _saved_dont_write
 
 MOMENTUM = REPO_ROOT / "hooks" / "advisory-nudge" / "momentum-rule-retrieval-gate" / "impl.py"
 PRE_MERGE = REPO_ROOT / "hooks" / "preflight-gate" / "pre-merge-approval-gate" / "impl.py"
@@ -128,6 +133,7 @@ def test_without_provider_the_relayed_answer_is_denied(env, tmp_path):
     (_record(ref=""), "has no ref"),
     (_record(approved_at=time.time() - 40 * 24 * 3600), "older than 30 days"),
     (_record(approved_at=None), "no approved_at"),
+    (_record(approved_at=time.time() + 3600), "in the future"),
 ])
 def test_record_that_does_not_match_the_merge_is_refused(env, tmp_path, record, why):
     _provider(env, record)
@@ -145,6 +151,7 @@ def test_record_that_does_not_match_the_merge_is_refused(env, tmp_path, record, 
     ("not json", 0, "not one JSON object"),
     ("[1, 2]", 0, "not one JSON object"),
     (json.dumps(_record()) + "\n" + json.dumps(_record()), 0, "not one JSON object"),
+    (json.dumps({**_record(), "approved_at": float("nan")}), 0, "in the future"),
 ])
 def test_provider_failure_is_refused(env, tmp_path, stdout, code, why):
     _provider(env, stdout=stdout, code=code)
@@ -174,6 +181,82 @@ def test_pull_url_names_the_repo(env, tmp_path):
     out = _run(MOMENTUM, env, _transcript(tmp_path), "gh pr merge https://github.com/o/r/pull/999 --squash")
     assert _decision(out) is None
     assert _calls(env)[0][1:5] == ["--repo", "o/r", "--pr", "999"]
+
+
+@pytest.mark.parametrize("command", [
+    "gh pr merge https://github.com/o/r/pull/999 --repo o/r --squash",
+    "gh pr merge 999 --repo=O/R --squash",
+    "gh pr merge 999 -Ro/r --squash",
+    "gh -R github.com/o/r pr merge 999 --squash",
+    "gh pr merge 999 --repo o/r --subject 'see https://github.com/a/b/pull/999' --squash",
+])
+def test_agreeing_repo_references_release(env, tmp_path, command):
+    _provider(env)
+    assert _decision(_run(MOMENTUM, env, _transcript(tmp_path), command)) is None
+    assert _calls(env)[0][1:3] == ["--repo", "o/r"]
+
+
+@pytest.mark.parametrize("command, why", [
+    # gh merges the URL's repo, not --repo's: the approval for o/r#999 must
+    # not release a/b#999.
+    ("gh pr merge --repo o/r https://github.com/a/b/pull/999 --squash", "more than one repo"),
+    ("gh pr merge -R o/r https://github.com/a/b/pull/999 --squash", "more than one repo"),
+    # gh keeps the last -R.
+    ("gh pr merge 999 -R o/r -R a/b --squash", "more than one repo"),
+    ("gh pr merge 999 --repo ghe.example.com/o/r --squash", "targets host ghe.example.com"),
+    ("gh pr merge https://ghe.example.com/o/r/pull/999 --squash", "targets host ghe.example.com"),
+    ("gh pr merge 999 --repo o/r/extra --squash", "targets host o,"),
+    ("gh pr merge 999 --repo o --squash", "cannot be read"),
+])
+def test_merge_naming_another_target_never_calls_the_provider(env, tmp_path, command, why):
+    _provider(env)
+    out = _run(MOMENTUM, env, _transcript(tmp_path), command)
+    assert _decision(out) == "deny" and why in out
+    assert _calls(env) == []
+
+
+def test_exported_gh_host_never_calls_the_provider(env, tmp_path):
+    _provider(env)
+    out = _run(MOMENTUM, env, _transcript(tmp_path, "momentum-merge-host-relayed-gh-host.jsonl"))
+    assert _decision(out) == "deny" and "GH_HOST was exported" in out
+    assert _calls(env) == []
+
+
+def _load_impl(path: Path, name: str):
+    import importlib.util
+    saved = sys.dont_write_bytecode
+    sys.dont_write_bytecode = True
+    try:
+        spec = importlib.util.spec_from_file_location(name, path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+    finally:
+        sys.dont_write_bytecode = saved
+    return module
+
+
+def test_a_crash_in_the_check_refuses(env, tmp_path, monkeypatch):
+    """`host_merge_decision` catches everything: the momentum hook is
+    `@fail_open`, so an escaping exception would release the merge."""
+    gate = _load_impl(MOMENTUM, "momentum_crash")
+
+    def boom(**_kwargs):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(gate._host_approval, "decide", boom)
+    payload = {"tool_input": {"command": MERGE}, "transcript_path": str(_transcript(tmp_path)),
+               "session_id": "s1", "tool_use_id": "t1"}
+    decision = gate.host_merge_decision(payload)
+    assert not decision.released and "check failed (RuntimeError)" in decision.detail
+
+
+def test_pre_merge_gate_keeps_the_prompt_when_the_sibling_fails(tmp_path, monkeypatch):
+    gate = _load_impl(PRE_MERGE, "pre_merge_crash")
+    broken = tmp_path / "impl.py"
+    broken.write_text("raise RuntimeError('boom')\n")
+    monkeypatch.setattr(gate, "_MOMENTUM_IMPL", broken)
+    released, note = gate.host_approval({"tool_input": {"command": MERGE}})
+    assert released is False and "check failed (RuntimeError)" in note
 
 
 @pytest.mark.parametrize("path", ["provider-missing", "relative/provider"])

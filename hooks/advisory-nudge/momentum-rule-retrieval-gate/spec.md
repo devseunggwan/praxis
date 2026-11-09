@@ -798,18 +798,25 @@ PRAXIS_MERGE_APPROVAL_PROVIDER=<absolute path>
 Unset (the default), nothing below runs and every decision is the one `main`
 makes. Set, the provider is asked only about a merge the transcript path would
 deny, and only when the command is one `gh pr merge` naming its PR number and
-its repo (`--repo owner/name`, `-R`, or a `…/pull/N` URL), with no chain, loop
-or `GH_REPO=` prefix. A merge with no repo runs against whatever checkout the
-shell or the host's working directory points at, which can change between the
-answer and the call, so the provider is not asked about it.
+exactly one repo on `github.com`, with no chain, loop or `GH_REPO=` prefix.
+Every repo reference counts (`--repo`, `-R`, `--repo=`, `-Rowner/name`, a pull
+request URL positional), and they must all agree: `gh` merges the URL's repo
+over `--repo`, and the last of several `-R`, so a command naming two repos
+could merge one the provider never vouched for. A host other than `github.com`
+(`-R host/o/r`, a URL on another host) and a session that ran
+`export GH_HOST=…` are refused too, since the provider contract names no host.
+A merge with no repo runs against whatever checkout the shell or the host's
+working directory points at, which can change between the answer and the
+call, so the provider is not asked about it.
 
 ```text
 <provider> merge-approval --repo <owner/name> --pr <N> --session <session_id>
 ```
 
 stdin is closed; the call is cut off after 5 s, or sooner when the dispatch
-group's shared deadline leaves less (below 0.5 s it is not started, a
-refusal). On exit 0 its stdout must be one JSON object:
+group's shared deadline leaves less (a quarter second is kept back to record
+the outcome; below 0.5 s the provider is not started, a refusal). On exit 0
+its stdout must be one JSON object:
 
 ```json
 {"approved": true, "ref": "<unique per approval>", "repo": "owner/name",
@@ -823,8 +830,10 @@ releases only when all of these hold:
   number, and `repo` equals the merge's repo (case-insensitive);
 - `briefing` scores at least `MERGE_BRIEFING_MIN_ITEMS` (4) of 6 items with
   `_briefing_item_count`, the counter the transcript path uses;
-- `approved_at` is a number no older than 30 days (the time spent refs are
-  kept, so a forgotten ref cannot be replayed);
+- `approved_at` is a finite number no older than 30 days and no more than
+  5 minutes ahead of the hook's clock (spent refs are kept 30 days, so neither
+  a forgotten ref nor a future timestamp can outlive its spent record and be
+  replayed);
 - `ref` has not released another merge.
 
 Any other outcome (non-zero exit, timeout, output that is not one JSON object,
@@ -839,7 +848,10 @@ the session and `tool_use_id` of the call it released. The ref is freed again
 only when that call's `tool_result` in the same session's transcript is
 `is_error`: a sibling gate blocked it or `gh` failed, so nothing merged. A
 call still in flight, or one whose result is not in the transcript, keeps it
-spent. A payload without `session_id` or `tool_use_id` is never released.
+spent. A merge that ran and then failed in `gh` (a local `--delete-branch`
+step, say) frees it too; the freed ref can only release the same PR again,
+which `gh` refuses once it is merged. A payload without `session_id` or
+`tool_use_id` is never released.
 
 **Both gates, one decision.** `pre-merge-approval-gate` asks the same
 function, `host_merge_decision(payload)`. The first gate to ask for a tool call
