@@ -1,6 +1,6 @@
 {
   "name": "praxis",
-  "description": "Workflow rules from CLAUDE.md turned into hooks and skills that actually fire",
+  "description": "Workflow skills from praxis: merge briefing, verification, review and cleanup procedures. Skills only; praxis hooks do not run under Gemini CLI",
   "version": "7.22.1",
   "author": "devseunggwan",
   "repository": "https://github.com/devseunggwan/praxis",
