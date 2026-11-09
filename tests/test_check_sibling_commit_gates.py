@@ -76,9 +76,9 @@ _SURFACE_FILES = (gates.MANIFEST, gates.SPEC, gates.IMPL, gates.TEST, gates.CHEC
 # is: a whitelist edit has to come through this file too.
 EXPECTED_PER_HOST = {"claude": 7, "codex": 5, "cursor": 5}
 
-# A host with no `hooks` output in `manifests/platforms/` — every shipped
-# platform installs hooks today, so this is a synthetic name.
-NON_HOOK_PLATFORM = "skills-only-host"
+# A host with no `hooks` output in `manifests/platforms/`: `gemini` ships
+# skills only, so it is not a host the ADVISE demotion has to hold on.
+NON_HOOK_PLATFORM = "gemini"
 
 # The manifest block the fixtures edit, quoted verbatim so a reformat of the
 # manifest breaks the fixture loudly instead of silently no-opping.

@@ -333,6 +333,9 @@ packaging is *generated* from canonical metadata, not hand-edited:
   repository, homepage, category, keywords). `VERSION` is the authoritative
   version string.
 - `manifests/platforms/{claude,codex,cursor}.json` — per-platform output list.
+- `manifests/platforms/gemini.json` - the Gemini CLI extension. Skills only:
+  Gemini discovers `skills/` from the extension root on its own, and no
+  Gemini-format `hooks/hooks.json` is emitted, so no hook runs there.
 - `manifests/platforms/hermes.json` — the Hermes Agent host. It declares no
   outputs: Hermes reads hooks from its own `config.yaml`, which
   `plugins/hermes/bridge.py --print-config` prints for the running clone (see
@@ -384,6 +387,7 @@ Generated (committed) outputs:
 | `plugins/praxis/{skills,hooks,scripts}` | Symlinks into repo-root runtime |
 | `.cursor-plugin/plugin.json` | Cursor IDE plugin root |
 | `.cursor-plugin/hooks/hooks.json` | Cursor-compatible hooks (filtered) |
+| `gemini-extension.json` | Gemini CLI extension root (`gemini extensions install`) |
 | `plugin.json` | Agent Plugins 1.0.0 portable manifest |
 
 ### Hermes Agent adapter

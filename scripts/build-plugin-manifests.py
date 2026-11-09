@@ -21,6 +21,10 @@ Writes (generated artifacts, committed to the repo):
   plugins/praxis/.codex-plugin/hooks/hooks.json
   .cursor-plugin/plugin.json
   .cursor-plugin/hooks/hooks.json
+  gemini-extension.json          - Gemini CLI extension manifest (skills
+                                   only; Gemini reads skills/ from the
+                                   extension root, and no hooks/hooks.json
+                                   is emitted for it)
   plugin.json                    — Agent Plugins 1.0.0 portable manifest
                                    (agent-plugins.org) for the hosts whose
                                    plugin root IS the repo root. Codex's is
@@ -1449,6 +1453,29 @@ def render_agent_plugin(base: dict) -> dict:
     }
 
 
+def render_gemini_extension(base: dict, overrides: dict) -> dict:
+    """Gemini CLI extension manifest (`gemini-extension.json` at the repo root).
+
+    `gemini extensions install <repo>` fails without this file, and the
+    Gemini extension gallery points at that command. Gemini discovers bundled
+    skills from `skills/` on its own and reads hooks from `hooks/hooks.json`,
+    not from this manifest, so metadata is all it carries. The platform file
+    overrides the shared description, which promises hooks that never run
+    under Gemini.
+    """
+    author = base["author"]
+    manifest = {
+        "name": base["name"],
+        "description": base["description"],
+        "version": base["version"],
+        "author": author["name"] if isinstance(author, dict) else author,
+        "repository": base["repository"],
+        "keywords": base["keywords"],
+    }
+    manifest.update(overrides)
+    return manifest
+
+
 def render_output(
     base: dict,
     output: dict,
@@ -1469,6 +1496,8 @@ def render_output(
         )
     if kind == "hooks":
         return filter_hooks_for_host(hooks_source, host_id, dispatch_groups)
+    if kind == "gemini-extension":
+        return render_gemini_extension(base, output.get("extension_overrides", {}))
     raise ValueError(f"unknown output kind: {kind}")
 
 

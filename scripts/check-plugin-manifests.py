@@ -33,8 +33,8 @@ main() is labeled with its number, and this list is the canonical roster
   8. Spec `Supported hosts:` ↔ manifest `hosts` cross-check.
   9. Release version wiring (#1172): `VERSION` equals the "." version in
      `.release-please-manifest.json`, and every versioned platform artifact
-     (plugin, marketplace kinds — marketplace carries
-     version fields too) is listed in release-please-config.json
+     (plugin, marketplace, agent-plugin, gemini-extension kinds;
+     marketplace carries version fields too) is listed in release-please-config.json
      `extra-files` so release-please bumps its embedded versions.
   10. spec.md exists at hooks/<role>/<name>/spec.md for every registered
       hook (Phase 3, ADR-0001 §5.3 — specs collocated with impl), and a
@@ -1440,7 +1440,8 @@ def main() -> int:
     #       — a mismatch means the next release PR computes its bump from a
     #       different version than the one the artifacts embed.
     #   (b) every platform output of a versioned kind (plugin, marketplace,
-    #       agent-plugin — marketplace embeds version fields too) is listed
+    #       agent-plugin, gemini-extension; marketplace embeds version
+    #       fields too) is listed
     #       in release-please-config.json `extra-files`, so a release
     #       bump rewrites its embedded versions. A new platform output added
     #       without the extra-files entry would otherwise ship stale versions
@@ -1492,7 +1493,9 @@ def main() -> int:
                 )
                 continue
             extra_specs[path] = entry
-        versioned_kinds = {"plugin", "marketplace", "agent-plugin"}
+        versioned_kinds = {
+            "plugin", "marketplace", "agent-plugin", "gemini-extension",
+        }
         for platform_file in sorted(_build.PLATFORMS_DIR.glob("*.json")):
             platform = json.loads(platform_file.read_text())
             for output in platform["outputs"]:

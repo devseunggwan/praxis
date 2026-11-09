@@ -1,0 +1,13 @@
+{
+  "platform": "gemini",
+  "host_id": "gemini",
+  "outputs": [
+    {
+      "kind": "gemini-extension",
+      "path": "gemini-extension.json",
+      "extension_overrides": {
+        "description": "Workflow skills from praxis: merge briefing, verification, review and cleanup procedures. Skills only; praxis hooks do not run under Gemini CLI"
+      }
+    }
+  ]
+}

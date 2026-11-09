@@ -211,7 +211,10 @@ verification-metadata requirement.
 ### Step 5: Understand Host Differences
 
 The same SKILL.md ships to every platform under `manifests/platforms/` that
-lists `skills/` — Claude Code, Codex, and Cursor today. The table covers the
+lists `skills/` — Claude Code, Codex, and Cursor today. The Gemini CLI
+extension (`gemini-extension.json`) gets the same files because Gemini
+discovers `skills/` in the extension root on its own; it installs no praxis
+hook. The table covers the
 two hosts the `runtime-verified-note` entries in this repo were recorded on;
 no skill carries a Cursor verification, so treat Cursor as unverified rather
 than identical to either column. Hermes Agent reads the same files when a user
@@ -233,6 +236,12 @@ Hermes source, not from a `runtime-verified-note`:
 Under Hermes, routing sees only the first words of `description`, so open it
 with the action the skill performs. `CLAUDE_PLUGIN_ROOT` is unset there; see
 [hermes-adapter-dev.md §8](hermes-adapter-dev.md#8-auditing-a-live-install).
+Gemini CLI does not set `CLAUDE_PLUGIN_ROOT` either, so a body that runs a
+bundled script through it (`strike`, `strikes`, `reset-strikes`,
+`cmux-delegate`, `codex-review-wrap` Step 6) gets an empty prefix there.
+On activation Gemini adds the skill's folder structure to the conversation
+and grants read access to that directory (Gemini CLI `docs/cli/skills.md`);
+resolve the script from the extension root above it.
 
 **Critical cross-host constraint:** never call `Skill("codex:review")` from
 inside any skill on either host — it declares `disable-model-invocation: true`
