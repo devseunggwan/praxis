@@ -63,6 +63,13 @@ when_to_use: >
   single source of truth.
 - Use a multi-line `>` block for a description or clause longer than one
   line; use inline text for a short one (see `strikes/SKILL.md`).
+- A `disable-model-invocation: true` skill is never routed by the model, so
+  its `when_to_use` only tells the reader what the user types: `Use when the
+  user types "/strikes"` is the form there, and `Triggers on` is not required.
+- `scripts/check-plugin-manifests.py` Rule 30 fails on a `name` that differs
+  from the directory, a trigger phrase in `description`, a missing
+  `when_to_use` or `Triggers on` clause, a field over the length budget, and
+  an `allowed-tools` entry that is bare `Bash` or a mutation.
 
 **Optional runtime fields** (each documented at
 <https://code.claude.com/docs/en/skills.md>; add one only when its condition
@@ -111,7 +118,7 @@ additionally keep a routing table in their own `CLAUDE.md`.
   "strike a balance", "strike that" → these must NOT match `strike`.
   Add exclusion notes to `when_to_use` when collisions are plausible.
 - **3–6 keywords is the target range.** Fewer leaves gaps; more creates false
-  positives.
+  positives. Rule 30 prints a warning outside the range and does not fail.
 
 **Language policy — body vs literals.** Body prose (Overview, When to Use,
 Process steps, tables) is written in English across the praxis corpus. Korean
@@ -127,6 +134,12 @@ section prose in Korean, and do not translate a literal into English.
 ### Step 4: Choose Sections
 
 Every SKILL.md must include **Overview**, **When to Use**, and **Process**.
+Rule 30 checks these three headings, a `Done when:` line in every
+`### Step` section, and a `references/` split once `SKILL.md` passes 15 KiB.
+Skills that predate a check are listed in its baseline in
+`scripts/skill_authoring.py`; the check fails when a listed skill complies, so
+fix a skill and drop it from the list in the same change. User-typed
+`disable-model-invocation` skills are exempt from the section check.
 Add the others when relevant:
 
 | Section | Include when |
