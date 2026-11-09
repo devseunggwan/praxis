@@ -138,6 +138,11 @@ main() is labeled with its number, and this list is the canonical roster
       this is the half that enforces it, because JSON Schema's supported
       subset here cannot express "if event is X then hosts must be Y".
       (Numbered 28 to leave 27 to the parallel #1332 branch.)
+  30. SKILL.md shape (#1643): name/directory, trigger phrases kept out of
+      `description`, `when_to_use` clause, listing length budget,
+      `allowed-tools` scope, per-step `Done when:`, references/ split past
+      15 KiB, required sections. Logic and the frozen per-rule baselines live
+      in scripts/skill_authoring.py; trigger keyword count is a warning only.
 
 An unnumbered auxiliary check verifies the Codex adapter symlinks
 (plugins/praxis/{skills,hooks,scripts} → repo root).
@@ -2716,6 +2721,14 @@ def main() -> int:
             f"manifest registers {', '.join(sorted(expected))} (#1376)"
         )
 
+    # ------------------------------------------------------------------
+    # Rule 30 - SKILL.md shape against docs/skill-authoring.md (#1643)
+    # ------------------------------------------------------------------
+    shape_drifts, shape_warnings = _skill_shape_rule()
+    drifts.extend(shape_drifts)
+    for warning in shape_warnings:
+        print(f"  warning: {warning}")
+
     if drifts:
         print("plugin-manifest check FAILED:")
         for d in drifts:
@@ -2723,6 +2736,21 @@ def main() -> int:
         return 1
     print("plugin-manifest check OK")
     return 0
+
+
+def _skill_shape_rule() -> tuple[list[str], list[str]]:
+    """Rule 30 - SKILL.md shape against docs/skill-authoring.md (#1643)."""
+    from skill_authoring import baseline_orphans, skill_shape_findings
+
+    drifts: list[str] = []
+    warnings: list[str] = []
+    skill_dirs = _skill_dirs()
+    for skill_dir in skill_dirs:
+        skill_drifts, skill_warnings = skill_shape_findings(skill_dir)
+        drifts.extend(skill_drifts)
+        warnings.extend(skill_warnings)
+    drifts.extend(baseline_orphans({d.name for d in skill_dirs}))
+    return drifts, warnings
 
 
 if __name__ == "__main__":
