@@ -71,13 +71,31 @@ transcript leaves the `ask` in place. A chained or looped merge, a numberless
 merge, a PR outside the approved set, or a second merge of the same PR still
 asks.
 
+### Host-approved merges (issue #1639)
+
+When the host sets `PRAXIS_MERGE_APPROVAL_PROVIDER` in the hook process
+environment, a merge that is not bulk-approved is checked with the host's
+provider before the prompt, through `host_merge_decision(payload)` in
+`hooks/advisory-nudge/momentum-rule-retrieval-gate/impl.py`, the function the
+briefing gate uses (contract, checks and the one-approval-one-merge rule:
+that hook's spec → *Host approval provider*). A release skips the prompt; a
+refusal keeps it and appends the provider's reason. Under Hermes the prompt
+is the desktop approval dialog, so a human who already answered in the host's
+own channel is not asked again.
+
+The provider is called and its approval spent once per tool call: whichever
+gate asks first records the outcome for the other. It fails closed: an import
+error or exception keeps the `ask`. Unset, this step does not run.
+
 ### No opt-out marker (deliberate)
 
 Unlike `side-effect-scan` (`# side-effect:ack`), this hook has **no
 agent-attachable bypass** and, since #1055, no environment bypass either. The
 contract is that a merge ALWAYS surfaces a per-PR approval prompt — a
 comment-style marker would let the agent silently self-bypass the same gate it
-is meant to enforce.
+is meant to enforce. The host approval provider above is not one: the agent
+cannot set the hook process environment, and the provider only answers whether
+the human approved.
 
 If a legitimate direct-session merge must proceed, approve the surfaced
 prompt — that single confirmation is the approval the rule requires.

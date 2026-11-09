@@ -488,6 +488,16 @@ the reason (`praxis:side-effect-scan[git-push]`); if any other gate asked, the
 key hashes the reasons with the tool call's arguments and never repeats, so an
 "always" there covers only the same call.
 
+**Host approval.** A human may answer a merge question in the host's own
+channel, which reaches the session only as a row the host wrote, not as the
+user's reply. A host that can verify such an answer sets
+`PRAXIS_MERGE_APPROVAL_PROVIDER` in the hook command's environment; the two
+merge gates then ask that executable about a merge they would otherwise stop,
+and release it when the answer matches the merge and its briefing. This is a
+host extension point on every platform, not a Hermes feature; contract in
+`hooks/advisory-nudge/momentum-rule-retrieval-gate/spec.md` → *Host approval
+provider*. Unset, nothing changes.
+
 **Install.** `plugins/hermes/bridge.py --print-config` prints the `hooks:`
 entries with this clone's path; merge them into Hermes's `config.yaml`. The
 `pre_tool_call` matcher is built from the manifest: it lists only the Hermes

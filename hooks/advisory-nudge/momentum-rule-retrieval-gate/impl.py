@@ -42,6 +42,7 @@ import re
 import sys
 from collections import deque
 from pathlib import Path
+from urllib.parse import urlparse
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "_lib"))
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
 from _hook_io import emit_decision  # type: ignore[import-not-found]  # noqa: E402
@@ -53,6 +54,7 @@ from _hook_utils import (  # type: ignore[import-not-found]  # noqa: E402
     safe_tokenize,
     strip_prefix,
 )
+import _host_merge_approval as _host_approval  # type: ignore[import-not-found]  # noqa: E402
 from _memory_dir import resolve_memory_dir  # type: ignore[import-not-found]  # noqa: E402
 from _payload import read_bash_payload  # type: ignore[import-not-found]  # noqa: E402
 from _transcript import (  # type: ignore[import-not-found]  # noqa: E402
@@ -2028,7 +2030,169 @@ def bulk_merge_approved(payload: dict) -> bool:
         return False
 
 
+def _call_failed(entries: list[dict], tool_use_id: str) -> bool:
+    """True when the transcript holds a failed tool_result for `tool_use_id`."""
+    for ev in entries:
+        msg = ev.get("message")
+        content = msg.get("content") if isinstance(msg, dict) else None
+        if not isinstance(content, list) or ev.get("isSidechain"):
+            continue
+        for b in content:
+            if (isinstance(b, dict) and b.get("type") == "tool_result"
+                    and b.get("tool_use_id") == tool_use_id and b.get("is_error")):
+                return True
+    return False
+
+
+_GITHUB_HOST = "github.com"
+
+
+def _repo_spec(spec: str) -> tuple[str, str] | None:
+    """`(host, owner/name)` of an `-R` value (`o/r` or `host/o/r`), lowercased,
+    or None when it is neither."""
+    parts = spec.strip("'\"").split("/")
+    if len(parts) == 2:
+        parts = [_GITHUB_HOST, *parts]
+    if len(parts) != 3 or not all(re.fullmatch(r"[A-Za-z0-9._-]+", p) for p in parts):
+        return None
+    host, owner, name = (p.lower() for p in parts)
+    return host, f"{owner}/{name.removesuffix('.git')}"
+
+
+def _pull_url_repo(url: str) -> tuple[str, str] | None:
+    """`(host, owner/name)` of a pull request URL, read the way `gh` reads one
+    (host, then the first two path segments), or None when it is not one."""
+    parsed = urlparse(url.strip("'\""))
+    segs = [s for s in parsed.path.split("/") if s]
+    if parsed.scheme not in ("http", "https") or not parsed.hostname or len(segs) < 4 \
+            or segs[2] != "pull":
+        return None
+    return parsed.hostname.lower(), f"{segs[0].lower()}/{segs[1].lower()}"
+
+
+def _merge_repos(code: str) -> set[tuple[str, str]] | None:
+    """Every `(host, owner/name)` the single merge segment names: each `-R` /
+    `--repo` value (gh keeps the last one) and a pull request URL positional
+    (gh prefers it to `-R`). None when one of them is not a repo."""
+    found: set[tuple[str, str]] = set()
+    for argv in iter_command_starts(safe_tokenize(code)):
+        argv = strip_prefix(argv)
+        if not _is_gh_pr_merge(argv):
+            continue
+        positional = _gh_pr_positional(argv, frozenset({"merge"}), _MERGE_VALUE_FLAGS)
+        if positional and "/" in positional:
+            hit = _pull_url_repo(positional)
+            if hit is None:
+                return None
+            found.add(hit)
+        skip_next = False
+        for i, tok in enumerate(argv):
+            if skip_next:
+                skip_next = False
+                continue
+            value = None
+            if "=" in tok and tok.partition("=")[0] in _REPO_FLAGS:
+                value = tok.partition("=")[2]
+            elif tok in _REPO_FLAGS and i + 1 < len(argv):
+                value = argv[i + 1]
+                skip_next = True
+            elif tok.startswith("-R") and len(tok) > 2 and not tok.startswith("--"):
+                value = tok[2:]
+            elif tok in _SEGMENT_VALUE_FLAGS:
+                skip_next = True
+            if value is not None:
+                hit = _repo_spec(value)
+                if hit is None:
+                    return None
+                found.add(hit)
+    return found
+
+
+def _exported_gh_host(entries: list[dict]) -> bool:
+    """True when an earlier Bash call exported GH_HOST, which retargets an
+    `-R owner/name` merge to another host for the rest of the shell."""
+    for ev in entries:
+        msg = ev.get("message")
+        if not isinstance(msg, dict) or msg.get("role") != "assistant" or ev.get("isSidechain"):
+            continue
+        content = msg.get("content")
+        for b in content if isinstance(content, list) else []:
+            if not (isinstance(b, dict) and b.get("type") == "tool_use" and b.get("name") == "Bash"):
+                continue
+            cmd = (b.get("input") or {}).get("command")
+            if not isinstance(cmd, str):
+                continue
+            for argv in iter_command_starts(safe_tokenize(cmd)):
+                if argv and argv[0] == "export" and any(t.startswith("GH_HOST=") for t in argv[1:]):
+                    return True
+    return False
+
+
+def _provider_target(code: str, entries: list[dict]) -> tuple[str | None, str | None, str | None]:
+    """`(repo, pr, refusal)` for the provider: one merge, one PR number, and
+    exactly one repo on github.com that every repo reference in the command
+    agrees on, so the repo the provider vouches for is the one `gh` merges."""
+    pr = _merge_pr_number(code) if code else None
+    if pr is None:
+        return None, None, "the command is not one merge naming its PR number"
+    repos = _merge_repos(code)
+    if repos is None:
+        return None, None, "the merge names a repo or URL that cannot be read"
+    if not repos:
+        return None, None, "the merge does not name its repo (--repo owner/name)"
+    if len(repos) > 1:
+        return None, None, "the merge names more than one repo"
+    host, repo = next(iter(repos))
+    if host != _GITHUB_HOST:
+        return None, None, f"the merge targets host {host}, not {_GITHUB_HOST}"
+    if _exported_gh_host(entries):
+        return None, None, "GH_HOST was exported earlier in this session"
+    return repo, pr, None
+
+
+def host_merge_decision(payload: dict) -> _host_approval.Decision:
+    """Public entry for both merge gates: the host approval provider's verdict
+    on the merge in `payload` (see `_lib/_host_merge_approval.py`).
+
+    Only a single merge naming its PR number and exactly one repo (`--repo`,
+    `-R`, or a pull request URL, all agreeing) is sent to the provider. A merge
+    with no repo would run against whatever checkout the shell sits in, which
+    a `cd` or the host's working directory can change between the approval
+    and the call; one naming two repos runs against the one `gh` prefers (the
+    URL, else the last `-R`). Never raises: any error is a refusal, so neither
+    gate releases on a crash.
+    """
+    try:
+        command = (payload.get("tool_input") or {}).get("command")
+        code = _split_shell_comment(command)[0] if isinstance(command, str) else ""
+        entries = _load_turn_entries(payload.get("transcript_path", "") or "") or []
+        repo, pr, refusal = _provider_target(code, entries)
+        return _host_approval.decide(
+            session_id=str(payload.get("session_id") or ""),
+            tool_use_id=str(payload.get("tool_use_id") or ""),
+            repo=repo, pr=pr, refusal=refusal,
+            count_items=_briefing_item_count, min_items=MERGE_BRIEFING_MIN_ITEMS,
+            call_failed=lambda tid: _call_failed(entries, tid))
+    except Exception as exc:  # noqa: BLE001 - a crash must refuse, not release
+        return _host_approval.Decision(False, f"the provider check failed ({type(exc).__name__})")
+
+
 def _merge_escalation_reason(payload: dict) -> str | None:
+    """Return a deny reason when the merge is not approved, else None.
+
+    The transcript decides first; a host approval provider, when the host
+    configured one, is asked only about a merge the transcript would stop.
+    """
+    reason = _transcript_merge_reason(payload)
+    if reason is None or not _host_approval.configured():
+        return reason
+    decision = host_merge_decision(payload)
+    if decision.released:
+        return None
+    return f"{reason}\n{decision.note()}"
+
+
+def _transcript_merge_reason(payload: dict) -> str | None:
     """Return a deny reason when the pre-merge briefing is incomplete, else None."""
     # Demote-to-advisory escape hatch (false-positive relief without full bypass).
     if os.environ.get(MERGE_ADVISORY_ENV) == "1":
