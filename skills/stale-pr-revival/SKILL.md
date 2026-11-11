@@ -145,6 +145,16 @@ number the PR body states from the field the system actually acts on, not a
 compatibility echo; the old count is frequently inflated. When the premise
 shrinks, stop and re-ask scope before committing the full port.
 
+Also check that the **code path the PR hooks into still runs** — a provider or
+subsystem migration that landed meanwhile can leave the DAG, job, or route the
+PR attaches to in place but gated off (an early short-circuit, a deleted
+trigger), so the PR would merge cleanly and do nothing. Read the gate on the
+base, then confirm with the runtime's own history (last run of that DAG/job on
+prod, with a wider-window query as the positive control that the probe returns
+rows at all). When the host path is dead, the PR is a close-and-rescope
+decision for the user, not a revival; record what the new path already
+carries (e.g. the fields the PR wanted to copy) in the issue comment.
+
 If the goal is already live, do not revive: close the PR with a comment naming
 the superseding PR and the residual difference, and close the linked issue only
 after a deploy-branch run shows the goal working (cite the run and the log
@@ -215,7 +225,14 @@ cleanly.
 - **Taking the base side of a file and re-applying the PR's small additions**
   (`git -C <worktree> checkout --theirs <file>`, then re-add) is usually cleaner than
   hand-merging hunks — and it drops the PR's unrelated formatting churn,
-  which reviewers tend to flag.
+  which reviewers tend to flag. `--theirs` replaces the whole file, including
+  the PR's non-conflicting hunks in it, so first list what the PR changed
+  there (`git diff $(git merge-base HEAD <base-remote>/<base>) HEAD -- <file>`)
+  and confirm each hunk is moot or re-applied.
+- **Re-read the reviewer's merge-order advice against the current base.** A
+  review that said "only file X conflicts" was measured against an older base;
+  more commits may have landed since. Run `git merge-tree --write-tree
+  --name-only <base-remote>/<base> HEAD` again and work from that list.
 - **When the base refactored the code the PR fixes**, the PR's hunk no longer
   has a home: take the base side, find where the logic lives now
   (`git -C <worktree> log <old-base>..<base-remote>/<base> -- <file>`, grep
@@ -229,6 +246,21 @@ cleanly.
   `git -C <worktree> grep -n <removed symbol>` on the merged tree, and run the repository's
   import/load test (e.g. DagBag import errors) before committing; fold the
   caller fixes into the merge commit so every commit stays buildable.
+  The reverse case matters as much: when the **base deleted** a function the
+  PR modified or ported, take the base side and also grep the merged tree for
+  that function, because the PR may have moved its tests to a non-conflicting
+  file that still imports it. Delete those tests in the merge commit, and drop
+  the matching row from the PR body and anchor.
+- **Carry the base's new guards onto the PR's parallel paths.** When the PR
+  adds a bulk/alternate entry point beside an existing single-item one
+  (bulk pause next to a single PUT, a batch trigger next to a single trigger),
+  diff the base's changes to that sibling since the merge-base
+  (`git -C <worktree> diff <merge-base> <base-remote>/<base> -- <sibling file>`)
+  and list every guard, precondition, or fallback it gained (rollout-stage
+  checks, provider-specific lookups). Each must also run on the PR's new path —
+  the text merge is clean because the PR's file never had the call, and only a
+  reviewer catches it after push. Grepping for status/enum literals alone does
+  not find these.
 - For a read-only conflict preview while only reporting status (no worktree
   needed): `git merge-tree --write-tree --name-only <base-remote>/<base>
   <head-sha>` lists the conflicted files.
@@ -256,13 +288,39 @@ plus the repository's import / smoke tests.
   merged tree) and treat any new entry as a fresh equivalence proof, with a
   positive control showing the probe can detect a difference.
 
+- **Run the base's new CI gates locally on the merged tree before pushing.**
+  A months-behind base often added a gate that only judges changed lines
+  (a changed-line lint, a new required job); the PR's own old lines now fail
+  it. Read the base's workflow diff since the merge-base, run each new gate
+  command on the merged tree, and fix at the root in its own commit.
+- **Re-run the PR's live proof on the merged head — tests and CI are not it.**
+  When the PR's anchor carries a real-environment row (prod/preview response,
+  screen, timing, body-equality), the base merge moved the head, so that row
+  now describes a commit that no longer exists. `git diff --quiet` on the
+  PR's paths does not carry it over: the merge also moved dependencies,
+  pins, and neighbours the path calls. Redo the same live measurement on the
+  new head (same targets the issue names, all of them) before Step 10, and
+  grade any row you could not redo as stale in the anchor.
+
 Done when: one failing run (core line reverted) and one passing run (restored)
-are captured as output, with the commands that produced them.
+are captured as output, with the commands that produced them, and every live
+anchor row is either re-measured on the merged head or marked stale.
 
 ### Step 7: Commit in order
 
 The merge commit first (resolution plus test rewrites), then one commit per
 review nit.
+
+- **Before you commit a test a reviewer suggested to kill a surviving
+  mutant, run that mutant against the new test.** Use a scratch script that
+  applies each one-line source mutation by exact-string replace (it must
+  assert the anchor matches exactly once), runs the target test file, records
+  CAUGHT or SURVIVED, and restores the source in `finally`. Run the unmutated
+  baseline under the same env so you know a CAUGHT is a test failure and not
+  an import error. If the mutant still survives, look for a later line that
+  repeats the same filter. When one does, the mutant is equivalent: leave the
+  fixture out and answer the thread `Not fixed —` with the probe output.
+  A test that kills no mutant only adds noise for later readers.
 
 - Stage only the files you resolved. An in-progress merge commits only the
   index, so unrelated edits can wait in the worktree.
@@ -271,6 +329,15 @@ review nit.
   `stash@{0}` — which may belong to another session.
 - A pre-commit formatter may reformat a line that had already drifted on the
   base. Re-add the file, commit again, and mention it in the change comment.
+- **Never run a formatter over a whole resolved file by hand** (`uv run black
+  <file>` or similar) — a formatter version that differs from the one the
+  base was formatted with rewrites untouched base lines and bloats the merge
+  diff. Check `git diff --stat <base-remote>/<base> -- <file>` after any
+  format step; if base lines moved, rebuild the file as the base version plus
+  only the PR's hunks (`git show <base-remote>/<base>:<file>` + the PR's
+  appended block from `git show HEAD:<file>`, written via a scratch script).
+  For a conflicted test file where the PR only appended a class, that rebuild
+  is also the cleanest resolution.
 - **Split a file that mixes two commits' changes by writing each commit's
   content into the index, not by hand-picking hunks.** Build the
   intermediate version in scratch (base plus only this commit's change, from
@@ -321,6 +388,27 @@ account often pushes a follow-up commit (a type annotation, a thread reply)
 seconds after your push and cancels your CI run. Measure and cite the final
 head, and say which commits were not yours.
 
+Every revival status report — not only the merge briefing — opens with a
+per-PR line of how deep verification went on the current head (`live / partly
+/ tests+CI only`, head sha, surface). A report that lists pushes, CI, and
+thread work without that line gets "did you actually verify?" back.
+
+When an auto-review bot keeps pushing fix commits after your push, start the
+live proof now anyway (a background worker on a preview) rather than parking
+it behind convergence: the user asks "did you actually verify?" again on every
+report until it runs. Tell the worker to record the head it deployed and, when
+the head moves mid-run, fast-forward, redeploy, and measure every scenario on
+the new head. Never register "wait for review, then ask merge"; the order is
+converged head + live proof on that head → anchor revision → merge ask.
+
+A live-proof worker that writes to a shared dev database snapshots every row
+it will touch to a file first, restores them at the end (status through the
+API, timestamps by SQL to the snapshot values), and proves the restore with a
+snapshot diff of 0 plus an independent read; it deletes the preview and
+confirms the namespace is gone. Ask it for a per-scenario table
+(PASS(live)/FAIL/BLOCKED, evidence line, head sha) so the anchor rows come
+straight from it.
+
 Done when: the push landed, the body no longer states a fact the new head
 contradicts, the change comment is posted, and CI on the new head has a final
 status.
@@ -347,6 +435,29 @@ Follow [`merge-briefing`](../merge-briefing/SKILL.md). Write the six-part
 briefing in the reply **before** the approval question — asking first and
 briefing afterwards means asking twice.
 
+- When the merge question also goes out through an async channel (a decision
+  board, a chat relay), put the full six-part briefing in this session's own
+  final answer in the same turn, not only the short relay text: the merge gate
+  reads the transcript, so a bare "merge" reply to a relay-only question is
+  blocked and costs another round trip.
+- Fold any pre-merge record the team requires (a dev-channel summary post)
+  into the same approval choice, then post it and link it on the PR before
+  merging. After the user merges a PR themselves, close any merge question
+  still open for it instead of answering it later.
+
+- Do not ask for the merge while any PR in the batch has only tests/CI on
+  its current head: listing "live check not redone" under part 3 is not a
+  substitute — the user answers with "was each one actually verified?" and
+  the ask is wasted. When asked that, answer first with a per-PR table
+  (`verified live / partly / not`, head sha, surface) and then close the
+  gaps in the same turn.
+- Before the ask, read what the merge itself needs on the production base:
+  the ruleset's required approvals, whether your account can bypass them
+  (`gh api graphql` `pullRequest{viewerCanMergeAsAdmin}`; when it disagrees
+  with the ruleset's bypass list, trust the probe), and whether the change
+  touches a class the team reserves for human review (authorization rules,
+  billing, deletion). When a human approval is still required, the question
+  is "request a reviewer, then ask merge", not "merge now" — and ask who.
 - Name the staleness of the approval under "not verified": it was given on an
   older commit, and if you pushed from the approver's account, nobody
   independent has reviewed your resolution.
@@ -373,7 +484,23 @@ briefing afterwards means asking twice.
   to another author ([`worktree-merge-cleanup`](../worktree-merge-cleanup/SKILL.md)
   owns the post-merge steps). Remove only your own worktree and local branch.
 - After merge, check the deploy job of the base-branch CI run
-  (`gh run view <id> --json jobs`) before saying the change is live. A
+  (`gh run view <id> --json jobs`) before saying the change is live. On a
+  GitOps repo a green deploy job only means the image tag was written to the
+  config repo; the cluster may still run the previous image for minutes. Read
+  the running image (`kubectl get deploy -o jsonpath=…image`) and wait until
+  it carries the merge sha with all replicas updated (a background script
+  with a time ceiling) before any post-merge live check.
+- A post-merge live check "on <named internal account>" needs two probes
+  before planning: that your login can act on that tenant (membership/owner
+  rows, not just that it exists), and that the target object is in the
+  scheduled path the decisive scenario relies on (e.g. it appears in the
+  daily batch's recent runs). Without the second, a pause/skip scenario has
+  no positive control: run what the target supports, mark the rest
+  unmeasured, and ask for access to a tenant that has it.
+- Before writing to a production tenant for the check, snapshot the rows you
+  will touch, read the write path for side effects (deletion DAGs, events,
+  mail) on that exact transition, restore at the end, and re-read the rows to
+  prove the end state; report any column you left changed (e.g. `updated_at`). A
   skipped `deploy` job is not a failure when the repo ships through another
   job (a DAG-bundle publish): read which job carries the release before
   judging. Compare the merged `headRefOid` with the head you verified — the
