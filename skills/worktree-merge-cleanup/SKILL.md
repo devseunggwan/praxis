@@ -114,9 +114,12 @@ fatal: 'main' is already used by worktree at /Users/.../<main-worktree>
    - A lone `M <submodule path>` line (with a leading space) in the clean-check is often only the
      submodule checkout lagging the pointer a base merge recorded, not your
      edit. Confirm the submodule itself is clean
-     (`git -C <path>/<submodule> status --porcelain` empty), then run
-     `git -C <path> submodule update <submodule path>` (no `--init`, never
-     `deinit`) and re-read `status --porcelain`. When it comes back empty, the
+     (`git -C <path>/<submodule> status --porcelain --ignored` empty, or
+     only regenerable `!!` lines) and that its current commit survives the
+     update (`git -C <path>/<submodule> branch -a --contains HEAD` non-empty;
+     otherwise stop and report), then run
+     `git -C <path> submodule update --checkout <submodule path>` (no
+     `--init`, never `deinit`) and re-read `status --porcelain`. When it comes back empty, the
      worktree is clean and the `--force` remove may proceed. A dirty submodule
      is a stop condition like any other dirty file.
 3. `cd <base-worktree-path>` or chain `cd <path> && gh pr merge ...` in the same
@@ -183,8 +186,12 @@ Confirm before touching anything:
    only an unpushed `git merge origin/<base>` made locally while the PR's
    remote branch got its own base merge (`gh pr update-branch`): check
    `git log --no-merges <headRefOid>..<branch>` is empty and
-   `git cherry -v <headRefOid> <branch>` prints nothing — then the extra
-   commits carry no content of their own; report that evidence and ask once
+   `git cherry -v <headRefOid> <branch>` prints nothing, and the files the
+   local tip changes against `headRefOid` are a subset of the ones the base
+   changed (`git diff --name-only <headRefOid> <branch>` vs
+   `git diff --name-only <headRefOid>...origin/<base>`; a file outside it is
+   a conflict-resolution edit to report) — then the extra commits carry no
+   content of their own; report that evidence and ask once
    rather than deleting under the standing approval.
    A dirty worktree (`git -C <path> status --porcelain` non-empty) or a tip
    with non-merge commits the PR never saw is the stop condition: report it
