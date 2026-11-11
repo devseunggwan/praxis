@@ -62,7 +62,9 @@ Reference map — load only when the step runs:
   from both sides of a base-merge conflict. Scope = `comm -13` of collected
   ids at `origin/<base>` vs head for the files `git diff origin/<base>...HEAD
   -- <tests>` touches. A test that exercises a file the PR's diff does not
-  change is out of the PR's scope: flag it in the matrix report.
+  change is out of the PR's scope: flag it in the matrix report. Drop
+  unasked only tests you added; report prunable tests a bot pushed or the
+  base merge kept in the same table and ask before dropping them.
 - Run the matrix as a background script that writes per-mutant JSON and
   restores each source from `git show HEAD:<f>`; invoke the venv's pytest from
   a shell, not from a notebook-kernel subprocess — the kernel's inherited

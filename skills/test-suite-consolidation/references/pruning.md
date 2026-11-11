@@ -70,7 +70,7 @@ after an edit or a rebase produces a mutant identical to HEAD, which reads as
 removes a *production* check and fails no test can also mean the check itself
 is redundant (a later-added check covers every case it decided): then delete
 the check and the test that existed only for it, rather than writing a new
-test for it. Run the matrix as a background process, never inside a foreground tool call with a timeout: a killed harness skips its restore step and leaves the last mutant applied plus a `*.orig` backup in the worktree. After any interrupted run, `git status` for stray `*.orig`, diff the backup against `git show HEAD:<f>`, and restore before testing or committing anything. A test that compares a value derived from the real clock (a floor of `now - N days`) with a fixed fixture date is a time bomb that passes today and fails on a fixed future date: pin `now` inside the test (monkeypatch the clock call the code uses) and assert the exact derived value, then prove it with a clock-freezing plugin at a future date: the old file fails there, the fixed one passes. Give the harness a per-mutant timeout and record a timeout as "caught (hung)": a mutant that removes a wait bound makes a wait test hang, and without the timeout the whole matrix dies on that row. When several review-bot guards each look dead in the matrix, propose replacing the stacked conditions with the one rule they approximate (and re-fit the tests to it) as a user choice, rather than deleting them one by one. While the matrix runs, the source file is a mutant — run lint
+test for it. Run the matrix as a background process, never inside a foreground tool call with a timeout: a killed harness skips its restore step and leaves the last mutant applied (plus a backup file, if the harness writes one). After any interrupted run, compare each target with `git show HEAD:<f>` and restore it from HEAD before testing or committing anything; delete any backup files the harness left. A test that compares a value derived from the real clock (a floor of `now - N days`) with a fixed fixture date is a time bomb that passes today and fails on a fixed future date: pin `now` inside the test (monkeypatch the clock call the code uses) and assert the exact derived value, then prove it with a clock-freezing plugin at a future date: the old file fails there, the fixed one passes. Give the harness a per-mutant timeout and record a timeout as "caught (hung)": a mutant that removes a wait bound makes a wait test hang, and without the timeout the whole matrix dies on that row. A hung row names no test, so before it justifies a drop, rerun that mutant against each candidate test alone and record which one hangs. When several review-bot guards each look dead in the matrix, propose replacing the stacked conditions with the one rule they approximate (and re-fit the tests to it) as a user choice, rather than deleting them one by one. While the matrix runs, the source file is a mutant — run lint
 and shellcheck on it only after the matrix restores it, or the findings
 belong to the mutant.
 
@@ -153,8 +153,10 @@ audit deletes nothing, and the scope question comes at the end anyway.
   as a test-only drop — removing just the test leaves untested dead code.
   After deleting such a module, re-run the grep for every type and helper it
   imported from its own package (models, parsers): one whose only remaining
-  hits are the package `__init__` re-export is now dead too — delete it and
-  trim the re-export in the same commit, or the next audit finds it.
+  hits are the package `__init__` re-export is now dead too, unless the
+  package is published or imported from outside the repo (check its public
+  API and dependents first) — delete it and trim the re-export in the same
+  commit, or the next audit finds it.
 - **Never-run map** — before judging any skip, map every test file to the CI
   steps that execute it: parse each workflow's `run:` steps (with
   `working-directory`) for `vitest run <paths> --exclude`, `pytest <paths>`,
@@ -624,8 +626,9 @@ In the user's language, in chat:
    on live data that the fixed check will not fire immediately (e.g. the
    max interval between health-file writes in `kubectl logs --timestamps`)
    and state the rollout it triggers on merge.
-   - Prove the fix on the cluster, not only in a container: apply throwaway
-     pods in dev with the live image digest and probe settings, replace the
+   - Prove the fix on the cluster, not only in a container (cluster writes
+     need the user's approval, or a standing one recorded for it): apply
+     throwaway pods in dev with the live image digest and probe settings, replace the
      app with a scripted writer (`: > file; sleep 50; while …; do echo
      Traceback > file; sleep 20; done`), watch `ready/restartCount` every
      15 s plus `kubectl get events`, then delete them by a `purpose=` label.
