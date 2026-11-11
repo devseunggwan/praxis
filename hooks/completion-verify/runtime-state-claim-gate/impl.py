@@ -15,7 +15,7 @@ actual execution + evidence" were all loaded. The gap is structural — every
 existing falsification gate anchors on an *action* event (issue create,
 recommendation surface, merge claim), while a conversational answer describing
 runtime state is also a claim-emission point. This is the runtime-state sibling
-of merge-state-claim-gate (#503): a Stop hook sees the final assistant text —
+of merge-gate (claim check) (#503): a Stop hook sees the final assistant text —
 the exact surface PreToolUse hooks cannot see.
 
 This hook scans the final assistant message for a present-state runtime
@@ -74,7 +74,7 @@ _ROLE = "completion-verify"
 # ---------------------------------------------------------------------------
 # Claim detection — a claim needs a runtime SUBJECT token and a present-state
 # CLAIM token on the same line (line-localization mirrors
-# merge-state-claim-gate; cuts false positives on long final messages).
+# merge-gate (claim check); cuts false positives on long final messages).
 # EN tokens use lookarounds, not \b: Python \b puts no boundary between Hangul
 # and ASCII word chars, so "\bagent\b" fails on "agent가" (same trap as the
 # sibling's \bPR\b fix).
@@ -184,7 +184,7 @@ def detect_claims(text: str) -> list[str]:
 # inside "bypass" and "success" inside "successful", recording a bogus
 # `pass:0` prior mention that makes a later GENUINE first verdict fire (and,
 # in strict mode, blocks a correct message). Same `(?<![A-Za-z])…(?![A-Za-z])`
-# convention as the sibling gates' `_en_token_present` (pr-state-refetch-gate,
+# convention as the sibling gates' `_en_token_present` (merge-gate (refetch check),
 # menu-mutation-tier-advisory) — `\b` puts no boundary between Hangul and
 # ASCII. The Korean half needs none: 실패/통과 carry their own boundaries.
 _EN_L = r"(?<![A-Za-z])"

@@ -532,7 +532,7 @@ _CONSUMERS = {
     # binds the min_events reader and slices the turn out itself (#1076); the
     # SubagentStop registration (#1337) makes it resolve the path first and
     # pass that reader the matching `drop_sidechain`.
-    HOOKS / "completion-verify" / "merge-state-claim-gate" / "impl.py":
+    HOOKS / "preflight-gate" / "merge-gate" / "claim.py":
         ["load_recent_events", "get_current_turn", "resolve_stop_transcript",
          "stop_last_assistant_text"],
     # Scans only the first paragraph of the final message, and clears on the
@@ -639,7 +639,7 @@ _CONSUMERS = {
     HOOKS / "advisory-nudge" / "cited-rule-gate" / "impl.py":
         ["tail_lines", "TranscriptReadError", "block_prose"],
     # Counts briefing items across an index range of assistant prose (#1502).
-    HOOKS / "advisory-nudge" / "momentum-rule-retrieval-gate" / "impl.py":
+    HOOKS / "preflight-gate" / "merge-gate" / "briefing.py":
         ["block_prose"],
     # A refusal anywhere earlier in the session arms the gate (#1488).
     HOOKS / "preflight-gate" / "rejected-call-probe-gate" / "impl.py":
@@ -660,7 +660,7 @@ _CONSTANT_CONSUMERS = {
         ["TRANSCRIPT_SCAN_LINES"],
     HOOKS / "advisory-nudge" / "pre-output-falsification-gate" / "impl.py":
         ["TRANSCRIPT_SCAN_LINES"],
-    HOOKS / "advisory-nudge" / "momentum-rule-retrieval-gate" / "impl.py":
+    HOOKS / "preflight-gate" / "merge-gate" / "briefing.py":
         ["TRANSCRIPT_SCAN_LINES"],
     HOOKS / "advisory-nudge" / "cited-rule-gate" / "impl.py":
         ["TRANSCRIPT_SCAN_LINES"],
@@ -821,7 +821,7 @@ class TestTailReaders:
         assert T.load_current_turn(path) == T.get_current_turn(T.load_transcript(path))
 
     def test_min_events_reaches_past_the_turn(self, tmp_path):
-        """merge-state-claim-gate's `events[-N:]` needs the window, not the turn."""
+        """merge-gate's claim check `events[-N:]` needs the window, not the turn."""
         events = [_assistant(text=f"old{i}") for i in range(50)]
         events += [_user(text="now"), _assistant(text="fresh")]
         path = _write_jsonl(tmp_path, events)

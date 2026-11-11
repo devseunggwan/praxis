@@ -38,7 +38,7 @@ local-branch delete, forcing manual recovery.
 
 This skill is the on-demand home for that procedure. The always-loaded rule set
 keeps only a pointer here; the deterministic `--delete-branch` failure mode is
-additionally enforced structurally by the `gh-merge-worktree-precondition`
+additionally enforced structurally by the `merge-gate` (worktree check)
 PreToolUse hook (see [Relationship to enforcement](#relationship-to-enforcement)).
 
 **Default order:** merge without `--delete-branch`, confirm `MERGED`, then
@@ -471,7 +471,7 @@ own oracle, and under a squash-merge repo the obvious ones are wrong.
 
 | Layer | Home | Covers |
 | ------- | ------ | -------- |
-| Structural enforcement | `gh-merge-worktree-precondition` PreToolUse hook | Blocks `gh pr merge ... --delete-branch` when the head branch is still checked out in another worktree, the remove-first order the flag needs; the default path in checklist item 2 does not pass the flag |
+| Structural enforcement | `merge-gate` (worktree check) PreToolUse hook | Blocks `gh pr merge ... --delete-branch` when the head branch is still checked out in another worktree, the remove-first order the flag needs; the default path in checklist item 2 does not pass the flag |
 | On-demand procedure (this skill) | `worktree-merge-cleanup` | The full manual sequence: base-worktree call site, submodule `--force`, squash-ancestry stale-HEAD guard, unified cleanup, no-`&&`-chain |
 | Always-loaded | user-level rule set | A pointer to this skill only |
 

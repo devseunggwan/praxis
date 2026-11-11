@@ -9,7 +9,8 @@ Usage::
 
 Corpus mode extracts ``hooks/`` at ``--base-ref`` (default ``origin/main``) of
 ``<branch-root>`` into a temp dir (or uses ``--base-root``, an extracted copy),
-loads ``momentum-rule-retrieval-gate/impl.py`` from both sides, and for every
+loads ``merge-gate/briefing.py`` (``momentum-rule-retrieval-gate/impl.py``
+before issue #1650) from both sides, and for every
 assistant Bash ``gh pr merge`` call in the corpus writes the transcript as the
 gate saw it at that call (see ``cut_before``) to a temp file and calls ``_merge_escalation_reason`` on both sides
 with the gate's advisory env var unset. It prints
@@ -46,7 +47,15 @@ import tempfile
 from pathlib import Path
 from types import ModuleType
 
-REL = "hooks/advisory-nudge/momentum-rule-retrieval-gate/impl.py"
+REL = "hooks/preflight-gate/merge-gate/briefing.py"
+# Where the briefing check lived before merge-gate (issue #1650), so a
+# checkout from before the move still replays.
+LEGACY_REL = "hooks/advisory-nudge/momentum-rule-retrieval-gate/impl.py"
+
+
+def gate_path(root: str | Path) -> str:
+    path = os.path.join(root, REL)
+    return path if os.path.exists(path) else os.path.join(root, LEGACY_REL)
 ADVISORY_ENV = "PRAXIS_MOMENTUM_MERGE_ADVISORY"
 
 
@@ -57,7 +66,7 @@ def load_gate(root: str | Path, name: str) -> ModuleType:
     so loading the other side imports that side's copies instead of reusing
     these; the loaded gate keeps its own references.
     """
-    path = os.path.join(root, REL)
+    path = gate_path(root)
     before = set(sys.modules)
     sys.path[:0] = [os.path.dirname(path), os.path.join(root, "hooks", "_lib")]
     try:

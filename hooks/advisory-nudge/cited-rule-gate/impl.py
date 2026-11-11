@@ -5,7 +5,7 @@ Issue #1487. The rule set opens with "before any action, name the section that
 governs it; if you cannot, re-read it first", and nothing enforces it. In the
 session behind the issue no assistant text carried a citation line until the
 user pointed it out, and every violation in that stretch was caught by the
-user. `momentum-rule-retrieval-gate` covers merges only and the other gates
+user. `merge-gate` covers merges only and the other gates
 check the content of specific calls, so nothing checks that retrieval happened
 at all before an ordinary mutation.
 

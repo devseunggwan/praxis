@@ -159,7 +159,7 @@ basename-aware `_is_gh_binary` helper (symmetric with the commit gates'
 | `cross-boundary-preflight` | None — orthogonal: format/cross-repo gate vs. dedup search |
 | `block-pr-without-caller-evidence` | None — orthogonal: body content gate vs. dedup search |
 | `side-effect-scan` | Same surface (`gh pr create` triggers `gh-merge` category ask) — complementary: side-effect-scan surfaces a generic intent-confirm ask; this hook surfaces the dedup artifact |
-| `pre-merge-approval-gate` | None — different subcommand (`gh pr merge`) |
+| `merge-gate` (approval check) | None — different subcommand (`gh pr merge`) |
 
 The four together gate `gh pr create` from four orthogonal angles. Each
 runs in parallel; their stderr / decisions compose at the tool-decision

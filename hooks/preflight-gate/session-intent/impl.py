@@ -318,7 +318,7 @@ def write_state(path: str, state: dict) -> None:
 # ---------------------------------------------------------------------------
 
 # gh global flags that consume one additional argument value. Same set as
-# pre-merge-approval-gate.py — must be peeled before checking subcommand.
+# merge-gate/approval.py — must be peeled before checking subcommand.
 GH_GLOBAL_FLAGS_WITH_ARG = frozenset({
     "-R", "--repo",
     "--hostname",

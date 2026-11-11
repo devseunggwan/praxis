@@ -47,7 +47,7 @@ caller keeps control of the exit code and may append
 Some gates have **no** authoritative self-bypass, and surfacing a bypass would
 defeat the gate. Omit the line in those cases:
 
-- **`pre-merge-approval-gate`** — a merge approval must come from the user, not
+- **`merge-gate` (approval check)** — a merge approval must come from the user, not
   from a marker the agent can attach to its own command. There is no bypass at
   all: the gate fires in every session, so the surfaced prompt IS the approval
   path.

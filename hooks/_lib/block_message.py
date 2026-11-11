@@ -130,7 +130,7 @@ Related gate — `AskUserQuestion`            ← output-block-falsify-advisory
 📋 Every gate on `gh pr merge` (satisfy ALL before re-running):
 
 Unconditional — fire on every `gh pr merge`, whatever the flags:
-  6-item briefing in this turn              ← momentum-rule-retrieval-gate
+  6-item briefing in this turn              ← merge-gate (briefing)
     What changed / verified / NOT verified / Risk / Open items / approve-ask.
     Relief: an unquoted shell comment `# briefing-surfaced: <reason>` on the
     merge command itself, only when the briefing is already in this turn, or
@@ -139,14 +139,14 @@ Unconditional — fire on every `gh pr merge`, whatever the flags:
     PRAXIS_MOMENTUM_MERGE_ADVISORY=1 also works, but
     ONLY from the session environment — the hook is spawned by the harness,
     so an inline `VAR=1 gh pr merge …` prefix never reaches it.
-  Explicit per-PR user approval             ← pre-merge-approval-gate
+  Explicit per-PR user approval             ← merge-gate (approval)
     Asks unless the user approved this PR in a bulk answer (one section
     per PR, one listed ask). No agent-attachable bypass exists, by design.
   Intentional-side-effect acknowledgement   ← side-effect-scan
     Opt out in-band: `# side-effect:ack`.
 
 Conditional — fire only in the stated situation:
-  Head-branch worktree removed first        ← gh-merge-worktree-precondition
+  Head-branch worktree removed first        ← merge-gate (worktree)
     Only with `--delete-branch` / `-d`.
   PR title ≤ 50 chars                       ← commit-title-length-check
     Only with `--squash` / `-s` (the PR title becomes the squash commit
@@ -184,10 +184,10 @@ Conditional — fire only in the stated situation:
     A hook or permission rule blocked a call this turn: offer the path that
     satisfies it, not an exception / disable / bypass of the guard.
     Advisory by default; blocks under PRAXIS_GUARD_REMOVAL_MENU_STRICT=1.
-  Live PR state re-fetched                 ← pr-state-refetch-gate
+  Live PR state re-fetched                 ← merge-gate (refetch)
     A merge-intent question naming a PR number: warns when that PR is already
     MERGED/CLOSED, blocks under PRAXIS_PR_STATE_REFETCH_STRICT=1.
-  Merge menu offers a review option         ← merge-menu-review-options-advisory
+  Merge menu offers a review option         ← merge-gate (menu)
     A merge-decision menu with no review/inspect option; blocks under
     PRAXIS_MERGE_MENU_REVIEW_STRICT=1.
   Menu offers a non-mutating tier           ← menu-mutation-tier-advisory

@@ -234,7 +234,7 @@ id, and print the action plus the `[praxis:<gate>]` names.
 
 A merge answer the human gave in the host's own channel reaches `state.db`
 as a user row the host wrote, so the transcript gates cannot read it as an
-approval (`momentum-rule-retrieval-gate` spec → *Host approval provider*).
+approval (`merge-gate` spec → *Host approval provider*).
 To check the provider path end to end, build the `state.db` above with a
 briefing turn followed by such a host row, write a stand-in provider (an
 executable that prints one JSON record and logs its argv), and run the bridge

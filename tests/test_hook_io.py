@@ -194,7 +194,7 @@ EXPECTED_MIGRATED = {
     "gh-flag-verify",
     "gh-json-validator",
     "pre-edit-protected-branch-guard",
-    "pre-merge-approval-gate",
+    "merge-gate/approval",
     "session-intent",
     "side-effect-scan",
     "verify-commit-flag-override",
@@ -211,12 +211,24 @@ _USES_HELPER_RE = re.compile(r"from _hook_io import|import _hook_io")
 
 
 def _hook_impls() -> list[Path]:
-    return sorted(HOOKS_DIR.glob("*/*/impl.py"))
+    """Every hook impl, with merge-gate's checks standing in for its
+    `impl.py`: each check is a former hook that emits its own decision
+    (issue #1650)."""
+    impls = list(HOOKS_DIR.glob("*/*/impl.py"))
+    impls += [p for p in HOOKS_DIR.glob("preflight-gate/merge-gate/*.py") if p.name != "impl.py"]
+    return sorted(impls)
+
+
+def _unit_name(impl: Path) -> str:
+    """`merge-gate/<check>` for a merge-gate check, else the hook dir name."""
+    if impl.parent.name == "merge-gate" and impl.name != "impl.py":
+        return f"merge-gate/{impl.stem}"
+    return impl.parent.name
 
 
 def test_migrated_hooks_import_helper() -> None:
     """Each #470 hook must import _hook_io and must NOT hand-roll the literal."""
-    by_name = {p.parent.name: p for p in _hook_impls()}
+    by_name = {_unit_name(p): p for p in _hook_impls()}
     for name in sorted(EXPECTED_MIGRATED):
         impl = by_name.get(name)
         assert impl is not None and impl.is_file(), f"missing impl for {name}"
@@ -238,7 +250,7 @@ def test_no_unaccounted_handrolled_decision_hook() -> None:
     helper, and is not on the legacy allowlist, fails here."""
     offenders: list[str] = []
     for impl in _hook_impls():
-        name = impl.parent.name
+        name = _unit_name(impl)
         src = impl.read_text(encoding="utf-8")
         if not _HANDROLLS_RE.search(src):
             continue  # no hand-rolled literal (compliant or non-emitter)
@@ -260,13 +272,13 @@ def test_no_unaccounted_handrolled_decision_hook() -> None:
 
 
 def test_legacy_allowlist_has_no_phantom_entries() -> None:
-    existing = {p.parent.name for p in _hook_impls()}
+    existing = {_unit_name(p) for p in _hook_impls()}
     phantom = sorted(LEGACY_UNMIGRATED - existing)
     assert not phantom, f"LEGACY_UNMIGRATED names non-existent hooks: {phantom}"
 
 
 def test_expected_migrated_all_exist() -> None:
-    existing = {p.parent.name for p in _hook_impls()}
+    existing = {_unit_name(p) for p in _hook_impls()}
     missing = sorted(EXPECTED_MIGRATED - existing)
     assert not missing, f"EXPECTED_MIGRATED names non-existent hooks: {missing}"
 

@@ -82,8 +82,8 @@ SKIP_PREFIXES = ("Merge ", "Revert ")
 _GH_TIMEOUT_SEC = 5
 
 # gh global flags that consume one separate-token argument. Same set
-# duplicated across ~11 sibling hooks in this repo (pre-merge-approval-gate,
-# gh-merge-worktree-precondition, gh-flag-verify, etc.) — established repo
+# duplicated across ~11 sibling hooks in this repo (merge-gate (approval check),
+# merge-gate (worktree check), gh-flag-verify, etc.) — established repo
 # convention keeps this local rather than extracted to _lib.
 _GH_GLOBAL_FLAGS_WITH_ARG = frozenset({
     "-R", "--repo",
@@ -200,7 +200,7 @@ def _parse_gh_api_merge(tail: list[str]) -> tuple[str | None, str | None, str | 
 def _gh_pr_merge_segment(argv: list[str]) -> tuple[list[str], str | None] | None:
     """Return (argv slice after `merge`, repo), or None if not `gh pr merge`.
 
-    Mirrors `gh-merge-worktree-precondition`'s `_merge_segment` — `-R`/
+    Mirrors `merge-gate` (worktree check)'s `_merge_segment` — `-R`/
     `--repo` (and the other value-taking gh global flags) are inherited
     cobra flags gh accepts before `pr`, between `pr` and `merge`, and after
     `merge` (the last placement handled by the tail scan below).

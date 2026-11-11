@@ -575,7 +575,7 @@ block on retry for the un-addressed question.
 
 `Falsified:` is one of seven PreToolUse hooks registered on `AskUserQuestion`:
 `block-ask-end-option` blocks unconditionally, `block-manufactured-action-menu`,
-`pr-state-refetch-gate` and `merge-menu-review-options-advisory` block only
+`merge-gate` (refetch check) and `merge-gate` (menu check) block only
 under their strict env vars, and `pre-output-falsification-gate` and
 `memory-hint` never block. An author who
 learns only about this one spends a further retry turn on the next, so both

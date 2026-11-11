@@ -19,7 +19,7 @@ Background (2026-08-11, issue #963):
   made a prod Iceberg table permanently unqueryable.
 
   `block-manufactured-action-menu` inspects whether an option is *manufactured*
-  (redundant re-confirmation). `merge-menu-review-options-advisory` inspects
+  (redundant re-confirmation). `merge-gate` (menu check) inspects
   whether a merge gate offers a *review lever*. Neither looks at whether the
   options span more than one blast-radius tier — this hook is the third axis on
   the same event.
@@ -250,7 +250,7 @@ LOCAL_ARTIFACT_NOUNS_KO = (
 # alternative that does not touch the shared surface. Presence of ANY of these
 # suppresses the advisory: a safe tier is on the menu, which is all this hook
 # asks for. A false positive here only *silences* the nudge, which is the safe
-# direction — the same rationale `merge-menu-review-options-advisory` records
+# direction — the same rationale `merge-gate` (menu check) records
 # for its own suppression set.
 #
 # Review / inspection levers are in this tier on purpose: re-running a review
@@ -769,7 +769,7 @@ def main() -> int:
 
     # Strict only on the documented `=1` value, matching the dominant codebase
     # convention (destructive-bash-guard, protected-paths-guard,
-    # merge-menu-review-options-advisory).
+    # merge-gate (menu check)).
     strict_set = os.environ.get("PRAXIS_MENU_MUTATION_TIER_STRICT", "").strip() == "1"
 
     if strict_set:

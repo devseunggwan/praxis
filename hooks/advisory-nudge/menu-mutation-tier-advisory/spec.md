@@ -33,7 +33,7 @@ the same payload for different defects:
 | Hook | Axis | Question it asks |
 | ------ | ------ | ------------------ |
 | `block-manufactured-action-menu` | manufacture | Is this menu *redundant* — did the user already give the directive? |
-| `merge-menu-review-options-advisory` | completeness | Does a merge gate offer a *review lever*? |
+| `merge-gate` (menu check) | completeness | Does a merge gate offer a *review lever*? |
 | `menu-mutation-tier-advisory` (this) | blast radius | Do the options span more than one *mutation tier*? |
 
 **Why a new hook rather than an axis on an existing one.** The tier predicate is
@@ -44,7 +44,7 @@ at all — so the tier axis would have to be bolted in *ahead* of that gate,
 sharing only the label extractor while needing none of its transcript read. It
 is also a `preflight-gate` that can block, whereas this axis must never block by
 default (prod genuinely is the only path sometimes; what is owed then is a
-stated reason, not a denial). `merge-menu-review-options-advisory` is the closer
+stated reason, not a denial). `merge-gate` (menu check) is the closer
 precedent and is followed structurally: same event and matcher, its own
 directory, payload-only detection, advisory default with opt-in strict.
 
@@ -298,7 +298,7 @@ alternative this hook asks the menu to carry. `reviewer` / `codex` / `critic` ar
 listed alongside `review` because the lookaround is whole-token: `review` does
 not match inside `code-reviewer`. A false positive in this set only
 *silences* the nudge — the safe direction, the same rationale
-`merge-menu-review-options-advisory` records for its own suppression set.
+`merge-gate` (menu check) records for its own suppression set.
 
 #### Tier 0 — abandonment (neither suppresses nor counts as a candidate)
 
@@ -380,7 +380,7 @@ the exit code there.
 
 Only the exact value `1` (after `.strip()`) activates strict, matching the
 dominant codebase convention (`destructive-bash-guard`,
-`protected-paths-guard`, `merge-menu-review-options-advisory`). `0` / `false` /
+`protected-paths-guard`, `merge-gate` (menu check)). `0` / `false` /
 `no` / `true` all stay advisory.
 
 Default is advisory by design, and this is the hook's central posture: prod is
@@ -393,7 +393,7 @@ around the gate.
 - **Merge-strategy choosers fire.** `squash 머지` / `rebase 머지` / `대기` has two
   mutating candidates and no low-blast option, so it nudges even though all
   three strategies are equally prod. The sibling
-  `merge-menu-review-options-advisory` documents the same limitation on the same
+  `merge-gate` (menu check) documents the same limitation on the same
   menu shape; in advisory mode the nudge is informational, and adding a review
   lever (which that sibling asks for anyway) suppresses this one too.
 - **Detection is lexical.** An option that is non-mutating for a reason no token

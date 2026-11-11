@@ -69,12 +69,12 @@ def test_group_members_count_and_roles():
     # exact-`Bash` entry (#1239), so they are members here and standalone on
     # their remaining matcher.
     members = _dispatch.group_members("PreToolUse", "Bash")
-    assert len(members) == 55, f"expected 55 exact-Bash members, got {len(members)}"
+    assert len(members) == 54, f"expected 54 exact-Bash members, got {len(members)}"
     # every impl path must exist on disk
     for role, name, impl in members:
         assert impl.exists(), f"missing impl for {role}/{name}: {impl}"
     roles = [role for role, _name, _impl in members]
-    assert roles.count("preflight-gate") == 30
+    assert roles.count("preflight-gate") == 29
     assert roles.count("advisory-nudge") == 25
 
 
@@ -89,7 +89,7 @@ def test_group_members_host_filter():
     claude = _dispatch.group_members("PreToolUse", "Bash", host="claude")
     codex = _dispatch.group_members("PreToolUse", "Bash", host="codex")
 
-    assert len(unfiltered) == 55  # host=None -> canonical, unfiltered view
+    assert len(unfiltered) == 54  # host=None -> canonical, unfiltered view
     # the only host-restricted Bash members are the 8 claude-only guards
     assert names(claude) == names(unfiltered)
     assert "block-commit-without-codex-review" not in names(codex)
@@ -100,7 +100,7 @@ def test_group_members_host_filter():
     assert "question-turn-mutation-gate" not in names(codex)
     assert "cited-rule-gate" not in names(codex)
     assert "rejected-call-probe-gate" not in names(codex)
-    assert len(codex) == 47
+    assert len(codex) == 46
 
 
 # --------------------------------------------------------------------------- #
@@ -128,7 +128,7 @@ EDIT_WRITE_MEMBERS = {
 SUBAGENT_STOP_MEMBERS = (
     "completion-verify",
     "completion-signal-gate",
-    "merge-state-claim-gate",
+    "merge-gate",
     "joint-liability-attribution-gate",
     "denied-action-report-gate",
 )

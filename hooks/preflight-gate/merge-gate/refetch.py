@@ -67,7 +67,11 @@ import sys
 from pathlib import Path as _Path
 
 sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
-from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
+from _hook_runtime import (  # type: ignore[import-not-found]  # noqa: E402
+    MIN_SUBPROC_BUDGET_SEC,
+    fail_open,
+    remaining_budget,
+)
 from _payload import read_payload  # type: ignore[import-not-found]  # noqa: E402
 from ask_option_text import collect_option_texts  # type: ignore[import-not-found]  # noqa: E402
 from block_message import format_block  # type: ignore[import-not-found]  # noqa: E402
@@ -205,6 +209,11 @@ def _gh_pr_state(cwd: str | None, number: str) -> dict | None:
     "cannot determine live state", which fail-opens that single PR number
     rather than blocking on an infrastructure error.
     """
+    # merge-gate runs this check and `menu` under one host timeout, so each
+    # call takes what is left of the hook's budget (issue #1650).
+    budget = remaining_budget(_GH_TIMEOUT_SEC)
+    if budget < MIN_SUBPROC_BUDGET_SEC:
+        return None
     try:
         proc = subprocess.run(
             [
@@ -213,7 +222,7 @@ def _gh_pr_state(cwd: str | None, number: str) -> dict | None:
             ],
             capture_output=True,
             text=True,
-            timeout=_GH_TIMEOUT_SEC,
+            timeout=min(_GH_TIMEOUT_SEC, budget),
             cwd=cwd or None,
             check=False,
         )

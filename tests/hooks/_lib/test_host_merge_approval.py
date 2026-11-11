@@ -29,8 +29,8 @@ import _host_merge_approval as host  # noqa: E402
 import merge_gate_fixtures as fx  # noqa: E402
 sys.dont_write_bytecode = _saved_dont_write
 
-MOMENTUM = REPO_ROOT / "hooks" / "advisory-nudge" / "momentum-rule-retrieval-gate" / "impl.py"
-PRE_MERGE = REPO_ROOT / "hooks" / "preflight-gate" / "pre-merge-approval-gate" / "impl.py"
+MOMENTUM = REPO_ROOT / "hooks" / "preflight-gate" / "merge-gate" / "briefing.py"
+PRE_MERGE = REPO_ROOT / "hooks" / "preflight-gate" / "merge-gate" / "approval.py"
 MERGE = "gh pr merge 999 --repo o/r --squash"
 BRIEFING = fx.section("o/r#999") + "\nApprove merge of #999?"
 
@@ -99,7 +99,7 @@ def _decision(out: str) -> str | None:
 
 
 def _both(env, transcript, command=MERGE, tool_use_id="t1", order=(PRE_MERGE, MOMENTUM)):
-    return {hook.parent.name: _run(hook, env, transcript, command, tool_use_id) for hook in order}
+    return {hook.stem: _run(hook, env, transcript, command, tool_use_id) for hook in order}
 
 
 @pytest.mark.parametrize("order", [(PRE_MERGE, MOMENTUM), (MOMENTUM, PRE_MERGE)],
@@ -107,8 +107,8 @@ def _both(env, transcript, command=MERGE, tool_use_id="t1", order=(PRE_MERGE, MO
 def test_valid_record_releases_both_gates_with_one_provider_call(env, tmp_path, order):
     _provider(env)
     out = _both(env, _transcript(tmp_path), order=order)
-    assert _decision(out["momentum-rule-retrieval-gate"]) is None
-    assert _decision(out["pre-merge-approval-gate"]) is None
+    assert _decision(out["briefing"]) is None
+    assert _decision(out["approval"]) is None
     assert _calls(env) == [["merge-approval", "--repo", "o/r", "--pr", "999", "--session", "s1"]]
 
 
@@ -117,8 +117,8 @@ def test_without_provider_the_relayed_answer_is_denied(env, tmp_path):
     _provider(env)
     del env["PRAXIS_MERGE_APPROVAL_PROVIDER"]
     out = _both(env, _transcript(tmp_path))
-    assert _decision(out["momentum-rule-retrieval-gate"]) == "deny"
-    assert _decision(out["pre-merge-approval-gate"]) == "ask"
+    assert _decision(out["briefing"]) == "deny"
+    assert _decision(out["approval"]) == "ask"
     assert "host approval provider" not in json.dumps(out)
     assert _calls(env) == []
 
@@ -138,8 +138,8 @@ def test_without_provider_the_relayed_answer_is_denied(env, tmp_path):
 def test_record_that_does_not_match_the_merge_is_refused(env, tmp_path, record, why):
     _provider(env, record)
     out = _both(env, _transcript(tmp_path))
-    assert _decision(out["momentum-rule-retrieval-gate"]) == "deny"
-    assert _decision(out["pre-merge-approval-gate"]) == "ask"
+    assert _decision(out["briefing"]) == "deny"
+    assert _decision(out["approval"]) == "ask"
     for text in out.values():
         assert "did not release this merge" in text and why in text
     assert len(_calls(env)) == 1
@@ -156,9 +156,9 @@ def test_record_that_does_not_match_the_merge_is_refused(env, tmp_path, record, 
 def test_provider_failure_is_refused(env, tmp_path, stdout, code, why):
     _provider(env, stdout=stdout, code=code)
     out = _both(env, _transcript(tmp_path))
-    assert _decision(out["momentum-rule-retrieval-gate"]) == "deny"
-    assert _decision(out["pre-merge-approval-gate"]) == "ask"
-    assert why in out["momentum-rule-retrieval-gate"]
+    assert _decision(out["briefing"]) == "deny"
+    assert _decision(out["approval"]) == "ask"
+    assert why in out["briefing"]
 
 
 @pytest.mark.parametrize("command, why", [
@@ -252,9 +252,11 @@ def test_a_crash_in_the_check_refuses(env, tmp_path, monkeypatch):
 
 def test_pre_merge_gate_keeps_the_prompt_when_the_sibling_fails(tmp_path, monkeypatch):
     gate = _load_impl(PRE_MERGE, "pre_merge_crash")
-    broken = tmp_path / "impl.py"
-    broken.write_text("raise RuntimeError('boom')\n")
-    monkeypatch.setattr(gate, "_MOMENTUM_IMPL", broken)
+
+    def broken():
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(gate, "_briefing", broken)
     released, note = gate.host_approval({"tool_input": {"command": MERGE}})
     assert released is False and "check failed (RuntimeError)" in note
 

@@ -44,7 +44,7 @@ site.
 `PreToolUse` cannot see in-flight assistant prose (issue #487 A3); the verdict
 here is declarative text (not an `AskUserQuestion`), so the `Stop` hook — which
 sees the final assistant output — is the only surface that can intercept it.
-This is the same surface as the sibling `merge-state-claim-gate` /
+This is the same surface as the sibling `merge-gate` (claim check) /
 `completion-signal-gate`.
 
 Reference: issue [#804](https://github.com/devseunggwan/praxis/issues/804)

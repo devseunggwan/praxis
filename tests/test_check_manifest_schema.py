@@ -688,3 +688,46 @@ def test_review_by_and_observe_only_never_reach_hooks_json(manifest):
     rendered = json.dumps(build.expand_to_hooks_json(manifest))
     assert "review_by" not in rendered
     assert "observe_only" not in rendered
+
+
+# ---------------------------------------------------------------------------
+# oneOf — strict_env as a string or an array (issue #1650)
+# ---------------------------------------------------------------------------
+
+_STRING_OR_LIST = {"oneOf": [
+    {"type": "string", "minLength": 1},
+    {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+]}
+
+
+@pytest.mark.parametrize("value", ["PRAXIS_X_STRICT", ["PRAXIS_A_STRICT", "PRAXIS_B_STRICT"]])
+def test_one_of_accepts_each_branch(value):
+    assert build.schema_validation_errors(value, _STRING_OR_LIST) == []
+
+
+@pytest.mark.parametrize("value", ["", [], [""], 3, {"x": 1}])
+def test_one_of_rejects_a_value_no_branch_takes(value):
+    errs = build.schema_validation_errors(value, _STRING_OR_LIST)
+    assert errs and "matches 0 of the oneOf branches" in errs[0]
+
+
+def test_one_of_rejects_a_value_two_branches_take():
+    both = {"oneOf": [{"type": "string"}, {"type": "string", "minLength": 1}]}
+    errs = build.schema_validation_errors("x", both)
+    assert errs and "matches 2 of the oneOf branches" in errs[0]
+
+
+def test_one_of_branches_are_checked_by_the_schema_guard():
+    with pytest.raises(ValueError, match="unsupported schema keyword"):
+        build.assert_schema_supported({"oneOf": [{"type": "string", "pattern": "^x"}]})
+    with pytest.raises(ValueError, match="oneOf must be a non-empty array"):
+        build.assert_schema_supported({"oneOf": []})
+
+
+def test_manifest_strict_env_list_is_valid_and_a_bad_one_is_not(manifest):
+    entry = next(h for h in manifest["hooks"] if h.get("mode", {}).get("strict_env"))
+    entry["mode"]["strict_env"] = ["PRAXIS_A_STRICT", "PRAXIS_B_STRICT"]
+    assert build.manifest_schema_drifts(manifest) == []
+    entry["mode"]["strict_env"] = []
+    drifts = build.manifest_schema_drifts(manifest)
+    assert len(drifts) == 1 and "strict_env" in drifts[0]

@@ -375,7 +375,7 @@ _APPLIED_NEGATION_RE = re.compile(
     r"\bnot\b|n't\b|\byet\b|아직|않|못\s|안\s|없|실패|fail",
     re.IGNORECASE,
 )
-# Mirrored in hooks/completion-verify/merge-state-claim-gate (2 copies — DRY
+# Mirrored in hooks/preflight-gate/merge-gate/claim.py (2 copies — DRY
 # extraction deferred to a 3rd consumer per repo convention). The baseRefName
 # arm requires the `--json` query context AND a `state` field in the same
 # command (either order): a bare-token match would let `grep baseRefName

@@ -66,7 +66,7 @@ once from a delegated agent instruction and once directly, both bypassing
 the memory-only rule under an "unresponsive agent recovery" narrative).
 
 **Extend, not new sibling** — decided after surveying ≥2 sibling hooks
-(`gh-merge-worktree-precondition`, `commit-title-length-check` — both
+(`merge-gate` (worktree check), `commit-title-length-check` — both
 preflight-gate, ask/block severity) plus this hook's own existing `git
 clean -f` / `git reset --hard` rules. `destructive-bash-guard` already hosts
 git-subcommand-shape classifiers with the exact severity this issue asks

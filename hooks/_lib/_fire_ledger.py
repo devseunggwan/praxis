@@ -63,7 +63,7 @@ main() after parsing its own stdin payload. It still also goes through
 `record_session_fire`'s docstring for the resulting dedup contract.
 
 STOP-LANE BLOCK RECOVERY (issue #847): the five completion-verify Stop
-hooks (completion-signal-gate, merge-state-claim-gate,
+hooks (completion-signal-gate, merge-gate (claim check),
 negative-existence-verdict-gate, runtime-state-claim-gate,
 readonly-verify-deferral-gate) close the coarse block-invisibility gap
 above by calling `record_session_fire` at their emit point with the real

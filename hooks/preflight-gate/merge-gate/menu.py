@@ -36,7 +36,11 @@ import sys
 from pathlib import Path as _Path
 
 sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent / "_lib"))
-from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
+from _hook_runtime import (  # type: ignore[import-not-found]  # noqa: E402
+    MIN_SUBPROC_BUDGET_SEC,
+    fail_open,
+    remaining_budget,
+)
 from _payload import read_payload  # type: ignore[import-not-found]  # noqa: E402
 
 # ---------------------------------------------------------------------------
@@ -148,8 +152,9 @@ _REVIEWER_FAMILIES: tuple[tuple[str, str, str, tuple[str, ...], tuple[str, ...]]
 
 
 # Total git-subprocess budget MUST stay safely under the hook's manifest timeout
-# (5s) so the Python fail-open path always runs before the hook runner kills the
-# process — otherwise a hung/locked git (NFS stall, index.lock contention) would
+# (5s when this was its own hook; merge-gate now shares 10s with `refetch`, and
+# `_timeout` cuts each call to what is left) so the Python fail-open path
+# always runs before the hook runner kills the process — otherwise a hung/locked git (NFS stall, index.lock contention) would
 # prevent the advisory/strict block from being emitted at all. Worst case for
 # base resolution: 5 candidates × (1 merge-base + 1 is-ancestor) at most, but
 # is-ancestor only runs when a candidate's merge-base differs (the rare
@@ -159,6 +164,19 @@ _REVIEWER_FAMILIES: tuple[tuple[str, str, str, tuple[str, ...], tuple[str, ...]]
 # pathological hang.
 _GIT_RESOLVE_TIMEOUT = 0.3
 _GIT_DIFF_TIMEOUT = 1.5
+
+
+def _timeout(limit: float) -> float | None:
+    """`limit`, cut to what is left of the hook's budget; None once spent.
+
+    merge-gate runs this check after `refetch` under one host timeout, so the
+    budget above is no longer this check's alone (issue #1650).
+    """
+    budget = remaining_budget(limit)
+    # The floor is capped at `limit`: these limits sit below the shared floor.
+    if budget < min(limit, MIN_SUBPROC_BUDGET_SEC):
+        return None
+    return min(limit, budget)
 
 
 # Candidate base refs. origin/HEAD is the remote default; the explicit
@@ -176,12 +194,15 @@ def _merge_base(cwd: str, ref: str) -> str | None:
     Doubles as an existence check: a non-existent ref makes `git merge-base`
     exit non-zero, which yields None (no separate rev-parse needed).
     """
+    limit = _timeout(_GIT_RESOLVE_TIMEOUT)
+    if limit is None:
+        return None
     try:
         proc = subprocess.run(
             ["git", "-C", cwd, "merge-base", ref, "HEAD"],
             capture_output=True,
             text=True,
-            timeout=_GIT_RESOLVE_TIMEOUT,
+            timeout=limit,
         )
     except Exception:
         return None
@@ -195,11 +216,14 @@ def _is_ancestor(cwd: str, ancestor: str, descendant: str) -> bool | None:
 
     `git merge-base --is-ancestor` exits 0 (yes), 1 (no), other (error).
     """
+    limit = _timeout(_GIT_RESOLVE_TIMEOUT)
+    if limit is None:
+        return None
     try:
         rc = subprocess.run(
             ["git", "-C", cwd, "merge-base", "--is-ancestor", ancestor, descendant],
             capture_output=True,
-            timeout=_GIT_RESOLVE_TIMEOUT,
+            timeout=limit,
         ).returncode
     except Exception:
         return None
@@ -250,12 +274,15 @@ def _changed_files(cwd: str) -> list[str] | None:
     base = _resolve_base(cwd)
     if base is None:
         return None
+    limit = _timeout(_GIT_DIFF_TIMEOUT)
+    if limit is None:
+        return None
     try:
         proc = subprocess.run(
             ["git", "-C", cwd, "diff", "--name-only", f"{base}...HEAD"],
             capture_output=True,
             text=True,
-            timeout=_GIT_DIFF_TIMEOUT,
+            timeout=limit,
         )
     except Exception:
         return None

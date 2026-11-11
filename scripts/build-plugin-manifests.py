@@ -209,7 +209,7 @@ SCHEMA_PATH = HOOKS_DIR / "manifest.schema.json"
 _SUPPORTED_SCHEMA_KEYWORDS = frozenset({
     "$schema", "$id", "title", "description",
     "type", "enum", "required", "properties", "additionalProperties",
-    "items", "minimum", "minItems", "minLength",
+    "items", "minimum", "minItems", "minLength", "oneOf",
 })
 _SUPPORTED_SCHEMA_TYPES = {
     "object": dict,
@@ -290,6 +290,14 @@ def assert_schema_supported(schema, spath: str = "#") -> None:
         assert_schema_supported(subschema, f"{spath}/properties/{key}")
     if "items" in schema:
         assert_schema_supported(schema["items"], f"{spath}/items")
+    if "oneOf" in schema:
+        branches = schema["oneOf"]
+        if not isinstance(branches, list) or not branches:
+            raise ValueError(
+                f"hooks/manifest.schema.json {spath}: oneOf must be a non-empty array"
+            )
+        for i, branch in enumerate(branches):
+            assert_schema_supported(branch, f"{spath}/oneOf/{i}")
 
 
 def schema_validation_errors(instance, schema, path: str = "$") -> list[str]:
@@ -298,11 +306,23 @@ def schema_validation_errors(instance, schema, path: str = "$") -> list[str]:
     Subset limitation: only the keywords in _SUPPORTED_SCHEMA_KEYWORDS are
     enforced — type (object/array/string/integer/boolean), enum, required,
     properties, additionalProperties (false), items, minimum, minItems,
-    minLength; $schema/$id/title/description are documentation and ignored.
+    minLength, oneOf (a node carrying it is checked by its branches only);
+    $schema/$id/title/description are documentation and ignored.
     assert_schema_supported() rejects anything else up front, so a keyword
     can never be silently unenforced.
     """
     errs: list[str] = []
+    if "oneOf" in schema:
+        matched = sum(
+            not schema_validation_errors(instance, branch, path)
+            for branch in schema["oneOf"]
+        )
+        if matched != 1:
+            errs.append(
+                f"{path}: {instance!r} matches {matched} of the oneOf branches, "
+                "expected exactly 1"
+            )
+        return errs
     if "enum" in schema:
         if instance not in schema["enum"]:
             errs.append(f"{path}: {instance!r} is not one of {schema['enum']!r}")
@@ -1298,8 +1318,9 @@ def render_hook_operating_matrix(manifest: dict) -> str:
     rewrite_vars: dict[str, list[str]] = {}
     for name, entries in by_name.items():
         mode = hook_mode(entries)
-        if mode.get("strict_env"):
-            strict_vars[name] = [mode["strict_env"]]
+        strict = mode.get("strict_env")
+        if strict:
+            strict_vars[name] = [strict] if isinstance(strict, str) else list(strict)
         if mode.get("bypass_env"):
             bypass_vars[name] = mode["bypass_env"]
         if mode.get("state_paths"):

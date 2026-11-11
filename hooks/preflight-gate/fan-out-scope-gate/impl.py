@@ -23,7 +23,7 @@ its own, before any prior target exists.
 
 No opt-out marker and no environment bypass. An agent-attachable marker would
 let the agent self-bypass the gate it is meant to enforce — the same contract
-`pre-merge-approval-gate` states for `# merge-approval:ack`.
+`merge-gate` (approval check) states for `# merge-approval:ack`.
 """
 from __future__ import annotations
 

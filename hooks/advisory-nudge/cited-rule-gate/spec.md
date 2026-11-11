@@ -18,8 +18,8 @@ direct commit to a protected branch, a push attempt to it, a recommendation to
 bypass a push guard, a fallback to an unapproved virtualenv) were all caught by
 the user, and each maps to a section the agent could name once asked.
 
-`momentum-rule-retrieval-gate` covers merges, dispatches and force-pushes
-only, and the other gates check the content of specific calls. Nothing checked
+`momentum-rule-retrieval-gate` covers dispatches and force-pushes and
+`merge-gate` covers merges, and the other gates check the content of specific calls. Nothing checked
 that retrieval happened at all before an ordinary mutation.
 
 ## Trigger
@@ -130,7 +130,8 @@ classifier asks about by design.
 
 | Hook | Scope | Overlap |
 | --- | --- | --- |
-| `momentum-rule-retrieval-gate` | merge, dispatch, force-push; surfaces the rules itself | Both can fire on a merge; that one names the rules, this one asks the agent to |
+| `merge-gate` | merge; its briefing check surfaces the merge rules itself | Both can fire on a merge; that one names the rules, this one asks the agent to |
+| `momentum-rule-retrieval-gate` | dispatch, force-push; surfaces the rules itself | Same split for those two triggers |
 | `approval-premise-reread-gate` | production-marked mutations; asks for the approval premise | Same classifier, different question |
 
 ## Tests

@@ -43,7 +43,15 @@ import tempfile
 from pathlib import Path
 from types import ModuleType
 
-REL = "hooks/advisory-nudge/momentum-rule-retrieval-gate/impl.py"
+REL = "hooks/preflight-gate/merge-gate/briefing.py"
+# Where the briefing check lived before merge-gate (issue #1650), so a
+# checkout from before the move still replays.
+LEGACY_REL = "hooks/advisory-nudge/momentum-rule-retrieval-gate/impl.py"
+
+
+def gate_path(root: str | Path) -> str:
+    path = os.path.join(root, REL)
+    return path if os.path.exists(path) else os.path.join(root, LEGACY_REL)
 ADVISORY_ENV = "PRAXIS_MOMENTUM_MERGE_ADVISORY"
 
 
@@ -61,7 +69,7 @@ def _import(path: str, name: str, extra_paths: list[str]) -> ModuleType:
 
 
 def load_gate(root: str) -> ModuleType:
-    path = os.path.join(root, REL)
+    path = gate_path(root)
     return _import(path, "gate", [os.path.dirname(path), os.path.join(root, "hooks", "_lib")])
 
 

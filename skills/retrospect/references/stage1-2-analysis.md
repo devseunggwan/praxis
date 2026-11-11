@@ -241,7 +241,7 @@ not salient window` rule.
 
 This inclusion is **scoped to the observation/retrospect layer only**. It does
 **not** override the discipline-gate `isSidechain` filters in the enforcement
-layer (`completion-verify`, `merge-state-claim-gate`), which correctly exclude
+layer (`completion-verify`, `merge-gate` (claim check)), which correctly exclude
 sidechain entries so that a subagent's *intermediate* completion claim is never
 mistaken for the parent turn's completion. Observation-layer inclusion and
 enforcement-layer exclusion are both correct; do not conflate them or "fix" one

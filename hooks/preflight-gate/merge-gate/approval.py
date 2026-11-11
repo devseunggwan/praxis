@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""PreToolUse(Bash) guard: require explicit user approval before `gh pr merge`.
+"""merge-gate check: require explicit user approval before `gh pr merge`.
+
+Moved from pre-merge-approval-gate (issue #1650); the verdict is unchanged.
 
 Every Claude session MUST receive per-PR merge approval from the user — merge
 is shared-state and irreversible.
@@ -22,7 +24,7 @@ answer in its own channel can name an executable in this hook process's
 environment (`PRAXIS_MERGE_APPROVAL_PROVIDER`); a merge it verifies skips the
 prompt. This is not an agent-attachable bypass: an inline env prefix on the
 command never reaches the hook, and the verdict comes from the same function
-momentum-rule-retrieval-gate uses (`host_merge_decision`), which still checks
+the briefing check uses (`host_merge_decision`), which still checks
 the briefing and spends one approval per merge. Unset, nothing changes.
 """
 from __future__ import annotations
@@ -105,50 +107,48 @@ def emit_ask(reason: str) -> None:
     emit_decision("ask", reason)
 
 
-_MOMENTUM_IMPL = (_Path(__file__).resolve().parent.parent.parent
-                  / "advisory-nudge" / "momentum-rule-retrieval-gate" / "impl.py")
-# Read here only to skip loading the sibling when no provider is configured;
-# _lib/_host_merge_approval.py owns the contract.
+# Read here only to skip loading the briefing check when no provider is
+# configured; _lib/_host_merge_approval.py owns the contract.
 HOST_PROVIDER_ENV = "PRAXIS_MERGE_APPROVAL_PROVIDER"
+
+
+def _briefing():
+    """The briefing check module (merge-gate/briefing.py), loaded once."""
+    import importlib.util
+
+    name = "_praxis_merge_gate_briefing"
+    if name in sys.modules:
+        return sys.modules[name]
+    spec = importlib.util.spec_from_file_location(name, _Path(__file__).resolve().parent / "briefing.py")
+    if spec is None or spec.loader is None:
+        raise ImportError("merge-gate briefing check not loadable")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
 
 
 def bulk_approved(payload: dict) -> bool:
     """True when the user already approved this merge in chat as one of a
-    bulk-approved set (momentum-rule-retrieval-gate decides; one parser, so the
-    two gates cannot disagree about what was approved).
+    bulk-approved set (the briefing check decides; one parser, so the two
+    checks cannot disagree about what was approved).
 
     Any failure returns False, so a broken lookup keeps the prompt.
     """
     try:
-        import importlib.util
-
-        spec = importlib.util.spec_from_file_location(
-            "_praxis_momentum_bulk_merge", _MOMENTUM_IMPL)
-        if spec is None or spec.loader is None:
-            return False
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        return bool(module.bulk_merge_approved(payload))
+        return bool(_briefing().bulk_merge_approved(payload))
     except Exception:
         return False
 
 
 def host_approval(payload: dict) -> tuple[bool, str]:
     """(released, note) from the host approval provider, decided by the same
-    function momentum-rule-retrieval-gate uses, so the provider is asked and
-    the approval spent once per tool call. Only called when the host set
+    function the briefing check uses, so the provider is asked and the
+    approval spent once per tool call. Only called when the host set
     `PRAXIS_MERGE_APPROVAL_PROVIDER`. Any failure keeps the prompt.
     """
     try:
-        import importlib.util
-
-        spec = importlib.util.spec_from_file_location(
-            "_praxis_momentum_host_approval", _MOMENTUM_IMPL)
-        if spec is None or spec.loader is None:
-            return False, "host approval provider: momentum gate not loadable"
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        decision = module.host_merge_decision(payload)
+        decision = _briefing().host_merge_decision(payload)
         return bool(decision.released), str(decision.note())
     except Exception as exc:
         return False, f"host approval provider: check failed ({type(exc).__name__})"
