@@ -136,49 +136,6 @@ run_case "gh_pr_merge_content_check" \
   "" \
   "gh pr merge --squash"
 
-# --- cmux new-workspace (dispatch) trigger ------------------------------------
-
-# Round-2 MAJOR 1 fix: ensure non-dispatch cmux invocations stay silent.
-run_case "silent_cmux_new_workspace_plain" \
-  "silent" \
-  "" \
-  "cmux new-workspace test-foo"
-
-run_case "silent_cmux_new_workspace_echo" \
-  "silent" \
-  "" \
-  'cmux new-workspace --command "echo hello"'
-
-run_case "silent_cmux_new_workspace_shell" \
-  "silent" \
-  "" \
-  'cmux new-workspace dev --command "bash -i"'
-
-# issue #513 결함2: provider name as an identifier substring (CLAUDE_API_KEY)
-# must NOT false-fire the dispatch advisory — word-boundary match required.
-run_case "silent_cmux_provider_substring_in_env_var" \
-  "silent" \
-  "" \
-  'cmux new-workspace --command "CLAUDE_API_KEY=abc myapp"'
-
-# issue #513 결함2 negative: a genuine provider invocation still fires.
-# --- force-push triggers -------------------------------------------------------
-
-# Round-2 MAJOR 2 fix: git global flags with separate-token value must not
-# disguise the push subcommand from the walker.
-# Confirm fused-form git global flags also bypass correctly.
-# Round-3 MAJOR fix: boolean git global flags MUST NOT consume the next token
-# as a value. Prior over-broad GIT_GLOBAL_FLAGS_WITH_ARG inclusion of
-# --literal-pathspecs / --super-prefix caused the walker to skip `push`,
-# masking the force-push gate entirely.
-# Issue #512: bundled short-flag clusters carrying `f` (=--force) must fire
-# (the prior exact-match force check let `-fu`/`-fv`/`-vf` bypass the gate).
-# Clean push with a bundled non-force cluster must stay silent.
-run_case "silent_git_push_bundled_no_force" \
-  "silent" \
-  "" \
-  "git push origin main -u"
-
 # --- dynamic memory loading negative cases (issue #359) ----------------------
 # Memory with no momentum: field must NOT surface on any trigger.
 negative_no_momentum_case() {
@@ -255,18 +212,14 @@ run_case "strict_mode_blocks_merge" \
   "PRAXIS_MOMENTUM_STRICT=1" \
   "gh pr merge --squash"
 
-# #1092: path-prefixed binaries must still trigger. `argv[0] == "gh"` /
-# `argv[0] == "git"` exact matches previously let `/usr/bin/gh pr merge` and
-# `/usr/bin/git push --force` bypass the gate; `_is_gh_binary`/`_is_git_binary`
-# close both.
+# #1092: a path-prefixed binary must still trigger. An `argv[0] == "gh"`
+# exact match previously let `/usr/bin/gh pr merge` bypass the gate;
+# `_is_gh_binary` closes it.
 run_case "strict_mode_blocks_path_prefixed_merge" \
   "block" \
   "PRAXIS_MOMENTUM_STRICT=1" \
   "/usr/bin/gh pr merge --squash"
 
-# #1092: `+refspec` force pushes carry no `--force`/`-f` flag. `_is_force_push`
-# now flags a leading-`+` refspec (`git push origin +main`,
-# `git push origin '+refs/heads/*'`) as a force push.
 run_case "strict_mode_with_ack_passes" \
   "advisory:[praxis:momentum-gate]" \
   "PRAXIS_MOMENTUM_STRICT=1 PRAXIS_MOMENTUM_ACK=1" \
@@ -321,30 +274,15 @@ run_case_raw_stdin "fail_open_malformed_json_raw" "silent" "{not valid json"
 
 # --- silent cases (unrelated commands) -----------------------------------------
 
-run_case "silent_git_push_normal" \
-  "silent" \
-  "" \
-  "git push origin my-branch"
-
 run_case "silent_gh_pr_list" \
   "silent" \
   "" \
   "gh pr list --state open"
 
-run_case "silent_cmux_other_subcommand" \
-  "silent" \
-  "" \
-  "cmux list-sessions"
-
 run_case "silent_unrelated_bash" \
   "silent" \
   "" \
   "echo hello world"
-
-run_case "silent_git_push_no_flag" \
-  "silent" \
-  "" \
-  "git push origin feature-branch --tags"
 
 # --- compound command multi-trigger ----------------------------------------
 #
@@ -1634,32 +1572,6 @@ print(json.dumps({
 }
 merge_escalation_bypass_silent_case
 
-# Force-push / dispatch triggers must NEVER emit a deny — escalation is merge-only.
-run_nonmerge_no_deny_case() {
-  local name="$1" command="$2"
-  local payload
-  payload=$(python3 -c '
-import json, sys
-print(json.dumps({
-    "tool_name": "Bash",
-    "tool_input": {"command": sys.argv[1]},
-    "transcript_path": sys.argv[2],
-}))' "$command" "$FIXTURES_DIR/momentum-merge-incomplete.jsonl")
-  local out_file
-  out_file=$(mktemp)
-  echo "$payload" | python3 "$HOOK" >"$out_file" 2>/dev/null
-  local rc=$?
-  local out
-  out=$(cat "$out_file"); rm -f "$out_file"
-  if [ "$rc" -eq 0 ] && ! echo "$out" | grep -qF '"permissionDecision"'; then
-    echo "PASS  [$name]"; PASS=$((PASS + 1))
-  else
-    echo "FAIL  [$name] rc=$rc out='$(echo "$out" | head -c 120)'"
-    FAIL=$((FAIL + 1)); FAILED_NAMES+=("$name")
-  fi
-}
-run_nonmerge_no_deny_case "force_push_never_denies" "git push --force origin main"
-run_nonmerge_no_deny_case "dispatch_never_denies" 'cmux new-workspace --command "claude -p go"'
 
 # ---------------------------------------------------------------------------
 # @fail_open structural assertion

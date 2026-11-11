@@ -514,6 +514,36 @@ fi
 # ===========================================================================
 
 echo ""
+FIXTURES_DIR="$ROOT_DIR/tests/fixtures"
+
+# Force-push / dispatch triggers must NEVER emit a deny: the merge deny moved to
+# merge-gate (issue #1650) and this hook only writes stderr now.
+run_nonmerge_no_deny_case() {
+  local name="$1" command="$2"
+  local payload
+  payload=$(python3 -c '
+import json, sys
+print(json.dumps({
+    "tool_name": "Bash",
+    "tool_input": {"command": sys.argv[1]},
+    "transcript_path": sys.argv[2],
+}))' "$command" "$FIXTURES_DIR/momentum-merge-incomplete.jsonl")
+  local out_file
+  out_file=$(mktemp)
+  echo "$payload" | python3 "$HOOK" >"$out_file" 2>/dev/null
+  local rc=$?
+  local out
+  out=$(cat "$out_file"); rm -f "$out_file"
+  if [ "$rc" -eq 0 ] && ! echo "$out" | grep -qF '"permissionDecision"'; then
+    echo "PASS  [$name]"; PASS=$((PASS + 1))
+  else
+    echo "FAIL  [$name] rc=$rc out='$(echo "$out" | head -c 120)'"
+    FAIL=$((FAIL + 1)); FAILED_NAMES+=("$name")
+  fi
+}
+run_nonmerge_no_deny_case "force_push_never_denies" "git push --force origin main"
+run_nonmerge_no_deny_case "dispatch_never_denies" 'cmux new-workspace --command "claude -p go"'
+
 echo "Results: $PASS passed, $FAIL failed"
 if [ "${#FAILED_NAMES[@]}" -gt 0 ]; then
   echo "Failed: ${FAILED_NAMES[*]}"

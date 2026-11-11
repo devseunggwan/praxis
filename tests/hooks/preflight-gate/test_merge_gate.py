@@ -27,7 +27,6 @@ LIB = REPO_ROOT / "hooks" / "_lib"
 sys.path.insert(0, str(LIB))
 
 import _hook_runtime  # noqa: E402
-import _hermes  # noqa: E402
 
 FIXTURES = REPO_ROOT / "tests" / "fixtures"
 NO_BRIEFING = FIXTURES / "momentum-merge-marker-no-briefing.jsonl"
@@ -218,11 +217,13 @@ def test_stop_claim_output_passes_through(gate, monkeypatch, capsys):
 # --- fire telemetry -----------------------------------------------------------
 
 
-def test_checks_record_no_fire_of_their_own(gate):
-    """impl.py peels each check's @fail_open: the hook records one fire per call."""
-    worktree = gate._load("worktree")
-    assert getattr(worktree.main, "__wrapped__", None) is not None
-    assert gate._run.__doc__ and "peeled" in gate._run.__doc__
+def test_one_call_records_one_fire(gate, monkeypatch, capsys):
+    """impl.py peels each check's @fail_open; without that, a merge would
+    record one fire for the hook plus one per check it ran."""
+    fires = []
+    monkeypatch.setattr(_hook_runtime, "_maybe_record_fire", lambda fn, rc: fires.append(fn.__module__))
+    _call(gate, _bash("gh pr merge 42 --squash"), monkeypatch, capsys)
+    assert fires == [gate.__name__]
 
 
 # --- the real dispatch group (cross-hook surfaces) ----------------------------
@@ -256,12 +257,6 @@ def test_a_compound_command_shows_every_surface_in_one_group_run(command, surfac
 
 
 # --- Hermes -------------------------------------------------------------------
-
-
-def test_hermes_treats_the_merge_gate_ask_as_human_consent():
-    human, self_check = _hermes.split_asks([("merge-gate", "approve?"), ("side-effect-scan", "x")])
-    assert human == [("merge-gate", "approve?")]
-    assert self_check == [("side-effect-scan", "x")]
 
 
 def test_only_the_approval_check_can_ask():
