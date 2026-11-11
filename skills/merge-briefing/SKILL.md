@@ -131,7 +131,8 @@ The same holds for a review bot still running on the current head: a draft
 marked ready, a push, or an `update-branch` re-triggers it, and its summary
 comment (e.g. Codex `Code Review | Running | <sha>`) is the state to read. Wait
 for it in the background (pending-check count and the bot's `Running` count
-both 0, 60s interval, stated ceiling) and end the turn; a finding it posts
+both 0, counted only once the head's checks are listed, 60s interval, stated
+ceiling) and end the turn; a finding it posts
 after the briefing is a re-brief on a new head. A review run you or the user
 dispatched after an ask went out (a remote/closed-loop reviewer that can push
 fix commits) **withdraws that ask**: say the merge question is off until the
@@ -193,7 +194,8 @@ base in with `gh pr update-branch <N>` (a merge commit, never a rewrite),
 which restarts CI and the bot review: wait for both on the new head, re-rev
 the anchor with the head that moved (when only the base moved, prove it by
 equal patch-ids, `git diff $(git merge-base <old> origin/<base>) <old> | git
-patch-id --stable` vs `git diff origin/<base>...<new> | git patch-id --stable`,
+patch-id --verbatim` vs `git diff origin/<base>...<new> | git patch-id --verbatim`
+(`--verbatim` keeps whitespace, which `--stable` strips),
 quote the id in the rev's History and mark the rows not re-measured; a
 `git diff <old> <new> -- <PR paths>` is non-empty after any base merge that
 touched those paths, so it cannot show this), then re-run Steps 1–3 against the new
@@ -202,10 +204,10 @@ approval coverage collected earlier describe the old head.
 When the base dismisses stale approvals on push (a dismissal event follows
 every push on this PR), `update-branch` also costs a fresh human approval. If
 the base commits touch none of the PR's paths (`git diff --stat
-HEAD...origin/<base> -- <PR paths>` empty, also covering any files that
-consume them), put "merge without update-branch" vs "update-branch, then
+HEAD...origin/<base> -- <PR paths> <paths that consume them>` empty), put "merge without update-branch" vs "update-branch, then
 re-approval" in the briefing as the user's choice, with that diff as the
-evidence, instead of updating on your own.
+evidence, instead of updating on your own; when it is not empty, update the
+branch first.
 
 ### Step 2: Grade every finding on all three surfaces
 
@@ -217,7 +219,7 @@ comment, and review body alike — by **the decoration, not the label**:
 | --- | --- |
 | `issue (blocking):` / `suggestion (blocking):` | Yes — the merge waits |
 | `issue (non-blocking):` / `suggestion (non-blocking):` | No |
-| `nitpick:` / `note:` | No — unresolved by design, unless the base requires conversation resolution (see the `BLOCKED` with no visible rule row in Failure Modes): then reply, resolve, and re-read the merge state before the ask |
+| `nitpick:` / `note:` | No — unresolved by design, unless the base requires conversation resolution (see the Failure Modes row starting "`mergeStateStatus: BLOCKED` with CI green"): then reply, resolve, and re-read the merge state before the ask |
 | No label at all | Grade it yourself — read the body |
 
 `suggestion` is not a lower rung than `issue`: both carry exactly one of
@@ -455,7 +457,7 @@ requires, the squash-ancestry stale-HEAD guard, and the no-`&&`-chain rule.
 Composing the merge command here from memory skips all four, and each one fails
 quietly enough to look like a clean merge.
 
-Pass `--match-head-commit <sha>` on the merge so a head that moved after the briefing fails the merge instead of landing unreviewed commits; it takes the **full 40-character** `headRefOid` (copy it from `gh pr view <N> --json headRefOid`), and an abbreviated sha fails with `Could not coerce value … to GitObjectID` before anything merges.
+Pass `--match-head-commit <sha>` on the merge so a head that moved after the briefing fails the merge instead of landing unreviewed commits; pass the **full 40-character** `headRefOid` your Step 1 probe recorded for the briefing, not one re-read after the approval (when `gh pr view <N> --json headRefOid` now differs, re-brief instead of merging); an abbreviated sha fails with `Could not coerce value … to GitObjectID` before anything merges.
 
 Never remove the head worktree before the merge has passed: a blocked or
 interrupted merge leaves the PR open with no worktree, and in a multi-stage
@@ -514,8 +516,9 @@ merge, matching the repo the Step 1 probes named.
 Stop at the first failed merge and report; the rest of the set stays approved
 only until a merge outside the set runs.
 
-Step 6 still applies to each PR: merge from the base worktree after removing
-that PR's head worktree, and report every PR with its URL.
+Step 6 still applies to each PR: merge from the base worktree without
+`--delete-branch`, confirm `MERGED`, then remove that PR's head worktree, and
+report every PR with its URL.
 
 ## Relationship to enforcement
 
@@ -587,13 +590,13 @@ decorative.
 | CI reported failed because a background `gh run watch --exit-status` exited 1 | The watch itself died (network read timeout on the API poll), not the run | Before calling CI failed, read `gh run view <id> --json status,conclusion,jobs` and the tail of the watch log; only `conclusion` decides |
 | A check on the previous head reads `cancelled`/exit 1 and is briefed as a failure | A review bot pushed commits to the PR, so concurrency cancelled the older head's run | Read `gh run view <id> --json conclusion,headSha`; a `cancelled` run on a superseded head is not a defect. Review the bot's commits like your own (lint, related tests), re-rev the anchor for the new head, and grade CI only on the new head's runs |
 | User answers the briefing with "remove the unnecessary tests" | Tests grew after the PR opened (later fixes, bot commits, both sides of a base-merge conflict) and were never pruned | Run `test-suite-consolidation`'s own-PR pruning pass (mutation matrix over the PR's new test ids) before composing the briefing; update the PR body's test counts and the anchor in the same revision |
-| `gh pr checks --watch` exits at once with `no checks reported`, or returns while some checks still read `pending` | Started right after a push, before every run of the new head registered (later-registering jobs such as test shards are missed) | In a background wait, do not rely on `--watch`: loop on the pending count (`gh pr checks <N> \| awk -F'\t' -v c=2 '$c=="pending"' \| wc -l` until 0, 60s interval, stated ceiling), then print the per-check list **and** `gh pr view --json headRefOid,mergeStateStatus,reviewDecision` in the same output, so a base that moved meanwhile (`DIRTY`) surfaces with the CI result instead of at the merge ask |
+| `gh pr checks --watch` exits at once with `no checks reported`, or returns while some checks still read `pending` | Started right after a push, before every run of the new head registered (later-registering jobs such as test shards are missed) | In a background wait, do not rely on `--watch`: loop on the pending count (`gh pr checks <N> \| awk -F'\t' -v c=2 '$c=="pending"' \| wc -l` until 0, 60s interval, stated ceiling), and accept 0 only when the same call exited 0 and listed the head's checks: an empty list or a failed probe is still pending, then print the per-check list **and** `gh pr view --json headRefOid,mergeStateStatus,reviewDecision` in the same output, so a base that moved meanwhile (`DIRTY`) surfaces with the CI result instead of at the merge ask |
 | `mergeStateStatus: BLOCKED` with CI green, 0 required approvals and `required_review_thread_resolution: false` in `rules/branches/<base>`, and the approved merge fails with `the base branch policy prohibits the merge` | The base also has classic branch protection, which the rules endpoint does not show; `gh api repos/<o>/<r>/branches/<base>` reports `protected: true` (and its required checks) while `/branches/<base>/protection` 404s without admin scope, so its conversation-resolution setting cannot be read | Do not conclude "cause unknown" from the ruleset alone, and do not reach for `--admin`. Compare open PRs on the same base: unresolved-thread count (paginated `reviewThreads` query) against `mergeStateStatus` (a PR whose threads are all resolved reads `CLEAN`, one with open threads `BLOCKED`, a PR with pending checks is not a control). When open threads are the only difference, reply to each non-blocking thread with its disposition, resolve them (`resolveReviewThread` mutation by thread id), wait ~20s and re-read: `CLEAN` confirms the cause. Put that before/after in the re-brief, then ask again; the earlier failed merge consumed nothing |
 | Merge approval asked on a PR that cannot merge yet | `mergeStateStatus: BLOCKED` only because a required approving review is missing and `current_user_can_bypass` is `never`; everything else (CI, threads, mergeable) is green | Do not ask the merge question. Still finish Step 3 now (write `Carried:` into the anchor, record named follow-ups on the issue that outlives the merge), write the per-PR sections as a status briefing, and ask instead whether to request a reviewer — assigning one notifies a person, so it needs its own yes. If the user declines ("직접 처리"), stop; they may merge out-of-band with the repo's force-merge command, so on their "merged" report go straight to `worktree-merge-cleanup`'s out-of-band path |
 | `--delete-branch` run from the wrong worktree after approval | Step 6 read as advice, merge command hand-rolled | Chain `worktree-merge-cleanup` as the next action (Step 6) |
 | A PR merges while its own body still lists deploy prerequisites (a cutover sequence, a data UPDATE, a companion PR that must merge or deploy first, "merge after X") or while the user has said another PR goes first, and the deploy breaks rows or routes the body warned about | Prerequisites read as background prose instead of merge gates; the user's stated order lived in another session's conversation | In Step 1, grep the PR body for ordering and prerequisite language and observe each one read-only (companion PR `state`, the stored value in prod, the secret path, the deploy run step) and put the observed state in part 3; any unmet one stops the ask. If such a PR is found already merged with a prerequisite unmet and its deploy run is still in tests, report it at the top before anything else and recommend cancelling the run plus a revert PR as the first option, since a pre-deploy stop has zero impact |
 | A merge question (or a "merge it?" re-ask after a CI/deploy notification) goes out for a PR the user had already merged out-of-band | The ask was built from the previous turn's state; users merge from the GitHub UI or with a slash command between turns without saying so | Every turn that ends in a merge question re-reads `gh pr view <N> --json state,mergedAt,mergedBy` for each PR in it right before composing; a `MERGED` PR leaves the ask and goes to post-merge verification and `worktree-merge-cleanup` |
-| On an out-of-band "merged" report, the turn ends with cleanup plus a scheduled check, and the user replies "확인하고 검증까지 진행해야 합니다" | Post-merge verification was read as "register a later check"; deploy surfaces that apply within minutes (GitOps sync, rolling restart, live config) were left to the next day | In the turn that learns of the merge: confirm `mergeCommit` = the briefed head, then measure what is already observable (synced revision contains the merge commit, pods restarted after it, the live value on each component, a first-window measurement against a pre-switch control window), and run cleanup. Only what needs elapsed time (next scheduled run, a day of failures) goes to a scheduled check, and a wait under an hour (one cycle of a periodic job) runs as a background re-measure in this session. Report the measured rows first, the scheduled remainder second |
+| On an out-of-band "merged" report, the turn ends with cleanup plus a scheduled check, and the user replies "확인하고 검증까지 진행해야 합니다" | Post-merge verification was read as "register a later check"; deploy surfaces that apply within minutes (GitOps sync, rolling restart, live config) were left to the next day | In the turn that learns of the merge: confirm the merged `headRefOid` = the briefed head (`gh pr view <N> --json headRefOid,mergeCommit`; a squash `mergeCommit` is a new sha, so use it only for the deploy checks), then measure what is already observable (synced revision contains the merge commit, pods restarted after it, the live value on each component, a first-window measurement against a pre-switch control window), and run cleanup. Only what needs elapsed time (next scheduled run, a day of failures) goes to a scheduled check, and a wait under an hour (one cycle of a periodic job) runs as a background re-measure in this session. Report the measured rows first, the scheduled remainder second |
 | User says "both merged" out-of-band, your check shows one still OPEN, and you warn them (or offer a revert) | The user merges PRs seconds apart; a status read taken right after their message can land before the second merge | Before reporting a reported-merged PR as unmerged, re-read `gh pr view <N> --json state,mergedAt,mergeCommit` once more (a few seconds later) for every PR named; only a second OPEN read is a finding, and the report quotes both `mergedAt` values |
 
 ## Limitations
