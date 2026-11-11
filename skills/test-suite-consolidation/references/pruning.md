@@ -442,8 +442,9 @@ Lane verdicts are claims. Re-read the code path behind every `drop` /
      a row file that looks deleted was often renamed or moved into another
      package (`*.integration.test.ts`, a new project dir); judge the new path,
      and drop rows a merged PR already fixed (a removed `it.skip`).
-   - Scan open PRs for the row files (`gh pr list --state open --json
-     number,author,files`, intersect in code). A row an in-flight PR already
+   - Scan open PRs for the row files (`gh pr list --state open --limit
+     1000 --json number,author,files`, intersect in code; the default limit
+     is 30, so check the count against the repo's open-PR total). A row an in-flight PR already
      reworks (often by the file's owner) leaves this PR — name the PR in the
      report instead of producing a conflicting edit; ignore long-stale
      bot/revert PRs.

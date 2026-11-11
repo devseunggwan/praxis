@@ -127,9 +127,13 @@ fatal: 'main' is already used by worktree at /Users/.../<main-worktree>
      edit. Confirm the submodule itself is clean
      (`git -C <path>/<submodule> status --porcelain --ignored` empty, or
      only regenerable `!!` lines) and that its current commit survives the
-     update (`git -C <path>/<submodule> for-each-ref --contains HEAD refs/heads
-     refs/remotes` non-empty; `branch -a --contains` is not enough, it lists a
-     detached HEAD as `* (no branch)`; otherwise stop and report), then run
+     update and the removal (`git -C <path>/<submodule> for-each-ref
+     --contains HEAD refs/remotes` non-empty, so a remote holds it: a local
+     branch does not count, because a linked worktree's submodule repository
+     can live under the worktree's git dir and `worktree remove --force`
+     deletes its refs and objects too; `branch -a --contains` is not enough
+     either, it lists a detached HEAD as `* (no branch)`; otherwise stop and
+     report), then run
      `git -C <path> submodule update --checkout <submodule path>` (no
      `--init`, never `deinit`) and re-read `status --porcelain`. When it comes back empty, the
      worktree is clean and the `--force` remove may proceed. A dirty submodule
