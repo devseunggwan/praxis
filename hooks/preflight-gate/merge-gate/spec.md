@@ -16,7 +16,7 @@ section below is the spec it had as a hook.
 | PreToolUse(AskUserQuestion) | menu: a merge menu without a review option | `hooks/preflight-gate/merge-gate/menu.py` | `merge-menu-review-options-advisory` |
 | Stop / SubagentStop | claim: a merge/PR state claim with no fresh state query | `hooks/preflight-gate/merge-gate/claim.py` | `merge-state-claim-gate` |
 
-### How the checks combine
+## How the checks combine
 
 `impl.py` picks the checks for the event and runs each one's `main()` on the
 same payload, in the order of the table. The answer follows the dispatcher's
@@ -67,8 +67,7 @@ routing and folding in `impl.py`.
 
 ## Check: approval (was `pre-merge-approval-gate`)
 
-_PreToolUse Pre-Merge Approval Gate_
-
+Former title: PreToolUse Pre-Merge Approval Gate.
 
 `hooks/preflight-gate/merge-gate/approval.py` fires on every PreToolUse(Bash) event and
 intercepts `gh pr merge` invocations. The gate emits
@@ -209,8 +208,7 @@ combined briefing block, a chained merge, and an unreadable transcript.
 
 ## Check: worktree (was `gh-merge-worktree-precondition`)
 
-_PreToolUse gh pr merge Worktree-Precondition Gate_
-
+Former title: PreToolUse gh pr merge Worktree-Precondition Gate.
 
 `hooks/preflight-gate/merge-gate/worktree.py` fires on every
 PreToolUse(Bash) event. When the command is `gh pr merge ... --delete-branch`
@@ -1141,8 +1139,7 @@ Tests: `tests/hooks/_lib/test_host_merge_approval.py`, on the fixtures
 
 ## Check: refetch (was `pr-state-refetch-gate`)
 
-_PreToolUse AskUserQuestion PR-State Re-Fetch Gate_
-
+Former title: PreToolUse AskUserQuestion PR-State Re-Fetch Gate.
 
 `hooks/preflight-gate/merge-gate/refetch.py` fires on every
 PreToolUse(AskUserQuestion) event. When a question's text names a PR number
@@ -1179,7 +1176,7 @@ surface: a PR-state-contingent **question**, not a merge **command**.
 
 Both conditions must hold for the **same** `questions[]` entry (question text
 
-+ all of that question's option labels/descriptions, joined):
+- all of that question's option labels/descriptions, joined):
 
 1. A **PR-number token** — `#\d+` (matches both bare `#123` and `PR #123`;
    the optional `PR` prefix carries no extra information once `#123` is
@@ -1304,17 +1301,17 @@ convention for `AskUserQuestion` gates.
 
 ### Parsing guarantees (fail-open)
 
-+ Malformed JSON payload → exit 0
-+ `tool_name != "AskUserQuestion"` → exit 0
-+ `tool_input` absent or not a dict → exit 0
-+ `questions` absent or not a list → exit 0 (no candidates)
-+ `options` absent or not a list in a question → that question's options
+- Malformed JSON payload → exit 0
+- `tool_name != "AskUserQuestion"` → exit 0
+- `tool_input` absent or not a dict → exit 0
+- `questions` absent or not a list → exit 0 (no candidates)
+- `options` absent or not a list in a question → that question's options
   contribute nothing to its text unit (question text alone is still scanned)
-+ No PR-number + merge-keyword co-occurrence in any question → exit 0, zero
+- No PR-number + merge-keyword co-occurrence in any question → exit 0, zero
   `gh` subprocess calls
-+ `gh` binary missing, non-zero exit, timeout, or unparseable JSON for a
+- `gh` binary missing, non-zero exit, timeout, or unparseable JSON for a
   candidate number → that number is dropped, not blocked
-+ Any uncaught exception → exit 0 (via the shared `@fail_open` decorator in
+- Any uncaught exception → exit 0 (via the shared `@fail_open` decorator in
   `hooks/_lib/_hook_runtime.py`)
 
 ### Relationship to sibling hooks
@@ -1343,8 +1340,7 @@ candidate PR numbers with mixed live states.
 
 ## Check: menu (was `merge-menu-review-options-advisory`)
 
-_PreToolUse AskUserQuestion Merge-Menu Review-Options Advisory_
-
+Former title: PreToolUse AskUserQuestion Merge-Menu Review-Options Advisory.
 
 The hook implementation lives at
 `hooks/preflight-gate/merge-gate/menu.py`; the build
@@ -1567,8 +1563,7 @@ routed reviewer.
 
 ## Check: claim (was `merge-state-claim-gate`)
 
-_Stop Merge-State Claim Gate_
-
+Former title: Stop Merge-State Claim Gate.
 
 `hooks/preflight-gate/merge-gate/claim.py` runs on the `Stop`
 event. It scans the **final assistant message** for a completed merge / PR /

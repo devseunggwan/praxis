@@ -108,7 +108,7 @@ approaches the budget was not measured.
 > re-derived from the manifest; the stage 2 result for `elapsed-time-signal`
 > above, and the "22 reachable hooks" count it was taken against, are kept as
 > the record of that measurement.
-
+>
 > **2026-11-11 note.** `merge-menu-review-options-advisory` moved into
 > `merge-gate` (issue #1650), a preflight-gate hook, so it left this
 > advisory-only table. `momentum-rule-retrieval-gate` lost its `merge`
