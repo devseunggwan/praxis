@@ -14,6 +14,7 @@ import json
 import os
 import re
 import subprocess
+import time
 import sys
 from pathlib import Path
 
@@ -270,3 +271,61 @@ def test_only_the_approval_check_can_ask():
     askers = sorted(p.name for p in GATE_DIR.glob("*.py")
                     if emits_ask.search(p.read_text(encoding="utf-8")))
     assert askers == ["approval.py"], askers
+
+
+# --- one host timeout for every check (issue #1650 review) --------------------
+
+
+def test_hook_timeout_matches_the_manifest(gate):
+    manifest = json.loads((REPO_ROOT / "hooks" / "manifest.json").read_text(encoding="utf-8"))
+    entry = next(h for h in manifest["hooks"] if h["name"] == "merge-gate")
+    assert gate.HOOK_TIMEOUT_SEC == entry["timeout"]
+
+
+def _stub(bin_dir: Path, name: str, sleep_sec: float) -> None:
+    path = bin_dir / name
+    path.write_text(f"#!/bin/sh\nsleep {sleep_sec}\nexit 1\n")
+    path.chmod(0o755)
+
+
+def test_checks_share_one_deadline_under_slow_gh_and_git(gate, tmp_path, monkeypatch, capsys):
+    """refetch (3 PRs x 2s gh) then menu (9 x 0.3s + 1.5s git) adds up to
+    10.2s of subprocess limits against merge-gate's 10s host timeout; each
+    check used to have a timeout of its own. With the host timeout cut to 4s,
+    every stub hanging to its limit, the run must still answer, strict block
+    included, inside it."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    _stub(bin_dir, "gh", 30)
+    # menu's worst case: each base candidate's merge-base answers inside its
+    # 0.3s limit with a different sha (so every is-ancestor runs), then
+    # is-ancestor and the diff hang to their limits.
+    git = bin_dir / "git"
+    git.write_text(
+        "#!/bin/sh\n"
+        'case "$*" in\n'
+        '  *"merge-base --is-ancestor"*) sleep 30 ;;\n'
+        '  *"merge-base"*) sleep 0.2; echo "sha-$4" ;;\n'
+        "  *) sleep 30 ;;\n"
+        "esac\n"
+    )
+    git.chmod(0o755)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    monkeypatch.setenv("PATH", f"{bin_dir}:/usr/bin:/bin")
+    monkeypatch.setenv("PRAXIS_MERGE_MENU_REVIEW_STRICT", "1")
+    monkeypatch.setattr(gate, "HOOK_TIMEOUT_SEC", 4)
+    payload = {
+        "hook_event_name": "PreToolUse", "tool_name": "AskUserQuestion", "session_id": "s1",
+        "cwd": str(repo),
+        "tool_input": {"questions": [{
+            "question": "Merge #11, #12 and #13 now?", "header": "Merge", "multiSelect": False,
+            "options": [{"label": "squash merge", "description": "d"},
+                        {"label": "wait", "description": "d"}],
+        }]},
+    }
+    start = time.monotonic()
+    rc, _, err = _call(gate, payload, monkeypatch, capsys)
+    elapsed = time.monotonic() - start
+    assert elapsed < 4, f"took {elapsed:.1f}s, over the 4s host timeout"
+    assert rc == 2, err[-1500:]

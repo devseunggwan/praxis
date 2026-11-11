@@ -30,6 +30,7 @@ import importlib.util
 import io
 import json
 import sys
+import time
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from types import ModuleType
@@ -38,6 +39,7 @@ from typing import Callable, Optional
 _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE.parent.parent / "_lib"))
 from _hook_io import read_decision  # type: ignore[import-not-found]  # noqa: E402
+import _hook_runtime  # type: ignore[import-not-found]  # noqa: E402
 from _hook_runtime import fail_open, member_host  # type: ignore[import-not-found]  # noqa: E402
 
 BASH_CHECKS = ("approval", "worktree", "briefing")
@@ -48,6 +50,14 @@ STOP_EVENTS = frozenset({"Stop", "SubagentStop"})
 # momentum-rule-retrieval-gate, which held the briefing check, was registered
 # for these hosts only; None is a standalone run (tests, replay scripts).
 BRIEFING_HOSTS = frozenset({"claude", "codex", "hermes"})
+
+# The checks share one host timeout (manifest `timeout`; a test pins the two
+# together) where each used to have its own, so a standalone run publishes a
+# deadline the budget-aware checks size their subprocess calls from, leaving
+# RESERVE_SEC to print the answer. Under the dispatcher its member deadline
+# is already published and is used as is.
+HOOK_TIMEOUT_SEC = 10
+RESERVE_SEC = 1.0
 
 
 def _load(check: str) -> ModuleType:
@@ -110,10 +120,21 @@ def main() -> int:
     if not isinstance(payload, dict):
         return 0
 
+    own_deadline = _hook_runtime._MEMBER_DEADLINE is None
+    if own_deadline:
+        _hook_runtime.set_member_deadline(time.monotonic() + HOOK_TIMEOUT_SEC - RESERVE_SEC)
+    try:
+        return _fold(_checks_for(payload), payload_raw)
+    finally:
+        if own_deadline:
+            _hook_runtime.set_member_deadline(None)
+
+
+def _fold(checks: tuple[str, ...], payload_raw: str) -> int:
     stderr_parts: list[str] = []
     other_stdout: list[str] = []
     first_ask: Optional[str] = None
-    for check in _checks_for(payload):
+    for check in checks:
         try:
             main_fn = _load(check).main
         except Exception as exc:  # noqa: BLE001 - a broken check must not block
