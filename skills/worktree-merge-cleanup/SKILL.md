@@ -186,12 +186,12 @@ Confirm before touching anything:
    only an unpushed `git merge origin/<base>` made locally while the PR's
    remote branch got its own base merge (`gh pr update-branch`): check
    `git log --no-merges <headRefOid>..<branch>` is empty and
-   `git cherry -v <headRefOid> <branch>` prints nothing, and the files the
-   local tip changes against `headRefOid` are a subset of the ones the base
-   changed (`git diff --name-only <headRefOid> <branch>` vs
-   `git diff --name-only <headRefOid>...origin/<base>`; a file outside it is
-   a conflict-resolution edit to report) — then the extra commits carry no
-   content of their own; report that evidence and ask once
+   `git cherry -v <headRefOid> <branch>` prints nothing, and merging the
+   local tip into `headRefOid` changes nothing
+   (`git merge-tree --write-tree <headRefOid> <branch>` prints the same tree
+   as `git rev-parse <headRefOid>^{tree}`; the first two checks skip merge
+   commits, and a conflict-resolution edit lives in one) — then the extra
+   commits carry no content of their own; report that evidence and ask once
    rather than deleting under the standing approval.
    A dirty worktree (`git -C <path> status --porcelain` non-empty) or a tip
    with non-merge commits the PR never saw is the stop condition: report it

@@ -471,10 +471,12 @@ Lane verdicts are claims. Re-read the code path behind every `drop` /
    `A && B || C` (shellcheck SC2015).
 5. **Commits** — one per class (orphans + their dead code / phrase-pin /
    tightened check / duplicates), each with `Refs #N` when an issue exists;
-   the PR uses `Closes #N` even while owner-pending rows remain (repo link
-   gates reject `Refs`): add one line saying those rows land on this branch
-   before merge, and move them there or to the open umbrella issue before
-   asking to merge. Do the small orphan/dead-code commit yourself
+   the PR uses `Refs #N` while owner-pending rows remain and `Closes #N`
+   only once they have landed on this branch. When the repo's link gate
+   rejects `Refs`, use `Closes #N` with one line saying those rows land on
+   this branch before merge, and land them before asking to merge; rows
+   moved to another open issue instead leave this issue partly done, so
+   keep `Refs #N` there. Do the small orphan/dead-code commit yourself
    first, then fan the case pruning out, so no file carries two classes.
    - Case-pruning lanes: one subagent per audit lane, disjoint test files in
      the same worktree, no git commands. Each lane re-reads every claimed
