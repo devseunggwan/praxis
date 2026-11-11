@@ -113,6 +113,33 @@ State the method and that positive control in the report.
 Adding `--durations=30` to the CI's main pytest invocation leaves exact
 evidence for the next hunt at no cost.
 
+## Ranking test files when CI logs only dots
+
+When CI runs pytest without `-v` and only a `--durations=30` top list, the
+top-N covers a fraction of leg time; get the full ranking from one local
+full-suite run instead:
+
+1. Throwaway detached worktree at the CI head sha (submodules initialised),
+   the CI's own dependency file synced into the venv.
+2. Run the whole suite in ONE pytest process, in the background (persisted),
+   with `-p no:cacheprovider --junitxml=<scratch>.xml`. Do not split it into
+   parallel `--splits N --group k` processes from the same checkout: a root
+   conftest that pins `AIRFLOW_HOME` to the repo root makes every process
+   share one sqlite metadata DB (`alembic_version` / `table already exists`
+   errors), and session containers get torn down under each other.
+3. Sum junit `testcase` time per module; print seconds, count, s/test and
+   cumulative share. Also print the concentration line: count and seconds of
+   tests ≥ 1 s vs < 0.05 s — it decides whether the lever is per-file or
+   suite-wide.
+4. Convert to CI seconds with the measured ratio (CI both-legs pytest sum ÷
+   local junit sum, typically ~2×) and state it; the converted per-module
+   values are estimates (the ratio differs per module), so cross-check the
+   top candidates against any CI `--durations` lines before ranking them; list errored modules as
+   unmeasured (not zero), with their error class.
+5. Before reporting after a long gap, check the run actually finished (log
+   tail has the pytest summary): a host restart kills the background run
+   silently and leaves a partial log.
+
 ## Attributing a slowdown between two dates
 
 For "CI is getting slower again, is it the new tests?":
@@ -130,7 +157,14 @@ For "CI is getting slower again, is it the new tests?":
    per leg. Report test-count growth % next to time growth %; time growing
    faster than count means either the new tests are individually slow or the
    existing ones got slower — step 5b tells the two apart, so do not name the
-   new tests as the cause from totals alone.
+   new tests as the cause from totals alone. Print one row per sampled day —
+   collected · slowest-leg seconds · summary seconds ÷ passed (per-test
+   average) — so the user sees both curves at once; a per-test average that
+   keeps climbing day after day says the added tests are heavier than the old
+   ones (or a shared fixture got slower), which is the question 5b settles.
+   When CI logs only dots plus a top-N `--durations`, 5b rests on local
+   junit runs: label that attribution as an estimate, or add `--junitxml`
+   (or `-v`) to the CI run first.
 4. **Per-file delta**: run the per-file ranking above on both runs, bucket by
    the first two path segments under the test root, and print baseline,
    now, delta. Start attribution at the `collected` line, not the step start:

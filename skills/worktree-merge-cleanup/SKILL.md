@@ -2,8 +2,9 @@
 name: worktree-merge-cleanup
 description: >
   On-demand home for the pre-merge worktree precondition and the unified
-  post-merge cleanup sequence — how to run `gh pr merge --squash --delete-branch`
-  from the base-branch worktree, the submodule `--force` caveat (never
+  post-merge cleanup sequence — how to run `gh pr merge --squash` from the
+  base-branch worktree and remove the head worktree only after `MERGED`, the
+  submodule `--force` caveat (never
   `git submodule deinit` a linked worktree: it strips the shared submodule
   url), the squash-ancestry stale-HEAD guard, and the no-`&&`-chain rule.
 when_to_use: >
@@ -13,7 +14,10 @@ when_to_use: >
   and on removing ANY worktree (load it BEFORE the first removal command) or
   cleaning up after a merge — including the worktree of a PR that was
   closed without merging ("닫았습니다" → "정리해주세요") — or when about to
-  run `git submodule deinit` to get a worktree removed.
+  run `git submodule deinit` to get a worktree removed, and on the error
+  `fatal: working trees containing submodules cannot be moved or removed`
+  (load it before reacting: the reflexive fixes, `deinit` or moving the
+  directory aside and pruning, are both the wrong path).
   Do NOT activate on "merge conflict resolution" or a plain
   feature-branch "git merge".
 verified-against-runtime: true
@@ -36,6 +40,11 @@ This skill is the on-demand home for that procedure. The always-loaded rule set
 keeps only a pointer here; the deterministic `--delete-branch` failure mode is
 additionally enforced structurally by the `gh-merge-worktree-precondition`
 PreToolUse hook (see [Relationship to enforcement](#relationship-to-enforcement)).
+
+**Default order:** merge without `--delete-branch`, confirm `MERGED`, then
+remove the head worktree and branches. Removing the worktree first (which
+`--delete-branch` requires) loses it when the merge is then blocked or
+interrupted, and cuts off any other session working in it.
 
 **Core principle:** run the post-merge cleanup steps as *separate* Bash calls,
 never collapsed into one `&&`-chain — a git hard error mid-sequence
@@ -73,8 +82,13 @@ fatal: 'main' is already used by worktree at /Users/.../<main-worktree>
 ```
 
 1. Confirm the worktree occupying the base branch with `git worktree list`.
-2. **If `--delete-branch` is included**: remove the PR head branch's worktree
-   first (`git worktree remove <issue-worktree-path>`). If the shell's working
+2. **Merge without `--delete-branch`; remove the head worktree only after
+   `gh pr view <N> --json state` reads `MERGED`** (`git worktree remove
+   <issue-worktree-path>`, then the branches, per the unified sequence
+   below). With `--delete-branch` gh deletes the local head branch itself,
+   so the worktree has to go first and is lost when the merge is then
+   blocked; pass the flag only for a worktree no other session uses and a
+   merge nothing can block. If the shell's working
    directory is that worktree, every later shell call fails at its implicit
    `cd` once the directory is gone — run the remove from (or with `-C`) the base
    worktree, and give every following call an explicit working directory
@@ -105,6 +119,25 @@ fatal: 'main' is already used by worktree at /Users/.../<main-worktree>
      straight to the clean-check + `--force`. If a deinit already ran, restore
      the entry from the main checkout with `git submodule init <path>` and
      confirm with `git config --get submodule.<name>.url`.
+     Moving the directory aside and running `git worktree prune` is not a
+     workaround either: it skips the clean-check `--force` relies on and runs a
+     repository-wide prune; the clean-check + `--force` is the only path.
+   - A lone `M <submodule path>` line (with a leading space) in the clean-check is often only the
+     submodule checkout lagging the pointer a base merge recorded, not your
+     edit. Confirm the submodule itself is clean
+     (`git -C <path>/<submodule> status --porcelain --ignored` empty, or
+     only regenerable `!!` lines) and that its current commit survives the
+     update and the removal (`git -C <path>/<submodule> for-each-ref
+     --contains HEAD refs/remotes` non-empty, so a remote holds it: a local
+     branch does not count, because a linked worktree's submodule repository
+     can live under the worktree's git dir and `worktree remove --force`
+     deletes its refs and objects too; `branch -a --contains` is not enough
+     either, it lists a detached HEAD as `* (no branch)`; otherwise stop and
+     report), then run
+     `git -C <path> submodule update --checkout <submodule path>` (no
+     `--init`, never `deinit`) and re-read `status --porcelain`. When it comes back empty, the
+     worktree is clean and the `--force` remove may proceed. A dirty submodule
+     is a stop condition like any other dirty file.
 3. `cd <base-worktree-path>` or chain `cd <path> && gh pr merge ...` in the same
    Bash call (avoid cwd-reset trap between Bash calls).
    - **Fork clones: pass `--repo <fork-owner>/<repo>` on every `gh pr` call,
@@ -121,8 +154,8 @@ fatal: 'main' is already used by worktree at /Users/.../<main-worktree>
    it first — see [prune is repository-wide](#prune-is-repository-wide--snapshot-before-running-it)),
    then `git pull origin <base>`.
 5. **Squash-ancestry stale HEAD guard (post-merge sync mandatory)**: immediately
-   after `gh pr merge --squash --delete-branch`, run `git pull origin
-   <base-branch>` as a **separate step**. gh merges remote then deletes local
+   after `gh pr merge --squash` (with or without `--delete-branch`), run
+   `git pull origin <base-branch>` as a **separate step**. gh merges remote then deletes local
    branch by reachability against local HEAD — but does not fetch the local
    base, so if local base is still at pre-merge SHA the delete silently skips
    (`warning: deleting branch 'X' that has been merged to 'refs/remotes/origin/X',
@@ -165,9 +198,26 @@ Confirm before touching anything:
    remote review bot or a "merge base into branch" pushed commits after your
    last local commit: the local branch holds nothing the merged PR lacks, so
    deleting it loses nothing — say so in the report.
+   A tip that is neither equal to nor an ancestor of `headRefOid` is often
+   only an unpushed `git merge origin/<base>` made locally while the PR's
+   remote branch got its own base merge (`gh pr update-branch`): check
+   `git log --no-merges <headRefOid>..<branch>` is empty and
+   `git cherry -v <headRefOid> <branch>` prints nothing, and merging the
+   local tip into `headRefOid` changes nothing
+   (`git merge-tree --write-tree <headRefOid> <branch>` prints the same tree
+   as `git rev-parse <headRefOid>^{tree}`; the first two checks skip merge
+   commits, and a conflict-resolution edit lives in one) — then the extra
+   commits carry no content of their own; report that evidence and ask once
+   rather than deleting under the standing approval.
    A dirty worktree (`git -C <path> status --porcelain` non-empty) or a tip
-   that is not equal to or an ancestor of `headRefOid` (local commits the PR
-   never saw) is the stop condition: report it and leave it. `--porcelain`
+   with non-merge commits the PR never saw is the stop condition: report it
+   and leave it. Before calling a
+   dirty file stale, check whether another session is mid-run in that worktree
+   (`lsof -d cwd 2>/dev/null | grep -F "<path>"`, `pgrep -fl "<path>"` for a
+   script given the path as an argument): a pipeline verifier or mutation test
+   stages an old version of a file on purpose and restores it when it ends.
+   Never revert or stash it yourself; tell that session the PR merged, ask it
+   to restore and leave the worktree clean, and retry cleanup after it exits. `--porcelain`
    alone does not list ignored files, and `git worktree remove` deletes them
    with the directory (a `.env`, local config, a scratch dataset). Also run
    `git -C <path> status --porcelain --ignored` and read its `!!` lines: when
@@ -179,7 +229,12 @@ Confirm before touching anything:
    in them is newer than the worktree's creation (the worktree's `.git` file):
    `find <artifact> -type f ! -newer <path>/.git` prints nothing — say so in
    the report; anything it prints was there before you and stays a stop
-   condition.
+   condition. A `.env` byte-identical to the main checkout's
+   (`cmp <path>/.env <main checkout>/.env` exit `0`) is a copy, also
+   regenerable. When every `!!` line falls in these classes, remove with
+   `--force` under the standing approval without asking — users who run many
+   worktrees read a "may I delete the leftovers?" question as the cleanup
+   leaving debris behind, and it costs a round trip each time.
    An ignored *source-looking* directory (`providers/<x>/`) that `!!` lists
    whole is often a package whose sources the base merge deleted while its
    `__pycache__/` stayed: `find <dir> -type f -not -path '*/__pycache__/*'`
@@ -213,9 +268,11 @@ files would be overwritten by merge`, or the same for untracked files), and `gh 
 fails its local sync. Those edits are not yours to stash, discard, or commit.
 
 1. Run the merge remotely only: `cd` somewhere outside the repository and call
-   `gh pr merge <N> --repo <owner>/<repo> --squash --delete-branch`. Outside a
-   repository gh has no local checkout to sync, so it merges and deletes the
-   remote head branch only. Remove the head worktree first, as above.
+   `gh pr merge <N> --repo <owner>/<repo> --squash`. Outside a repository gh
+   has no local checkout to sync, so it only merges. After it reads
+   `MERGED`, remove the head worktree as above, and delete the remote head
+   branch when `delete_branch_on_merge` is off (`git push origin --delete
+   <branch>`, after its remote tip equals `headRefOid`).
 2. Confirm the local base has no commits of its own:
    `git -C <base-worktree> fetch origin --prune`, then
    `git -C <base-worktree> merge-base --is-ancestor HEAD origin/<base>`
@@ -245,10 +302,12 @@ Covers both sub-cases (worktree conflict + squash-ancestry gap):
 ```bash
 cd <base-worktree-path>
 git switch <base-branch>
-gh pr merge <N> --squash --delete-branch
+gh pr merge <N> --squash                                   # no --delete-branch
+gh pr view <N> --json state,headRefOid                     # MERGED before any removal
 git pull origin <base-branch>                              # resolve squash-ancestry gap
-git branch -d <feature-branch> 2>/dev/null \
-  || git branch -D <feature-branch>                        # fallback (may already be deleted)
+git worktree remove <head-worktree-path>                   # checklist item 2 caveats
+git branch -D <feature-branch>                             # after its tip equals headRefOid
+git push origin --delete <feature-branch>                  # only when delete_branch_on_merge is off
 git worktree list --porcelain \
   > "$(git rev-parse --path-format=absolute --git-common-dir)/wt-before-<N>.txt"
 git worktree prune --dry-run -v                             # what would go — read it
@@ -271,7 +330,7 @@ cleanup separately: confirm with `git branch | grep <feature-branch>` **and**
 diff the post-prune registry against the snapshot. Both sides must be filtered
 the same way — the plain `git worktree list` output is a different format from
 `--porcelain`, so comparing one against the other never matches. Your own
-worktree left the registry back at checklist item 2, so it is already absent
+worktree left the registry earlier in this sequence, so it is already absent
 from the snapshot: when the dry-run printed nothing, the `diff` must print
 nothing either — assuming no one added or removed a worktree in this
 repository while the sequence was running. Any entry it reports as removed
@@ -412,7 +471,7 @@ own oracle, and under a squash-merge repo the obvious ones are wrong.
 
 | Layer | Home | Covers |
 | ------- | ------ | -------- |
-| Structural enforcement | `gh-merge-worktree-precondition` PreToolUse hook | Blocks `gh pr merge ... --delete-branch` when the head branch is still checked out in another worktree — one deterministic slice of checklist item 2 |
+| Structural enforcement | `gh-merge-worktree-precondition` PreToolUse hook | Blocks `gh pr merge ... --delete-branch` when the head branch is still checked out in another worktree, the remove-first order the flag needs; the default path in checklist item 2 does not pass the flag |
 | On-demand procedure (this skill) | `worktree-merge-cleanup` | The full manual sequence: base-worktree call site, submodule `--force`, squash-ancestry stale-HEAD guard, unified cleanup, no-`&&`-chain |
 | Always-loaded | user-level rule set | A pointer to this skill only |
 
