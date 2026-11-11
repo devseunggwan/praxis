@@ -1,18 +1,18 @@
 #!/bin/bash
-# test_pre_merge_approval_gate.sh — coverage for hooks/preflight-gate/pre-merge-approval-gate/impl.py
+# test_merge_gate_approval.sh — coverage for hooks/preflight-gate/merge-gate/approval.py
 #
 # Synthesizes Claude Code PreToolUse hook payloads and asserts:
 #   ask    → exit 0 + stdout JSON has permissionDecision "ask"
 #   silent → exit 0 + stdout empty (no JSON, no permissionDecision)
 #
-# Usage: bash tests/test_pre_merge_approval_gate.sh
+# Usage: bash tests/test_merge_gate_approval.sh
 # Exit:  0 = all pass; 1 = at least one fail
 
 set +e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/../../.." && pwd)"
-HOOK="$ROOT_DIR/hooks/preflight-gate/pre-merge-approval-gate/impl.py"
+HOOK="$ROOT_DIR/hooks/preflight-gate/merge-gate/approval.py"
 
 if [ ! -x "$HOOK" ]; then
   echo "FAIL: hook not executable: $HOOK" >&2
@@ -259,7 +259,7 @@ run_case "direct session: merge after a heredoc terminator (still a merge, ask)"
   '{"tool_name": "Bash", "tool_input": {"command": "cat <<'EOF'\nbody\nEOF\ngh pr merge 985 --squash"}}'
 
 # Bulk approval: the chat answer to a per-PR-sectioned briefing replaces the
-# prompt for each listed PR (momentum-rule-retrieval-gate's bulk_merge_approved
+# prompt for each listed PR (the briefing check's bulk_merge_approved
 # decides). Anything it does not release still asks.
 FIXTURES_DIR="$ROOT_DIR/tests/fixtures"
 bulk_payload() {

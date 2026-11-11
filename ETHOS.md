@@ -39,7 +39,7 @@ implements these principles live in [`DESIGN.md`](DESIGN.md).
 - **Fail-open on infrastructure errors.** Missing `jq` / `python3`, malformed
   JSON stdin, unreadable transcript, unknown tool name → exit 0. The hook
   never breaks Claude Code; it only nudges.
-- **No agent-attachable bypass for high-stakes gates.** `pre-merge-approval-gate`
+- **No agent-attachable bypass for high-stakes gates.** `merge-gate` (approval check)
   intentionally has no marker (it stays silent only for a PR the user approved
   in a bulk answer, read from the user's own message); `completion-verify` the
   same. Bypass marker (`# side-effect:ack`, `# title-length:ack`) exists only
@@ -90,8 +90,8 @@ backstop yet).
 | --- | --- | --- |
 | **Git Commit & Title Rules** | `type(scope): description`, title ≤ 50 characters, lowercase, no trailing period — [`CONTRIBUTING.md` → Commit conventions](CONTRIBUTING.md#commit-conventions) | `commit-title-format-check`, `commit-title-length-check` |
 | **Issue-Driven Worktree Workflow** | Every code change lives in its own issue, branch, and worktree; nothing is edited on `main` / `dev` / `prod` | `pre-edit-protected-branch-guard`, `worktree-edit-gate` |
-| **Pre-Merge Reporting** | Before asking to merge, brief the user on what changed, what review found, and how it was verified; a trivial PR may use a two-line report | `merge-briefing`, `pre-merge-approval-gate`, `block-manufactured-action-menu`, `momentum-rule-retrieval-gate` |
-| **No Approval Transfer Across Companion PRs** | Approval of one PR or action never carries to a sibling; each mutation gets its own ask | `pre-merge-approval-gate`, `momentum-rule-retrieval-gate`, `external-write-falsify-check` |
+| **Pre-Merge Reporting** | Before asking to merge, brief the user on what changed, what review found, and how it was verified; a trivial PR may use a two-line report | `merge-briefing`, `merge-gate` (approval check), `block-manufactured-action-menu`, `momentum-rule-retrieval-gate` |
+| **No Approval Transfer Across Companion PRs** | Approval of one PR or action never carries to a sibling; each mutation gets its own ask | `merge-gate` (approval and briefing checks), `external-write-falsify-check` |
 | **Executing actions with care** | A shared-state mutation is confirmed per action, even after a generic go-ahead | `block-manufactured-action-menu` |
 | **Verification Before Completion** | The verification command runs in the same turn as the completion claim it supports | `completion-verify`, `completion-signal-gate` |
 | **Information Accuracy** | Layer 2: a data-driven claim shows the command output first; Layer 3: own-authored content is verified like external content (the *author-exempt verification trap*); a checkmark is a citation to something read this session | `count-assertion-verify`, `source-citation-probe-gate`, `artifact-verdict-evidence-gate` |
@@ -102,7 +102,7 @@ backstop yet).
 | **One-Probe-Before-Action Gate** | Run one probe before repeating a status check or re-issuing an action | `pre-output-falsification-gate` |
 | **External-Surface Write Requires Falsification** | Text posted to a PR, issue, Slack, or Notion is verified fact, not hypothesis; retraction costs more than the check | `external-write-falsify-check`, `codex-review-wrap` |
 | **Every `$` block is a transcription, never a composition** | A command line shown above an output block is the line that produced it | `composed-command-gate` |
-| **External Discussion Fidelity — lock-boundary re-fetch** | Live state (PR state, a Slack thread) is re-fetched at the boundary where a decision depends on it | `pr-state-refetch-gate` |
+| **External Discussion Fidelity — lock-boundary re-fetch** | Live state (PR state, a Slack thread) is re-fetched at the boundary where a decision depends on it | `merge-gate` (refetch check) |
 | **Read-only prod calls auto-proceed** | A read-only production fetch needs no approval; anything that captures or forwards a secret does | `secret-print-redaction-advisory` |
 | **Rule Conflict Precedence — CLAUDE.md over Skills** | When a skill body and a CLAUDE.md rule disagree, the rule wins | `block-ask-end-option` |
 | **Look Up the Answer Before You Offer a Menu** | A choice that a registry, convention, or sibling implementation already settles is looked up, not put to the user | *none* — deliberately unhooked; `docs/hook/RULE-BACKSTOP-GAPS.md` gap #5 (issue #1009) |

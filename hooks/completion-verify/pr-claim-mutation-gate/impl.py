@@ -69,7 +69,7 @@ _ROLE = "completion-verify"
 
 # ---------------------------------------------------------------------------
 # Claim detection — a PR/review-context SUBJECT and a processed-state CLAIM on
-# the same line (line-localization mirrors merge-state-claim-gate). EN tokens
+# the same line (line-localization mirrors merge-gate (claim check)). EN tokens
 # use lookarounds, not \b: Python \b puts no boundary between Hangul and ASCII
 # word chars, so "\bPR\b" fails on "PR를" (same trap the sibling hooks fixed).
 # ---------------------------------------------------------------------------
@@ -100,7 +100,7 @@ _CLAIM_RE = re.compile(
 )
 
 # Negation — same line suppresses the claim (conservative; mirrors
-# merge-state-claim-gate's `_NEGATION_RE`). Double negation ("처리하지 않은 게
+# merge-gate (claim check)'s `_NEGATION_RE`). Double negation ("처리하지 않은 게
 # 아닙니다") is a KNOWN, ACCEPTED gap: the inner negation token still matches
 # and suppresses the line, silencing what is semantically an affirmative
 # claim. Reliable double-negation parsing is out of scope for a line-level

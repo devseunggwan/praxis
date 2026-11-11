@@ -489,7 +489,7 @@ can miss a note without error.
 
 - `hooks/advisory-nudge/cited-rule-gate/impl.py:221` — `window_text`, the
   assistant text since the previous tool call.
-- `hooks/advisory-nudge/momentum-rule-retrieval-gate/impl.py:672` —
+- `hooks/preflight-gate/merge-gate/briefing.py:538` —
   `_assistant_text`, assistant text across an index range.
 - `hooks/completion-verify/pr-report-destination-gate/impl.py:247` —
   `_reduce_event`, the PR numbers named in each event's `text` blocks.

@@ -99,7 +99,7 @@ _GIT_GLOBAL_VALUE_OPTS = frozenset(
     {"-C", "-c", "--git-dir", "--work-tree", "--namespace", "--exec-path"}
 )
 # gh's are inherited cobra flags, so they are accepted in any position — before
-# `pr`, and between `pr` and the verb (the same walk gh-merge-worktree-precondition
+# `pr`, and between `pr` and the verb (the same walk merge-gate (worktree check)
 # performs).
 _GH_GLOBAL_VALUE_OPTS = frozenset({"-R", "--repo", "--hostname", "--color"})
 # `cmux --config <path> new-workspace` takes a value the same way.

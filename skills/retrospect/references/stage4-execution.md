@@ -187,8 +187,8 @@ For each approved action:
 
    **`momentum:` stays top-level — a deliberate exclusion, not a residual gap.**
    `momentum` is a *different* opt-in mechanism (consumed by
-   `hooks/advisory-nudge/momentum-rule-retrieval-gate/impl.py`'s
-   `MOMENTUM_RE`, not by the memory-hint hook's `hookKeywords`/`hookEvents`)
+   `hooks/_lib/_momentum_surface.py`'s `MOMENTUM_RE` (read by
+   `momentum-rule-retrieval-gate` and `merge-gate`), not by the memory-hint hook's `hookKeywords`/`hookEvents`)
    with its own independent hook consumer — it answers "surface this memory
    at a high-momentum action point" rather than "what kind of memory is
    this", so it does not belong in the `metadata:` taxonomy block

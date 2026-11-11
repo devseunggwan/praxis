@@ -39,14 +39,14 @@ in [`../SECURITY.md`](../SECURITY.md).
 | `PRAXIS_HOOK_BYPASS_WORKTREE_GATE` | `worktree-edit-gate` | Skip the worktree-edit preflight |
 | `PRAXIS_HOOK_BYPASS_DECISION_CONSISTENCY_GATE` | `write-decision-consistency-gate` | Skip the Decisions-block consistency preflight |
 | `PRAXIS_HOOK_BYPASS_WORKTREE_PRUNE_SNAPSHOT` | `worktree-prune-snapshot-gate` | Skip the snapshot-before-prune gate |
-| `PRAXIS_HOOK_BYPASS_MERGE_WORKTREE_GATE` | `gh-merge-worktree-precondition` | Skip the `gh pr merge --delete-branch` worktree-conflict precondition check |
+| `PRAXIS_HOOK_BYPASS_MERGE_WORKTREE_GATE` | `merge-gate` | Skip the `gh pr merge --delete-branch` worktree-conflict precondition check |
 | `PRAXIS_HOOK_BYPASS_ANCHOR_GATE` | `anchor-comment-gate` | Skip both the pre-post structure check and the published-anchor re-check |
 | `PRAXIS_HOOK_BYPASS_HUB_ENFORCE` | `block-child-repo-issue-create` | Skip the hub-mediated child-repo issue guard |
 | `PRAXIS_HOOK_BYPASS_POSTCOMPACT_CONTEXT` | `postcompact-context` | Skip the post-compaction context advisory |
 | `PRAXIS_HOOK_BYPASS_POLL_LOOP_GUARD` | `foreground-poll-loop-guard` | Skip the foreground poll-loop ceiling guard |
 | `PRAXIS_BULK_WRITE_BYPASS` | `bulk-write-memory-checkpoint` | Skip the bulk-write checkpoint advisory |
 | `PRAXIS_FALSIFY_GATE_BYPASS` | `pre-output-falsification-gate` | Skip both falsification lanes |
-| `PRAXIS_MERGE_CLAIM_BYPASS` | `merge-state-claim-gate` | Skip the merge/PR/issue-state claim gate |
+| `PRAXIS_MERGE_CLAIM_BYPASS` | `merge-gate` | Skip the merge/PR/issue-state claim gate |
 | `PRAXIS_RUNTIME_CLAIM_BYPASS` | `runtime-state-claim-gate` | Skip the runtime/execution-state claim gate |
 | `PRAXIS_HOOK_BYPASS_NEGATIVE_EXISTENCE_GATE` | `negative-existence-verdict-gate` | Skip the negative-existence verdict `Enumerated:`-line gate |
 | `PRAXIS_HOOK_BYPASS_ARTIFACT_VERDICT_GATE` | `artifact-verdict-evidence-gate` | Skip the artifact-verdict `Verdict-evidence:`-line gate |
@@ -70,8 +70,8 @@ in [`../SECURITY.md`](../SECURITY.md).
 | `PRAXIS_EXCLUSION_PROBE_SKIP` | `exclusion-probe-gate` | Skip the unprobed-exclusion-directive content gate |
 | `PRAXIS_MD_ESCAPE_SKIP` | `pre-edit-md-escape-advisory` | Skip the markdown-escape advisory |
 | `PRAXIS_PBGUARD_SKIP` | `pre-edit-protected-branch-guard` | Skip the protected-branch edit guard |
-| `PRAXIS_MOMENTUM_BYPASS` | `momentum-rule-retrieval-gate` | Skip the high-momentum rule nudge |
-| `PRAXIS_MOMENTUM_MERGE_ADVISORY` | `momentum-rule-retrieval-gate` | Demote the merge-briefing escalation to advisory (stderr reminder still fires; no `deny` block on an incomplete pre-merge briefing) |
+| `PRAXIS_MOMENTUM_BYPASS` | `momentum-rule-retrieval-gate`, `merge-gate` | Skip the high-momentum rule nudge, and the merge-gate briefing check |
+| `PRAXIS_MOMENTUM_MERGE_ADVISORY` | `merge-gate` | Demote the merge-briefing escalation to advisory (stderr reminder still fires; no `deny` block on an incomplete pre-merge briefing) |
 | `PRAXIS_VERSION_BUMP_BYPASS` | `version-bump-evidence-check` | Skip the version-bump evidence advisory |
 | `PRAXIS_SKIP_STAGED_FILE_ENUM` | `pre-commit-staged-file-enumeration` | Skip the pre-commit staged-file enumeration advisory |
 | `PRAXIS_SKIP_MODEL_ROUTING` | `model-routing-advisory` | Skip the delegation `--model` tier-mismatch advisory |
@@ -96,13 +96,13 @@ in [`../SECURITY.md`](../SECURITY.md).
 | `PRAXIS_ARTIFACT_VERDICT_STRICT` | `artifact-verdict-evidence-gate` | Promote the artifact-verdict gate from advisory to block. Any non-falsey value (`1` / `true` / `yes`); `0` / `false` / empty keep advisory |
 | `PRAXIS_EXCLUSION_PROBE_STRICT` | `exclusion-probe-gate` | |
 | `PRAXIS_PHANTOM_PATH_STRICT` | `external-write-path-existence-check` | |
-| `PRAXIS_MERGE_CLAIM_STRICT` | `merge-state-claim-gate` | |
+| `PRAXIS_MERGE_CLAIM_STRICT` | `merge-gate` | |
 | `PRAXIS_DENIED_ACTION_STRICT` | `denied-action-report-gate` | Exact value `1` after stripping. The advisory tier reaches the user but not the model, so this is the tier that makes the finding actionable in-session (#1265) |
 | `PRAXIS_RUNTIME_CLAIM_STRICT` | `runtime-state-claim-gate` | |
 | `PRAXIS_PUSH_VERIFY_STRICT` | `push-remote-ref-verify` | |
 | `PRAXIS_PR_THREAD_ADVISORY_STRICT` | `pr-thread-resolve-advisory` | Exit 2 only when a needs-a-reply thread is open |
-| `PRAXIS_MOMENTUM_STRICT` | `momentum-rule-retrieval-gate` | |
-| `PRAXIS_MOMENTUM_ACK` | `momentum-rule-retrieval-gate` | Strict-mode unlock token — unblocks one invocation when `PRAXIS_MOMENTUM_STRICT=1`; no effect in advisory mode |
+| `PRAXIS_MOMENTUM_STRICT` | `momentum-rule-retrieval-gate`, `merge-gate` | |
+| `PRAXIS_MOMENTUM_ACK` | `momentum-rule-retrieval-gate`, `merge-gate` | Strict-mode unlock token — unblocks one invocation when `PRAXIS_MOMENTUM_STRICT=1`; no effect in advisory mode |
 | `PRAXIS_VERSION_BUMP_STRICT` | `version-bump-evidence-check` | |
 | `PRAXIS_COMMIT_TITLE_FORMAT_STRICT` | `commit-title-format-check` | |
 | `PRAXIS_COMMIT_PAREN_STRICT` | `commit-message-paren-check` | |
@@ -114,8 +114,8 @@ in [`../SECURITY.md`](../SECURITY.md).
 | `PRAXIS_BLOCK_MANUFACTURED_MENU_STRICT` | `block-manufactured-action-menu` | |
 | `PRAXIS_GUARD_REMOVAL_MENU_STRICT` | `block-guard-removal-menu` | |
 | `PRAXIS_MENU_MUTATION_TIER_STRICT` | `menu-mutation-tier-advisory` | Exact value `1` only — `true` / `yes` / `no` / `0` stay advisory |
-| `PRAXIS_MERGE_MENU_REVIEW_STRICT` | `merge-menu-review-options-advisory` | Exact value `1` after stripping — `true` / `yes` / `0` stay advisory |
-| `PRAXIS_PR_STATE_REFETCH_STRICT` | `pr-state-refetch-gate` | |
+| `PRAXIS_MERGE_MENU_REVIEW_STRICT` | `merge-gate` | Exact value `1` after stripping — `true` / `yes` / `0` stay advisory |
+| `PRAXIS_PR_STATE_REFETCH_STRICT` | `merge-gate` | |
 | `PRAXIS_EXTERNAL_WRITE_STRICT` | `external-write-falsify-check` | |
 | `PRAXIS_AUTHOR_EXEMPT_STRICT` | `external-write-falsify-check` | |
 | `PRAXIS_CLUSTER_APPROVAL_STRICT` | `external-write-falsify-check` | |
@@ -166,7 +166,7 @@ per-hook `spec.md` before promoting any of them.
 | `PRAXIS_INTENT_PIVOT_MODE` | `session-intent` | Pivot-detection mode |
 | `PRAXIS_SKIP_JEV_ROUTING` | `cmux-delegate` (skill, not a hook) | `1` stops the delegation route script from calling TypeSafe's System One API, so an omitted `--model` keeps the pre-jev default. See [`../PRIVACY.md`](../PRIVACY.md) Direct egress (issue #1481) |
 | `PRAXIS_RESPONSE_LANGUAGE` | `postcompact-context`, `response-language-nudge` | User's response-language instruction. `postcompact-context` echoes it verbatim as one context line; `response-language-nudge` additionally requires it to normalize to Korean before it runs its drift check. No default, no hardcoded language — unset or blank leaves both hooks' output unchanged (issue #1476) |
-| `PRAXIS_MERGE_APPROVAL_PROVIDER` | `momentum-rule-retrieval-gate`, `pre-merge-approval-gate` | Absolute path to a host approval provider that reports a merge answer the human gave in the host's own channel. Not an opt-out: praxis still checks the briefing and spends one approval per merge, and the hook process environment is set by the host, never by an inline prefix. Unset leaves both gates unchanged (issue #1639; contract in the momentum gate's spec → *Host approval provider*) |
+| `PRAXIS_MERGE_APPROVAL_PROVIDER` | `merge-gate` | Absolute path to a host approval provider that reports a merge answer the human gave in the host's own channel. Not an opt-out: praxis still checks the briefing and spends one approval per merge, and the hook process environment is set by the host, never by an inline prefix. Unset leaves both gates unchanged (issue #1639; contract in the merge gate's spec → *Host approval provider*) |
 
 ## Path / test (relocate state, caches, logs)
 
@@ -179,7 +179,7 @@ per-hook `spec.md` before promoting any of them.
 | `PRAXIS_HOOK_ERROR_LOG_MAX_BYTES` | `5242880` | shared (`@fail_open`) — error-log rotation cap in bytes, `0` disables (#1282) |
 | `PRAXIS_BYPASS_TELEMETRY_FILE` | `~/.praxis/telemetry/bypass-events-<date>.jsonl` | `bypass-telemetry` |
 | `PRAXIS_BYPASS_ROUTE_SIGNAL_FILE` | `~/.praxis/telemetry/bypass-route-events-<date>.jsonl` | `bypass-route-signal` |
-| `PRAXIS_MEMORY_DIR` | memory store dir | `memory-hint`, `momentum-rule-retrieval-gate`, `memory-distillation-fields-gate` |
+| `PRAXIS_MEMORY_DIR` | memory store dir | `memory-hint`, `momentum-rule-retrieval-gate`, `merge-gate`, `memory-distillation-fields-gate` |
 | `PRAXIS_GH_LABEL_CACHE_PATH` | `~/.praxis/cache/gh-label-cache.json` | `gh-label-verify` |
 | `PRAXIS_GH_LABEL_CACHE_TTL_SEC` | `300` | `gh-label-verify` |
 | `PRAXIS_INTERNAL_TOKEN_CACHE_PATH` | `~/.praxis/cache/internal-token-visibility.json` | `internal-token-leak-gate` — `public` repo-visibility answers only, 24h TTL |

@@ -109,6 +109,12 @@ approaches the budget was not measured.
 > above, and the "22 reachable hooks" count it was taken against, are kept as
 > the record of that measurement.
 
+> **2026-11-11 note.** `merge-menu-review-options-advisory` moved into
+> `merge-gate` (issue #1650), a preflight-gate hook, so it left this
+> advisory-only table. `momentum-rule-retrieval-gate` lost its `merge`
+> trigger to the same hook; its remaining dispatch and force-push triggers
+> write stderr only, so its row now reads `unreachable`.
+
 <!-- rule-noop-audit:begin -->
 | Hook | Channels | Strict env | Reach | Stage 2 |
 | --- | --- | --- | --- | --- |
@@ -132,9 +138,8 @@ approaches the budget was not measured.
 | `long-foreground-call-advisory` | stderr | - | unreachable | - |
 | `memory-hint` | stderr | - | unreachable | - |
 | `menu-mutation-tier-advisory` | decision, stderr | `PRAXIS_MENU_MUTATION_TIER_STRICT` | reachable | unmeasured: event |
-| `merge-menu-review-options-advisory` | stderr | `PRAXIS_MERGE_MENU_REVIEW_STRICT` | unreachable | - |
 | `model-routing-advisory` | stderr | - | unreachable | - |
-| `momentum-rule-retrieval-gate` | decision, stderr | `PRAXIS_MOMENTUM_STRICT` | reachable | unmeasured: write |
+| `momentum-rule-retrieval-gate` | stderr | `PRAXIS_MOMENTUM_STRICT` | unreachable | - |
 | `n1-quantitative-claim-advisory` | stderr | - | unreachable | - |
 | `output-block-falsify-advisory` | decision, stderr | - | reachable | unmeasured: write |
 | `path-probe-gate` | decision, stderr | `PRAXIS_PATH_PROBE_STRICT` | reachable | unmeasured: strict |

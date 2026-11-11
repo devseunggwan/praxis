@@ -507,7 +507,7 @@ placement guidance.
 | ---------------------------------- | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
 | `block-gh-state-all`               | `gh search --state all`                              | None — different subcommand                                                                                                                |
 | `block-pr-without-caller-evidence` | `gh pr create` body missing `Caller chain verified:` | Complementary — this hook fires first as a pre-flight; sibling fires if body is present but missing the line                               |
-| `pre-merge-approval-gate`          | `gh pr merge`                                        | None — different subcommand                                                                                                                |
+| `merge-gate` (approval check)          | `gh pr merge`                                        | None — different subcommand                                                                                                                |
 | `side-effect-scan`                 | `gh pr create` (gh-merge category)                   | Complementary — side-effect-scan fires first with a generic "remote trigger" ask; this hook fires with a targeted cross-boundary checklist |
 
 ### Tests

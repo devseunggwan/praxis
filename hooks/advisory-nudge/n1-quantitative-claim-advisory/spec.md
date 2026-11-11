@@ -209,7 +209,7 @@ on this axis: `caller-probe-gate` scopes its suppressor per write — the code
 says so at `impl.py:373`, *"Arm A is per-write: a probe line in one body says
 nothing about a claim published by another"*, and a regression test pins it
 (`two writes: probe in write A does not clear write B (warn)`).
-`merge-state-claim-gate` scopes per PR number via
+`merge-gate` (claim check) scopes per PR number via
 `has_fresh_query_for_number(events, n)`. The only gate that scans the whole
 body symmetrically is `perf-multiplier-evidence-advisory`, and it *detects*
 over the whole body too, so it has no narrow/wide mismatch to begin with.

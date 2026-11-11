@@ -7,7 +7,8 @@ Coverage:
     a `.` resolves to the per-character slug directory
   - PRAXIS_MEMORY_DIR env override (existing dir wins, missing dir → None)
   - fallback dir absent → None
-  - both consumer hooks (memory-hint, momentum-rule-retrieval-gate) import
+  - the consumer hooks (memory-hint, momentum-rule-retrieval-gate and
+    merge-gate's briefing check) import
     the shared resolver — identity check blocks dual-SoT reintroduction
 """
 from __future__ import annotations
@@ -15,6 +16,8 @@ from __future__ import annotations
 import importlib.util
 import sys
 from pathlib import Path
+
+import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 LIB = REPO_ROOT / "hooks" / "_lib"
@@ -221,11 +224,13 @@ def test_memory_hint_uses_shared_resolver(tmp_path, monkeypatch):
     assert impl.resolve_memory_dir() == str(memory)
 
 
-def test_momentum_gate_uses_shared_resolver(tmp_path, monkeypatch):
+@pytest.mark.parametrize("rel", [
+    "hooks/advisory-nudge/momentum-rule-retrieval-gate/impl.py",
+    # The momentum `merge` trigger moved here with its memory surface (#1650).
+    "hooks/preflight-gate/merge-gate/briefing.py",
+])
+def test_momentum_gate_uses_shared_resolver(tmp_path, monkeypatch, rel):
     memory = _fallback_fixture(tmp_path, monkeypatch)
-    impl = _load_impl(
-        "momentum_gate_impl",
-        "hooks/advisory-nudge/momentum-rule-retrieval-gate/impl.py",
-    )
+    impl = _load_impl("momentum_gate_impl", rel)
     assert impl.resolve_memory_dir is _memory_dir.resolve_memory_dir
     assert impl.resolve_memory_dir() == str(memory)

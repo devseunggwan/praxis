@@ -24,7 +24,8 @@ import _transcript as T  # type: ignore[import-not-found]  # noqa: E402
 
 
 def _load(name: str, rel: str) -> ModuleType:
-    spec = importlib.util.spec_from_file_location(name, REPO_ROOT / "hooks" / rel / "impl.py")
+    path = REPO_ROOT / "hooks" / rel
+    spec = importlib.util.spec_from_file_location(name, path if path.suffix else path / "impl.py")
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -32,7 +33,7 @@ def _load(name: str, rel: str) -> ModuleType:
 
 
 cited = _load("cited_rule_gate", "advisory-nudge/cited-rule-gate")
-momentum = _load("momentum_rule_retrieval_gate", "advisory-nudge/momentum-rule-retrieval-gate")
+momentum = _load("merge_gate_briefing", "preflight-gate/merge-gate/briefing.py")
 pr_report = _load("pr_report_destination_gate", "completion-verify/pr-report-destination-gate")
 runtime_claim = _load("runtime_state_claim_gate", "completion-verify/runtime-state-claim-gate")
 

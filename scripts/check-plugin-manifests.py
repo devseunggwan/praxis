@@ -1185,7 +1185,7 @@ def main() -> int:
     # ------------------------------------------------------------------
     expected_stop = ["completion-verify",
                      "completion-signal-gate", "readonly-verify-deferral-gate",
-                     "merge-state-claim-gate", "runtime-state-claim-gate",
+                     "merge-gate", "runtime-state-claim-gate",
                      "negative-existence-verdict-gate",
                      "bypass-route-signal",
                      "artifact-verdict-evidence-gate",

@@ -20,7 +20,7 @@ critic as "the biggest engineering misjudgement of the session", original:
 `grep -rln "worktree prune" hooks/` returned nothing. The pattern is
 deterministic and checkable before execution, and the sibling failure mode
 (`gh pr merge --delete-branch` vs. a checked-out worktree) is already
-enforced structurally by `gh-merge-worktree-precondition` — this hook closes
+enforced structurally by `merge-gate` (worktree check) — this hook closes
 the equivalent gap for bare prune.
 
 ## Snapshot-recorded decision: state file, not transcript tail
@@ -118,7 +118,7 @@ it never blocks on an inability to determine session state.
 
 | Hook | Scope | Overlap |
 | ------ | ------- | --------- |
-| `gh-merge-worktree-precondition` | Blocks `gh pr merge --delete-branch` when the head branch is still checked out in a worktree | Same failure family (worktree-registry hazard around merge/prune), different trigger command and different check (this hook checks session history, not live `git worktree list` state at gate time) |
+| `merge-gate` (worktree check) | Blocks `gh pr merge --delete-branch` when the head branch is still checked out in a worktree | Same failure family (worktree-registry hazard around merge/prune), different trigger command and different check (this hook checks session history, not live `git worktree list` state at gate time) |
 | `session-intent` | Session-scoped read-intent vs. mutation-pivot drift, same state-file-keyed-by-`session_id` primitive | Shares the state-file design, unrelated detection domain |
 | `destructive-bash-guard` | Advisory nudge for `rm -rf`, `git clean -f`, `git reset --hard`, etc. | Different role (advisory vs. preflight-gate) and different failure mode — that hook flags destructive commands unconditionally; this hook conditions the block on *absence of a prior snapshot*, not on the command itself being inherently destructive |
 

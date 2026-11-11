@@ -207,6 +207,16 @@ now carry real load on the 30-day window (343 ask / 174 block + 1,812 advise /
 662 block / 153 block respectively). Defense-in-depth across different event
 types, not redundant coverage. No action.
 
+**Reversed by issue #1650 (merge-gate).** The verdict above held on coverage:
+the four hooks do gate different points. It did not weigh maintenance, and
+that is what changed. One `gh pr merge` was judged by three separate
+PreToolUse(Bash) hooks (`pre-merge-approval-gate`, `momentum-rule-retrieval-gate`'s
+merge trigger, `gh-merge-worktree-precondition`), two of which loaded each
+other's code to agree on what the user approved. The six merge-lifecycle
+hooks are now one hook, `merge-gate`, with each former hook kept as a check
+module and its verdicts, messages and environment variables unchanged; the
+coverage this audit counted is all still there, at the same events.
+
 ## Axis 4 — advisory-only-never-escalated
 
 **Scope restriction (premise-verification):** a coarse-only hook records just

@@ -213,7 +213,7 @@ where `<step>` is one of:
 | Step | Accepted form |
 | ---- | ------------- |
 | own work-branch push | `git push [-u\|--set-upstream\|-q\|--quiet\|-v\|--verbose\|--progress\|--no-progress] origin <branch>`, where `<branch>` is a plain branch name (`[A-Za-z0-9][A-Za-z0-9._/-]*`, not `HEAD` or another `*HEAD`, not `refs/...`, no `..`, no trailing `.`, `/` or `.lock`), fully matches the work-branch convention (`PRAXIS_BRANCH_NAME_REGEX`, default `^(hub\|issue)-<N>-<type>-<slug>$`, the pattern `branch-name-check` gates new branches with) and is not a base branch (`PRAXIS_BRANCH_NAME_WHITELIST`, default `main,master,dev,prod,staging`) |
-| PR create | `gh [global flags] pr create ...` with any flags, `--base prod` included (the merge is the step that moves a branch; `gh pr merge` keeps the ask here and is consent-gated by `pre-merge-approval-gate`) |
+| PR create | `gh [global flags] pr create ...` with any flags, `--base prod` included (the merge is the step that moves a branch; `gh pr merge` keeps the ask here and is consent-gated by `merge-gate` (approval check)) |
 
 The command word is the literal `git` / `gh`: an env assignment
 (`GIT_CONFIG_COUNT=1 git push ...`), a path (`/usr/bin/git`) or a wrapper

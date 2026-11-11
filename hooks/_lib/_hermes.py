@@ -871,7 +871,7 @@ def approve_response(asks: List[Tuple[str, str]], call: Optional[dict] = None) -
 # for the human's consent, and only their asks become a Hermes approval.
 HUMAN_APPROVAL_HOOKS = frozenset({
     "fan-out-scope-gate",
-    "pre-merge-approval-gate",
+    "merge-gate",
 })
 
 SELF_CHECK_TTL_SEC = 3600

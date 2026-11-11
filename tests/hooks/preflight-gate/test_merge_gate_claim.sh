@@ -4,7 +4,7 @@ set +e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/../../.." && pwd)"
-HOOK="$ROOT_DIR/hooks/completion-verify/merge-state-claim-gate/impl.py"
+HOOK="$ROOT_DIR/hooks/preflight-gate/merge-gate/claim.py"
 
 unset PRAXIS_MERGE_CLAIM_BYPASS PRAXIS_MERGE_CLAIM_STRICT PRAXIS_HOOK_ERROR_STDERR
 
@@ -34,7 +34,7 @@ elif evidence == "baserefname":
                         "input": {"command": "gh pr view 543 --json state,baseRefName"}})
 elif evidence == "grep-baserefname":
     asst_blocks.append({"type": "tool_use", "name": "Bash",
-                        "input": {"command": "grep -n baseRefName hooks/completion-verify/merge-state-claim-gate/impl.py"}})
+                        "input": {"command": "grep -n baseRefName hooks/preflight-gate/merge-gate/claim.py"}})
 elif evidence == "baserefname-only":
     asst_blocks.append({"type": "tool_use", "name": "Bash",
                         "input": {"command": "gh pr view 543 --json baseRefName"}})

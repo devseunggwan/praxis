@@ -3,7 +3,7 @@
 Eight impl.py files carried their own git subprocess wrapper — byte-identical
 `_run_git` copies in `pre-edit-protected-branch-guard` and
 `worktree-edit-gate`, plus near-variants in `anchor-comment-gate` (`_git`),
-`gh-merge-worktree-precondition` (`_run`, git call site),
+`merge-gate` (worktree check) (`_run`, git call site),
 `postcompact-context` (`_run`, git call site), `block-personal-asset-leak`
 (`_git_output`), `pre-commit-staged-file-enumeration` (`_git`), and
 `external-write-path-existence-check` (`_git_toplevel`). Three of those also
@@ -31,7 +31,7 @@ This module pins those in a single place, mirroring the sibling `_hook_io.py`
     (OSError covers FileNotFoundError; SubprocessError covers TimeoutExpired;
     ValueError covers embedded-null argv/cwd).
 
-The `gh` call sites in `gh-merge-worktree-precondition` and
+The `gh` call sites in `merge-gate` (worktree check) and
 `postcompact-context` keep their local runners — this module is git-only.
 """
 from __future__ import annotations

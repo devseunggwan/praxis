@@ -141,7 +141,7 @@ reads *the request asked for* rather than asserting authorship.
 An agent-attachable marker was considered and rejected. The natural design —
 "emit a table mapping each target to a span of the request, and pass" — is
 self-attestation: the agent that mis-scoped the fan-out is the same one filling
-in the table. `pre-merge-approval-gate` states the same contract for
+in the table. `merge-gate` (approval check) states the same contract for
 `# merge-approval:ack`.
 
 ## Known limits
@@ -164,7 +164,7 @@ in the table. `pre-merge-approval-gate` states the same contract for
 
 | Hook | Scope | Overlap |
 | ---- | ----- | ------- |
-| `pre-merge-approval-gate` | PreToolUse `ask` on every `gh pr merge`, no bypass by design | Structural sibling — same `ask`-with-no-marker shape, different action |
+| `merge-gate` (approval check) | PreToolUse `ask` on every `gh pr merge`, no bypass by design | Structural sibling — same `ask`-with-no-marker shape, different action |
 | `block-manufactured-action-menu` | Blocks a surfaced menu whose options were not asked for | Adjacent: that gate catches invented *choices*, this one invented *work* |
 | `side-effect-scan` | Enumerates side effects of a pending command | None — that hook grades one command, this one counts across a turn |
 

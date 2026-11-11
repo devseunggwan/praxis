@@ -161,8 +161,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pr-state-refetch-gate.sh",
-            "timeout": 8
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/merge-gate.sh",
+            "timeout": 10
           }
         ]
       },
@@ -239,11 +239,6 @@
       {
         "matcher": "AskUserQuestion",
         "hooks": [
-          {
-            "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/merge-menu-review-options-advisory.sh",
-            "timeout": 5
-          },
           {
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/menu-mutation-tier-advisory.sh",

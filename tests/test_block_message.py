@@ -144,10 +144,10 @@ def test_merge_verb_checklist_names_every_merge_gate() -> None:
     discovering them one block at a time is the #873 defect."""
     out = bm.verb_gate_checklist("gh pr merge")
     for gate in (
-        "momentum-rule-retrieval-gate",
-        "pre-merge-approval-gate",
+        "merge-gate (briefing)",
+        "merge-gate (approval)",
         "side-effect-scan",
-        "gh-merge-worktree-precondition",
+        "merge-gate (worktree)",
         "commit-title-length-check",
         "pipefail-advisory",
         "session-intent",
@@ -171,10 +171,10 @@ def test_merge_checklist_splits_unconditional_from_conditional() -> None:
     out = bm.verb_gate_checklist("gh pr merge")
     head, _, tail = out.partition("Conditional — fire only in the stated situation:")
     assert tail, "merge checklist must carry a Conditional section"
-    for always in ("momentum-rule-retrieval-gate", "pre-merge-approval-gate", "side-effect-scan"):
+    for always in ("merge-gate (briefing)", "merge-gate (approval)", "side-effect-scan"):
         assert always in head, f"{always} fires on every merge — belongs above the split"
     for flag_gated in (
-        "gh-merge-worktree-precondition",   # requires -d / --delete-branch
+        "merge-gate (worktree)",            # requires -d / --delete-branch
         "commit-title-length-check",        # requires -s / --squash
         "pipefail-advisory",                # requires a pipe
         "session-intent",                   # requires a read-only-intent session
@@ -194,8 +194,8 @@ def test_ask_checklist_splits_unconditional_from_conditional() -> None:
         assert always in head, f"{always} blocks by default — belongs above the split"
     for gated in (
         "block-manufactured-action-menu",     # strict-mode only
-        "pr-state-refetch-gate",              # merge-intent question + strict
-        "merge-menu-review-options-advisory",  # merge menu + strict
+        "merge-gate (refetch)",               # merge-intent question + strict
+        "merge-gate (menu)",                  # merge menu + strict
     ):
         assert gated in tail, f"{gated} is conditional — belongs below the split"
 
@@ -206,8 +206,8 @@ def test_ask_verb_checklist_names_every_ask_gate() -> None:
         "output-block-falsify-advisory",
         "block-ask-end-option",
         "block-manufactured-action-menu",
-        "pr-state-refetch-gate",
-        "merge-menu-review-options-advisory",
+        "merge-gate (refetch)",
+        "merge-gate (menu)",
         "pre-output-falsification-gate",
         "memory-hint",
     ):
@@ -268,11 +268,12 @@ def test_verb_checklists_do_not_start_a_column_0_falsified_line() -> None:
 
 def test_verb_wired_hooks_append_their_checklist() -> None:
     """Each hook named by #873 must append its verb's checklist."""
-    for name, verb in (
-        ("momentum-rule-retrieval-gate", "gh pr merge"),
-        ("output-block-falsify-advisory", "AskUserQuestion"),
+    for impl, verb in (
+        (REPO_ROOT / "hooks" / "preflight-gate" / "merge-gate" / "briefing.py", "gh pr merge"),
+        (ADVISORY_DIR / "output-block-falsify-advisory" / "impl.py", "AskUserQuestion"),
     ):
-        src = (ADVISORY_DIR / name / "impl.py").read_text(encoding="utf-8")
+        name = impl.parent.name
+        src = impl.read_text(encoding="utf-8")
         assert f'verb_gate_checklist("{verb}")' in src, (
             f"{name} must append verb_gate_checklist(\"{verb}\") to its message"
         )
@@ -397,6 +398,9 @@ LEGACY_UNMIGRATED = {
     "gh-flag-verify",
     "gh-json-validator",
     "gh-label-verify",
+    # Moved here from advisory-nudge with merge-gate (issue #1650); this lint
+    # never covered it there, and its strict-mode stderr block is hand-rolled.
+    "merge-gate/menu",
     "pre-edit-protected-branch-guard",
     "pre-gh-pr-create-dedup-gate",
     "session-intent",
@@ -407,7 +411,7 @@ LEGACY_UNMIGRATED = {
 # Hooks that emit a block message and so must use the helper (post-migration).
 EXPECTED_MIGRATED = {
     "block-gh-state-all",
-    "pre-merge-approval-gate",
+    "merge-gate/approval",
     "block-gh-issue-create-without-dup-search",
 }
 
@@ -420,13 +424,24 @@ _USES_HELPER_RE = re.compile(r"from block_message import|import block_message")
 
 
 def _hook_impls() -> list[Path]:
-    return sorted(PREFLIGHT_DIR.glob("*/impl.py"))
+    """Every preflight hook's impl, with merge-gate's checks standing in for
+    its `impl.py`: each check is a former hook that writes its own message,
+    while `impl.py` only forwards theirs (issue #1650)."""
+    impls = [p for p in PREFLIGHT_DIR.glob("*/impl.py") if p.parent.name != "merge-gate"]
+    impls += [p for p in (PREFLIGHT_DIR / "merge-gate").glob("*.py") if p.name != "impl.py"]
+    return sorted(impls)
+
+
+def _unit_name(impl: Path) -> str:
+    """`merge-gate/<check>` for a merge-gate check, else the hook dir name."""
+    return f"merge-gate/{impl.stem}" if impl.parent.name == "merge-gate" else impl.parent.name
 
 
 def test_migrated_hooks_use_helper() -> None:
     """The 3 issue-#439 hooks must import the standard block helper."""
     for name in sorted(EXPECTED_MIGRATED):
-        impl = PREFLIGHT_DIR / name / "impl.py"
+        impl = (PREFLIGHT_DIR / f"{name}.py" if name.startswith("merge-gate/")
+                else PREFLIGHT_DIR / name / "impl.py")
         assert impl.is_file(), f"missing {impl}"
         src = impl.read_text(encoding="utf-8")
         assert _USES_HELPER_RE.search(src), (
@@ -442,7 +457,7 @@ def test_no_unaccounted_handrolled_block_hook() -> None:
     explicitly listed as legacy. A NEW hand-rolled block hook fails here."""
     offenders: list[str] = []
     for impl in _hook_impls():
-        name = impl.parent.name
+        name = _unit_name(impl)
         src = impl.read_text(encoding="utf-8")
         if not _EMITS_BLOCK_RE.search(src):
             continue  # not a blocking hook (e.g. pure advisory/ask-only)
@@ -463,6 +478,6 @@ def test_no_unaccounted_handrolled_block_hook() -> None:
 def test_legacy_allowlist_has_no_phantom_entries() -> None:
     """Every LEGACY_UNMIGRATED entry must name a real hook dir — prevents the
     allowlist from silently rotting as hooks are renamed/removed."""
-    existing = {p.parent.name for p in _hook_impls()}
+    existing = {_unit_name(p) for p in _hook_impls()}
     phantom = sorted(LEGACY_UNMIGRATED - existing)
     assert not phantom, f"LEGACY_UNMIGRATED names non-existent hooks: {phantom}"

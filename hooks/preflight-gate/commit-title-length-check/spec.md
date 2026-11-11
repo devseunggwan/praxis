@@ -175,7 +175,7 @@ Inherits `safe_tokenize` / `iter_command_starts` / `strip_prefix` from
 ## Fail-open (squash-merge path)
 
 `gh pr view` failure (auth error, timeout, non-zero exit, empty output) ->
-silent pass, same fail-open contract as `gh-merge-worktree-precondition`'s
+silent pass, same fail-open contract as `merge-gate` (worktree check)'s
 own `gh pr view` call. The advisory only fires on a positively-resolved,
 over-limit title.
 

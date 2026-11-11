@@ -116,7 +116,7 @@ shipped CLI wrapper.
 
 ## Hooks
 
-Hooks are the larger half of praxis: **105 hooks**, registered at 126 points across
+Hooks are the larger half of praxis: **101 hooks**, registered at 124 points across
 `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `PostToolBatch`, `Stop`,
 `SubagentStart`, `SubagentStop`, `UserPromptSubmit`, and `SessionStart`. They run
 without being invoked, so this section is the one to read before installing — it is what
@@ -127,15 +127,15 @@ promoted into blocking:
 
 | Role | Count | What it does |
 | ------ | ------- | -------------- |
-| `preflight-gate` | 39 | Inspects a tool call before it runs and can deny it |
-| `completion-verify` | 19 | Fires at `Stop`; selected hooks also run at `SubagentStop` — can block a response that claims completion without evidence |
-| `advisory-nudge` | 42 | Prints a warning to stderr and lets the call through — 19 read a `PRAXIS_*_STRICT` variable that makes them stop the call instead |
+| `preflight-gate` | 37 | Inspects a tool call before it runs and can deny it |
+| `completion-verify` | 18 | Fires at `Stop`; selected hooks also run at `SubagentStop` — can block a response that claims completion without evidence |
+| `advisory-nudge` | 41 | Prints a warning to stderr and lets the call through — 18 read a `PRAXIS_*_STRICT` variable that makes them stop the call instead |
 | `postuse-correction` | 5 | Reacts after a tool call — telemetry, follow-up signals |
 
 Concretely, what a gate stops looks like this — `gh issue create` without a duplicate
 search first (`block-gh-issue-create-without-dup-search`), an edit to a file while you
 are standing on a protected branch (`pre-edit-protected-branch-guard`), a merge run from
-the wrong worktree (`gh-merge-worktree-precondition`), `gh search --state all` which that
+the wrong worktree (`merge-gate`), `gh search --state all` which that
 subcommand does not accept (`block-gh-state-all`), a foreground `sleep`-and-poll loop
 (`foreground-poll-loop-guard`), a commit whose title breaks the repo's format
 (`commit-title-format-check`).
@@ -157,7 +157,7 @@ contracts every hook follows.
 
 A hook that blocks something you meant to do is not a wall. There are three levers.
 
-**One gate.** 74 of the 105 hooks declare an opt-out or tuning variable. Which variable
+**One gate.** 70 of the 101 hooks declare an opt-out or tuning variable. Which variable
 belongs to which hook, and what setting it actually does to that hook, is the table in
 [`docs/bypass-vars.md`](docs/bypass-vars.md); the generated
 [Hook Operating Matrix](docs/hook-operating-matrix.md) carries the same mapping with each

@@ -22,8 +22,8 @@ single source, reached via `verb_gate_checklist(verb)`:
 | Verb | Gates enumerated on the first block | Emitted by |
 | ------ | ------------------------------------- | ------------ |
 | `gh pr create` | block-pr-without-caller-evidence, block-pr-without-precommit-evidence, + related-gate pointers (block-commit-without-codex-review, output-block-falsify-advisory) | both pr-body gates |
-| `gh pr merge` | momentum-rule-retrieval-gate, pre-merge-approval-gate, side-effect-scan, + conditional (gh-merge-worktree-precondition on `--delete-branch`, commit-title-length-check on `--squash`, pipefail-advisory when piped, session-intent on an undeclared mutation pivot) | momentum-rule-retrieval-gate |
-| `AskUserQuestion` | output-block-falsify-advisory, block-ask-end-option, + conditional (block-manufactured-action-menu, block-guard-removal-menu, pr-state-refetch-gate, merge-menu-review-options-advisory, menu-mutation-tier-advisory) and advisory-only (pre-output-falsification-gate, memory-hint) | output-block-falsify-advisory |
+| `gh pr merge` | merge-gate, side-effect-scan, + conditional (commit-title-length-check on `--squash`, pipefail-advisory when piped, session-intent on an undeclared mutation pivot) | momentum-rule-retrieval-gate |
+| `AskUserQuestion` | output-block-falsify-advisory, block-ask-end-option, + conditional (block-manufactured-action-menu, block-guard-removal-menu, merge-gate, menu-mutation-tier-advisory) and advisory-only (pre-output-falsification-gate, memory-hint) | output-block-falsify-advisory |
 
 Rows are **host-scoped** (issue #1245). Several enumerated gates carry a `hosts`
 whitelist while the hook printing the checklist does not, so the unfiltered text
@@ -88,12 +88,10 @@ confirmation-prompt layer.
 | [internal-token-leak-gate](../../hooks/preflight-gate/internal-token-leak-gate/spec.md) | PreToolUse | Block a `git commit` or `gh` write carrying a `PRAXIS_INTERNAL_TOKENS` name toward a repo GitHub reports as public |
 | [commit-message-paren-check](../../hooks/preflight-gate/commit-message-paren-check/spec.md) | PreToolUse | Block `git commit` when a message line opens a pseudo-scope release-please's parser cannot close, which silently drops the commit from the CHANGELOG |
 | [branch-name-check](../../hooks/preflight-gate/branch-name-check/spec.md) | PreToolUse | Block branch creation (`checkout -b`, `switch -c`, `worktree add -b`) when the new branch name does not match the configured regex |
-| [pre-merge-approval-gate](../../hooks/preflight-gate/pre-merge-approval-gate/spec.md) | PreToolUse | Surface per-PR approval prompt for `gh pr merge` in direct sessions |
+| [merge-gate](../../hooks/preflight-gate/merge-gate/spec.md) | PreToolUse + Stop + SubagentStop (claude only) | Every check on the merge lifecycle in one hook (issue #1650): before `gh pr merge` the per-PR approval ask, the `--delete-branch` worktree precondition and the Pre-Merge Reporting briefing deny; before a merge `AskUserQuestion` the live PR-state re-fetch and the missing-review-option advisory; at Stop the merge/PR state claim check |
 | [fan-out-scope-gate](../../hooks/preflight-gate/fan-out-scope-gate/spec.md) | PreToolUse | Surface an approval prompt from the 2nd delegation target created in one turn |
-| [gh-merge-worktree-precondition](../../hooks/preflight-gate/gh-merge-worktree-precondition/spec.md) | PreToolUse | Block `gh pr merge --delete-branch` when the PR's live head branch is still checked out in another `git worktree` (issue #798) |
 | [anchor-comment-gate](../../hooks/preflight-gate/anchor-comment-gate/spec.md) | PreToolUse + PostToolUse | Block a PR verification anchor comment (`### 검증 …`) missing one of its five required fields, decided from the body alone with no network; after the post, read the published comment back through the API and re-check it plus SHA freshness and diff coverage (issue #947) |
 | [worktree-prune-snapshot-gate](../../hooks/preflight-gate/worktree-prune-snapshot-gate/spec.md) | PreToolUse | Block a bare `git worktree prune` when no `git worktree list --porcelain` snapshot was taken in the session — prune is repository-wide, so without the snapshot a removed sibling registration is unrecoverable evidence-wise (#870) |
-| [pr-state-refetch-gate](../../hooks/preflight-gate/pr-state-refetch-gate/spec.md) | PreToolUse | Warn or block when `AskUserQuestion` names a PR number + merge-intent keyword whose live `gh pr view` state is already MERGED/CLOSED — issue #719 |
 | [cross-boundary-preflight](../../hooks/preflight-gate/cross-boundary-preflight/spec.md) | PreToolUse | Block heredoc body in `gh pr/issue create`; ask with four-point checklist on cross-repo `--repo` writes |
 | [question-turn-mutation-gate](../../hooks/preflight-gate/question-turn-mutation-gate/spec.md) | PreToolUse | Ask on every mutating call (Bash not provably read-only, Edit/Write/NotebookEdit, MCP write verb) in a turn whose opening human message reads as a question or a challenge; read-only probes stay silent, the next human message lifts it (#1486) |
 | [rejected-call-probe-gate](../../hooks/preflight-gate/rejected-call-probe-gate/spec.md) | PreToolUse | Ask on the next mutating call after a refused or interrupted mutating call until read-only probes have covered every surface the refused call could have changed (local git, remote ref, GitHub, local files, the tool or MCP server it called), since a refused call may still have run (#1488) |
@@ -125,7 +123,7 @@ Fail-open on infrastructure errors by design.
 
 | Hook | Trigger | Purpose |
 | ------ | --------- | --------- |
-| [momentum-rule-retrieval-gate](../../hooks/advisory-nudge/momentum-rule-retrieval-gate/spec.md) | PreToolUse | Advisory nudge at high-momentum action points (`gh pr merge`, `cmux new-workspace`, `git push --force`) — surfaces relevant CLAUDE.md rules + memory entries to prevent "Loaded ≠ Retrieved" failures |
+| [momentum-rule-retrieval-gate](../../hooks/advisory-nudge/momentum-rule-retrieval-gate/spec.md) | PreToolUse | Advisory nudge at high-momentum action points (`cmux new-workspace`, `git push --force`; the `gh pr merge` trigger moved to merge-gate) — surfaces relevant CLAUDE.md rules + memory entries to prevent "Loaded ≠ Retrieved" failures |
 | [cited-rule-gate](../../hooks/advisory-nudge/cited-rule-gate/spec.md) | PreToolUse | Advisory (or strict-mode `ask`) before a mutating call when the assistant text since the previous tool call has no `Rule: <section>` line naming a heading of the loaded rule file (#1487) |
 | [cli-flag-incompat-advisory](../../hooks/advisory-nudge/cli-flag-incompat-advisory/spec.md) | PreToolUse | Advisory nudge for known mode-incompatible flag combos (`git merge-tree --name-only` 3-arg form, `kubectl --use-protocol-buffers`) |
 | [inspection-chain-advisory](../../hooks/advisory-nudge/inspection-chain-advisory/spec.md) | PreToolUse | Advisory nudge when 2+ inspection-only commands are chained with `&&` (non-match exit silently drops downstream probes) — issue #469 |
@@ -165,7 +163,6 @@ Fail-open on infrastructure errors by design.
 | [count-assertion-verify](../../hooks/advisory-nudge/count-assertion-verify/spec.md) | PreToolUse | Advisory nudge when `grep -c` with alternation (`\|` BRE or `\|` ERE/PCRE) runs without per-arm verification; prevents citing inflated alternation counts — issue #277 |
 | [bulk-write-memory-checkpoint](../../hooks/advisory-nudge/bulk-write-memory-checkpoint/spec.md) | PreToolUse | Advisory nudge when bulk-writing to SOT-flagged paths (vault/, wiki/, .claude/, skills/, AGENTS.md/CLAUDE.md companions) — reminds to checkpoint memory before the write loop to prevent "Loaded ≠ Retrieved" failures — issue #443 |
 | [pre-output-falsification-gate](../../hooks/advisory-nudge/pre-output-falsification-gate/spec.md) | PreToolUse | Advisory on `AskUserQuestion` when an evaluative/`(Recommended)` option is surfaced under recent negative evidence without a disconfirming-probe phrase in the question body (Lane A), and on `Bash` when a read-only status command (status/get/list) repeats ≥3× in a session (Lane B / B-i) — issue #487 |
-| [merge-menu-review-options-advisory](../../hooks/advisory-nudge/merge-menu-review-options-advisory/spec.md) | PreToolUse | Advisory (opt-in strict) on `AskUserQuestion` when a merge-decision menu (option label names a merge/squash action) offers no review/debate option (codex-review-wrap / code-reviewer / critic) — issue #560 |
 | [menu-mutation-tier-advisory](../../hooks/advisory-nudge/menu-mutation-tier-advisory/spec.md) | PreToolUse | Advisory (opt-in strict) on `AskUserQuestion` when a question keeps ≥2 candidates after abandonment options are dropped, ≥1 mutates shared state, and none names a non-mutating alternative (preview / dev / sandbox / dry-run / review / `보고만`) — an abandonment option (`다음 정기 실행에 맡김`) is neither a candidate nor a tier; a `Safe-tier-unavailable:` line in the question body suppresses it — issue #963 |
 
 ---
@@ -190,7 +187,7 @@ context, patch false positives, or record tracking state for paired gates.
 Stop hooks that gate **completion claims** before the assistant response is
 finalized. Run sequentially: `completion-verify` →
 `completion-signal-gate` → `readonly-verify-deferral-gate` →
-`merge-state-claim-gate` → `runtime-state-claim-gate` →
+`merge-gate` → `runtime-state-claim-gate` →
 `negative-existence-verdict-gate` → `bypass-route-signal` →
 `artifact-verdict-evidence-gate` →
 `pr-report-destination-gate` → `pr-claim-mutation-gate` →
@@ -217,7 +214,6 @@ One documented exception: `bypass-route-signal` is observe-only and emits
 | [completion-verify](../../hooks/completion-verify/completion-verify/spec.md) | Stop + SubagentStop (claude only, issue #1337) | Block "done / 완료" claims without same-turn Bash verification evidence |
 | [completion-signal-gate](../../hooks/completion-verify/completion-signal-gate/spec.md) | Stop + SubagentStop (claude only, issue #1337) | Advisory nudge when completion-signal phrase appears without evidence-block; also flags cross-plugin slash commands (Event 2) |
 | [readonly-verify-deferral-gate](../../hooks/completion-verify/readonly-verify-deferral-gate/spec.md) | Stop | Advisory when the last turn offers to run a read-only verification (SELECT/kubectl get/git status/--dry-run) instead of running it; mutation carve-out + read-already-run suppressor |
-| [merge-state-claim-gate](../../hooks/completion-verify/merge-state-claim-gate/spec.md) | Stop + SubagentStop (claude only, issue #1337) | Advisory when the final message asserts a merge/PR/issue/worktree state change without a fresh `gh`/GitHub-MCP state query — applied-on-branch claims additionally require reachability evidence (#656) |
 | [runtime-state-claim-gate](../../hooks/completion-verify/runtime-state-claim-gate/spec.md) | Stop | Advisory when the final message asserts a runtime/execution state ("X is running in Y" / "로컬은 건드리지 않습니다") with no probe tool_use in the current turn — launch success does not reveal where something runs (#809) |
 | [artifact-verdict-evidence-gate](../../hooks/completion-verify/artifact-verdict-evidence-gate/spec.md) | Stop | Advise when the final message surfaces a positive artifact verdict (삭제 후보/중복/통합 대상/superseded) as a candidate list without an adjacent `Verdict-evidence:` line (#862) |
 | [negative-existence-verdict-gate](../../hooks/completion-verify/negative-existence-verdict-gate/spec.md) | Stop | Block when the final message surfaces a negative-existence verdict (없습니다/does not exist) under a registered decision framing (게이트 결과/게이트 판정/AC #) without an `Enumerated:` line in the same paragraph (#804) |

@@ -24,7 +24,7 @@ failure time. Every existing falsification gate anchors on an *action* event
 (issue create, recommendation surface, merge claim) — a conversational answer
 describing runtime state is also a claim-emission point, and nothing fired
 there. This is the runtime-state sibling of
-[merge-state-claim-gate](../merge-state-claim-gate/spec.md) (#503): a Stop
+[merge-gate's claim check](../../preflight-gate/merge-gate/spec.md) (#503): a Stop
 hook sees the final assistant text, the exact surface PreToolUse cannot see.
 
 **Second gap, closed by #1062**: the trigger above fires only when the USER

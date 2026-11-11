@@ -10,10 +10,9 @@ relevant CLAUDE.md rules and memory entries that retrieval failure studies
 show are most likely to be skipped under session momentum.
 
 The `dispatch` and `force-push` triggers are advisory-only in default mode.
-The `merge` trigger additionally **blocks** (via `permissionDecision: deny`)
-when the assistant text preceding the merge lacks the Pre-Merge Reporting
-briefing — see [Merge-briefing escalation](#merge-briefing-escalation-issue-797)
-below.
+The `gh pr merge` trigger moved to `merge-gate` (issue #1650), which prints the
+same surface for a merge and owns the briefing escalation; see
+[Merge trigger (moved)](#merge-trigger-moved).
 
 ### Why this exists
 
@@ -36,7 +35,6 @@ N merges occur in rapid succession) is deferred to Phase 2 (separate issue).
 
 | Command pattern | trigger id | Static rule cites | Dynamic memory cites |
 | ----------------- | ------------ | ------------------- | ---------------------- |
-| `gh pr merge` (any flags) | `merge` | Pre-Merge Reporting + No Approval Transfer | every memory with `momentum:` containing `merge` |
 | `cmux new-workspace` (dispatch via cmux) | `dispatch` | Pre-Implementation Surface Enumeration → Multi-PR / multi-worktree shared state + Self-Authored Labels Are Drafts | every memory with `momentum:` containing `dispatch` |
 | `git push --force` / `--force-with-lease` / `-f` | `force-push` | trigger header + history-rewrite mutation rule | every memory with `momentum:` containing `force-push` |
 
@@ -44,7 +42,9 @@ N merges occur in rapid succession) is deferred to Phase 2 (separate issue).
 
 Memory cites are no longer hardcoded — they are loaded at hook fire time
 from the same user-scoped memory directory used by `memory-hint`, resolved
-via the shared `hooks/_lib/_memory_dir.py` resolver (#823): `PRAXIS_MEMORY_DIR`
+via the shared `hooks/_lib/_memory_dir.py` resolver (#823), and parsed by
+`hooks/_lib/_momentum_surface.py`, which `merge-gate` reads too for the `merge`
+trigger: `PRAXIS_MEMORY_DIR`
 env var when set, otherwise `~/.claude/projects/{slugified-cwd}/memory/` —
 slugify replaces every non-alphanumeric character with `-`, per-character
 (Claude Code's own project-slug rule). A memory file participates
@@ -70,814 +70,39 @@ and silently skip the memory rather than raise.
 
 Each triggered surface writes lines to stderr, all prefixed with
 `[praxis:momentum-gate]`. The `dispatch` and `force-push` surfaces never block
-in default mode. The `merge` surface additionally emits a `permissionDecision:
-deny` when the pre-merge briefing is incomplete — see
-[Merge-briefing escalation](#merge-briefing-escalation-issue-797).
+in default mode.
 
-Example for `gh pr merge --squash`:
+Example for `git push --force`:
 
 ```
-[praxis:momentum-gate] ── TRIGGER: gh pr merge ──────────────────────────────────
+[praxis:momentum-gate] ── TRIGGER: git push --force / --force-with-lease / -f ─────
 [praxis:momentum-gate]
-[praxis:momentum-gate] Rule: Pre-Merge Reporting (CLAUDE.md)
+[praxis:momentum-gate] Rule: History rewrite is a mutation — prior approval is NOT carried over
 ...
 ```
 
-### Merge-briefing escalation (issue #797)
+### Merge trigger (moved)
 
-The `merge` trigger alone is advisory — but a stderr line cannot stop a
-`gh pr merge` that skips the Pre-Merge Reporting briefing, and that failure
-recurred despite the advisory firing (memory
-`feedback_pre_merge_briefing_compound_imperative`, two recurrences; the #795
-retrospect confirmed the advisory fired yet the merge ran with 3 of 6 briefing
-items and no explicit approve-ask). For the `merge` trigger **only**, the hook
-reads the assistant text preceding the merge call and, when fewer than
-`MERGE_BRIEFING_MIN_ITEMS` (default **4**) of the 6 Pre-Merge Reporting items
-are present, escalates to `permissionDecision: deny` so the merge is blocked
-and the agent must produce the briefing before retrying. The stderr advisory
-is still emitted alongside the deny.
-
-The 6 items (a single keyword hit marks each present, EN/KO): What changed /
-What was verified / What was NOT verified / Risk-blast-radius / Open items /
-explicit approve-ask. Keyword groups live in `_BRIEFING_ITEM_GROUPS`
-(`impl.py`); EN/KO variants are enumerated there, not duplicated in prose here.
-
-**The merge question is part of the briefing (issue #1597).** The windows this
-gate scores for a merge read the assistant's prose blocks *and* each
-`AskUserQuestion` question that asks to merge the target PR (`_is_merge_ask`;
-`_assistant_text(..., pr)`). The user reads that question before answering it,
-so a briefing written inside it is one the user saw. Hosts whose approval tool
-carries the whole briefing in the question — Hermes `clarify`, mapped to
-`AskUserQuestion` by the adapter — left the prose empty: the first merge of a
-bulk set passed only when unrelated prose happened to hold a keyword, and every
-later merge was denied, because the serial-merge cut (#1214) leaves only prose
-written after the last merge. Other questions are not read: a sibling question
-about something else would add keywords no briefing of this merge carried, and
-a question that names PRs but not the target briefs another merge even when it
-ends in an unnamed "Approve merge?". A question whose answer holds the merge
-(`보류`, `_question_answer_holds` — a label that is neither a single nor a bulk
-approval) or that the user declined (`is_error` result) is not read either: its answer arrives as a
-tool_result, not a human message, so unlike a typed `보류` it does not close the
-window, and on a first merge — where no answer check runs — its briefing would
-release the merge the user just held. The answer checks (#1402) are otherwise
-unchanged, and a question carrying no briefing items still denies.
-
-**`·` lists and Korean section labels (issue #1597).** Korean prose joins a PR
-list with `·` (`#1525 · #1526을 머지할까요?`) and may restate it with a count
-(`#1524 · #1525 · #1526 세 건을 머지할까요?`). `_REF_LIST` takes `·` as a
-separator and `_REF_COUNT` the count, so both read as listed merge asks.
-`_SENTENCE_TAIL_RE` also splits clauses on `·`, which cut a picked label like
-`승인 — #1524 · #1525 · #1526 머지` into a piece holding only `#1525`; that piece
-now names a PR and approves nothing, and a count phrase restating the list
-(`#1525 · #1526 두 건 모두 머지`) is dropped the same way, but only when the
-count equals the number of PRs the reply names — `두 건만 머지` against a
-three-PR ask names none and picks a subset, so it is not read; the reply still needs
-one piece that is an approval (`#833 · #999` alone is not). The item vocabulary gained the
-section labels these briefings use, colon included — `바뀐 것:`, `확인한 것:`,
-`못 한 것:` (as in `확인 못 한 것:`) — because the bare phrase is ordinary prose too (`새로 바뀐 것은
-없습니다` released a marked merge in corpus replay before the colon was required).
-
-**Vocabulary coverage is EN/KO substring matching, not free-form Korean
-(issue #1118).** A real 6-item briefing was blocked at 3/6 because it phrased
-group0/2/4 as `무엇이 바뀌는 것` / `검증 안 된` / `열린 항목` — content the
-Pre-Merge Reporting rule fully satisfies, but strings the keyword groups did
-not yet contain (`_BRIEFING_ITEM_GROUPS` had only `무엇이 변경` / `미검증` /
-`미확인` / `남은 항목` / `남은 작업` for those groups). The author was forced to
-rewrite the briefing in the hook's dialect rather than fix content — it
-recurred 6 times in one session (3 PRs × 2 blocks each). Fixed by adding the
-observed variants (`무엇이 바뀌`, `바뀌는 것`, `검증 안 된`, `검증되지 않은`,
-`열린 항목`, `남은 것`) to the existing groups.
-
-**Regression fixture provenance.** `tests/fixtures/momentum-merge-natural-korean-wording.jsonl`
-is a reconstruction from the issue's per-group miss/HIT lists, not the
-original session transcript — the transcript that hit the actual 3/6 block
-belongs to a different session and is not available to the fix. The
-reconstruction reproduces the same group0/2/4 miss pattern that section
-described (verified: pre-fix scores 3/6, post-fix 6/6), but a wording not
-covered by the issue's reproduction could in principle still score below
-4/6 on the real transcript without this fixture catching it.
-
-**Known limitation — vocabulary chasing, not structural scoring.** This gate
-scores by keyword substring, so it stays open-ended: any Korean phrasing not
-yet in `_BRIEFING_ITEM_GROUPS` reads as absent even when the content is
-present. Scoring by briefing *structure* (numbered or bolded 6-part lists)
-was considered and rejected for this fix — it would let a content-free fake
-6-item list pass, defeating the gate's purpose — and is deliberately left
-unimplemented. Revisit only if vocabulary additions keep failing to prevent
-recurrence.
-
-**Window scoping (issue #826).** The mandated Pre-Merge Reporting flow is
-*briefing → user approval → merge*, which necessarily places the briefing in
-the turn **before** the approving user message — outside the "since the last
-human user message" window. Scoring only that window would therefore penalise
-the *correct* flow (briefing → "ok" → merge) and pass only the anti-pattern
-(briefing + merge crammed into one turn, i.e. auto-proceed without waiting).
-The **prior-turn extension** resolves this. When the last human user message is
-an approval reply (`ok` / `진행` / `승인` / … — matched against
-`_APPROVAL_TOKENS` either as the whole normalized message or as its **final
-clause**, issue #1087), the immediately preceding assistant turn is scored
-**alone** (post-approval text must not supplement a briefing the user never saw
-before approving). Safety gates on the extension:
-
-- **Final-clause matching (issue #1087).** Whole-message equality alone denied
-  every approval phrased as prose — `ok, merge it`, `사용해보고 결정하겠습니다.
-  머지 진행` — while the barer `ok` passed, so the mandated flow was blocked
-  whenever the user wrote a sentence. The message is split on clause boundaries
-  (`.!?。…,;·` and newline) and only the LAST clause is matched, which keeps the
-  property whole-message equality existed for: a message whose final clause is a
-  fresh instruction (`머지 진행 상황 알려주고 파서부터 고쳐줘`, `merge it but
-  rebase first`) is not an approval, no matter what appears earlier in it.
-
-- **Numbered replies (issue #1630).** A user answering several numbered
-  questions in one message (`1. approve` / `2. go with your recommendation`)
-  puts the merge answer at the merge question's number, which need not be the
-  last line, so the final-clause rule read the answer to another question and
-  the decision flipped with the order of the lines. When the reply is a
-  numbered list (`1.`, `1)`, `(1)`, `1:`, `1번`, with an optional bullet,
-  heading or bold around the marker; `1.5` and `10:30` are not markers) and the
-  turn it answers has one, the reply is read at the number of the merge ask in
-  that turn's **last** numbered list, and that item alone is matched with the
-  rules above (whole-token or final clause, a trailing `?` refuses), with a
-  reference to the target PR inside it set aside (`1. #999 머지`). The
-  whole-reply PR strip in `_is_typed_approval` is skipped for a numbered
-  reply answering a numbered turn, since it would also blank a list marker
-  equal to the PR number (`2.` for PR #2); a numbered reply to a turn with no
-  numbered list keeps the strip with the final-clause rule.
-
-  Reading the turn (`_merge_question_numbers`): fenced blocks are skipped;
-  only top-level items count, so a nested sub-list is text of its parent item;
-  a list restarts where a number does not exceed the one before it, so a
-  numbered six-item briefing followed by numbered questions pairs with the
-  questions. An item is the merge ask (`_is_item_merge_ask`) when its **last**
-  ask sentence — or, with none, a first line that asks with a noun phrase
-  (`1. #999 머지 승인 여부`, `1. Whether to merge #999`) — passes
-  `_is_merge_ask` and carries no qualifier or negation
-  (`_ITEM_ASK_QUALIFIER_RE`, `_LABEL_NEGATION_RE`): an ask about when, around,
-  or instead of the merge (`Re-run CI before merging #999?`, `#999 머지 보류
-  여부`, `merge #999 or close it?`) is answered by `yes` without approving the
-  merge. An ask naming no PR counts only when the turn names no PR but the
-  target, since `1. Approve merge?` in another PR's briefing is that PR's
-  question. An item with a line over 400 characters is no ask (it also bounds
-  `_ASK_SENTENCE_RE`, which is quadratic on a long line).
-
-  Reading the reply: it is not an approval when the turn's list holds no such
-  ask or more than one; when the reply has no item at that number or has it
-  twice; when a non-blank line precedes its first item (a quoted question
-  list included) or an unindented, unnumbered line follows one (`Actually,
-  hold off on the merge`); or when any other item mentions the PR or merging
-  without being an approval token (`2. B, and don't merge yet`) — the latest
-  word on the merge wins inside one message, as `_held_after` applies it
-  across messages. An answer naming another PR, with `#` or bare (`1. For
-  #1001, approve`, `1. 1001 approve`), approves nothing here. Across messages,
-  `_held_after` also counts a numbered reply to a later turn whose numbered
-  list asks to merge the PR as being about the merge, so `1. hold` to a
-  re-asked question withdraws an earlier `1. approve`. A URL's dots do not end
-  the ask sentence (`1. Approve merge of https://github.com/o/r/pull/999?`).
-  What follows the ask is read for qualifiers and negation too — the rest of
-  its line, the item's later lines that are not option bullets, and
-  unindented prose after the item (`1. Approve merge of #999? Only after the
-  release.`, or an unindented `Or hold until Monday?` under it). Option
-  bullets under the ask (`- (추천) 승인합니다`) are choices, not conditions.
-
-  The pairing reads the same turn and target `_correlated_prior_turn_text`
-  scores (`_last_reply_approves`), and `_answered_after` / `_held_after` pass
-  the turn each later message answers. On top of the release the issue asked
-  for, two shapes main allowed now deny: `1. hold` / `2. approve` (and `3.
-  approve` / `4. ok`) when item 1 is the merge ask, and a numbered reply when
-  the merge ask sat outside a numbered follow-up list (`Approve merge?` then
-  `1. …?` / `2. …?`, answered `1. ok` / `2. ok`) — those items answer the
-  follow-ups. Unchanged: an unnumbered reply, and a numbered reply to a turn
-  with no numbered list, keep the final-clause rule; with no turn (an
-  `AskUserQuestion` label) `_is_approval_reply` reads as before. Known gaps,
-  each a missed release: items on one line (`1 ok, 2 b`) and `1 ok` without
-  punctuation are not markers, so they fall back to the final-clause rule; the
-  qualifier list is vocabulary (`조건`, `먼저`, `before`, `or`, …), so a plain
-  ask that happens to use one of those words is asked again.
-
-- **PR correlation.** The prior-turn briefing must reference the PR actually
-  being merged. The merge target is the segment's *first positional* token
-  (value-flag arity skipped, including trailing gh global flags like `-R
-  org/repo <N>`), classified three ways:
-  - **Numeric** (`gh pr merge 833`, `.../pull/833`) → the prior turn must
-    reference that `#N` (or bare number).
-  - **No positional** (`gh pr merge --squash`, the project standard) → a
-    current-branch merge; the real target is **derived from the window's
-    mandated Pre-Merge probe** (`gh pr checks/view <N>`, scanned from assistant
-    tool_use Bash commands) and the prior turn must reference *that* number.
-    When no probe resolves a target, the extension **fails closed** (denies).
-  - **Named branch** (`gh pr merge feature-x`) → targets that branch's PR, which
-    cannot be mapped to a number without a live `gh` call and is not the current
-    branch, so the window probe does not identify it → **fails closed** (denies).
-    A prior probe of a *different* PR must not be treated as this branch's target
-    (round-3 P1b).
-  - Command parsing reuses the trigger tokenizer, so fused global flags
-    (`gh --repo=o/r pr merge 833`) resolve the target correctly.
-
-  > **Accepted residual gaps (advisory-hook threat model).** This gate is a
-  > self-discipline *nudge* for an honest agent that forgets the briefing (the
-  > #795 failure), not an adversarial security boundary — `deny` merely adds
-  > teeth, and `PRAXIS_MOMENTUM_MERGE_ADVISORY=1` is a standing escape hatch. Two
-  > CLI forms that only an adversarial target-swap would use are therefore left
-  > as documented gaps rather than chased across further rounds: an
-  > `xargs`-wrapped merge (`… | xargs -n1 gh pr merge`) is not recognized by the
-  > trigger tokenizer (`xargs` is not a peeled prefix), so it bypasses the gate
-  > entirely. Closing it soundly needs an explicit-signal redesign, out of scope
-  > for the honest-agent nudge. (A second gap listed here — an unscoped
-  > cross-repo number — is now handled by **Repo scoping** below, down to the
-  > residual that section names.)
-
-- **Repo scoping (#1419).** Every repo has a `#999`, so a number alone does not
-  identify a PR. When the *merge command* names a repo and the correlated
-  approval window names a **different** one, the approval does not transfer:
-  both `_correlated_prior_turn_text` (prior-turn path) and the `answered`
-  expression in `_merge_escalation_reason` (serial path) bail out via
-  `_repo_conflict`.
-  - The merge's repo is read from the command **only** — `-R`/`--repo` in any
-    spelling (`-R o/r`, `-RO/r`, `--repo=o/r`) or a `…/pull/N` URL argument. A
-    leading host is dropped (`github.com/o/r` == `o/r`) and comparison is
-    case-insensitive. `cd`-based inference is deliberately absent: `cwd` resets
-    between Bash calls, so it would be a guess.
-  - The window's repo comes from the same two sources over the correlated turn
-    range, last-wins — mirroring `_context_pr_from_window`.
-  - **Both sides must resolve, or it is not a conflict.** `None` vs `o/r` is
-    left alone. Measured over the local corpus (851 transcripts, 787 executed
-    `gh pr merge` calls): 393 merges name a repo — 377 agree with their window,
-    **14 differ** — while 123 name none, and **96 of those 123** sit in a window
-    that does name one (the ordinary `gh pr checks 999` → `gh pr merge --repo
-    o/r 999` shape). Treating `None` as a disagreement would therefore deny 96
-    honest merges to reach the same 14.
-  - **Residual:** the issue's literal repro — a briefing/approval window whose
-    prose names no repo at all, followed by `gh -R org/other pr merge 833` — is
-    *not* caught, because the window side is unresolved. What is caught is the
-    common shape where the window did probe a repo.
-- **No multi-target / loop transfer.** A compound `gh pr merge A && gh pr merge
-  B` (≥2 merge segments) OR a shell loop / `xargs` repeating one segment
-  (`for pr in 833 999; do gh pr merge "$pr"; done`, detected via whole-token
-  match of `for`/`while`/`until`/`xargs`) skips the extension entirely — one
-  approval cannot authorize repeated merges (No Approval Transfer Across
-  Companion PRs).
-- **Trivial carve-out.** A trivial-PR marker in the *prior* turn is honored the
-  same as in the current turn (the 2-line briefing sits before the "ok"), but
-  **only once the merge is correlated to the briefed PR** — an unrelated trivial
-  briefing about a different PR cannot carve out the merge.
-
-> **Recording-fidelity axis (deferred).** A separate #826 concern — harnesses
-> that drop assistant narration so a real briefing scores 0 — is **not** handled
-> here. A text-absence heuristic cannot distinguish a non-recording harness from
-> a genuine briefing skip that happens to be tool-only (it is gameable by
-> suppressing all narration), so it was dropped from this change rather than
-> shipped as a weak gate. If needed, address it with an explicit harness signal
-> in a follow-up, not an inference.
-
-**Why `deny`, not `ask`:** the sibling `pre-merge-approval-gate` already emits
-an unconditional `ask` on *every* `gh pr merge`. A second `ask` would be
-redundant with the exact gate that failed to prevent the #795 recurrence (the
-user approved the `ask` blindly while the agent never produced the briefing).
-`deny` adds the missing teeth — it blocks and feeds the reason back so the
-agent self-corrects, rather than re-surfacing an approval the user will again
-approve blindly.
-
-**Escalation is contained** (fail-open and false-positive relief):
-
-- No readable transcript (`transcript_path` absent/unreadable) → no escalation
-  (fail open). The advisory still fires.
-- `PRAXIS_MOMENTUM_MERGE_ADVISORY=1` → demote back to advisory only (keeps the
-  stderr reminder, skips the deny). The escape hatch for a mis-scored briefing.
-- `# briefing-surfaced` in the merge command (an **in-band** marker, issue #826)
-  → demote back to advisory only. The env bypass above is read from the hook
-  process `os.environ` and is **not** reachable via a Bash inline `VAR=1 cmd`
-  prefix — the hook is spawned by the harness, not as a child of the command. In
-  a bridge-session harness that *also* drops assistant text from the transcript
-  (so the briefing scores 0), a legitimate briefing-surfaced merge would be
-  permanently blocked with no in-band release. A shell-comment marker embedded in
-  the command (harmless at exec — bash ignores everything after `#`) is reachable
-  in-band. Matched case-insensitively as `#\s*briefing-surfaced`; a trailing
-  `: <reason>` is recommended but not required. This is a conscious
-  self-attestation, appropriate for a self-discipline nudge (not an adversarial
-  boundary): the agent asserts the briefing was surfaced, exactly as the env
-  bypass would. The marker is honored only in a **real** unquoted shell comment,
-  parsed with a continuous quote/escape scanner (`_split_shell_comment`): a
-  quoted `'# briefing-surfaced'`, a mid-word `x#`, a backslash-escaped `\#`, or a
-  `#` inside a single-quoted string spanning newlines is data, not an
-  attestation, and does not demote (round-1/2/3 codex findings). It is honored
-  only for a **single** merge segment with no loop (No Approval Transfer). A
-  `# briefing-surfaced` inside a heredoc body (`<<EOF … EOF`) is the one residual
-  the scanner does not exclude — accepted under the non-adversarial threat model,
-  as with the `xargs` gap above.
-
-  **The marker attests completeness, never existence (issue #940).** It used to
-  short-circuit before the transcript was read, so it released the merge no
-  matter what the window contained. Measured over 2026-08-01~03: it rode along
-  on **11 of 11** merges and **8 of those had no preceding block at all** — two
-  at 322 and 627 events from the last briefing. Once a marker is a command's
-  default suffix, the gate it relaxes can never fire, and a per-merge
-  re-confirmation never happens; the bypass convention permits a token only
-  after the spec is read and the case matched, and one reading does not cover
-  the next N merges.
-
-  The marker is therefore evaluated **after** the transcript is scanned, and
-  releases the merge only when the window already contains at least
-  `MERGE_BRIEFING_MARKER_MIN_ITEMS` (1) recognised briefing item. That keeps its
-  original purpose — the item counter reads prose and under-counts a briefing
-  phrased outside its vocabulary — while removing the one thing it was never
-  meant to do. With zero items the attestation has no referent and the merge is
-  denied with a distinct reason naming the marker. An unreadable transcript
-  still fails open, which is the bridge-session case the marker was invented
-  for: there is nothing to verify against, so nothing is claimed.
-
-  **The offer carries the condition (issue #1402).** The first deny message is
-  where the marker is advertised, and it used to name only the syntax — the
-  attestation condition surfaced in the second, marker-specific deny, after the
-  marker had already been attached. Read on first contact, the offer was a
-  relief that takes a reason string, and a reason slot invites filling rather
-  than checking. Both the deny's `bypass_reason_hint` and the `gh pr merge` gate
-  checklist in `hooks/_lib/block_message.py` now state it in the same sentence
-  as the offer: only when the briefing is already in the window the gate scores
-  (this turn, or the turn that named this PR right before the user's approval),
-  because the marker attests the briefing was complete, not that one exists.
-  This narrows one supply path; markers attached pre-emptively with no block at
-  all never read the message.
-
-  "The window" is whichever one the gate was allowed to score, current turn or
-  correlated prior turn — the same window the full-briefing check reads. The
-  mandated flow is briefing → approval → merge, which leaves the current turn
-  empty, so a marker floor scored against the current turn alone would deny a
-  marked merge whose briefing the user did see. The prior turn is read only
-  when it is correlated to this merge's PR, so an uncorrelated briefing cannot
-  supply the item the floor needs (No Approval Transfer).
-
-  **The window is cut at the last merge that actually ran (issue #1214).** A
-  briefing is spent by the merge it releases, so in a serial run — merge, merge,
-  merge, one briefing at the top — every later merge was riding evidence that
-  already had an owner. The existing transfer guards only ever saw repetition
-  inside ONE command (`merge A && merge B`, a `for` loop); a merge per turn
-  looked like a fresh single merge each time. `_last_executed_merge` walks the
-  same already-loaded entries for `gh pr merge` tool_use blocks, and the marker
-  floor scores only what was written after the last one. No new persistent
-  state — this is the window calculation, moved.
-
-  A merge counts as *executed* only when its `tool_result` came back without
-  `is_error`. A merge this gate blocked, a sibling gate denied, or the user
-  declined never ran, so it moves nothing and the legitimate retry passes
-  exactly as before — the failure that made #1214 discard its own original
-  "one block buys one attachment" design, where the credit was spent by a
-  `PreToolUse` that is not an execution.
-
-  **Scoped to the marker floor, deliberately.** Replayed over 207 marker-carrying
-  merges from 67 local sessions (2026-08-09 onward, post-#940), the cut as
-  shipped changes **3** decisions and every one is a merge only the marker was
-  releasing; the 167 attachments that changed nothing are untouched. Extending
-  the same cut to the 4-of-6 full-briefing path instead changes **35**, of which
-  **32** carried a complete briefing — that only raises the cost of the honest
-  path, which is the ground this hook's spec already takes elsewhere: it is a
-  self-discipline nudge, not an adversarial boundary.
-
-  **A serial merge needs its own answer (issue #1402).** The cut above leaves
-  the full-briefing path uncut, and that path had no notion of an answer: a
-  briefing written after the first merge, whose approve-ask slot cites the
-  answer the first merge already consumed, reached 4 of 6 items and released
-  the second merge on text alone. So once a merge has executed, both
-  full-briefing releases — the current turn and the correlated prior turn —
-  also require an approval of THIS merge after that merge. The target is the
-  one `_merge_target_pr` resolves, the way the prior-turn path resolves it,
-  except that a numberless merge reads its `gh pr checks/view` probe only after
-  the last executed merge — the earlier probe named that merge's PR. The
-  approval is either a typed reply that `_is_approval_reply` accepts (its final
-  clause is an approval token, with a reference to the PR set aside, so
-  `PR #999 머지해줘` counts) and that names the PR or answers a turn that
-  named it and either asked to merge that PR, or is answered by an approval
-  that names merging itself (`머지 진행`), and no later user message about the
-  PR or about merging is something other than an approval — the latest decision
-  wins, so `ok` followed by `PR #999 머지 보류` leaves the merge unanswered. An
-  `AskUserQuestion` answer withdraws it the same way — a picked label that is
-  not an approval, or a declined (`is_error`) question, about the PR or about
-  merging — which the typed-message scan cannot see, since that answer arrives
-  as a tool_result. A
-  merge that repeats or chains merge segments is never answered this way: one
-  answer releases one merge.
-  Asking to merge is one question sentence (ending in `?`, `할까요`, `될까요`,
-  `하시겠` or `해도 되`) with `merge` or `merging` as a whole word, `머지` or
-  `병합`, that
-  neither negates it nor asks whether it happened or how it stands
-  (`머지하지 말까요?`, `머지됐나요?`, `머지했나요?`, `Did we merge PR #999?`,
-  `PR #999 merge status?`, `머지 상태`) — in either spelling of the verb, so
-  `merging status|state|conflicts|results` is excluded exactly as `merge` is.
-  A completion question is excluded the same way (`Is the merge of PR #999
-  done?`, `Has merging PR #999 completed?`, `머지 완료됐어?`, `머지 끝났나요?`),
-  but only when the completion word is about the merge: a conditional clause
-  keeps the ask (`Merge PR #999 once CI is done?`), and so does a request to
-  finish it (`머지 완료할까요?`). A progressive question is a state question
-  too (`Is GitHub merging PR #999?`, `Are you still merging …?`): a subject
-  before `merging` separates it from the gerund in `Is merging PR #999 OK?`,
-  which still asks. The sentence must also be about the PR. When the merge
-  verb takes PR references as its object — a list right before `머지`/`병합`
-  or right after `merge`, with or without a colon (`Approve merging: PR #833
-  and #999?`) — the ask is
-  about exactly those PRs (`#833, #999 를 머지할까요?` asks about both;
-  `PR #999 checks are green, #833 머지할까요?` asks about #833 only). Without
-  such an object the sentence must name the PR or no PR at all
-  (`PR #999 브리핑 … Approve merge?` counts;
-  `PR #833 and #999 are ready; Approve merge #833?` does not). An unnamed ask is not discounted because the turn
-  cites other PRs or issues, since briefings do; a turn that briefs two PRs and
-  asks once without a number is read as asking about either. The other form is an `AskUserQuestion` tool_result that is not
-  `is_error`, whose question names the PR, held to the same merge rule
-  (`PR #999 어떻게 할까요?` answered `승인 — 그대로 머지` counts), and whose
-  picked label leads with an approval token
-  (`승인 — 머지`, `Approve merge`), a reference to the PR itself set aside (`PR #999 머지`),
-  with no negation anywhere in the label — a qualifier can reverse the lead
-  rather than narrow it, whether the negator follows the verb
-  (`승인 — 머지하지 않기`, `Approve — do not merge`), precedes it
-  (`승인 — 안 머지`), sits in a consequence clause (`승인 — 머지하면 안 됨`) or
-  is a bare English determiner (`Approve — no merge`). A reply is not an approval: an unrelated message, a status
-  request that names the PR (`PR #999 머지 상태만 알려줘`), a refusal that does
-  not end on an approval token, a reply that ends in a question mark
-  (`Approve merge?` typed back, `ok?`), a bare `ok` to a turn about something else or
-  to a status line about the PR that asks nothing (`PR #999 checks are green.`,
-  `PR #999 was approved; checks are green.`, `PR #999 emergency rollback?`), an answer to an approval ask that
-  is not a merge ask (`PR #999 테스트 승인할까요?`), an
-  approval picked for a different question, a `보류` pick, or a declined
-  question leaves the merge unanswered, and a merge whose target cannot be
-  resolved is never answered this way. Keyword tests were tried and dropped — each review round found a
-  phrasing that named the PR beside an approval word without agreeing to
-  anything. A PR number counts as named when no ASCII identifier character
-  touches it, so `#999를` names PR 999 and `v999` does not.
-
-  The `AskUserQuestion` form matters because `_human_user_indices` skips
-  tool_result-only entries by design — replayed over 566 local merges, the
-  typed-message-only version denied 47 merges the shipped gate allowed, and 13
-  of those had been answered through `AskUserQuestion`. With the forms above, a
-  replay over 572 local merges denies 45 that the shipped gate allowed. Three of them carry
-  a real approval that these forms do not read — typed `둘다 승인` and
-  `둘다 머지하세요`, whose final clause is not a bare token, and a picked
-  `앵커 작성 후 머지`, which does not lead with one — and a typed `승인` whose turn
-  did not name the merged PR; one answer was picked for a CHANGELOG question
-  that did not name it either. Each of those costs one more ask. The rest are
-  replies that approve nothing (`둘다 진행`, `각각 올리세요`) or merges with
-  nothing from the user after the previous one: compaction summaries and task
-  notifications are not the user. No new state; a session
-  with no executed merge is untouched. A complete briefing that fails only this
-  check is denied with its own reason naming the missing answer, not the item
-  count.
-
-  The comparison is session-wide, not per repository: a merge in one repo
-  followed by a briefing for another still needs its answer, which is the
-  same No Approval Transfer rule. The marker floor is deliberately left as
-  #1214 shipped it — `merge_serial_rebriefed_passes` pins that a briefing item
-  written after the first merge re-arms the marker on its own — so a marked
-  merge is the one release this check does not reach.
-
-  **One answer can approve a listed set (bulk merge, issue #1583).** The
-  serial check above made every merge after the first wait for its own
-  round trip, so N ready PRs cost N briefing → answer cycles even when the
-  user had read all N briefings and answered `둘다 머지하세요` — a reply the
-  #1402 replay already lists as denied. `_bulk_released` is a second release
-  path, checked before the others, and every condition below must hold:
-
-  | Condition | Check |
-  | --------- | ----- |
-  | the command is that merge and nothing else, with an explicit PR number: no other command chained before or after it (`cd other && …`), no loop, no `GH_REPO`/`GH_HOST` prefix, not numberless | `_merge_pr_number` |
-  | the latest decision is an approval: the last typed message, or the `AskUserQuestion` answer after it. Every sentence holds only PR references and approval words, so a deferral or precondition in any sentence (`CI 한번 더 돌려보고. ok`), a condition after a comma, a refusal word, or a trailing `?` voids it; a reply over 300 characters is not read. In an `AskUserQuestion` answer every pair is read — a refusal on any question voids it — and the deciding pair must be a listed merge ask or a label naming the PRs | `_bulk_reply_prs`, `_ask_decision` |
-  | the approved set has two or more PRs: the PRs the answer names (`#833 #999 머지`, or by bare number `98, 1118 머지` when the reply has no `#N`/`PR N` reference — beside one, a bare number is an ordinal and voids the reply), else the PRs the listed merge ask names — the PR list is the object of 머지/merge and the ask ending follows the verb directly (`#833, #999 를 머지할까요?`, `Approve merging #833 and #999?`); a merge method may sit between the particle and the verb (`#833 · #999 두 건을 squash 머지할까요?`, `스쿼시로 병합`), since it names how to merge, not another object; `#833, #999 머지 전에 CI 를 다시 돌릴까요?` is not one. A reply naming no PR answers the turn's last question, so the listed ask must be that last question (`… 머지할까요? 그 전에 리베이스해 둘까요?` voids a bare `ok`) | `_listed_merge_ask` |
-  | this PR is in the set and has its own section in the briefing turn — from a heading line (a markdown heading, or a line bold end to end) that names exactly one PR, this one (`### PR #833 / PR #1001` is a joint heading even when #1001 is not in the set), to the next heading at the same level or above — with 4 of 6 items inside it, the shared ask counting as its approve-ask item. The first such heading fixes the level; a deeper heading or a `#` comment inside a code fence is content of the section it sits in, a bold lead inside a bullet is an item, a shared block after the last section belongs to no PR, and only a PR's first section counts | `_pr_sections`, `_briefing_item_count` |
-  | no merge since the answer targeted a PR outside the set or repeated one, and this PR has not merged since; a clean call that merged inside a chain or condition (`gh pr merge 1001 && echo done`) has no single PR number and ends the set | `_executed_merges(include_skippable=True)` |
-  | no repo conflict (as in **Repo scoping**) and no later `AskUserQuestion` hold; the briefed repo is the one this PR's section names it with (`owner/repo#N` or a `…/owner/repo/pull/N` URL — one repo only; two repos for the same number name none), else the window's last read-only probe; after a Bash call since the briefing window opened (before the answer too) that changed directory (`cd`, `pushd`, `popd`) or exported `GH_REPO`/`GH_HOST`, the merge must name the briefed repo with `--repo` | `_section_repo`, `_repo_conflict`, `_changed_directory_after`, `_ask_held_after` |
-
-  The section rule is the part that keeps *No Approval Transfer*: a combined
-  paragraph about two PRs (`momentum-merge-serial-unanswered-prior.jsonl`)
-  still denies the second merge, because no heading names one PR alone, so
-  no PR has a briefing of its own. The answer rule keeps the user's choice
-  partial: `#833만 머지` approves a set of one, which this path does not
-  release.
-
-  `pre-merge-approval-gate` asks the same question through
-  `bulk_merge_approved(payload)` (loaded from this file), so the two gates
-  cannot disagree about which merges the user approved. That function fails
-  closed: any exception or unreadable transcript returns False and the sibling
-  keeps asking.
-
-  Replayed over every recorded `gh pr merge` in local transcripts (339 calls
-  across 813 Claude Code and Hermes transcripts, each cut right before the
-  merge and fed to the main and branch builds): 0 decision changes, 0
-  sibling prompts skipped, 0 errors. No recorded briefing used per-PR
-  headings with a listed ask, so the path opens only for briefings written to
-  the new shape (`skills/merge-briefing/SKILL.md` → *Bulk merge*); the
-  release cases are pinned by the `momentum-merge-bulk-*.jsonl` fixtures.
-
-  An adversarial review round found nine shapes the first version released
-  wrongly — a bold bullet naming the other PR in passing taken as its heading, a
-  shared trailing block credited to the last PR, a prep question (`… 머지 전에 …
-  돌릴까요?`) read as the merge ask, only the last `AskUserQuestion` pair read, a
-  승인 to an unrelated question counted, a clarify condition after the comma
-  dropped, an earlier deferral sentence ignored, and a merge chained after `cd`
-  or retargeted by `GH_REPO`. Each is a `merge_bulk_*_denies` case now; all nine
-  fail against that first version and pass against this one. A second round
-  found five more — a `#` comment in a code fence or a deeper heading taken as
-  the other PR's section, a bare `ok` credited to an earlier listed ask when the
-  turn ended on another question, a deferral sentence with no PR number, and a
-  `cd` issued as its own call before the merge — and those five cases fail
-  against the round-one version and pass now. The fix after round two had no
-  independent review round of its own; the round-two probes were re-run on it
-  and every shape they flagged now denies.
-
-  **A merge method word and a set across repos (issue #1604).** Two bulk
-  briefings a user had read and approved were denied in a Hermes session. The
-  ask `#A · #B 두 건을 squash 머지할까요?` put `squash` between the particle
-  and 머지, so `_MERGE_OBJECT_RE` found no object and the six-item question
-  did not score; `_MERGE_METHOD` now allows `squash`/`rebase`/`스쿼시`/`리베이스`
-  there. The second PR of the set lived in another repo, and a `cd` in an
-  unrelated call after the briefing left the window with no probe repo, so the
-  cd rule compared the merge's `--repo` with `None` and denied — although each
-  section heading named its PR as `owner/repo#N`. The section's repo now is the
-  briefed repo — read from the heading line only (the body may cite a related
-  PR with the same number in another repo) and lowercased like `--repo` values.
-  The listed-ask pattern takes the same method
-  words, so a bare `ok` to `#A, #B 를 squash 머지할까요?` releases the set. The same change closes a wrong release in the old rule: with
-  the window's last probe on repo `a/x`, `gh pr merge 999 --repo a/x` was
-  released for a #999 the briefing placed in `b/y`; it now denies
-  (`merge_bulk_cross_repo_wrong_repo_denies`). Replayed over every recorded
-  `gh pr merge` (290 calls across 93 transcripts): 2 deny → allow, both the
-  approved merges of the reporting session, 0 allow → deny, 0 errors.
-
-  **A deny says why a briefing the user saw was not scored (issue #1433).**
-  Message-only; no decision moves. When the two deny paths above fire —
-  "fewer than 4 of 6 items" and the marker with no briefing — and the latest
-  turn in which the assistant wrote text before the last human message holds
-  a briefing that would have passed that path's threshold (4 items, or the
-  marker's 1), the `why` gains one clause naming the check that excluded it.
-  `_excluded_briefing_reason` asks the decision's own questions again, in the
-  decision's order, so the named reason is the one that fired:
-
-  | Reason | Check re-asked |
-  | ------ | -------------- |
-  | one approval releases one merge, and this command runs more than one | `_merge_segments` / `_has_repetition` |
-  | the last user message (`…`) is not an approval reply | `_last_reply_approves` |
-  | a user message (`…`) came between the briefing and the approval | briefing turn ends before the approval's own prior turn |
-  | the briefed turn does not name the PR this merge targets | `_correlated_prior_turn_text` |
-  | it precedes a merge that already ran in this session | serial-merge `floor` (marker path only) |
-
-  "The latest turn in which the assistant wrote text" rather than "the turn
-  right before the last user message" is deliberate. A user message that
-  carries content of its own still empties the turn behind it — briefing →
-  interrupt → `잠깐, CI 로그부터` → `ok` leaves the briefing one turn further
-  back — so keyed on the turn right before, the clause would never fire on the
-  sequences that motivated it. A bare interrupt marker no longer produces that
-  shape: issue #1459 stopped counting it as a human message, so briefing →
-  interrupt → `ok` is released rather than explained. `continue` after an
-  interrupt still denies, and the clause is what names the reason.
-
-  Replayed over every recorded `gh pr merge` in local transcripts (791 calls
-  across 867 transcripts, each transcript cut right before the merge and fed
-  to the pre-change and changed builds): 0 decision disagreements, 0
-  tracebacks. Of the 187 denies, 99 gain the clause — 96 not an approval
-  reply, 1 an intervening user message, 1 the briefed turn names a different
-  PR, 1 the serial-merge cut. The replay matters because this code runs inside
-  a `@fail_open` hook: an exception here would not surface as an error, it
-  would release the merge.
-
-  **Both directions fail open.** A merge counts as executed only on a clean
-  `tool_result`, and only when the shell could not have jumped over it —
-  `_SKIPPABLE_KEYWORDS` (`||`, `if`, `elif`, `case`) plus a non-terminal `&&`.
-  Each guard closes one direction:
-
-  - `gh pr merge 833; false` — the merge RAN but `is_error` is per Bash
-    tool_use, not per subcommand, so the window stays uncut. Crediting an
-    `is_error` result instead would let a merge this gate itself blocked spend
-    the window, and the legitimate retry could never pass. The same granularity
-    is recorded at `hooks/completion-verify/pr-anchor-existence-gate/spec.md`
-    as structural rather than a local bug; every gate correlating tool_use to
-    tool_result shares it.
-  - `true || gh pr merge 833` — the merge did NOT run yet the call exits clean.
-    Crediting it would advance the cut past a briefing nothing consumed and deny
-    the next marked merge whose briefing was real. Measured over the local
-    transcripts, 8 of 834 `gh pr merge` calls carry such a construct.
-  - `false && gh pr merge 833; true` — the same phantom through `&&`. The merge
-    is skipped, and because the exit status belongs to the LAST command, the
-    call still comes back clean, so `is_error` cannot drop it. `&&` therefore
-    gets a positional test rather than a flat ban: a `&&`-reached merge is
-    credited only when it is the final command, where its own failure IS the
-    call's exit status. That buys the invariant *a credited merge really ran*
-    without a shell parser, and keeps `cd X && gh pr merge N` — the common
-    shape — creditable. Measured over the local transcripts, 587 of 834
-    `gh pr merge` calls stay creditable (70%), against 826 (99%) with `&&`
-    unrestricted and 431 (52%) with `&&` banned outright.
-
-  `;` stays non-skippable, so a real merge after one is still credited. The
-  residual gap runs the other way: `if true; then :; fi; gh pr merge 833` really
-  merges and is dropped, because the whole-token `if` scan is command-wide. That
-  is the fail-open direction — the guard stays silent rather than spending a
-  window it cannot confirm, the same posture as the `xargs`/heredoc gaps above.
-
-  **Coverage ceiling — the 400-line tail.** `_load_turn_entries` reads
-  `TRANSCRIPT_SCAN_LINES` (400) lines, so a prior merge pushed past that tail is
-  invisible and the gate behaves as it did before (fail-open). Measured over the
-  local transcripts: of 719 consecutive `gh pr merge` pairs, **491 (68%) sit
-  within 400 lines** and 228 do not (median gap 60 lines). That is a ceiling on
-  visibility, not a firing rate — a user message between the two merges starts a
-  new window, in which case the defect never arose. Widening the constant is out
-  of scope: it is shared, so it would move every other hook's cost too.
-
-  The prior-turn extension works inside the same tail without widening it
-  (issue #1410). When the approval is the only human message left in the tail,
-  the briefing turn's opening message has scrolled out. Every entry before the
-  approval still belongs to that turn, so the extension scores from the tail
-  head instead of giving up. A briefing pushed entirely past the tail stays
-  invisible, and that merge still denies.
-
-- **Injected user entries do not start a new window (issue #940).** A skill body
-  loaded mid-turn and the expansion of a slash command both arrive as
-  `role: user` with prose content; the harness stamps them `isMeta: true` while
-  a genuinely typed message carries no such flag. Counting them would move the
-  "since the last user message" boundary past a briefing the user actually saw,
-  so a skill invoked between the briefing and the merge made a compliant flow
-  look unbriefed. `_human_user_indices` skips them — a structural discriminator,
-  not a content heuristic.
-- **Host notifications do not start a new window either (issue #1410).** A
-  background task finishing arrives as `role: user` text with no `isMeta`, and
-  carries `origin: {"kind": "task-notification"}` where a typed message carries
-  `origin: {"kind": "human"}`. Waiting on CI in the background between the
-  approval and the merge put the notification in the "last user message" slot,
-  which is not an approval reply, so the prior-turn extension never opened and a
-  briefed, approved merge was denied at 0 of 6 items. `_human_user_indices`
-  skips an entry whose `origin.kind` is present and is not `human`. An entry
-  with no `origin` is kept: transcripts written before the field existed carry
-  none on real user messages. Measured over 3,136 local transcripts: 9,592
-  `task-notification` entries, none with `isMeta`; 428 of 3,003 `gh pr merge`
-  calls had one as the last user entry.
-- **An interrupt marker does not start a new window either (issue #1459).** The
-  harness writes `[Request interrupted by user]` (or `… for tool use]`) as a
-  `role: user` entry with no `isMeta` and no `origin`, so it was counted as a
-  typed message: briefing → interrupt → `ok` → merge was denied although the
-  user had just approved. It records that the reply was stopped, not something
-  the user said, so `_human_user_indices` skips an entry whose **whole** text is
-  the marker. The anchors are load-bearing: the same phrase inside a longer
-  message is the user writing about the interrupt, and that message still closes
-  the window. Measured over 1,254 local transcripts: 246 bare-marker entries in
-  the countable shape (146 `[Request interrupted by user]`, 100 `… for tool
-  use]`, no third spelling), against 41 entries carrying the phrase inside
-  longer text, which stay counted. `continue` after an interrupt still denies —
-  it is a progress signal, not consent — and that split is what the four
-  `momentum-merge-interrupt-*` fixtures fix in place.
-- Trivial-PR markers (`typo`, `comment-only`, `single-line`, `오타`, `주석만`,
-  `trivial pr`, `2-line report`, …) in the briefing text → no escalation,
-  matching the *Pre-Merge Reporting* rule's "Trivial PRs: a 2-line report is
-  fine" carve-out.
-- Prior-turn briefing correlated to the merged PR (approval reply + PR-number
-  match, or numberless merge whose window-derived target matches) → no
-  escalation (issue #826, above).
-
-The `dispatch` and `force-push` triggers never emit a decision — escalation is
-merge-only, per the issue scope (only the merge failure was reproduced).
-
-**Deny reason carries the whole verb's checklist (issue #873).** The briefing
-is one of three gates that fire on every `gh pr merge` whatever the flags — the
-other two are `pre-merge-approval-gate` and `side-effect-scan`. Four more are
-conditional: `gh-merge-worktree-precondition` (only with `--delete-branch`),
-`commit-title-length-check` (only with `--squash`), `pipefail-advisory` (only
-when the merge is piped), and `session-intent` (only when the session never
-declared a mutation intent). The checklist keeps that split
-explicit — a conditional gate listed as unconditional sends the reader looking
-for a requirement that does not apply to their command.
-Before #873 each was discovered by its own separate block, costing a retry turn
-apiece — praxis #873 measured six such blocks in one session, at least four of
-which already had their satisfaction form documented. Documentation was never
-the gap; retrieval at call time was. This hook therefore emits
-`verb_gate_checklist("gh pr merge")` from `hooks/_lib/block_message.py`, which
-is the single source for that mapping (see
-[docs/hook/INDEX.md](../../../docs/hook/INDEX.md)).
-
-**The checklist goes out on both channels (issue #932).** Neither one alone
-reaches the model in every case:
-
-- **decision JSON** — `hooks/_lib/_dispatch.py:195-201` surfaces only the
-  **first** deny's stdout. These gates run in parallel on the same command, so
-  whenever a sibling denies first, a checklist embedded in this hook's
-  `permissionDecisionReason` is discarded — precisely the multi-gate case the
-  checklist exists for.
-- **stderr** — forwarded for **every** hook, but a PreToolUse hook's stderr is
-  fed to the model only when the dispatcher exits 2. That is the deny path
-  (`:201 return 2`), never the ask path (`:207 return 0`).
-
-A deny is always exit 2, so stderr alone would in fact suffice *here*. #873
-shipped stderr-only for both this hook and `output-block-falsify-advisory`,
-where the ask path exits 0 and the checklist silently went nowhere; splitting
-the two hooks' handling is what let that through, so they now emit identically.
-`format_block`'s five-field output is unchanged — the checklist is appended
-after it.
-`tests/hooks/advisory-nudge/test_momentum_rule_retrieval_gate.sh::merge_checklist_on_both_channels`
-pins both channels per gate name.
+The `gh pr merge` trigger, its rule surface and the Pre-Merge Reporting
+briefing escalation moved to `merge-gate` (issue #1650); see
+`hooks/preflight-gate/merge-gate/spec.md` → *Check: briefing*. The merge
+check still reads `PRAXIS_MOMENTUM_BYPASS`, `PRAXIS_MOMENTUM_STRICT` and
+`PRAXIS_MOMENTUM_ACK`, so those variables keep covering merges.
 
 ### Environment variables
 
 | Variable | Effect |
 | ---------- | -------- |
 | `PRAXIS_MOMENTUM_BYPASS=1` | Skip all output and exit 0 immediately (for scripted batch operations) |
-| `PRAXIS_MOMENTUM_MERGE_ADVISORY=1` | Demote the merge-briefing escalation to advisory only (stderr reminder still fires, no `deny`). Read from the hook process env, so it must be set in the **session** environment — an inline `VAR=1 gh pr merge …` prefix never reaches the hook, and the deny message says so (issue #1087). See also the in-band `# briefing-surfaced` command marker (issue #826) |
 | `PRAXIS_MOMENTUM_STRICT=1` | Exit 2 (block) instead of exit 0, unless `PRAXIS_MOMENTUM_ACK=1` is also set |
 | `PRAXIS_MOMENTUM_ACK=1` | Acknowledge the surface in strict mode; exit 0 after emitting the advisory |
-| `PRAXIS_MERGE_APPROVAL_PROVIDER=<path>` | Host approval provider for a merge the transcript path would deny; see *Host approval provider* below. Not a bypass: it names where the answer comes from |
 
-Default mode (no env vars): advisory for `dispatch` / `force-push`; the `merge`
-trigger blocks with `deny` only when the pre-merge briefing is incomplete
-(above), otherwise advisory.
-
-### Host approval provider (issue #1639)
-
-A host can collect the human's merge answer in a channel of its own (a
-dashboard button, a chat thread) and relay it into the session as a row the
-host wrote. The transcript path cannot read that as an approval: the last user
-message is the host's text, whatever the human answered. Replayed through the
-Hermes bridge on `main`, a relayed answer was denied with and without
-`# briefing-surfaced`.
-
-The host can instead name an executable in the hook process environment:
-
-```text
-PRAXIS_MERGE_APPROVAL_PROVIDER=<absolute path>
-```
-
-Unset (the default), nothing below runs and every decision is the one `main`
-makes. Set, the provider is asked only about a merge the transcript path would
-deny, and only when the command is one `gh pr merge` naming its PR number and
-exactly one repo on `github.com`, with no chain, loop or `GH_REPO=` prefix.
-Every repo reference counts (`--repo`, `-R`, `--repo=`, `-Rowner/name`, a pull
-request URL positional), and they must all agree: `gh` merges the URL's repo
-over `--repo`, and the last of several `-R`, so a command naming two repos
-could merge one the provider never vouched for. A host other than `github.com`
-(`-R host/o/r`, a URL on another host) and a session that ran
-`export GH_HOST=…` are refused too, since the provider contract names no host.
-A merge with no repo runs against whatever checkout the shell or the host's
-working directory points at, which can change between the answer and the
-call, so the provider is not asked about it.
-
-```text
-<provider> merge-approval --repo <owner/name> --pr <N> --session <session_id>
-```
-
-stdin is closed; the call is cut off after 5 s, or sooner when the dispatch
-group's shared deadline leaves less (a quarter second is kept back to record
-the outcome; below 0.5 s the provider is not started, a refusal). On exit 0
-its stdout must be one JSON object:
-
-```json
-{"approved": true, "ref": "<unique per approval>", "repo": "owner/name",
- "pr": 999, "briefing": "<text the human saw>", "approved_at": 1767225600}
-```
-
-The provider vouches for who answered; praxis still judges the answer and
-releases only when all of these hold:
-
-- `approved` is the JSON `true`, `pr` is a JSON integer equal to the merge's
-  number, and `repo` equals the merge's repo (case-insensitive);
-- `briefing` scores at least `MERGE_BRIEFING_MIN_ITEMS` (4) of 6 items with
-  `_briefing_item_count`, the counter the transcript path uses;
-- `approved_at` is a finite number no older than 30 days and no more than
-  5 minutes ahead of the hook's clock (spent refs are kept 30 days, so neither
-  a forgotten ref nor a future timestamp can outlive its spent record and be
-  replayed);
-- `ref` has not released another merge.
-
-Any other outcome (non-zero exit, timeout, output that is not one JSON object,
-a mismatch) keeps the deny and appends one line naming the reason:
-`host approval provider did not release this merge: <reason>`. When a
-provider that exits non-zero prints a JSON object with a string `reason`, that
-reason is quoted too, cut to 200 printable characters.
-
-**One approval, one merge.** The release spends the ref, under `state_lock`,
-in `$PRAXIS_STATE_DIR` (default `~/.praxis/state`) `merge-approval.json`, with
-the session and `tool_use_id` of the call it released. The ref is freed again
-only when that call's `tool_result` in the same session's transcript is
-`is_error`: a sibling gate blocked it or `gh` failed, so nothing merged. A
-call still in flight, or one whose result is not in the transcript, keeps it
-spent. A merge that ran and then failed in `gh` (a local `--delete-branch`
-step, say) frees it too; the freed ref can only release the same PR again,
-which `gh` refuses once it is merged. A payload without `session_id` or
-`tool_use_id` is never released.
-
-**Both gates, one decision.** `pre-merge-approval-gate` asks the same
-function, `host_merge_decision(payload)`. The first gate to ask for a tool call
-records the outcome, refusals included, keyed by session, `tool_use_id`, repo
-and PR, for 10 minutes; the second reads it. In one dispatch the gates run in
-sequence, so the provider runs once per tool call in either order, and a
-provider that would answer differently on a second call cannot split them.
-
-**Not a bypass.** The agent cannot set the hook process environment: an
-inline `PRAXIS_MERGE_APPROVAL_PROVIDER=… gh pr merge` prefix never reaches the
-hook, as with the other variables here. The provider replaces where the answer
-comes from; the briefing check and one-answer-one-merge still hold. A crash in
-the check refuses (`host_merge_decision` catches every exception), so it
-never releases on an error even though the hook itself is `@fail_open`.
-The provider executable and `merge-approval.json` are as safe as the user's
-filesystem, like every praxis state file; a host that runs agents able to
-write there keeps the provider outside their reach.
-
-Tests: `tests/hooks/_lib/test_host_merge_approval.py`, on the fixtures
-`momentum-merge-host-relayed*.jsonl` from
-`tests/fixtures/merge_gate_fixtures.py`.
+Default mode (no env vars): advisory for `dispatch` / `force-push`.
 
 ### Scope (Phase 1 vs Phase 2)
 
 **Phase 1 (this hook):** ANY single matching command triggers the rule surface.
-This is intentionally simple — every `gh pr merge` or `git push -f` emits the
+This is intentionally simple — every agent dispatch or `git push -f` emits the
 relevant reminder, regardless of how many similar commands have already been
 issued in the session.
 
@@ -889,26 +114,10 @@ tracking per PPID or `session_id`.
 ### Detection logic
 
 The hook uses the same `safe_tokenize` / `iter_command_starts` / `strip_prefix`
-pipeline as sibling hooks (`hooks/preflight-gate/pre-merge-approval-gate/impl.py`,
+pipeline as sibling hooks (`hooks/preflight-gate/merge-gate/approval.py`,
 `hooks/advisory-nudge/bash-worktree-existence-advisory/impl.py`). Each segment in the tokenized command
-is inspected independently so that compound commands (`cmux new-workspace && gh
-pr merge ...`) trigger the appropriate surfaces for each matching segment.
-
-gh global flags (`-R/--repo`, `--hostname`, `--color`) are walked past before
-checking the subcommand so that `gh -R owner/repo pr merge` is detected
-correctly.
-
-Two argv shapes match `gh pr merge` textually and merge nothing, so neither
-counts as a trigger (issue #985):
-
-- **A help invocation** — `--help` / `-h` prints usage and exits. Demanding a
-  merge briefing for it blocks the command an agent runs precisely to get the
-  merge right. `is_help_invocation` skips value-flag values, so `--subject -h`
-  stays a subject and still triggers.
-- **A heredoc body** — `safe_tokenize` blanks every body line before the
-  per-line split, so a commit message that merely quotes `gh pr merge` is no
-  longer read as one. The operator line and everything after the terminator are
-  untouched, which is what keeps a real merge on a later line firing.
+is inspected independently so that compound commands (`cmux new-workspace &&
+git push --force ...`) trigger the appropriate surfaces for each matching segment.
 
 `git push` force detection scans all tokens after the `push` subcommand for
 `--force`, `-f`, and `--force-with-lease` (including `--force-with-lease=<ref>`
@@ -918,10 +127,10 @@ prefix-matched form).
 
 | Hook | Overlap |
 | ------ | --------- |
-| `pre-merge-approval-gate` | Both fire on `gh pr merge`. The sibling surfaces an **unconditional** `permissionDecision: ask` (per-PR user approval, content-blind). This hook emits the stderr rule reminder and, when the pre-merge briefing is incomplete, a **content-aware** `permissionDecision: deny` (blocks so the agent produces the briefing). Different checks — the sibling gates *user* approval, this hook gates *briefing existence*. When both fire, `deny` wins (more restrictive), and the agent self-corrects. The sibling skips its ask on this hook's `bulk_merge_approved` and, with a host provider set, `host_merge_decision`. |
-| `side-effect-scan` | Fires on `gh pr merge` / `git push` collateral side effects. Complementary. |
+| `merge-gate` | Owns the `gh pr merge` trigger this hook used to carry (issue #1650): same surface and memory filter, plus the briefing escalation. No overlap left. |
+| `side-effect-scan` | Fires on `git push` collateral side effects. Complementary. |
 | `verify-commit-flag-override` | Fires on `git commit --no-verify`. Different trigger, no overlap. |
-| `memory-hint` | Surfaces `hookable: true` memory entries by keyword. The momentum gate specifically surfaces the entries most relevant to merge / dispatch / force-push momentum, as a targeted complement to the general memory-hint scan. |
+| `memory-hint` | Surfaces `hookable: true` memory entries by keyword. The momentum gate specifically surfaces the entries most relevant to dispatch / force-push momentum, as a targeted complement to the general memory-hint scan. |
 
 ### Co-firing with the sibling gates (PreToolUse Bash)
 
@@ -929,11 +138,9 @@ Per the [Anthropic hooks docs](https://code.claude.com/docs/en/hooks), all
 matching hooks run **in parallel**: array position in `hooks/manifest.json` is
 registration order, not firing order, and no hook runs before or after another.
 
-What matters here is therefore co-firing, not sequence. On `gh pr merge` this
-hook and `pre-merge-approval-gate` both match. The sibling surfaces a
-`permissionDecision: ask` dialog; this hook writes stderr rule reminders. Both
-reach the user in the same surface — an `ask` from one hook does not suppress
-another hook's output, because there is no chain to short-circuit.
+What matters here is therefore co-firing, not sequence. This hook writes
+stderr rule reminders only; an `ask` or advisory from another hook on the same
+command does not suppress them, because there is no chain to short-circuit.
 
 A hook added to this matcher inherits that property automatically. There is no
 ordering invariant to preserve, and none can be expressed: a spec that asks
@@ -956,7 +163,7 @@ The hook returns exit 0 on every infrastructure error:
 bash tests/hooks/advisory-nudge/test_momentum_rule_retrieval_gate.sh
 ```
 
-Cases: gh pr merge trigger, cmux new-workspace trigger, force-push triggers
+Cases: cmux new-workspace trigger, force-push triggers
 (--force / -f / --force-with-lease), bypass env var, strict mode (block +
 ack), fail-open (non-Bash tool, malformed JSON), silent cases (unrelated
 commands), compound command multi-trigger.

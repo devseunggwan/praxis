@@ -130,7 +130,7 @@ def test_transcript_events_render_claude_shapes(tmp_path):
     assert ask["name"] == "AskUserQuestion" and ask["id"] == "c1"
     [result] = events[2]["message"]["content"]
     assert result["tool_use_id"] == "c1" and "is_error" not in result
-    # The pair praxis's merge gate parses (`_ASK_ANSWER_RE` in momentum-rule-retrieval-gate).
+    # The pair praxis's merge gate parses (`_ASK_ANSWER_RE` in merge-gate/briefing.py).
     pairs = re.findall(r'"((?:[^"\\]|\\.)*)"=\s*"((?:[^"\\]|\\.)*)"', result["content"])
     assert pairs == [("PR #7 를 머지할까요?", "승인 — 머지")]
     # The unmapped process_manage call and its result are dropped; terminal stays.
@@ -305,7 +305,7 @@ def test_approval_key_separates_categories_and_prod():
 
 PER_CALL_GATES = [
     "approval-premise-reread-gate", "cross-boundary-preflight", "destructive-bash-guard",
-    "fan-out-scope-gate", "pre-merge-approval-gate", "rejected-mutation-reconsent-gate",
+    "fan-out-scope-gate", "merge-gate", "rejected-mutation-reconsent-gate",
     "session-intent", "a-gate-added-later",
 ]
 
@@ -443,13 +443,13 @@ def test_self_check_lists_every_gate_that_asked(tmp_path):
 
 
 def test_merge_consent_still_asks_the_human(tmp_path):
-    """pre-merge-approval-gate is consent, not a self-check: it stays a Hermes approval,
+    """merge-gate's approval check is consent, not a self-check: it stays a Hermes approval,
     and re-issuing the call does not get past it."""
     subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
     payload = _terminal("gh pr merge 11 --squash # briefing-surfaced: test # side-effect:ack", tmp_path)
     first = _bridge(payload, tmp_path)
     assert first["action"] == "approve", first
-    assert "[praxis:pre-merge-approval-gate]" in first["message"]
+    assert "[praxis:merge-gate]" in first["message"]
     assert _bridge(payload, tmp_path)["action"] == "approve"
 
 
@@ -566,8 +566,8 @@ def test_take_self_check_expires_and_separates_sessions(tmp_path):
 
 def test_split_asks_separates_consent_from_self_check():
     human, self_check = hermes.split_asks(
-        [("side-effect-scan", "x"), ("pre-merge-approval-gate", "y"), ("", "z")])
-    assert human == [("pre-merge-approval-gate", "y")]
+        [("side-effect-scan", "x"), ("merge-gate", "y"), ("", "z")])
+    assert human == [("merge-gate", "y")]
     assert self_check == [("side-effect-scan", "x"), ("", "z")]
 
 
@@ -578,16 +578,16 @@ def test_mixed_asks_self_check_first_then_human_consent(monkeypatch, tmp_path):
     monkeypatch.setenv("PRAXIS_HOME", str(tmp_path / "praxis"))
     monkeypatch.setattr(bridge, "_groups", lambda event, tool: ["Bash"])
     ask = json.dumps({"hookSpecificOutput": {"permissionDecision": "ask", "permissionDecisionReason": "r"}})
-    asked = [("pre-merge-approval-gate", "merge consent"), ("cross-boundary-preflight", "checklist")]
+    asked = [("merge-gate", "merge consent"), ("cross-boundary-preflight", "checklist")]
     monkeypatch.setattr(bridge, "_run", lambda event, matcher, payload: (0, ask, "", asked))
     call = {"tool_name": "terminal", "tool_input": {"command": "gh pr merge 1"}, "session_id": "s",
             "cwd": str(tmp_path), "extra": {"tool_call_id": "t"}}
     first = bridge.pre_tool_call(call)
     assert first["action"] == "block" and "[praxis:cross-boundary-preflight]" in first["message"]
-    assert "pre-merge-approval-gate" not in first["message"]
+    assert "merge-gate" not in first["message"]
     second = bridge.pre_tool_call(call)
     assert second["action"] == "approve"
-    assert second["message"] == "[praxis] [praxis:pre-merge-approval-gate] merge consent"
+    assert second["message"] == "[praxis] [praxis:merge-gate] merge consent"
 
 
 def test_self_check_keeps_every_gate_when_a_reason_is_long():
@@ -712,7 +712,7 @@ def test_other_user_rows_stay_human(tmp_path, kind):
 
 
 def _merge_gate(transcript: Path) -> str:
-    gate = REPO_ROOT / "hooks" / "advisory-nudge" / "momentum-rule-retrieval-gate" / "impl.py"
+    gate = REPO_ROOT / "hooks" / "preflight-gate" / "merge-gate" / "briefing.py"
     payload = {"tool_name": "Bash", "tool_input": {"command": "gh pr merge 7 --squash"},
                "transcript_path": str(transcript)}
     proc = subprocess.run([sys.executable, str(gate)], input=json.dumps(payload),

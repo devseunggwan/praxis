@@ -136,7 +136,7 @@ Advisory arrives as a single stdout `{"systemMessage": ...}` JSON object
 | `PRAXIS_READONLY_VERIFY_BYPASS=1` | Silence the hook entirely (exit 0, no scan). |
 | `PRAXIS_READONLY_VERIFY_SIGNALS=<regex>` | OR-ed into Signal A to recognise project-specific read-only CLIs. |
 
-Exit-2-on-Stop semantics match the sibling `merge-state-claim-gate`: Claude Code
+Exit-2-on-Stop semantics match the sibling `merge-gate` (claim check): Claude Code
 treats a Stop hook `{"decision": "block"}` as "block the stop and feed the
 reason to the model" (equivalent to the exit-2 stderr form, but structured).
 

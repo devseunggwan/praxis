@@ -476,7 +476,7 @@ bridge still reads the last one from `state.db`.
 not a question for the human. The dispatcher emits only the first ask of a
 group, so the bridge collects every gate that asked through
 `run_group(asked_by=...)` and splits them. Asks from gates outside
-`HUMAN_APPROVAL_HOOKS` (`hooks/_lib/_hermes.py`: `pre-merge-approval-gate`,
+`HUMAN_APPROVAL_HOOKS` (`hooks/_lib/_hermes.py`: `merge-gate` (approval check),
 `fan-out-scope-gate`) block the call and return each gate's checklist to the
 agent as a `[praxis self-check]` message. The bridge records the call (tool +
 arguments) per session under `~/.praxis/cache/hermes-self-check/`, under
@@ -499,8 +499,8 @@ user's reply. A host that can verify such an answer sets
 merge gates then ask that executable about a merge they would otherwise stop,
 and release it when the answer matches the merge and its briefing. This is a
 host extension point on every platform, not a Hermes feature; contract in
-`hooks/advisory-nudge/momentum-rule-retrieval-gate/spec.md` → *Host approval
-provider*. Unset, nothing changes.
+`hooks/preflight-gate/merge-gate/spec.md` → *Check: briefing* → *Host
+approval provider*. Unset, nothing changes.
 
 **Install.** `plugins/hermes/bridge.py --print-config` prints the `hooks:`
 entries with this clone's path; merge them into Hermes's `config.yaml`. The

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# test_gh_merge_worktree_precondition.sh — coverage for
-# hooks/preflight-gate/gh-merge-worktree-precondition/impl.py
+# test_merge_gate_worktree.sh — coverage for
+# hooks/preflight-gate/merge-gate/worktree.py
 #
 # Synthesizes Claude Code PreToolUse(Bash) payloads and asserts:
 #   block → exit 2 + stderr non-empty (mentions the conflicting worktree path)
@@ -11,14 +11,14 @@
 # (git worktree state cannot be faked without a real .git) — each case that
 # needs a worktree conflict creates one with `git worktree add`.
 #
-# Usage: bash tests/hooks/preflight-gate/test_gh_merge_worktree_precondition.sh
+# Usage: bash tests/hooks/preflight-gate/test_merge_gate_worktree.sh
 # Exit:  0 = all pass; 1 = at least one fail
 
 set +e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/../../.." && pwd)"
-HOOK="$ROOT_DIR/hooks/preflight-gate/gh-merge-worktree-precondition/impl.py"
+HOOK="$ROOT_DIR/hooks/preflight-gate/merge-gate/worktree.py"
 
 if [ ! -x "$HOOK" ]; then
   echo "FAIL: hook not executable: $HOOK" >&2

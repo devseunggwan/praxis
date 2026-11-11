@@ -127,7 +127,7 @@ convention — `0` is **not** a universal off switch:
   six `completion-verify` bypass vars: any non-blank value bypasses, including
   `0` and `false`. Unset or blank to keep the gate.
 - `PRAXIS_ARTIFACT_VERDICT_STRICT` requires the **exact value `1`**, as in the
-  `_STRICT_ENV` of `merge-state-claim-gate` / `runtime-state-claim-gate` /
+  `_STRICT_ENV` of `merge-gate` (claim check) / `runtime-state-claim-gate` /
   `readonly-verify-deferral-gate`. Every other value keeps the default advisory.
 
 ## Fail-open contract

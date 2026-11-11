@@ -83,7 +83,7 @@ SHA, so any difference means the success was illusory.
 | Hook | Scope | Overlap |
 | ------ | ------- | --------- |
 | `side-effect-scan` | PreToolUse preflight on `git push` / `gh pr merge` | None — runs *before* the push; this hook verifies the *result* |
-| `momentum-rule-retrieval-gate` | PreToolUse nudge at force-push / merge | None — different trigger and timing |
+| `momentum-rule-retrieval-gate` | PreToolUse nudge at force-push / dispatch | None — different trigger and timing |
 
 ### Parsing guarantees (fail-open)
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# test_pr_state_refetch_gate.sh — coverage for
-# hooks/preflight-gate/pr-state-refetch-gate/impl.py
+# test_merge_gate_refetch.sh — coverage for
+# hooks/preflight-gate/merge-gate/refetch.py
 #
 # Synthesizes Claude Code PreToolUse(AskUserQuestion) payloads and asserts:
 #   block → exit 2 + stderr non-empty
@@ -11,14 +11,14 @@
 # that assert "zero-cost pass-through" (no signal detected → no gh subprocess)
 # can verify the hook never shelled out at all, not just that it exited 0.
 #
-# Usage: bash tests/hooks/preflight-gate/test_pr_state_refetch_gate.sh
+# Usage: bash tests/hooks/preflight-gate/test_merge_gate_refetch.sh
 # Exit:  0 = all pass; 1 = at least one fail
 
 set +e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/../../.." && pwd)"
-HOOK="$ROOT_DIR/hooks/preflight-gate/pr-state-refetch-gate/impl.py"
+HOOK="$ROOT_DIR/hooks/preflight-gate/merge-gate/refetch.py"
 
 if [ ! -x "$HOOK" ]; then
   echo "FAIL: hook not executable: $HOOK" >&2

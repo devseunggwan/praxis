@@ -121,8 +121,8 @@ those invocations make network calls — most notably:
 
 - `hooks/preflight-gate/pre-gh-pr-create-dedup-gate/impl.py` runs `gh pr list`
   against the target repo's PR search API to detect duplicate PRs.
-- `hooks/preflight-gate/pr-state-refetch-gate/impl.py`,
-  `gh-merge-worktree-precondition/impl.py`, and `anchor-comment-gate/impl.py`
+- `hooks/preflight-gate/merge-gate/refetch.py`,
+  `merge-gate/worktree.py`, and `anchor-comment-gate/impl.py`
   run `gh pr view` / `gh api` reads to compare a claim against live PR state.
 - `skills/cmux-delegate` performs two distinct egress steps when run
   in a GitHub-backed repo:

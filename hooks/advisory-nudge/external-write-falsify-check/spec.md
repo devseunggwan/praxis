@@ -287,7 +287,7 @@ query (`gh pr view --json state`) is deliberately NOT accepted — the
 2026-05-15 incident ran exactly that probe and still mis-released 3 changes
 (merged PR's base was a feature branch; ref-A existence is not ref-B
 application). The regex is mirrored in
-`hooks/completion-verify/merge-state-claim-gate` (2 copies — DRY extraction
+`hooks/preflight-gate/merge-gate/claim.py` (2 copies — DRY extraction
 deferred to a 3rd consumer per repo convention); that Stop-hook gates the
 *final-message* surface, this check gates the *external-write* surface.
 

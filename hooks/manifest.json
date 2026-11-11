@@ -396,14 +396,6 @@
       }
     },
     {
-      "name": "pre-merge-approval-gate",
-      "role": "preflight-gate",
-      "event": "PreToolUse",
-      "matcher": "Bash",
-      "timeout": 5,
-      "review_by": "2026-12-04"
-    },
-    {
       "name": "fan-out-scope-gate",
       "role": "preflight-gate",
       "event": "PreToolUse",
@@ -419,19 +411,30 @@
       "timeout": 5
     },
     {
-      "name": "gh-merge-worktree-precondition",
+      "name": "merge-gate",
       "role": "preflight-gate",
       "event": "PreToolUse",
       "matcher": "Bash",
-      "timeout": 8,
-      "review_by": "2026-12-04",
+      "timeout": 10,
+      "review_by": "2027-02-09",
       "mode": {
-        "bypass_env": [
-          "PRAXIS_HOOK_BYPASS_MERGE_WORKTREE_GATE"
+        "strict_env": [
+          "PRAXIS_MOMENTUM_STRICT",
+          "PRAXIS_PR_STATE_REFETCH_STRICT",
+          "PRAXIS_MERGE_MENU_REVIEW_STRICT",
+          "PRAXIS_MERGE_CLAIM_STRICT"
         ],
+        "bypass_env": [
+          "PRAXIS_HOOK_BYPASS_MERGE_WORKTREE_GATE",
+          "PRAXIS_MOMENTUM_BYPASS",
+          "PRAXIS_MOMENTUM_MERGE_ADVISORY",
+          "PRAXIS_MERGE_CLAIM_BYPASS"
+        ],
+        "state_paths": ["PRAXIS_MEMORY_DIR"],
         "external_commands": [
           "gh pr view <identifier> --json headRefName -q .headRefName",
-          "git worktree list --porcelain"
+          "git worktree list --porcelain",
+          "gh pr view <N> --json state,mergeStateStatus,mergeable,isDraft"
         ]
       }
     },
@@ -501,18 +504,11 @@
       }
     },
     {
-      "name": "pr-state-refetch-gate",
+      "name": "merge-gate",
       "role": "preflight-gate",
       "event": "PreToolUse",
       "matcher": "AskUserQuestion",
-      "timeout": 8,
-      "review_by": "2026-12-04",
-      "mode": {
-        "strict_env": "PRAXIS_PR_STATE_REFETCH_STRICT",
-        "external_commands": [
-          "gh pr view <N> --json state,mergeStateStatus,mergeable,isDraft"
-        ]
-      }
+      "timeout": 10
     },
     {
       "name": "gh-flag-verify",
@@ -873,8 +869,7 @@
       "mode": {
         "strict_env": "PRAXIS_MOMENTUM_STRICT",
         "bypass_env": [
-          "PRAXIS_MOMENTUM_BYPASS",
-          "PRAXIS_MOMENTUM_MERGE_ADVISORY"
+          "PRAXIS_MOMENTUM_BYPASS"
         ],
         "state_paths": [
           "PRAXIS_MEMORY_DIR"
@@ -1153,17 +1148,6 @@
       "timeout": 5
     },
     {
-      "name": "merge-menu-review-options-advisory",
-      "role": "advisory-nudge",
-      "event": "PreToolUse",
-      "matcher": "AskUserQuestion",
-      "timeout": 5,
-      "review_by": "2026-12-04",
-      "mode": {
-        "strict_env": "PRAXIS_MERGE_MENU_REVIEW_STRICT"
-      }
-    },
-    {
       "name": "menu-mutation-tier-advisory",
       "role": "advisory-nudge",
       "event": "PreToolUse",
@@ -1383,29 +1367,17 @@
       "review_by": "2026-12-04"
     },
     {
-      "name": "merge-state-claim-gate",
-      "role": "completion-verify",
+      "name": "merge-gate",
+      "role": "preflight-gate",
       "event": "Stop",
-      "timeout": 10,
-      "review_by": "2026-12-04",
-      "mode": {
-        "strict_env": "PRAXIS_MERGE_CLAIM_STRICT",
-        "bypass_env": [
-          "PRAXIS_MERGE_CLAIM_BYPASS"
-        ]
-      }
+      "timeout": 10
     },
     {
-      "name": "merge-state-claim-gate",
-      "role": "completion-verify",
+      "name": "merge-gate",
+      "role": "preflight-gate",
       "event": "SubagentStop",
       "hosts": ["claude"],
-      "timeout": 10,
-      "mode": {
-        "bypass_env": [
-          "PRAXIS_MERGE_CLAIM_BYPASS"
-        ]
-      }
+      "timeout": 10
     },
     {
       "name": "runtime-state-claim-gate",

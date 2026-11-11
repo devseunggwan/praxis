@@ -181,7 +181,7 @@ changed row.
 
 ## 7. Transcript-reading gates
 
-Gates such as `momentum-rule-retrieval-gate` and `pre-merge-approval-gate`
+Gates such as `merge-gate` (briefing and approval checks)
 decide from the session transcript: what the assistant wrote, what the user
 answered, which calls ran. Parse conservatively: when the answer or the
 briefing shape is ambiguous, do not release.
@@ -264,7 +264,7 @@ false release in a first implementation.
   or conditional ones included (`gh pr merge 1001 && echo done`). Do not
   reuse a blocking gate's "executed merges" helper as-is: it drops chained
   merges to fail open, which on a release path is a hole — add a flag
-  (`include_skippable=True` in `momentum-rule-retrieval-gate`) instead.
+  (`include_skippable=True` in `merge-gate`'s briefing check) instead.
 - **Widening what the gate reads.** When a change widens the input (the
   question text, say), write these deny fixtures first: a question answered
   with a hold; a refused question (an `is_error` result with no `"q"="a"`

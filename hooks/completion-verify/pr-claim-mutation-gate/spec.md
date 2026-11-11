@@ -93,7 +93,7 @@ cross-hook refactor into a one-narrowing fix.
 matches `_NEGATION_RE`'s inner `않` token and is silently suppressed even
 though the sentence is semantically a completion claim. Reliable
 double-negation parsing is out of scope for a line-level regex gate; this is
-a documented trade-off in the same style as `merge-state-claim-gate`'s
+a documented trade-off in the same style as `merge-gate` (claim check)'s
 `without`/`fail` notes.
 
 ## Mutation evidence (current turn only)
@@ -213,7 +213,7 @@ entirely.
 | Hook | Scope | Overlap |
 | ---- | ----- | ------- |
 | `completion-signal-gate` | Stop advisory, generic completion vocabulary, any Bash/Read call clears it | Complementary — broader phrase net, much weaker evidence gate |
-| `merge-state-claim-gate` | Stop advisory, merge/PR/issue/worktree **state** assertions (`merged`, `created`, `closed`), evidence = any fresh `gh pr\|issue` query in the recent 80-event window | None — that hook gates state assertions about the PR's lifecycle; this one gates "I processed the review feedback" claims and requires an actual **mutation**, not just a query, in the **current turn** only |
+| `merge-gate` (claim check) | Stop advisory, merge/PR/issue/worktree **state** assertions (`merged`, `created`, `closed`), evidence = any fresh `gh pr\|issue` query in the recent 80-event window | None — that hook gates state assertions about the PR's lifecycle; this one gates "I processed the review feedback" claims and requires an actual **mutation**, not just a query, in the **current turn** only |
 | `runtime-state-claim-gate` | Stop advisory, runtime/execution state claims, evidence = any probe tool in current turn | Structural sibling (same turn-scoped-evidence shape); different claim domain |
 
 ## Parsing guarantees (fail-open)

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# test_merge_menu_review_options.sh — coverage for
-# hooks/advisory-nudge/merge-menu-review-options-advisory/impl.py
+# test_merge_gate_menu.sh — coverage for
+# hooks/preflight-gate/merge-gate/menu.py
 #
 # Synthesizes Claude Code PreToolUse(AskUserQuestion) payloads and asserts:
 #   advisory → exit 0 + stderr non-empty  (default mode)
@@ -9,14 +9,14 @@
 #
 # The hook inspects only options[].label — no transcript is needed.
 #
-# Usage: bash tests/hooks/advisory-nudge/test_merge_menu_review_options.sh
+# Usage: bash tests/hooks/preflight-gate/test_merge_gate_menu.sh
 # Exit:  0 = all pass; 1 = at least one fail
 
 set +e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/../../.." && pwd)"
-HOOK="$ROOT_DIR/hooks/advisory-nudge/merge-menu-review-options-advisory/impl.py"
+HOOK="$ROOT_DIR/hooks/preflight-gate/merge-gate/menu.py"
 
 if [ ! -x "$HOOK" ]; then
   echo "FAIL: hook not executable: $HOOK" >&2

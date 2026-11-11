@@ -100,6 +100,26 @@ def emit_decision(
     out.write("\n")
 
 
+def read_decision(stdout: str) -> tuple[Optional[str], str]:
+    """(decision, reason) from what `emit_decision` wrote; (None, "") otherwise.
+
+    The inverse of `format_decision`, for a hook that runs other checks in
+    process and folds their answers (merge-gate, issue #1650), so the JSON
+    shape is still spelled only in this module.
+    """
+    try:
+        data = json.loads(stdout)
+    except ValueError:
+        return None, ""
+    spec = data.get("hookSpecificOutput") if isinstance(data, dict) else None
+    if not isinstance(spec, dict):
+        return None, ""
+    decision = spec.get("permissionDecision")
+    reason = spec.get("permissionDecisionReason")
+    return (decision if isinstance(decision, str) else None,
+            reason if isinstance(reason, str) else "")
+
+
 # --- PreToolUse advisory context (issue #1265) ------------------------------
 #
 # A PreToolUse hook that exits 0 has exactly one channel that reaches the model:

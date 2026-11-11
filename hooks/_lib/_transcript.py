@@ -5,7 +5,7 @@ Previously these JSONL transcript readers were re-implemented per hook:
 
   - _load_transcript / _get_current_turn / _extract_last_assistant_text
     duplicated across readonly-verify-deferral-gate, completion-signal-gate,
-    merge-state-claim-gate (Stop hooks)
+    merge-gate (claim check) (Stop hooks)
   - _read_last_user_message duplicated across block-ask-end-option,
     block-manufactured-action-menu (PreToolUse AskUserQuestion gates)
   - bounded whole-file readers (_read_transcript_tail, _load_transcript_objs)
@@ -16,7 +16,7 @@ Previously these JSONL transcript readers were re-implemented per hook:
 
 All consumers now import from here so the parsing semantics cannot drift.
 The canonical bodies adopt the most defensive variant that existed
-(merge-state-claim-gate's `isinstance(block, dict)` guards): a malformed
+(merge-gate (claim check)'s `isinstance(block, dict)` guards): a malformed
 content block is skipped instead of raising into the caller's fail-open
 wrapper, which silently disabled the whole scan.
 
