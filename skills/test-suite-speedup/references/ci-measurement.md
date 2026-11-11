@@ -132,7 +132,9 @@ full-suite run instead:
    tests ≥ 1 s vs < 0.05 s — it decides whether the lever is per-file or
    suite-wide.
 4. Convert to CI seconds with the measured ratio (CI both-legs pytest sum ÷
-   local junit sum, typically ~2×) and state it; list errored modules as
+   local junit sum, typically ~2×) and state it; the converted per-module
+   values are estimates (the ratio differs per module), so cross-check the
+   top candidates against any CI `--durations` lines before ranking them; list errored modules as
    unmeasured (not zero), with their error class.
 5. Before reporting after a long gap, check the run actually finished (log
    tail has the pytest summary): a host restart kills the background run
@@ -160,6 +162,9 @@ For "CI is getting slower again, is it the new tests?":
    average) — so the user sees both curves at once; a per-test average that
    keeps climbing day after day says the added tests are heavier than the old
    ones (or a shared fixture got slower), which is the question 5b settles.
+   When CI logs only dots plus a top-N `--durations`, 5b rests on local
+   junit runs: label that attribution as an estimate, or add `--junitxml`
+   (or `-v`) to the CI run first.
 4. **Per-file delta**: run the per-file ranking above on both runs, bucket by
    the first two path segments under the test root, and print baseline,
    now, delta. Start attribution at the `collected` line, not the step start:
