@@ -227,11 +227,11 @@ cleanly.
   hand-merging hunks — and it drops the PR's unrelated formatting churn,
   which reviewers tend to flag. `--theirs` replaces the whole file, including
   the PR's non-conflicting hunks in it, so first list what the PR changed
-  there (`git diff $(git merge-base HEAD <base-remote>/<base>) HEAD -- <file>`)
+  there (`git -C <worktree> diff $(git -C <worktree> merge-base HEAD <base-remote>/<base>) HEAD -- <file>`)
   and confirm each hunk is moot or re-applied.
 - **Re-read the reviewer's merge-order advice against the current base.** A
   review that said "only file X conflicts" was measured against an older base;
-  more commits may have landed since. Run `git merge-tree --write-tree
+  more commits may have landed since. Run `git -C <worktree> merge-tree --write-tree
   --name-only <base-remote>/<base> HEAD` again and work from that list.
 - **When the base refactored the code the PR fixes**, the PR's hunk no longer
   has a home: take the base side, find where the logic lives now
@@ -249,8 +249,10 @@ cleanly.
   The reverse case matters as much: when the **base deleted** a function the
   PR modified or ported, take the base side and also grep the merged tree for
   that function, because the PR may have moved its tests to a non-conflicting
-  file that still imports it. Delete those tests in the merge commit, and drop
-  the matching row from the PR body and anchor.
+  file that still imports it. When the base retired that behaviour, delete
+  those tests in the merge commit and drop the matching row from the PR body
+  and anchor; when the base moved it to another implementation, rewire the
+  tests to that implementation instead.
 - **Carry the base's new guards onto the PR's parallel paths.** When the PR
   adds a bulk/alternate entry point beside an existing single-item one
   (bulk pause next to a single PUT, a batch trigger next to a single trigger),
@@ -334,10 +336,12 @@ review nit.
   base was formatted with rewrites untouched base lines and bloats the merge
   diff. Check `git diff --stat <base-remote>/<base> -- <file>` after any
   format step; if base lines moved, rebuild the file as the base version plus
-  only the PR's hunks (`git show <base-remote>/<base>:<file>` + the PR's
-  appended block from `git show HEAD:<file>`, written via a scratch script).
-  For a conflicted test file where the PR only appended a class, that rebuild
-  is also the cleanest resolution.
+  only the PR's hunks as they stand in the resolved file (index or worktree),
+  written via a scratch script. `git show HEAD:<file>` is the pre-merge PR
+  side and lacks the conflict fixes, so take only a block the resolution did
+  not touch from it: for a conflicted test file where the PR only appended a
+  class, `git show <base-remote>/<base>:<file>` + that appended block is also
+  the cleanest resolution.
 - **Split a file that mixes two commits' changes by writing each commit's
   content into the index, not by hand-picking hunks.** Build the
   intermediate version in scratch (base plus only this commit's change, from
@@ -403,8 +407,10 @@ converged head + live proof on that head → anchor revision → merge ask.
 
 A live-proof worker that writes to a shared dev database snapshots every row
 it will touch to a file first, restores them at the end (status through the
-API, timestamps by SQL to the snapshot values), and proves the restore with a
-snapshot diff of 0 plus an independent read; it deletes the preview and
+API, timestamps by SQL to the snapshot values) only where a row still holds
+the value the worker wrote (a row that differs was changed by someone else:
+leave it and report it), and proves the restore with a snapshot diff of 0
+over the restored rows plus an independent read; it deletes the preview and
 confirms the namespace is gone. Ask it for a per-scenario table
 (PASS(live)/FAIL/BLOCKED, evidence line, head sha) so the anchor rows come
 straight from it.
@@ -450,11 +456,14 @@ briefing afterwards means asking twice.
   substitute — the user answers with "was each one actually verified?" and
   the ask is wasted. When asked that, answer first with a per-PR table
   (`verified live / partly / not`, head sha, surface) and then close the
-  gaps in the same turn.
+  gaps in the same turn. A PR with no live surface at all (no preview, no
+  reachable environment) may be briefed: say so in part 3 with the risk, so
+  the user decides on it.
 - Before the ask, read what the merge itself needs on the production base:
   the ruleset's required approvals, whether your account can bypass them
-  (`gh api graphql` `pullRequest{viewerCanMergeAsAdmin}`; when it disagrees
-  with the ruleset's bypass list, trust the probe), and whether the change
+  (`gh api graphql` `pullRequest{viewerCanMergeAsAdmin}`, and the ruleset's
+  `current_user_can_bypass`; when the two disagree, report both and ask
+  rather than picking one), and whether the change
   touches a class the team reserves for human review (authorization rules,
   billing, deletion). When a human approval is still required, the question
   is "request a reviewer, then ask merge", not "merge now" — and ask who.
@@ -488,7 +497,8 @@ briefing afterwards means asking twice.
   GitOps repo a green deploy job only means the image tag was written to the
   config repo; the cluster may still run the previous image for minutes. Read
   the running image (`kubectl get deploy -o jsonpath=…image`) and wait until
-  it carries the merge sha with all replicas updated (a background script
+  it runs the image the deploy job wrote for the merge commit (tag or digest,
+  read from the config repo's commit) with all replicas updated (a background script
   with a time ceiling) before any post-merge live check.
 - A post-merge live check "on <named internal account>" needs two probes
   before planning: that your login can act on that tenant (membership/owner
@@ -499,8 +509,9 @@ briefing afterwards means asking twice.
   unmeasured, and ask for access to a tenant that has it.
 - Before writing to a production tenant for the check, snapshot the rows you
   will touch, read the write path for side effects (deletion DAGs, events,
-  mail) on that exact transition, restore at the end, and re-read the rows to
-  prove the end state; report any column you left changed (e.g. `updated_at`). A
+  mail) on that exact transition, restore at the end only rows that still
+  hold the value you wrote (report any row someone else changed meanwhile),
+  and re-read the rows to prove the end state; report any column you left changed (e.g. `updated_at`). A
   skipped `deploy` job is not a failure when the repo ships through another
   job (a DAG-bundle publish): read which job carries the release before
   judging. Compare the merged `headRefOid` with the head you verified — the
