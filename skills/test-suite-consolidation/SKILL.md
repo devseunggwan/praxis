@@ -40,7 +40,7 @@ Reference map — load only when the step runs:
 | ------ | ------- |
 | [`references/duplicate-audit.md`](references/duplicate-audit.md) | How to find copied fixtures/helpers on the base ref with a normalized-AST grouping, and the three buckets to report |
 | [`references/copy-guard.md`](references/copy-guard.md) | Copy-guard design: binding-aware equality, diff-scoped vs baseline, thresholds, checker mutation testing, CI placement |
-| [`references/pruning.md`](references/pruning.md) | Pruning shape: own-PR quick pass, criteria, deterministic probes (never-runs / empty-parametrize / failing-since-added), window audit of newly added tests, read-only fan-out, re-verification traps (randomized differential, forced-state simulations, uniform mocks, self-comparing differentials), parallel implementation lanes (private DBs, HEAD-checked mutations), removal-vs-approved check, report |
+| [`references/pruning.md`](references/pruning.md) | Pruning shape: own-PR quick pass, criteria, deterministic probes (never-run map from workflow steps / in-body env guards / importorskip vs the venv's lockfile / empty-parametrize / failing-since-added), window audit of newly added tests, read-only fan-out, re-verification traps (randomized differential, forced-state simulations, uniform mocks, self-comparing differentials, copied commands judged by stdout, lane citations), parallel implementation lanes (private DBs, HEAD-checked mutations, lint with the CI linter's config file, commit split from lane result JSON), removal-vs-approved check, report (production defects split into their own fix PR first, with a post-merge rollout check), base-vs-branch lint diff when the repo has no lint config |
 
 ## When to Use
 
@@ -57,6 +57,46 @@ Reference map — load only when the step runs:
   [`scripts/mutation_matrix.sh`](scripts/mutation_matrix.sh)) before
   `gh pr create`; otherwise the user asks for it after review and the anchor,
   PR body and CI all need another revision.
+- **Unasked, again before any merge briefing** on a PR whose tests grew after
+  it opened — tests you added later, tests a review bot pushed, or tests kept
+  from both sides of a base-merge conflict. Scope = `comm -13` of collected
+  ids at `origin/<base>` vs head for the files `git diff origin/<base>...HEAD
+  -- <tests>` touches. A test that exercises a file the PR's diff does not
+  change is out of the PR's scope: flag it in the matrix report.
+- Run the matrix as a background script that writes per-mutant JSON and
+  restores each source from `git show HEAD:<f>`; invoke the venv's pytest from
+  a shell, not from a notebook-kernel subprocess — the kernel's inherited
+  interpreter env can make conftest imports fail (`pydantic_core` /
+  `ArgsKwargs` ImportError) and the pipeline reports zero collected ids.
+- Drop a test only when its failing-mutant set is a subset of the union of
+  the kept tests' sets, and report it as a table (dropped test → mutants it
+  caught → kept test that catches the same). A test no mutant fails is not
+  thereby unnecessary: first check it was not skipped in the matrix venv
+  (a venv lacking an optional dependency skips it silently), then write a
+  mutant aimed at its own assertion — keep it if that mutant fails it alone.
+  A no-hit row usually means the mutant set is missing a branch, not that the
+  test is dead. The subset test only covers what the matrix models: before
+  dropping a case a design or brief listed (or one written for a named
+  behavior: same-day protection, an off switch value), add the mutant that
+  breaks that behavior and re-run — otherwise the drop deletes the only guard
+  of an unmodeled regression and a reviewer forces it back.
+- Re-run the full matrix and recompute sole killers after every change to
+  the code or the case list, and repeat until nothing new is prunable or
+  restorable: a new code branch needs its own mutants (and old mutants'
+  anchors may stop matching), restoring cases makes other cases redundant,
+  and adding rows can make a mutant newly equivalent. Read the matrix's
+  error list before its survivor list: a mutant whose anchor text no longer
+  matches the code never ran, so it is a missing guard, not a pass. When a
+  mutant survives because the current rows give the same answer on both
+  branches, pick a row at the branch boundary (a value that only one branch
+  maps differently, e.g. a start before the floor with the switch off) before
+  calling it equivalent. Before rewriting mutant anchors for a code change, copy the matrix file
+  (`kill_matrix.rev<N>.py`) and move the previous result JSON aside: if the
+  change is reverted, restoring that copy gives the matching matrix at once.
+  Rewrite anchors with a script that asserts each anchor matches exactly once,
+  not by hand edits. The matrix rewrites
+  files in the worktree, so commit first and point any parallel reader
+  (review subagent) at `git show HEAD:<path>`, not the working tree.
 
 Pick the shape first: **consolidate** (Steps 1–8) or **prune**
 ([`references/pruning.md`](references/pruning.md)). A request for both runs

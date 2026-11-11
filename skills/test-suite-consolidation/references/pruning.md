@@ -70,7 +70,7 @@ after an edit or a rebase produces a mutant identical to HEAD, which reads as
 removes a *production* check and fails no test can also mean the check itself
 is redundant (a later-added check covers every case it decided): then delete
 the check and the test that existed only for it, rather than writing a new
-test for it. Give the harness a per-mutant timeout and record a timeout as "caught (hung)": a mutant that removes a wait bound makes a wait test hang, and without the timeout the whole matrix dies on that row. When several review-bot guards each look dead in the matrix, propose replacing the stacked conditions with the one rule they approximate (and re-fit the tests to it) as a user choice, rather than deleting them one by one. While the matrix runs, the source file is a mutant — run lint
+test for it. Run the matrix as a background process, never inside a foreground tool call with a timeout: a killed harness skips its restore step and leaves the last mutant applied plus a `*.orig` backup in the worktree. After any interrupted run, `git status` for stray `*.orig`, diff the backup against `git show HEAD:<f>`, and restore before testing or committing anything. A test that compares a value derived from the real clock (a floor of `now - N days`) with a fixed fixture date is a time bomb that passes today and fails on a fixed future date: pin `now` inside the test (monkeypatch the clock call the code uses) and assert the exact derived value, then prove it with a clock-freezing plugin at a future date: the old file fails there, the fixed one passes. Give the harness a per-mutant timeout and record a timeout as "caught (hung)": a mutant that removes a wait bound makes a wait test hang, and without the timeout the whole matrix dies on that row. When several review-bot guards each look dead in the matrix, propose replacing the stacked conditions with the one rule they approximate (and re-fit the tests to it) as a user choice, rather than deleting them one by one. While the matrix runs, the source file is a mutant — run lint
 and shellcheck on it only after the matrix restores it, or the findings
 belong to the mutant.
 
@@ -89,7 +89,11 @@ stops reaching the branch it was written for.
 
 After the drop, **mutate each remaining guard once** (delete or invert it) and
 confirm a kept test fails — so pruning did not remove the only test pinning
-it. Report a table of dropped test · reason and update the PR's verification
+it. A drop justified by "the integration test already covers it" needs this
+mutation, not a reading: integration fixtures often never build the input
+combination the unit case did (two accounts on one key, one of them
+unchecked), so the guard goes unpinned and a reviewer's surviving mutant
+forces the test back with a correction reply. Report a table of dropped test · reason and update the PR's verification
 note with the new test count.
 
 Run this pass before opening the PR — and before the first verification
@@ -147,10 +151,35 @@ audit deletes nothing, and the scope question comes at the end anyway.
   the build's entry list and any path-string loaders (`'./src/…/x.ts'` maps)
   before calling a module orphaned. Report these as "delete test + code", not
   as a test-only drop — removing just the test leaves untested dead code.
+  After deleting such a module, re-run the grep for every type and helper it
+  imported from its own package (models, parsers): one whose only remaining
+  hits are the package `__init__` re-export is now dead too — delete it and
+  trim the re-export in the same commit, or the next audit finds it.
+- **Never-run map** — before judging any skip, map every test file to the CI
+  steps that execute it: parse each workflow's `run:` steps (with
+  `working-directory`) for `vitest run <paths> --exclude`, `pytest <paths>`,
+  `unittest discover -s`, `node --test <glob>`, `python3 <test_file>` and
+  `pnpm --filter <pkg> test` (resolve the package's `test` script dirs), and
+  write `{owners: {file: [workflow:job]}, never: [...]}` to scratch JSON. Hand
+  the JSON to every lane so each row carries a `ci` column. If an approved
+  open PR is about to change how tests run (a monorepo task runner fallback),
+  say which never-run files it will pick up, and re-read the map on the new
+  base before acting on it.
 - **Conditional skips** — grep `skipIf` / `runIf` / `.skip` / `.only` / `.todo`
   (vitest/jest) or `skipif` / `importorskip` (pytest), and judge each condition
   against the CI job's env (which env vars, creds, browsers, files it has). A
   block CI never runs is a `never-runs-in-CI` finding, not automatically a drop.
+  - Also grep in-body env guards — `if (!process.env.X) return;`,
+    `if (!bundlePath) return;`, `if not os.environ.get(...): return` — which no
+    skip grep finds and which report PASS. For each, find the CI step that runs
+    that file and check whether the step (or the task-runner target) exports
+    the variable; one step exporting it does not cover a sibling step that runs
+    the same directory. Fix by resolving the value in the test (an existing
+    resolver helper) or exporting it in that step, never by leaving the guard.
+  - An `importorskip("<pkg>.<module>")` whose module imports a dependency
+    missing from the only venv that collects the file always skips: grep that
+    venv's lockfile (`grep -c '^name = "<dep>"' <dir>/uv.lock`) and every other
+    job's collected paths before calling it live.
   - Before calling a main-CI skip `never-runs`, map the file against every
     other workflow's pytest targets, including target lists a script prints
     (`scripts/<x>.sh targets`) and grep-built lists — side workflows with the
@@ -255,7 +284,17 @@ e.g. per-provider dirs, alphabetically). Write each lane's file list to
 `<scratch>/l_<lane>.txt` and have the lane write a TSV
 (`file  class  verdict  criterion  evidence  cases_affected`) to
 `<scratch>/out_<lane>.tsv`, so you aggregate and count rows in code instead of
-from summaries. Give each lane these classes:
+from summaries. When the ask includes "needs improvement" (not only unnecessary/invalid),
+add an `IMPROVE` verdict whose lane must name what dominates the cost and the
+cheaper proof: whole-repo scans (`git ls-files` / glob / `os.walk` parsing
+files unrelated to the assertion — pre-filter with a cheap regex, keep the
+all-files guarantee), fixtures of hundreds of KB re-read per case (share one
+load or synthesize a small one; keep a recorded original when its owner says
+it is the source of truth), the same synth/stack build repeated per case
+(cache by input), bundling inside synth (`bundling-stacks: []`), fixed
+sleeps and real-time waits (inject the clock or interval), and network or
+host-binary dependencies (docker, kubectl, PyPI, GitHub downloads). Give each
+lane these classes:
 
 - `behavior` — executes code;
 - `contract` — pins a structure code consumes at runtime: manifest fields, a
@@ -305,6 +344,11 @@ Lane verdicts are claims. Re-read the code path behind every `drop` /
   that re-states a guard's predicate inline protects nothing for the same
   reason: extract the predicate into one function the guard and the control
   both call, then show a mutant of it fails the control.
+  When the re-implemented part is a harness standing in for code that cannot
+  load in the test runtime (a browser patch hunk), drop only the assertions
+  about the harness's own behavior (ordering), keep the ones that drive the
+  real loaded code, comment which test pins the real code, and mutate the real
+  source (the patch line) to show that test fails.
 - **"Re-tests a shared helper" through a caller.** The helper's own test
   pins the helper, not which inputs each caller feeds it. Before dropping a
   caller-side case (e.g. "different source path → different directory"),
@@ -336,6 +380,36 @@ Lane verdicts are claims. Re-read the code path behind every `drop` /
   rebinds `f` to the installed module. Block those imports in `sys.modules`
   during the exec (as they fail in the real runtime), and assert
   `shipped.__globals__ is not original.__globals__` before comparing outputs.
+- **A copied production command judged by a different oracle.** A test that
+  pastes a probe or shell command from a manifest into its own body and
+  decides pass/fail by stdout instead of the exit code the runtime uses can
+  hide that the real command never fails (`find` exits 0 with no match, so a
+  `find ... -mmin -2` liveness probe passes on a stale file). Run the real
+  command's exit code on the failure inputs; if it cannot fail, report a
+  production defect, not a test verdict, and replace the test with one that
+  executes the rendered command.
+- **Lane citations and environment claims.** A lane that says "`<file>:<N>`
+  already does X" or "breaks on runners without `<binary>`" can be wrong:
+  open the cited line, and read the job's `runs-on` image before relaying a
+  missing-tool risk (hosted `ubuntu-latest` ships common CLIs). Drop or
+  correct the claim before it reaches a comment or issue.
+- **A phrase-pin over a runbook operators paste.** A test asserting a README
+  command block's shape (no `openssl rand` in a seed step, `--context` on every
+  `kubectl`) looks doc-only, but people execute that text by hand. Inject the
+  unsafe line into the README: if only that test fails, it is a contract —
+  keep it (tighten it if it is loose), and correct the audit verdict.
+- **A source-grep test rewritten as a real build gets slower.** Replacing
+  "the call string appears in the file" with a synth/render assertion can cost
+  5x per file. Show the mutation that proves the old test vacuous (comment out
+  the call → old green, new red) next to the before/after seconds, and report
+  it as an accepted trade-off rather than an IMPROVE win.
+- **Race tests over a fake async client that never yields.** If the fake
+  store/boto client completes every call without awaiting, "concurrent"
+  coroutines run one after another and a removed conditional-write guard stays
+  green. Add an interleaving fake (`await asyncio.sleep(0)` before each call)
+  in the store tests' conftest only, and mutation-check the guard. Widening it
+  to other suites can surface real production contention — record that as a
+  finding on the work issue instead of fixing it in the cleanup.
 - **A collector over a tested stream** (`getX()` = collect `getXStream()`)
   is a duplicate only if the stream's tests carry every error-path case the
   collector's had; compare the case lists before dropping.
@@ -359,11 +433,34 @@ Lane verdicts are claims. Re-read the code path behind every `drop` /
    body to a scratch file, show it, then `gh issue create --body-file <file>`.
    Record the out-of-scope tier (3) items as a comment on that issue and cite
    the comment URL as `Carried:` in the verification anchor.
-2. **Worktree** from a fresh `origin/<base>`. If the base moved since the
-   audit, `git diff --stat <audit-sha> origin/<base>` and re-check any audited
-   file it touches. Take the collect-ID oracle now, before the first edit.
+2. **Worktree** from a fresh `origin/<base>`. Take the collect-ID oracle now,
+   before the first edit. If the base moved since the audit, re-baseline every
+   checklist row before touching it:
+   - `git log -M --name-status <audit-sha>..origin/<base> -- <row files>` —
+     a row file that looks deleted was often renamed or moved into another
+     package (`*.integration.test.ts`, a new project dir); judge the new path,
+     and drop rows a merged PR already fixed (a removed `it.skip`).
+   - Scan open PRs for the row files (`gh pr list --state open --json
+     number,author,files`, intersect in code). A row an in-flight PR already
+     reworks (often by the file's owner) leaves this PR — name the PR in the
+     report instead of producing a conflicting edit; ignore long-stale
+     bot/revert PRs.
+   - Re-run each dead-code grep on the new base before quoting it to anyone.
+   - When the user picks one PR with production-code deletion gated on the
+     owner, start the test-only rows at once and put the dead-code and
+     INVESTIGATE rows in ONE owner comment on the work issue: a table of
+     code · usage grep (with its scope and base sha) · tests deleted with it,
+     plus one question per INVESTIGATE row. Show the draft before posting
+     (it mentions a person); land the answers on the same branch. If the
+     user says they will notify the owner themselves, post without the
+     @mention. If the user later says to delete the dead code before the owner
+     answers, do it in the same PR and state that decision in the PR body,
+     since the posted comment still reads as a question.
 3. **Before `git rm`**, grep each deleted file's name across the repo
-   (excluding the changelog). Rewrite comments that cite it with the
+   (excluding the changelog) — after the lanes return too, since lanes delete
+   files you did not. Docs that list commands to run (quickstart evidence
+   tables, runbooks) must drop the removed paths; history lines get the
+   repo's deletion annotation. Rewrite comments that cite it with the
    current-state reason — no "dropped in #N" history. Check whether a shared
    helper (e.g. an assert library) still has consumers.
 4. **A check that greps a SKILL.md for a script name** passes even when the
@@ -372,7 +469,10 @@ Lane verdicts are claims. Re-read the code path behind every `drop` /
    `A && B || C` (shellcheck SC2015).
 5. **Commits** — one per class (orphans + their dead code / phrase-pin /
    tightened check / duplicates), each with `Refs #N` when an issue exists;
-   the PR uses `Closes #N`. Do the small orphan/dead-code commit yourself
+   the PR uses `Closes #N` even while owner-pending rows remain (repo link
+   gates reject `Refs`): add one line saying those rows land on this branch
+   before merge, and move them there or to the open umbrella issue before
+   asking to merge. Do the small orphan/dead-code commit yourself
    first, then fan the case pruning out, so no file carries two classes.
    - Case-pruning lanes: one subagent per audit lane, disjoint test files in
      the same worktree, no git commands. Each lane re-reads every claimed
@@ -419,6 +519,58 @@ Lane verdicts are claims. Re-read the code path behind every `drop` /
      above a blank line, and a TS repo without `noUnusedLocals` will not flag
      imports the removal orphaned. After removal, grep for `^// <name>`
      headers and for each removed symbol's remaining imports.
+   - Fan-out mechanics: write ONE shared instructions file (worktree, lane
+     JSON path, verdict semantics, hard rules: test files only, no git state
+     changes, no fixture edits, re-verify STALE, mutation per DROP/MERGE,
+     before/after timing ×2, lint) and give each lane only its lane name plus
+     lane-specific conflicts (open PRs on its files). Each lane writes
+     `<scratch>/<issue>-result-<lane>.json`; aggregate those, not summaries.
+   - Timing and flakes measured while other lanes run are invalid (load
+     average 15–30). Re-time after every lane returns, alone. A test that fails
+     once in a loaded full run: run it alone ~20× on the branch and on a clean
+     base worktree before attributing it to the change. Resolve the node id
+     with `git grep -ln <test name>` first and print each run's last line: a
+     wrong path exits non-zero with `no tests ran`, which a loop counting
+     only exit codes reports as 20/20 failures on both sides.
+   - Lint lanes with the CI linter's own config, not the local default: read
+     the MegaLinter/CI lint config for the file it passes
+     (`TYPESCRIPT_ES_CONFIG_FILE: eslint.config.tsc.js`) and run
+     `eslint -c <that file> $(git diff --name-only --diff-filter=AM origin/<base> -- '*.ts')`.
+     oxlint and a plain `eslint` pass code the type-aware config rejects —
+     e.g. a synth cache key `` `${stage}/${flag}` `` with a boolean trips
+     `restrict-template-expressions`; write `String(flag)`. Confirm the
+     config reproduces the CI errors on the pre-fix file before trusting its
+     clean result.
+   - A lint bot may push auto-fix commits to the PR head between your
+     pushes; on a rejected push, `git fetch` the head, read its diff, and
+     merge it (never force-push).
+   - Write commit trailers only with facts known at commit time: a
+     `Not-tested: <X> pending` in a pushed commit cannot be corrected once
+     X is measured. Leave pending measurements to the verification anchor.
+   - Infra diff bots on a test-only PR (cdk diff "Destructive Changes",
+     plan summaries) can report base-vs-deployed drift. Before explaining
+     or alarming, confirm the PR's `cdk/lib`/`cdktf/lib` diff and find the
+     same warning on another open PR's diff comment; then record it as
+     unrelated in the anchor.
+   - Split commits from the lanes' result JSON, not from memory: collect the
+     dead-code lane's deleted/edited paths (plus any you deleted yourself)
+     into a file, `git add --pathspec-from-file=<file>` for the
+     `refactor(...)` commit, then `git add -A` for the test commit, and read
+     `git diff --cached --diff-filter=A --name-only` before each.
+   - Deleting production code a still-running lane's test imports breaks
+     that lane mid-run: defer the deletion until the lane returns, then remove
+     the remaining import site yourself. A dead module that a pending
+     INVESTIGATE row's test imports waits for that row's decision — delete
+     them together or not at all.
+   - Deleting the last test file of a task-runner project: remove its `test`
+     target too (an nx `vitest run src` over zero files fails the affected
+     run) and the CI-mapping doc row that names it.
+   - Before dropping a `pythonpath`/path entry whose comment cites only the
+     deleted module, grep for other consumers (`files("<pkg>.tests")`,
+     resource imports); keep the entry with a corrected comment if any remain.
+   - Doc edits for deleted code: current-state docs (README) state the
+     present design with no date/issue tag; history docs (specs, task logs)
+     follow the repo's own annotation precedent or stay untouched.
    - Deleting dead production code: grep every open PR's added lines for
      the removed symbols and paths (`gh pr diff <N> --repo <o>/<r> | grep '^+'
      | grep -E '<sym1>|<sym2>|<path>'`) and list open PRs that touch the same
@@ -431,7 +583,12 @@ Lane verdicts are claims. Re-read the code path behind every `drop` /
      build output you did not mean to change.
    - Format only what you dirtied: check a file's base copy with
      `git show HEAD:<f> | npx prettier --stdin-filepath <f> --check`; leave
-     pre-existing format debt alone.
+     pre-existing format debt alone. When the repo has no linter config or CI
+     lint step, run the default linter on the touched files in the branch and
+     in a clean base worktree, strip line numbers, and `comm -13` the two
+     lists: report only the new findings, and keep one that mirrors a
+     production idiom (a blind `except` copied from the task runner) with
+     that reason instead of diverging from production.
 6. **Check removals against the approved set.** `comm -23 before after` must
    equal the approved DROP/MERGE ids plus the renames and unparametrizations
    the lanes reported; compute the residual in code and explain each line.
@@ -457,9 +614,50 @@ In the user's language, in chat:
    the dead production code they guarded, (3) decisions that need the user —
    unwired modules that may be planned, `never-runs-in-CI` blocks (add a CI
    job or drop). Recommend 1+2; leave 3 out until the user decides.
-5. Say whether the slowest files are in the drop set; usually they are KEEP,
+5. A finding that is a production defect (a check that cannot fail, a
+   probe that always passes) leaves the cleanup scope: propose it as its own
+   fix issue and PR first, ahead of the test cleanup issue. Before editing,
+   find the file the live system is actually built from — for a Kubernetes
+   object, read the owning GitOps Application's `source.path`
+   (`kubectl get deploy -A | grep <name>`, then the Application YAML); a
+   code generator next to the app may be a dead pre-adoption path. Measure
+   on live data that the fixed check will not fire immediately (e.g. the
+   max interval between health-file writes in `kubectl logs --timestamps`)
+   and state the rollout it triggers on merge.
+   - Prove the fix on the cluster, not only in a container: apply throwaway
+     pods in dev with the live image digest and probe settings, replace the
+     app with a scripted writer (`: > file; sleep 50; while …; do echo
+     Traceback > file; sleep 20; done`), watch `ready/restartCount` every
+     15 s plus `kubectl get events`, then delete them by a `purpose=` label.
+     Run old vs new side by side; it is the evidence reviewers cannot get
+     from a docker exit code.
+   - When a heartbeat-file probe starts being able to fail, re-check two
+     things the always-passing probe hid: the first write only lands after
+     the first run, so add a `startupProbe` covering that window; and a
+     failed run that the app retries on its own loop is not a reason to
+     restart (a restart rebuilds nothing when clients are created per run).
+     Default split: startup/liveness = file still refreshed
+     (`test -n "$(find F -mmin -N)"`), readiness = refreshed and empty
+     (`-size 0`). Make the CI check assert a separate expected exit per probe
+     per input (missing / fresh-empty / fresh-error / stale), not one shared
+     verdict.
+   - After merge, verify the rollout yourself rather than stopping at
+     "ArgoCD will sync": per cluster, the Application `Synced/Healthy`, the
+     live Deployment's probe commands equal the chart's, `rollout status`,
+     new pods Ready with restarts 0, and pod events filtered to
+     `Unhealthy|Killing|BackOff`. One `Startup probe failed … No such file`
+     per pod before the first write is the designed wait; a pod replaced by
+     `Evicted pod: Underutilized` is node consolidation, not the probe —
+     read the event reason before counting a replacement as a restart.
+   - The freshness window now couples to the app's own sleep: if the loop
+     sleeps up to `jitter × SLEEP` between writes, a larger configured sleep
+     turns a healthy pod into a restart loop. Guard the exposed value in the
+     template (`{{- if gt (float64 .Values.<sleep>) <max> }}{{- fail … }}`,
+     max = window / jitter minus run time) and add a render-must-fail case to
+     the chart validation script.
+6. Say whether the slowest files are in the drop set; usually they are KEEP,
    so pruning will not shorten CI — state that rather than imply it.
-6. When asked "is it faster?", measure both sides before answering:
+7. When asked "is it faster?", measure both sides before answering:
    - Local: a throwaway `git worktree add --detach <scratch> origin/<base>`
      whose dependency dirs are symlinks to the branch worktree's (only after
      `git diff --quiet origin/<base> HEAD -- <every lockfile>` exits 0), then
@@ -469,16 +667,29 @@ In the user's language, in chat:
      `gh api repos/<o>/<r>/actions/runs/<id>/jobs`) for ~25 recent successful
      runs of the same workflow, giving min/median/max. One PR run inside that
      band is "no measurable change" — say so with the band, not a delta.
+     When the workflow runs only on PRs (no base-branch runs), take the band
+     from other branches' successful runs. An affected-only job (nx
+     `affected`) spans 70 s–10 min by how many projects a PR touches; a
+     cleanup touching every project is a full run, so compare it only with
+     other full-run PRs. Job time is mostly install/setup, so per-file
+     savings of seconds rarely show — report the cleanup's value as removed
+     vacuous tests and determinism, not speed.
    - Answer with the table, the reason (which files dominate), and the existing
      issue that owns CI speed if there is one; then remove the bench worktree.
-7. Mutation results a lane reported are self-reports: put them in the
+   - When asked "how does CI change after this?", lead with the time answer in
+     one line, then a table of target · today · after for what newly runs or
+     can now fail (env-guarded tests that executed nothing, skipped contract
+     tests, race tests that never interleaved, grep tests that pass with the
+     call removed), moved CI targets, and per-suite test counts; mark
+     unmeasured claims (fewer flakes) as unmeasured.
+8. Mutation results a lane reported are self-reports: put them in the
    verification anchor's `Unverified` list unless you re-ran them. Before the
    PR, re-run the ones behind the highest-stakes changes yourself (a seed or
    case cut, a rewritten vacuous test, any production fix) in one scratch
    script: apply each mutation only when the file equals HEAD, run the
    survivor, restore, and confirm `git diff --quiet -- <f>`. Grade those rows
    PASS and leave the rest Unverified.
-8. "Apply all of it" after an audit that listed a trade-off item (seed
+9. "Apply all of it" after an audit that listed a trade-off item (seed
    count, sample size) is approval to apply it. Choose the parameter yourself,
    state it in the PR body, and mutation-check that the reduced set still
    catches the regressions the full set caught.
