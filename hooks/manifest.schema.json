@@ -150,9 +150,11 @@
             "additionalProperties": false,
             "properties": {
               "strict_env": {
-                "description": "Env var that switches the hook from advisory to blocking. Deliberately a bare string (not an array like its siblings) — that is the shape every consumer reads today; widening it to an array is a semantic change tracked outside this schema.",
-                "type": "string",
-                "minLength": 1
+                "description": "Env var that switches the hook from advisory to blocking: a bare string, or an array when one hook carries several checks that each kept their own strict variable (merge-gate, #1650).",
+                "oneOf": [
+                  {"type": "string", "minLength": 1},
+                  {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}}
+                ]
               },
               "rewrite_env": {
                 "description": "Env var that switches the hook from blocking to correcting the tool input in place (#1334). Same bare-string shape as strict_env: a hook has one such arm or none.",
