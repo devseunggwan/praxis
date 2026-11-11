@@ -13,7 +13,10 @@ when_to_use: >
   and on removing ANY worktree (load it BEFORE the first removal command) or
   cleaning up after a merge — including the worktree of a PR that was
   closed without merging ("닫았습니다" → "정리해주세요") — or when about to
-  run `git submodule deinit` to get a worktree removed.
+  run `git submodule deinit` to get a worktree removed, and on the error
+  `fatal: working trees containing submodules cannot be moved or removed`
+  (load it before reacting: the reflexive fixes, `deinit` or moving the
+  directory aside and pruning, are both the wrong path).
   Do NOT activate on "merge conflict resolution" or a plain
   feature-branch "git merge".
 verified-against-runtime: true
@@ -105,6 +108,17 @@ fatal: 'main' is already used by worktree at /Users/.../<main-worktree>
      straight to the clean-check + `--force`. If a deinit already ran, restore
      the entry from the main checkout with `git submodule init <path>` and
      confirm with `git config --get submodule.<name>.url`.
+     Moving the directory aside and running `git worktree prune` is not a
+     workaround either: it skips the clean-check `--force` relies on and runs a
+     repository-wide prune; the clean-check + `--force` is the only path.
+   - A lone `M <submodule path>` line (with a leading space) in the clean-check is often only the
+     submodule checkout lagging the pointer a base merge recorded, not your
+     edit. Confirm the submodule itself is clean
+     (`git -C <path>/<submodule> status --porcelain` empty), then run
+     `git -C <path> submodule update <submodule path>` (no `--init`, never
+     `deinit`) and re-read `status --porcelain`. When it comes back empty, the
+     worktree is clean and the `--force` remove may proceed. A dirty submodule
+     is a stop condition like any other dirty file.
 3. `cd <base-worktree-path>` or chain `cd <path> && gh pr merge ...` in the same
    Bash call (avoid cwd-reset trap between Bash calls).
    - **Fork clones: pass `--repo <fork-owner>/<repo>` on every `gh pr` call,
@@ -165,9 +179,22 @@ Confirm before touching anything:
    remote review bot or a "merge base into branch" pushed commits after your
    last local commit: the local branch holds nothing the merged PR lacks, so
    deleting it loses nothing — say so in the report.
+   A tip that is neither equal to nor an ancestor of `headRefOid` is often
+   only an unpushed `git merge origin/<base>` made locally while the PR's
+   remote branch got its own base merge (`gh pr update-branch`): check
+   `git log --no-merges <headRefOid>..<branch>` is empty and
+   `git cherry -v <headRefOid> <branch>` prints nothing — then the extra
+   commits carry no content of their own; report that evidence and ask once
+   rather than deleting under the standing approval.
    A dirty worktree (`git -C <path> status --porcelain` non-empty) or a tip
-   that is not equal to or an ancestor of `headRefOid` (local commits the PR
-   never saw) is the stop condition: report it and leave it. `--porcelain`
+   with non-merge commits the PR never saw is the stop condition: report it
+   and leave it. Before calling a
+   dirty file stale, check whether another session is mid-run in that worktree
+   (`lsof -d cwd 2>/dev/null | grep -F "<path>"`, `pgrep -fl "<path>"` for a
+   script given the path as an argument): a pipeline verifier or mutation test
+   stages an old version of a file on purpose and restores it when it ends.
+   Never revert or stash it yourself; tell that session the PR merged, ask it
+   to restore and leave the worktree clean, and retry cleanup after it exits. `--porcelain`
    alone does not list ignored files, and `git worktree remove` deletes them
    with the directory (a `.env`, local config, a scratch dataset). Also run
    `git -C <path> status --porcelain --ignored` and read its `!!` lines: when
@@ -179,7 +206,12 @@ Confirm before touching anything:
    in them is newer than the worktree's creation (the worktree's `.git` file):
    `find <artifact> -type f ! -newer <path>/.git` prints nothing — say so in
    the report; anything it prints was there before you and stays a stop
-   condition.
+   condition. A `.env` byte-identical to the main checkout's
+   (`cmp <path>/.env <main checkout>/.env` exit `0`) is a copy, also
+   regenerable. When every `!!` line falls in these classes, remove with
+   `--force` under the standing approval without asking — users who run many
+   worktrees read a "may I delete the leftovers?" question as the cleanup
+   leaving debris behind, and it costs a round trip each time.
    An ignored *source-looking* directory (`providers/<x>/`) that `!!` lists
    whole is often a package whose sources the base merge deleted while its
    `__pycache__/` stayed: `find <dir> -type f -not -path '*/__pycache__/*'`
