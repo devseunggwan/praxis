@@ -329,6 +329,18 @@ CASES = {
     "momentum-merge-chat-short-hold-later.jsonl":
         lambda: [*_chat_answered(), prose("CI restarted. Merge #999 now?"), user("hold"),
                  prose("Merge briefing\n\n" + section("o/r#999"))],
+    # pm A: a reply-instruction line and a host trailer may follow the
+    # question; a condition riding on either keeps the prompt.
+    "momentum-merge-chat-reply-line-after-ask.jsonl":
+        lambda: [user("prepare PR #999 for merge"),
+                 prose("Merge briefing\n\n" + section("o/r#999")
+                       + "\nApprove merge of #999?\n머지하려면 `merge` 한 단어로 답해 주세요.\n\nStatus: waiting"),
+                 user("merge")],
+    "momentum-merge-chat-reply-line-condition.jsonl":
+        lambda: [user("prepare PR #999 for merge"),
+                 prose("Merge briefing\n\n" + section("o/r#999")
+                       + "\nApprove merge of #999?\nReply `merge` only after CI passes."),
+                 user("merge")],
     "momentum-merge-chat-ask-answer.jsonl":
         lambda: [user("prepare PR #999 for merge"),
                  bash("c1", "gh pr checks 999 --repo o/r"), result("c1", "all checks passing"),

@@ -31,6 +31,8 @@ FAILED_NAMES=()
 #     "delegate"    — run with CMUX_DELEGATE=1 set. Since #1055 this grants no
 #                     exemption; the cases below assert it is inert.
 #     "no-delegate" — run with CMUX_DELEGATE unset
+unset PRAXIS_MERGE_ASK_TRAILER_REGEX
+
 run_case() {
   local name="$1" expectation="$2" delegate="$3" payload="$4"
 
@@ -376,6 +378,12 @@ run_case "chat: AskUserQuestion pick is a conditional approval (ask)" \
   "ask" "no-delegate" "$(bulk_payload momentum-merge-chat-conditional-ask-pick.jsonl "$M999")"
 run_case "chat: short 'hold' to a later merge question (ask)" \
   "ask" "no-delegate" "$(bulk_payload momentum-merge-chat-short-hold-later.jsonl "$M999")"
+PRAXIS_MERGE_ASK_TRAILER_REGEX='Status: .*' run_case "chat: reply line and configured trailer after the question (silent)" \
+  "silent" "no-delegate" "$(bulk_payload momentum-merge-chat-reply-line-after-ask.jsonl "$M999")"
+run_case "chat: trailer after the question with no trailer configured (ask)" \
+  "ask" "no-delegate" "$(bulk_payload momentum-merge-chat-reply-line-after-ask.jsonl "$M999")"
+PRAXIS_MERGE_ASK_TRAILER_REGEX='Status: .*' run_case "chat: condition inside the reply line (ask)" \
+  "ask" "no-delegate" "$(bulk_payload momentum-merge-chat-reply-line-condition.jsonl "$M999")"
 run_case "chat: injected AskUserQuestion answer (ask)" \
   "ask" "no-delegate" "$(bulk_payload momentum-merge-chat-injected-ask-answer.jsonl "$M999")"
 

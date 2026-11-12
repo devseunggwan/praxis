@@ -2016,11 +2016,53 @@ def _plain_merge_ask(sentence: str, pr: str) -> bool:
     return bool(words) and all(w in _PLAIN_ASK_WORDS for w in words)
 
 
+# Words a reply-instruction line after the merge question may hold besides
+# the quoted reply words (`merge` 또는 `보류` 로 답해 주세요; reply `merge`).
+# A condition (`only after`, `뒤에`) is in no list, so it keeps the prompt.
+_REPLY_LINE_WORDS = frozenset({
+    "reply", "answer", "type", "with", "or", "please", "to", "approve", "merge",
+    "the", "word", "one", "a", "single", "in", "this", "chat", "session", "just",
+    "이", "세션에서", "세션", "채팅에", "채팅에서", "머지하려면", "머지하시려면",
+    "승인하려면", "승인하시려면", "진행하시려면", "또는", "로", "으로", "한",
+    "단어로", "단어만", "답해", "주세요", "입력해", "다른", "말", "없이", "만",
+    "라고", "이라고", "추천",
+})
+_REPLY_QUOTED_RE = re.compile(r"[`\"“”']([^`\"“”']+)[`\"“”']")
+_REPLY_TOKENS = frozenset({"merge", "보류", "hold"})
+
+
+def _reply_line(line: str) -> bool:
+    """True when `line` only tells the user how to answer: its quoted words
+    are reply words (`merge`, `보류`), one of them `merge`, and every other
+    word is in `_REPLY_LINE_WORDS`."""
+    low = line.strip().lower()
+    quoted = _REPLY_QUOTED_RE.findall(low)
+    if any(q.strip() not in _REPLY_TOKENS for q in quoted):
+        return False
+    rest = _REPLY_QUOTED_RE.sub(" ", low)
+    words = _PLAIN_ASK_NOISE_RE.sub(" ", rest.replace("/", " ")).split()
+    return ("merge" in {q.strip() for q in quoted} or "merge" in words) \
+        and all(w in _REPLY_LINE_WORDS for w in words)
+
+
+def _trailer_line(line: str) -> bool:
+    """True when `line` fully matches `PRAXIS_MERGE_ASK_TRAILER_REGEX`, a
+    status line a host appends to every turn (unset: none)."""
+    raw = os.environ.get("PRAXIS_MERGE_ASK_TRAILER_REGEX", "").strip()
+    if not raw:
+        return False
+    try:
+        return re.fullmatch(raw, line.strip()) is not None
+    except re.error:
+        return False
+
+
 def _ends_with_plain_ask(text: str, pr: str) -> bool:
     """True when `text` ends with a plain merge ask for `pr`: its last question
-    is one (`_plain_merge_ask`) and only choice lines (`A: merge`) follow it.
-    A condition written after the question (`Approve merge of #999? Only after
-    I confirm the release.`) keeps the prompt."""
+    is one (`_plain_merge_ask`), and only choice lines, reply-instruction
+    lines (`_reply_line`) and host trailer lines (`_trailer_line`) follow it.
+    A condition written after the question (`Approve merge of #999? Only
+    after I confirm the release.`) keeps the prompt."""
     urls: list[str] = []
 
     def keep(m: re.Match[str]) -> str:
@@ -2033,7 +2075,8 @@ def _ends_with_plain_ask(text: str, pr: str) -> bool:
         return False
     tail = masked[asks[-1].end():]
     for line in tail.splitlines():
-        if line.strip(" \t*_`>.?？)") and not _OPTION_LINE_RE.match(line):
+        if (line.strip(" \t*_`>.?？)") and not _OPTION_LINE_RE.match(line)
+                and not _reply_line(line) and not _trailer_line(line)):
             return False
     return _plain_merge_ask(_last_ask_sentence(text), pr)
 

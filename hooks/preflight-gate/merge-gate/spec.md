@@ -173,9 +173,18 @@ PR, and once its PR references are set aside holds no word outside
 `_PLAIN_ASK_WORDS` (`Approve merge of o/r#999?`, `PR #999 을 squash
 머지할까요?`). A condition (`after CI passes`) or a second action makes the
 question one this release does not read, and the prompt stays. The question
-must also end the turn's text (`_ends_with_plain_ask`): only choice lines may
-follow it, so `Approve merge of #999? Only after I confirm the release.`
-keeps the prompt.
+must also end the turn's text (`_ends_with_plain_ask`). Only these lines may
+follow it:
+
+- choice lines (`A: merge`);
+- reply-instruction lines (`_reply_line`): quoted reply words (`merge`,
+  `보류`, `hold`), one of them `merge`, and otherwise only words in
+  `_REPLY_LINE_WORDS` (`머지하려면 \`merge\` 한 단어로 답해 주세요.`);
+- host trailer lines that fully match `PRAXIS_MERGE_ASK_TRAILER_REGEX` (a
+  status line the host appends to every turn; unset, none is allowed).
+
+Any other line, such as `Only after I confirm the release.` or a results
+section written after the question, keeps the prompt.
 
 A later message about the PR or merging that is not an approval (`#999 머지
 보류`) withdraws it. It reads the transcript, never the command, and fails
