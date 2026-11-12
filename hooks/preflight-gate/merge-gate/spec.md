@@ -543,12 +543,15 @@ before approving). Safety gates on the extension:
   머지`, `**A**: 머지`, `**A:** merge`), the reply is read as that line
   (`_picked_option`, `_option_label_approves`). It approves when the line has
   no negation (`_LABEL_NEGATION_RE`, note included: `A: 머지하지 않기`, `A:
-  보류`, `A (not recommended): merge`), names no PR but the target, and its
-  lead (the text before the first `_LABEL_LEAD_RE` separator, cut at the
-  first sentence end) either passes `_ask_label_approves` (`A: 승인, 머지`)
-  or is merging said plainly, a closed set (`_MERGE_LEAD_RE`: `merge`,
+  보류`, `A (not recommended): merge`), names no PR but the target (note
+  included: `A (#1001): merge` refuses), and its lead (the text before the
+  first `_LABEL_LEAD_RE` separator, cut at the first sentence end) is either
+  an approval token (`A: 승인, 머지`) or merging said plainly, a closed set
+  (`_MERGE_LEAD_RE`: `merge`,
   `merge it`, `Merge PR #999`, `squash merge`, `머지`, `머지합니다`, `머지
-  진행`, `스쿼시 머지`, …). A lead that only starts with the word asks for
+  진행`, `스쿼시 머지`, …). Only the lead is read, never the whole label
+  through the final-clause rule: `A: Check merge status, ok` ends in `ok` and
+  refuses. A lead that only starts with the word asks for
   something else and refuses (`A: 머지 진행 상황 알려줘`, `A: 머지 전에
   리베이스`, `A: mergeability check`). Two lines for the same letter (two
   menus in one turn) leave the letter ambiguous and refuse.

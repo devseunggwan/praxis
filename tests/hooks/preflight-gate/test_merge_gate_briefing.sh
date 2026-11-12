@@ -1125,6 +1125,10 @@ cases = [
     (False, "A", b + "A: mergeability check\nB: 보류"),
     # Another PR in the line, no line, two lines, or a fenced one.
     (False, "A", b + "A: merge #1001\nB: hold"),
+    # Review: a PR in the note, and a label whose final clause approves while
+    # its lead asks for something else.
+    (False, "A", b + "A (#1001): merge\nB: hold"),
+    (False, "A", b + "A: Check merge status, ok\nB: hold"),
     (False, "A", b + "Approve merge of #999?"),
     (False, "A", b + "A: 머지\nB: 보류\n\nA: 다른 메뉴"),
     (False, "A", b + "```\nA: 머지\n```"),
@@ -1146,7 +1150,7 @@ if printf '%s\n' "$letter_probe" | grep -q '^BAD '; then
   echo "FAIL  [approval_reply_letter_surface]"
   printf '%s\n' "$letter_probe" | grep '^BAD ' | sed 's/^/        /'
   FAIL=$((FAIL + 1)); FAILED_NAMES+=("approval_reply_letter_surface")
-elif [ "$(printf '%s\n' "$letter_probe" | grep -c '^ok  ')" -eq 35 ]; then
+elif [ "$(printf '%s\n' "$letter_probe" | grep -c '^ok  ')" -eq 37 ]; then
   echo "PASS  [approval_reply_letter_surface]"; PASS=$((PASS + 1))
 else
   echo "FAIL  [approval_reply_letter_surface] probe=<$letter_probe>"

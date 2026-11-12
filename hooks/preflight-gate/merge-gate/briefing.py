@@ -762,18 +762,19 @@ def _option_label_approves(label: str, note: str, pr: str) -> bool:
     """True when a picked choice line approves merging `pr`.
 
     The line carries no negation (`A: 머지하지 않기`, `A: 보류`) and names no
-    other PR, and its lead approves the way a picked AskUserQuestion label
-    does (`A: 승인, 머지`) or is merging said plainly (`_MERGE_LEAD_RE`:
-    `A: 머지합니다`, `A: merge: squash`). A wrong refusal costs one more ask."""
-    if _LABEL_NEGATION_RE.search(f"{note} {label}"):
+    other PR, its note included (`A (#1001): merge`). Only the lead is read,
+    never the whole label: `A: Check merge status, ok` ends in an approval
+    token but asks for something else. The lead approves when it is an
+    approval token (`A: 승인, 머지`) or merging said plainly
+    (`_MERGE_LEAD_RE`: `A: 머지합니다`, `A: merge: squash`). A wrong refusal
+    costs one more ask."""
+    line = f"{note} {label}"
+    if _LABEL_NEGATION_RE.search(line) or set(_PR_REF_RE.findall(line)) - {pr}:
         return False
-    if set(_PR_REF_RE.findall(label)) - {pr}:
-        return False
-    if _ask_label_approves(label, pr):
-        return True
     lead = _LABEL_LEAD_RE.split(label.lower(), maxsplit=1)[0]
     lead = _LEAD_SENTENCE_RE.split(_strip_pr_ref(lead, pr), maxsplit=1)[0]
-    return bool(_MERGE_LEAD_RE.fullmatch(re.sub(r"\s+", " ", lead).strip(" .!~,·")))
+    lead = re.sub(r"\s+", " ", lead).strip(" .!~,·")
+    return lead in _APPROVAL_TOKENS or bool(_MERGE_LEAD_RE.fullmatch(lead))
 
 
 def _merge_question_numbers(asked: str, pr: str) -> set[int] | None:
