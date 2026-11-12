@@ -354,6 +354,20 @@ run_case "chat: repo named only after the answer (ask)" \
   "ask" "no-delegate" "$(bulk_payload momentum-merge-chat-repo-after-answer.jsonl 'gh pr merge 999 --repo x/y --squash')"
 run_case "chat: '1. approve / 2. hold' holds only the other item (silent)" \
   "silent" "no-delegate" "$(bulk_payload momentum-merge-chat-numbered-other-hold.jsonl "$M999")"
+run_case "chat: 'ok' to a conditional merge question (ask)" \
+  "ask" "no-delegate" "$(bulk_payload momentum-merge-chat-conditional-ask.jsonl "$M999")"
+run_case "chat: 'A' picked under another PR's merge question (ask)" \
+  "ask" "no-delegate" "$(bulk_payload momentum-merge-chat-letter-other-pr.jsonl "$M999")"
+run_case "chat: 'A: merge' under this PR's plain merge question (silent)" \
+  "silent" "no-delegate" "$(bulk_payload momentum-merge-chat-letter-plain.jsonl "$M999")"
+run_case "chat: AskUserQuestion result approving and holding the merge (ask)" \
+  "ask" "no-delegate" "$(bulk_payload momentum-merge-chat-ask-answer-held-same-result.jsonl "$M999")"
+run_case "chat: bullet and label before a plain merge question (silent)" \
+  "silent" "no-delegate" "$(bulk_payload momentum-merge-chat-labelled-ask.jsonl "$M999")"
+run_case "chat: plain merge question naming the PR by URL (silent)" \
+  "silent" "no-delegate" "$(bulk_payload momentum-merge-chat-url-ask.jsonl "$M999")"
+run_case "chat: merge question with a second action (ask)" \
+  "ask" "no-delegate" "$(bulk_payload momentum-merge-chat-second-action-ask.jsonl "$M999")"
 run_case "chat: injected AskUserQuestion answer (ask)" \
   "ask" "no-delegate" "$(bulk_payload momentum-merge-chat-injected-ask-answer.jsonl "$M999")"
 

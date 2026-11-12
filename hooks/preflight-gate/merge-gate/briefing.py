@@ -1954,10 +1954,82 @@ def _seen_pr_repos(entries: list[dict], idxs: list[int], lo: int, hi: int,
     return found
 
 
-def _last_ask_merges(asked: str, pr: str) -> bool:
-    """True when the last question of the answered turn asks to merge `pr`."""
-    asks = _ASK_SENTENCE_RE.findall(asked)
-    return bool(asks) and _is_merge_ask(asks[-1], pr)
+# Words a plain merge question may hold besides references to the PR. Any
+# other word (a condition such as `after CI passes`, a second action, `bypass`)
+# makes it a question this release does not read: a missed release costs one
+# dialog, a misread one merges unasked.
+_PLAIN_ASK_WORDS = frozenset({
+    "approve", "merge", "merging", "of", "the", "this", "pr", "it", "now",
+    "squash", "rebase", "and", "can", "i", "we", "shall", "should",
+    "머지", "머지를", "머지할까요", "merge할까요", "머지해도", "될까요", "할까요",
+    "진행할까요", "승인", "승인할까요", "승인하실까요", "을", "를", "이", "가", "은",
+    "는", "로", "으로", "스쿼시", "하시겠어요", "하시겠습니까", "바로", "지금", "건",
+    "이번",
+})
+# A label written before the question (`**승인 요청:** #67을 머지할까요?`), a list
+# bullet or a circled step number carries no condition.
+_ASK_LABEL_RE = re.compile(
+    r"^\s*(?:[-*+•]\s+)?(?:[\u2460-\u2473]\s*)?(?:\*\*)?(?:승인 요청|질문|요청|question|ask)\s*:\s*(?:\*\*)?\s*",
+    re.IGNORECASE)
+_ASK_BULLET_RE = re.compile(r"^\s*(?:[-*+•]\s+|[\u2460-\u2473]\s*|\d+\.\s+)")
+_URL_RE_FULL = re.compile(r"https?://\S+")
+# `name#N` (a repo named without its owner) and `owner/name#N`.
+_SLUG_REF_RE = re.compile(r"(?<![A-Za-z0-9._/-])(?:[A-Za-z0-9._-]+/)?[A-Za-z0-9._-]+#(\d+)(?![A-Za-z0-9_])")
+_PLAIN_ASK_NOISE_RE = re.compile(r"[?？.!,:;()\[\]*`~·]")
+
+
+def _last_ask_sentence(text: str) -> str:
+    """The last question in `text`, read on its own line, with URLs kept whole
+    (a `.` inside one is not a sentence end) and an escaped `\\n` from an
+    answer row read as a line break."""
+    urls: list[str] = []
+
+    def keep(m: re.Match[str]) -> str:
+        urls.append(m.group(0))
+        return f"\x00{len(urls) - 1}\x00"
+
+    masked = _URL_RE_FULL.sub(keep, text.replace("\\n", "\n"))
+    asks = _ASK_SENTENCE_RE.findall(masked)
+    if not asks:
+        return ""
+    return re.sub(r"\x00(\d+)\x00", lambda m: urls[int(m.group(1))], asks[-1].strip())
+
+
+def _plain_merge_ask(sentence: str, pr: str) -> bool:
+    """True when `sentence` asks to merge `pr` and nothing else: it names no
+    other PR, and once a leading label or bullet and its PR references are set
+    aside every word is in `_PLAIN_ASK_WORDS` (`Approve merge of o/r#999?`,
+    `PR #999 을 squash 머지할까요?`, `**승인 요청:** web#999 를 머지할까요?`)."""
+    sentence = _ASK_BULLET_RE.sub("", _ASK_LABEL_RE.sub("", sentence))
+    # A pull URL reads as its number: `.` inside it is not a sentence end.
+    sentence = _URL_RE_FULL.sub(
+        lambda m: f" #{u.group(1)} " if (u := re.search(r"/pull/(\d+)", m.group(0))) else " ", sentence)
+    if not _is_merge_ask(sentence, pr):
+        return False
+    refs = set(_PR_REF_RE.findall(sentence)) | set(_SLUG_REF_RE.findall(sentence))
+    refs |= {m.group(3) or m.group(5) for m in _TEXT_PR_REF_RE.finditer(sentence)}
+    if refs - {pr}:
+        return False
+    rest = _URL_RE_FULL.sub(" ", sentence.lower())
+    rest = _strip_pr_ref(_SLUG_REF_RE.sub(" ", rest), pr)
+    words = _PLAIN_ASK_NOISE_RE.sub(" ", rest).split()
+    return bool(words) and all(w in _PLAIN_ASK_WORDS for w in words)
+
+
+def _last_ask_plain(asked: str, pr: str) -> bool:
+    """True when the last question of `asked` is a plain merge ask for `pr`."""
+    return _plain_merge_ask(_last_ask_sentence(asked), pr)
+
+
+def _ask_result_approves(content: object, pr: str) -> bool:
+    """True when an AskUserQuestion result approves merging `pr`: every pair
+    in it about the PR or merging is a plain merge ask for `pr` answered with
+    an approval, and at least one is. A second pair holding the merge in the
+    same result (`"Merge #999 now?"="hold"`) refuses it."""
+    pairs = [(q, a) for q, a in _ASK_ANSWER_RE.findall(_user_message_text(content))
+             if _mentions_pr(q, pr) or _MERGE_WORD_RE.search(q)]
+    return bool(pairs) and all(_mentions_pr(q, pr) and _last_ask_plain(q, pr)
+                               and _ask_label_approves(a, pr) for q, a in pairs)
 
 
 def _chat_reply_approves(content: object, asked: str, pr: str) -> bool:
@@ -1965,16 +2037,16 @@ def _chat_reply_approves(content: object, asked: str, pr: str) -> bool:
     merging `pr`. Stricter than `_is_typed_approval`, which reads the final
     clause: here the whole message, PR references set aside, is an approval
     token, and either it names the PR and merging (`#999 머지해`) or the turn
-    it answers ends by asking to merge the PR (`merge`). A picked choice line
-    or a numbered item is read as the briefing check reads it, and must
-    answer a merge ask."""
+    it answers ends with a plain merge ask for the PR (`merge` to `Approve
+    merge of #999?`; `_plain_merge_ask` refuses a condition). A picked choice
+    line must answer such an ask; a numbered item is read as the briefing
+    check reads it, which already refuses a qualified item."""
     raw = _user_message_text(content).strip().lower()
     if not raw or raw.endswith(("?", "？")):
         return False
     picked = _picked_option(raw, asked)
     if picked is not None:
-        return (_option_label_approves(*picked, pr)
-                and (bool(_MERGE_WORD_RE.search(picked[0])) or _last_ask_merges(asked, pr)))
+        return _option_label_approves(*picked, pr) and _last_ask_plain(asked, pr)
     if _numbered_items(raw):
         return _merge_question_numbers(asked, pr) is not None and _is_approval_reply(content, asked, pr)
     if _LABEL_NEGATION_RE.search(raw):
@@ -1984,7 +2056,7 @@ def _chat_reply_approves(content: object, asked: str, pr: str) -> bool:
         return False
     if _mentions_pr(raw, pr) and _MERGE_WORD_RE.search(raw):
         return True
-    return _last_ask_merges(asked, pr) and _mentions_pr(asked, pr)
+    return _last_ask_plain(asked, pr) and _mentions_pr(asked, pr)
 
 
 def _chat_approval_index(entries: list[dict], idxs: list[int], lo: int, pr: str) -> int | None:
@@ -2011,8 +2083,7 @@ def _chat_approval_index(entries: list[dict], idxs: list[int], lo: int, pr: str)
                 asks.add(b["id"])
             elif (i >= lo and b.get("type") == "tool_result" and b.get("tool_use_id") in asks
                   and not b.get("is_error") and not _is_injected(ev)
-                  and any(_mentions_pr(q, pr) and _is_merge_ask(q, pr) and _ask_label_approves(a, pr)
-                          for q, a in _ASK_ANSWER_RE.findall(_user_message_text(b.get("content"))))
+                  and _ask_result_approves(b.get("content"), pr)
                   and (found is None or i > found)):
                 found = i
     if found is None or _held_after(entries, idxs, found, pr):

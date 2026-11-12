@@ -265,6 +265,45 @@ CASES = {
                  user("1. approve\n2. hold")],
     "momentum-merge-numbered-serial-other-hold.jsonl":
         lambda: _numbered_serial("1. approve\n2. hold"),
+    # Review: a conditional merge question, a letter picked for another PR's
+    # question, and a hold in the same AskUserQuestion result approve nothing.
+    "momentum-merge-chat-conditional-ask.jsonl":
+        lambda: [user("prepare PR #999 for merge"),
+                 prose("Merge briefing\n\n" + section("o/r#999") + "\nApprove merge of o/r#999 after CI passes?"),
+                 user("ok")],
+    "momentum-merge-chat-letter-other-pr.jsonl":
+        lambda: [user("prepare the merges"),
+                 prose("Merge briefing\n\n" + section("o/r#999") + "\n" + section("o/r#1001")
+                       + "\nA: merge\nB: hold\nApprove merge of #1001?"),
+                 user("A")],
+    "momentum-merge-chat-letter-plain.jsonl":
+        lambda: [user("prepare PR #999 for merge"),
+                 prose("Merge briefing\n\n" + section("o/r#999") + "\nApprove merge of #999?\nA: merge\nB: hold"),
+                 user("A")],
+    "momentum-merge-chat-ask-answer-held-same-result.jsonl":
+        lambda: [user("prepare PR #999 for merge"), prose("Opened https://github.com/o/r/pull/999 ."),
+                 {"type": "assistant", "message": {"role": "assistant", "content": [
+                     {"type": "tool_use", "id": "q1", "name": "AskUserQuestion", "input": {"questions": [
+                         {"question": "Merge briefing\n\n" + section("o/r#999") + "\nApprove merge of #999?",
+                          "header": "Merge", "multiSelect": False,
+                          "options": [{"label": "Approve", "description": ""}, {"label": "hold", "description": ""}]},
+                         {"question": "Merge #999 now?", "header": "Now", "multiSelect": False,
+                          "options": [{"label": "now", "description": ""}, {"label": "hold", "description": ""}]}]}}]}},
+                 result("q1", 'User has answered your questions: "Merge briefing ... Approve merge of #999?"="Approve", '
+                              '"Merge #999 now?"="hold". You can now continue with the user\'s answers in mind.')],
+    "momentum-merge-chat-labelled-ask.jsonl":
+        lambda: [user("prepare PR #999 for merge"),
+                 prose("Merge briefing\n\n" + section("o/r#999") + "\n- **승인 요청:** r#999 를 머지할까요?"),
+                 user("merge")],
+    "momentum-merge-chat-url-ask.jsonl":
+        lambda: [user("prepare PR #999 for merge"),
+                 prose("Merge briefing\n\n" + section("o/r#999")
+                       + "\nhttps://github.com/o/r/pull/999 을 머지할까요?"),
+                 user("merge")],
+    "momentum-merge-chat-second-action-ask.jsonl":
+        lambda: [user("prepare PR #999 for merge"),
+                 prose("Merge briefing\n\n" + section("o/r#999") + "\nPR #999 를 머지하고 배포까지 진행할까요?"),
+                 user("merge")],
     "momentum-merge-chat-ask-answer.jsonl":
         lambda: [user("prepare PR #999 for merge"),
                  bash("c1", "gh pr checks 999 --repo o/r"), result("c1", "all checks passing"),
