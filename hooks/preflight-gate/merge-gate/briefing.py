@@ -333,6 +333,28 @@ _URL_RE = re.compile(r"https?://[^\s?]+")
 # An option bullet under a numbered ask (`   - (추천) 승인합니다`).
 _BULLET_RE = re.compile(r"^\s*[-*+•]\s")
 
+# A menu written as prose (or in a host's question tool that keeps no
+# `"q"="a"` row) lists its choices as lettered lines, and the user answers
+# with the letter alone. The reply is one letter A-D, any case, with an
+# optional trailing period.
+_LETTER_REPLY_RE = re.compile(r"^([a-d])\.?$")
+# A lettered choice line of the turn the letter answers: `A: 머지합니다`,
+# `- A: merge`, `A (추천): 머지`, `**A**: 머지`, `**A:** merge`. The letter is
+# uppercase and followed by a colon, so prose (`a: …`, `A. Smith`) is no menu.
+_OPTION_LINE_RE = re.compile(
+    r"^[ \t>]*(?:[-*+•][ \t]+)?(?:\*\*|__)?(?P<letter>[A-D])(?:\*\*|__)?[ \t]*"
+    r"(?:\((?P<note>[^()\n]{0,30})\)[ \t]*)?(?:\*\*|__)?[:：](?:\*\*|__)?[ \t]*(?P<label>.*)$")
+# A choice whose lead is merging said plainly (`merge`, `Merge PR #999`,
+# `머지합니다`, `머지 진행`) is the merge choice. A closed set, not a prefix:
+# `머지 진행 상황 알려줘` and `머지 전에 리베이스` lead with the word and ask for
+# something else. `merged` is a past state, as in `_MERGE_WORD_RE`.
+_MERGE_LEAD_RE = re.compile(
+    r"(?:squash\s+)?merge(?:\s+(?:it|now|this|this\s+pr|the\s+pr|pr))?"
+    r"|(?:스쿼시\s*)?(?:머지|병합)\s*(?:합니다|할게요|하기|해|해요|해줘|해\s*주세요|하겠습니다"
+    r"|진행|진행합니다|진행해|진행해\s*주세요|승인)?", re.IGNORECASE)
+# The lead's first sentence: `머지합니다. 정리까지 합니다.` leads with `머지합니다`.
+_LEAD_SENTENCE_RE = re.compile(r"[.。!](?:\s|$)")
+
 # The harness writes the interrupt as a `role: user` entry with this exact text
 # and no flag distinguishing it from typed input. Anchored at both ends: the
 # same phrase inside a longer message is the user quoting it, not an interrupt.
@@ -720,6 +742,40 @@ def _strip_fences(text: str) -> str:
     return "\n".join(kept)
 
 
+def _picked_option(raw: str, asked: str) -> tuple[str, str] | None:
+    """`(label, note)` of the choice line in `asked` that a one-letter reply
+    `raw` picks; None when `raw` is not one letter A-D, or when `asked` has
+    no line for that letter or more than one outside fenced blocks: two
+    menus in one turn leave the letter ambiguous."""
+    m = _LETTER_REPLY_RE.match(raw.strip().lower())
+    if m is None:
+        return None
+    letter = m.group(1).upper()
+    picked = [o for o in map(_OPTION_LINE_RE.match, _strip_fences(asked).splitlines())
+              if o is not None and o.group("letter") == letter]
+    if len(picked) != 1:
+        return None
+    return picked[0].group("label").strip(" \t*_"), picked[0].group("note") or ""
+
+
+def _option_label_approves(label: str, note: str, pr: str) -> bool:
+    """True when a picked choice line approves merging `pr`.
+
+    The line carries no negation (`A: 머지하지 않기`, `A: 보류`) and names no
+    other PR, and its lead approves the way a picked AskUserQuestion label
+    does (`A: 승인, 머지`) or is merging said plainly (`_MERGE_LEAD_RE`:
+    `A: 머지합니다`, `A: merge: squash`). A wrong refusal costs one more ask."""
+    if _LABEL_NEGATION_RE.search(f"{note} {label}"):
+        return False
+    if set(_PR_REF_RE.findall(label)) - {pr}:
+        return False
+    if _ask_label_approves(label, pr):
+        return True
+    lead = _LABEL_LEAD_RE.split(label.lower(), maxsplit=1)[0]
+    lead = _LEAD_SENTENCE_RE.split(_strip_pr_ref(lead, pr), maxsplit=1)[0]
+    return bool(_MERGE_LEAD_RE.fullmatch(re.sub(r"\s+", " ", lead).strip(" .!~,·")))
+
+
 def _merge_question_numbers(asked: str, pr: str) -> set[int] | None:
     """Numbers of the items in `asked`'s LAST numbered list that ask to merge
     `pr`; None when `asked` has no numbered list at all.
@@ -793,11 +849,17 @@ def _is_approval_reply(content: object, asked: str | None = None,
     the merge wins inside one message too. A turn with no numbered list
     leaves the reply to the final-clause rule, as does an unnumbered reply.
     A reference to `pr` in the answer is set aside (`1. #999 머지`), as
-    `_is_typed_approval` does for a whole reply.
+    `_is_typed_approval` does for a whole reply. A one-letter reply (`A`)
+    is the choice line it picks in that turn, read by
+    `_option_label_approves` (issue #1652); with no such line it fails as before.
     """
     raw = _user_message_text(content).strip().lower()
     if asked is None or pr is None:
         return _is_bare_approval(raw)
+    # A one-letter reply is read as the choice line it picks (`A: 머지합니다`).
+    picked = _picked_option(raw, asked)
+    if picked is not None:
+        return _option_label_approves(*picked, pr)
     items = _numbered_items(raw)
     if items == []:
         return _is_bare_approval(raw)
@@ -1256,10 +1318,12 @@ def _held_after(entries: list[dict], idxs: list[int], index: int, pr: str) -> bo
         text = _user_message_text(content)
         asked = _assistant_text(entries, idxs[k - 1] + 1 if k else 0, j)
         # A numbered answer to a numbered merge ask is about this merge even
-        # when it names neither the PR nor merging (`1. hold`).
+        # when it names neither the PR nor merging (`1. hold`); so is a letter
+        # picking a choice line of a turn about the PR (`B` for `B: 보류`).
         about = (_mentions_pr(text, pr) or _MERGE_WORD_RE.search(text)
                  or (_numbered_items(text.strip().lower()) != []
-                     and bool(_merge_question_numbers(asked, pr))))
+                     and bool(_merge_question_numbers(asked, pr)))
+                 or (_picked_option(text, asked) is not None and _mentions_pr(asked, pr)))
         if about and not _is_typed_approval(content, pr, asked):
             return True
     return False
@@ -1289,6 +1353,9 @@ def _answered_after(entries: list[dict], idxs: list[int], index: int,
         if not _is_typed_approval(content, pr, replied_to):
             continue
         merge_named = _is_merge_ask(replied_to, pr) or _MERGE_WORD_RE.search(reply)
+        if not merge_named:
+            picked = _picked_option(reply, replied_to)
+            merge_named = picked is not None and bool(_MERGE_WORD_RE.search(picked[0]))
         if ((_mentions_pr(reply, pr) or (merge_named and _mentions_pr(replied_to, pr)))
                 and not _held_after(entries, idxs, i, pr)):
             return True

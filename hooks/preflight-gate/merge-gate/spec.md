@@ -531,6 +531,42 @@ before approving). Safety gates on the extension:
   qualifier list is vocabulary (`조건`, `먼저`, `before`, `or`, …), so a plain
   ask that happens to use one of those words is asked again.
 
+- **Lettered choices (issue #1652).** A menu written as prose, or in a host
+  question tool whose answer leaves no `"q"="a"` row (Hermes `clarify`
+  answered in chat), lists its choices as lettered lines and the user answers
+  with the letter alone, which no approval token matched, so every such merge
+  was denied and the user asked to type `merge` again. When the reply is one
+  letter A-D (any case, surrounding whitespace and one trailing `.` allowed)
+  and the turn it answers holds exactly one choice line for that letter
+  outside fenced blocks (uppercase letter, optional bullet, bold or
+  parenthetical note, then a colon: `A: 머지합니다`, `- A: merge`, `A (추천):
+  머지`, `**A**: 머지`, `**A:** merge`), the reply is read as that line
+  (`_picked_option`, `_option_label_approves`). It approves when the line has
+  no negation (`_LABEL_NEGATION_RE`, note included: `A: 머지하지 않기`, `A:
+  보류`, `A (not recommended): merge`), names no PR but the target, and its
+  lead (the text before the first `_LABEL_LEAD_RE` separator, cut at the
+  first sentence end) either passes `_ask_label_approves` (`A: 승인, 머지`)
+  or is merging said plainly, a closed set (`_MERGE_LEAD_RE`: `merge`,
+  `merge it`, `Merge PR #999`, `squash merge`, `머지`, `머지합니다`, `머지
+  진행`, `스쿼시 머지`, …). A lead that only starts with the word asks for
+  something else and refuses (`A: 머지 진행 상황 알려줘`, `A: 머지 전에
+  리베이스`, `A: mergeability check`). Two lines for the same letter (two
+  menus in one turn) leave the letter ambiguous and refuse.
+
+  The letter is read where a numbered reply is: in `_is_approval_reply` with
+  the turn `_last_reply_approves`, `_answered_after` and `_held_after` pass.
+  `_answered_after` also counts a picked line that names merging as the reply
+  naming the merge, so a serial merge's menu needs no separate `Approve
+  merge?` sentence. `_held_after` counts a letter picking a line of a later
+  turn that mentions the PR as being about the merge, so `B` for `B: 보류` to
+  a re-asked menu withdraws an earlier `A`. Target correlation, the briefing
+  item count, the serial-merge cut and bulk approval are unchanged. Only a
+  one-letter reply reads differently: before this change none was an
+  approval, so the change can only release a letter that picks an approving
+  line, and deny a merge whose earlier letter approval a later letter
+  withdrew. Known gap, a missed release: a menu lettered past D, or written
+  `A)` / `A.` / `(A)` without a colon, is not read.
+
 - **PR correlation.** The prior-turn briefing must reference the PR actually
   being merged. The merge target is the segment's *first positional* token
   (value-flag arity skipped, including trailing gh global flags like `-R
