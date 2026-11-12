@@ -336,6 +336,12 @@ run_case "chat: later probe naming no repo (ask)" \
   "ask" "no-delegate" "$(bulk_payload momentum-merge-chat-unnamed-probe.jsonl "$M999")"
 run_case "chat: no probe binds the repo (ask)" \
   "ask" "no-delegate" "$(bulk_payload momentum-merge-chat-no-probe.jsonl "$M999")"
+run_case "chat: '#999 머지 보류. ok' (ask)" \
+  "ask" "no-delegate" "$(bulk_payload momentum-merge-chat-hold-ok.jsonl "$M999")"
+run_case "chat: order then '#999 머지 보류. ok' (ask)" \
+  "ask" "no-delegate" "$(bulk_payload momentum-merge-chat-order-then-hold-ok.jsonl "$M999")"
+run_case "chat: injected AskUserQuestion answer (ask)" \
+  "ask" "no-delegate" "$(bulk_payload momentum-merge-chat-injected-ask-answer.jsonl "$M999")"
 
 
 echo ""

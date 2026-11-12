@@ -512,6 +512,15 @@ def _load_turn_entries(transcript_path: str) -> list[dict] | None:
     return entries
 
 
+def _is_injected(ev: dict) -> bool:
+    """True when a user-role entry was injected by the host, not written by the
+    human: `isMeta`, or an `origin.kind` other than human (see below)."""
+    if ev.get("isMeta"):
+        return True
+    origin = ev.get("origin")
+    return isinstance(origin, dict) and origin.get("kind") not in (None, "human")
+
+
 def _human_user_indices(entries: list[dict]) -> list[int]:
     """Indices of human-authored user messages (skip tool_result-only bridges).
 
@@ -540,10 +549,7 @@ def _human_user_indices(entries: list[dict]) -> list[int]:
         msg = ev.get("message")
         if not isinstance(msg, dict) or msg.get("role") != "user" or ev.get("isSidechain"):
             continue
-        if ev.get("isMeta"):
-            continue
-        origin = ev.get("origin")
-        if isinstance(origin, dict) and origin.get("kind") not in (None, "human"):
+        if _is_injected(ev):
             continue
         content = msg.get("content", [])
         if _is_interrupt_only(content):
@@ -1294,6 +1300,10 @@ def _merge_target_pr(entries: list[dict], command: object, floor: int) -> str | 
 
 def _is_typed_approval(content: object, pr: str, asked: str | None = None) -> bool:
     reply = _user_message_text(content)
+    # A hold or refusal anywhere outweighs a trailing token: `#999 머지 보류. ok`
+    # neither approves nor leaves an earlier approval standing.
+    if _LABEL_NEGATION_RE.search(reply):
+        return False
     if _is_approval_reply(content, asked, pr):
         return True
     # A numbered reply paired with a numbered turn sets its PR references aside
@@ -1380,6 +1390,7 @@ def _answered_after(entries: list[dict], idxs: list[int], index: int,
                     asks.add(b["id"])
             elif (i > index and b.get("type") == "tool_result"
                   and b.get("tool_use_id") in asks and not b.get("is_error")
+                  and not _is_injected(ev)
                   and _ask_answer_approves(b.get("content"), pr)
                   and not _held_after(entries, idxs, i, pr)):
                 return True
