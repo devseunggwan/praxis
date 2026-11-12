@@ -101,6 +101,7 @@ is not retrieved.
 | ---------- | -------- |
 | Any session, any `gh pr merge` | `permissionDecision: "ask"` |
 | A single numbered merge the user approved in a bulk answer (see below) | silent pass-through |
+| A single numbered merge the user approved for that PR in chat (see below) | silent pass-through |
 | Any env-var prefix (`env FOO=1 gh pr merge`) | `ask` — no environment variable exempts a merge |
 | `# merge-approval:ack` marker (or any comment text) | `ask` — no agent-attachable bypass exists by design |
 | Non-merge gh commands (`gh pr view`, `gh pr list`, etc.) | silent pass-through |
@@ -138,6 +139,35 @@ transcript leaves the `ask` in place. A chained or looped merge, a numberless
 merge, a PR outside the approved set, or a second merge of the same PR still
 asks.
 
+### Chat-approved merges (issue #1654)
+
+The same reasoning covers one PR. When the user has already approved this
+merge in chat, the prompt asks a second time for the consent the user just
+gave: on Hermes it is a desktop dialog after a typed `merge`. The hook calls
+`chat_merge_approved(payload)` in
+`hooks/preflight-gate/merge-gate/briefing.py`, which reads the approval with
+`_answered_after`, the function the briefing check scores answers with. A
+merge is released when a human message since the last merge that may have
+run (a chained one included) is one of:
+
+- a typed approval of a turn that asked to merge the PR (`merge`, `머지 승인`,
+  `ok` to `Approve merge of #999?`), or one naming the PR (`#999 머지 진행`);
+- the user's own order naming the PR (`#999 머지해`), whether or not a
+  briefing asked first;
+- an `AskUserQuestion` pick that approves a question naming the PR.
+
+A later message about the PR or merging that is not an approval (`#999 머지
+보류`) withdraws it. It reads the transcript, never the command, and fails
+closed: the command must be one `gh pr merge <N>` and nothing else (no chain,
+loop, env prefix or numberless merge); a `--repo` other than the repo the
+window probed asks; after a `cd` or a `GH_REPO`/`GH_HOST` export anywhere in
+the session, only a merge naming its repo is read; an injected message
+(`isMeta`, a non-human `origin`) is not a human message. Any error keeps the
+prompt.
+
+This releases the prompt only. The briefing check still runs on the same
+call: a merge with no briefing is denied whatever the user said.
+
 ### Host-approved merges (issue #1639)
 
 When the host sets `PRAXIS_MERGE_APPROVAL_PROVIDER` in the hook process
@@ -158,7 +188,8 @@ error or exception keeps the `ask`. Unset, this step does not run.
 
 Unlike `side-effect-scan` (`# side-effect:ack`), this hook has **no
 agent-attachable bypass** and, since #1055, no environment bypass either. The
-contract is that a merge ALWAYS surfaces a per-PR approval prompt — a
+contract is that a merge the user has not approved ALWAYS surfaces a per-PR
+approval prompt — a
 comment-style marker would let the agent silently self-bypass the same gate it
 is meant to enforce. The host approval provider above is not one: the agent
 cannot set the hook process environment, and the provider only answers whether

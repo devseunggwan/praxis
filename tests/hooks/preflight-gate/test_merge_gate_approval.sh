@@ -285,6 +285,44 @@ run_case "bulk: unreadable transcript (ask)" \
   "ask" "no-delegate" \
   '{"tool_name": "Bash", "tool_input": {"command": "gh pr merge 999 --squash"}, "transcript_path": "/nonexistent/t.jsonl"}'
 
+# Single-PR chat approval (issue #1654): the user's own answer or order for
+# this PR replaces the prompt; a merge the user has not approved still asks.
+M999='gh pr merge 999 --repo o/r --squash'
+run_case "chat: 'merge' answering the briefed ask (silent)" \
+  "silent" "no-delegate" "$(bulk_payload momentum-merge-chat-answered.jsonl "$M999")"
+run_case "chat: '머지 승인' answering the briefed ask (silent)" \
+  "silent" "no-delegate" "$(bulk_payload momentum-merge-chat-answered-ko.jsonl "$M999")"
+run_case "chat: user ordered '#999 머지해' (silent)" \
+  "silent" "no-delegate" "$(bulk_payload momentum-merge-chat-ordered.jsonl "$M999")"
+run_case "chat: AskUserQuestion pick '머지 승인' (silent)" \
+  "silent" "no-delegate" "$(bulk_payload momentum-merge-chat-ask-answer.jsonl "$M999")"
+run_case "chat: retry after a merge that failed (silent)" \
+  "silent" "no-delegate" "$(bulk_payload momentum-merge-chat-failed-merge.jsonl "$M999")"
+run_case "chat: --repo given after a cd (silent)" \
+  "silent" "no-delegate" "$(bulk_payload momentum-merge-chat-cd.jsonl "$M999")"
+run_case "chat: briefing with no answer yet (ask)" \
+  "ask" "no-delegate" "$(bulk_payload momentum-merge-chat-unanswered.jsonl "$M999")"
+run_case "chat: 'ok' to a non-merge question (ask)" \
+  "ask" "no-delegate" "$(bulk_payload momentum-merge-chat-unrelated-ok.jsonl "$M999")"
+run_case "chat: order then '머지 보류' (ask)" \
+  "ask" "no-delegate" "$(bulk_payload momentum-merge-chat-held.jsonl "$M999")"
+run_case "chat: injected isMeta order (ask)" \
+  "ask" "no-delegate" "$(bulk_payload momentum-merge-chat-injected.jsonl "$M999")"
+run_case "chat: answer already spent by a merge (ask)" \
+  "ask" "no-delegate" "$(bulk_payload momentum-merge-chat-spent.jsonl "$M999")"
+run_case "chat: another PR than the approved one (ask)" \
+  "ask" "no-delegate" "$(bulk_payload momentum-merge-chat-answered.jsonl 'gh pr merge 1001 --repo o/r --squash')"
+run_case "chat: --repo other than the probed repo (ask)" \
+  "ask" "no-delegate" "$(bulk_payload momentum-merge-chat-answered.jsonl 'gh pr merge 999 --repo x/y --squash')"
+run_case "chat: no --repo after a cd (ask)" \
+  "ask" "no-delegate" "$(bulk_payload momentum-merge-chat-cd.jsonl 'gh pr merge 999 --squash')"
+run_case "chat: chained merge (ask)" \
+  "ask" "no-delegate" "$(bulk_payload momentum-merge-chat-answered.jsonl "$M999 && echo done")"
+run_case "chat: numberless merge (ask)" \
+  "ask" "no-delegate" "$(bulk_payload momentum-merge-chat-answered.jsonl 'gh pr merge --repo o/r --squash')"
+run_case "chat: looped merge (ask)" \
+  "ask" "no-delegate" "$(bulk_payload momentum-merge-chat-answered.jsonl "for i in 1; do $M999; done")"
+
 
 echo ""
 echo "Result: $PASS passed, $FAIL failed"

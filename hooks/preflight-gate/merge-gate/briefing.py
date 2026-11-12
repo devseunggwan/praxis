@@ -1917,6 +1917,50 @@ def bulk_merge_approved(payload: dict) -> bool:
         return False
 
 
+def _chat_released(entries: list[dict], idxs: list[int], command: object) -> bool:
+    """True when the user approved this one merge in chat since the last merge.
+
+    The approval is the one `_answered_after` reads for the briefing check: a
+    typed reply to a turn that asked to merge the PR (`merge`, `머지 승인`), the
+    user's own message naming the PR and merging (`#999 머지해`), or an
+    AskUserQuestion pick. It fails closed where a number could name another
+    PR: the command must be one numbered merge and nothing else, a merge that
+    may have run since spends the answer, a `--repo` that differs from the
+    window's probe refuses, and after a `cd` or a `GH_REPO` export only a merge
+    naming its repo is read.
+    """
+    if not isinstance(command, str) or not idxs:
+        return False
+    pr = _merge_pr_number(command)
+    if pr is None:
+        return False
+    executed = _executed_merges(entries, include_skippable=True)
+    last_merge = executed[-1][0] if executed else -1
+    merge_repo = _merge_target_repo(command)
+    if _repo_conflict(merge_repo, _context_repo_from_window(entries, last_merge + 1, len(entries))):
+        return False
+    if merge_repo is None and _changed_directory_after(entries, -1):
+        return False
+    return _answered_after(entries, idxs, last_merge, pr)
+
+
+def chat_merge_approved(payload: dict) -> bool:
+    """Public entry for the approval check: True when the user already
+    approved the merge in `payload` in chat, so the host prompt would ask a
+    second time. Fails closed (False) on any unreadable input."""
+    try:
+        command = (payload.get("tool_input") or {}).get("command")
+        if not isinstance(command, str):
+            return False
+        code = _split_shell_comment(command)[0]
+        entries = _load_turn_entries(payload.get("transcript_path", "") or "")
+        if entries is None:
+            return False
+        return _chat_released(entries, _human_user_indices(entries), code)
+    except Exception:
+        return False
+
+
 def _call_failed(entries: list[dict], tool_use_id: str) -> bool:
     """True when the transcript holds a failed tool_result for `tool_use_id`."""
     for ev in entries:
