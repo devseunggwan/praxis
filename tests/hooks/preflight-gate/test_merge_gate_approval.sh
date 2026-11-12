@@ -328,14 +328,20 @@ run_case "chat: two --repo selectors (ask)" \
   "ask" "no-delegate" "$(bulk_payload momentum-merge-chat-answered.jsonl 'gh pr merge 999 --repo o/r --repo x/y --squash')"
 run_case "chat: same owner/name on another host (ask)" \
   "ask" "no-delegate" "$(bulk_payload momentum-merge-chat-answered.jsonl 'gh pr merge 999 --repo ghe.example.com/o/r --squash')"
-run_case "chat: later probe of another repo (ask)" \
-  "ask" "no-delegate" "$(bulk_payload momentum-merge-chat-later-probe.jsonl "$M999")"
 run_case "chat: later probe moves to another repo, merge follows it (ask)" \
   "ask" "no-delegate" "$(bulk_payload momentum-merge-chat-later-probe.jsonl 'gh pr merge 999 --repo x/y --squash')"
-run_case "chat: later probe naming no repo (ask)" \
-  "ask" "no-delegate" "$(bulk_payload momentum-merge-chat-unnamed-probe.jsonl "$M999")"
-run_case "chat: no probe binds the repo (ask)" \
-  "ask" "no-delegate" "$(bulk_payload momentum-merge-chat-no-probe.jsonl "$M999")"
+run_case "chat: later probe naming no repo, text names o/r#999 (silent)" \
+  "silent" "no-delegate" "$(bulk_payload momentum-merge-chat-unnamed-probe.jsonl "$M999")"
+run_case "chat: later probe of another repo, merge stays on o/r (silent)" \
+  "silent" "no-delegate" "$(bulk_payload momentum-merge-chat-later-probe.jsonl "$M999")"
+run_case "chat: pull URL in the briefing names the repo (silent)" \
+  "silent" "no-delegate" "$(bulk_payload momentum-merge-chat-url-named.jsonl "$M999")"
+run_case "chat: pull URL repo differs from the merge (ask)" \
+  "ask" "no-delegate" "$(bulk_payload momentum-merge-chat-url-named.jsonl 'gh pr merge 999 --repo x/y --squash')"
+run_case "chat: text names #999 in two repos (ask)" \
+  "ask" "no-delegate" "$(bulk_payload momentum-merge-chat-two-repos-named.jsonl "$M999")"
+run_case "chat: text names #999 without its repo (ask)" \
+  "ask" "no-delegate" "$(bulk_payload momentum-merge-chat-no-repo-named.jsonl "$M999")"
 run_case "chat: '#999 머지 보류. ok' (ask)" \
   "ask" "no-delegate" "$(bulk_payload momentum-merge-chat-hold-ok.jsonl "$M999")"
 run_case "chat: order then '#999 머지 보류. ok' (ask)" \

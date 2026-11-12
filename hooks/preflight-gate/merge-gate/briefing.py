@@ -1928,95 +1928,25 @@ def bulk_merge_approved(payload: dict) -> bool:
         return False
 
 
-# `gh` subcommands that act on one repository; a call to one of them that
-# names no repo acts on whatever the shell's checkout is.
-_REPO_SCOPED_GH = frozenset({
-    "pr", "issue", "run", "workflow", "release", "label", "cache", "secret",
-    "variable", "browse", "repo", "api",
-})
-_API_REPO_RE = re.compile(r"^/?repos/([A-Za-z0-9._-]+)/([A-Za-z0-9._-]+)(?:/|$)")
-_ISSUE_URL_RE = re.compile(r"^https?://[^/\s]+/[^/\s]+/[^/\s]+/(?:pull|issues)/\d+")
+# A PR named with its repo in text: `owner/name#N`, or a pull URL (host kept).
+_TEXT_PR_REF_RE = re.compile(
+    r"(?:https?://([A-Za-z0-9.-]+))?/([A-Za-z0-9._-]+/[A-Za-z0-9._-]+)/pull/(\d+)(?![A-Za-z0-9_])"
+    r"|(?<![A-Za-z0-9._/-])([A-Za-z0-9._-]+/[A-Za-z0-9._-]+)#(\d+)(?![A-Za-z0-9_])")
 
 
-def _gh_call_repos(argv: list[str]) -> set[tuple[str, str]] | None:
-    """`(host, owner/name)` of every repo one `gh` call names: `-R`/`--repo`
-    values, pull or issue URLs, a `gh repo <verb> o/r` slug and a
-    `gh api repos/o/r/…` endpoint. An empty set when the call is repo-scoped
-    and names none, None when it is not repo-scoped (`gh auth status`) or
-    names something that is not a repo."""
-    argv = strip_prefix(argv)
-    if not argv or not _is_gh_binary(argv[0]):
-        return None
-    words: list[str] = []
+def _seen_pr_repos(entries: list[dict], idxs: list[int], lo: int, pr: str) -> set[tuple[str, str]]:
+    """`(host, owner/name)` of every repo the conversation from entry `lo` on
+    names PR `pr` with: the assistant's prose and its merge question for
+    `pr`, and the human's messages. A bare `owner/name#N` is on github.com."""
+    text = _assistant_text(entries, lo, len(entries), pr) + "\n" + "\n".join(
+        _user_message_text(entries[i].get("message", {}).get("content"))
+        for i in idxs if i >= lo)
     found: set[tuple[str, str]] = set()
-    host = _GITHUB_HOST
-    skip_next = False
-    for i, tok in enumerate(argv[1:], start=1):
-        if skip_next:
-            skip_next = False
-            continue
-        value = None
-        if "=" in tok and tok.partition("=")[0] in _REPO_FLAGS:
-            value = tok.partition("=")[2]
-        elif tok in _REPO_FLAGS and i + 1 < len(argv):
-            value, skip_next = argv[i + 1], True
-        elif tok.startswith("-R") and len(tok) > 2 and not tok.startswith("--"):
-            value = tok[2:]
-        elif tok == "--hostname" and i + 1 < len(argv):
-            host, skip_next = argv[i + 1].lower(), True
-        elif tok in _SEGMENT_VALUE_FLAGS or tok in GH_GLOBAL_FLAGS_WITH_ARG:
-            skip_next = True
-        elif _ISSUE_URL_RE.match(tok.strip("'\"")):
-            url = tok.strip("'\"").replace("/issues/", "/pull/", 1)
-            hit = _pull_url_repo(url)
-            if hit is None:
-                return None
-            found.add(hit)
-        elif not tok.startswith("-"):
-            words.append(tok)
-        if value is not None:
-            hit = _repo_spec(value)
-            if hit is None:
-                return None
-            found.add(hit)
-    if words[:1] == ["repo"] and len(words) >= 3 and "/" in words[2]:
-        hit = _repo_spec(words[2])
-        if hit is None:
-            return None
-        found.add(hit)
-    if words[:1] == ["api"] and len(words) >= 2:
-        m = _API_REPO_RE.match(words[1])
-        if m:
-            found.add((host, f"{m.group(1).lower()}/{m.group(2).lower().removesuffix('.git')}"))
-    if found or (words[:1] and words[0] in _REPO_SCOPED_GH):
-        return found
-    return None
-
-
-def _window_names_only(entries: list[dict], lo: int, repo: tuple[str, str]) -> bool:
-    """True when every repo-scoped `gh` call from entry `lo` on names `repo` and
-    nothing else, and at least one does. A call naming no repo, or another
-    repo, may be what the user's answer was about, so it keeps the prompt."""
-    seen = False
-    for ev in entries[lo:]:
-        msg = ev.get("message")
-        if not isinstance(msg, dict) or msg.get("role") != "assistant" or ev.get("isSidechain"):
-            continue
-        content = msg.get("content")
-        for b in content if isinstance(content, list) else []:
-            if not (isinstance(b, dict) and b.get("type") == "tool_use" and b.get("name") == "Bash"):
-                continue
-            cmd = (b.get("input") or {}).get("command")
-            if not isinstance(cmd, str):
-                continue
-            for argv in iter_command_starts(safe_tokenize(cmd)):
-                repos = _gh_call_repos(argv)
-                if repos is None:
-                    continue
-                if repos != {repo}:
-                    return False
-                seen = True
-    return seen
+    for m in _TEXT_PR_REF_RE.finditer(text):
+        host, url_repo, url_pr, slug_repo, slug_pr = m.groups()
+        if (url_pr or slug_pr) == pr:
+            found.add(((host or _GITHUB_HOST).lower(), (url_repo or slug_repo).lower()))
+    return found
 
 
 def _chat_released(entries: list[dict], idxs: list[int], command: object) -> bool:
@@ -2026,10 +1956,11 @@ def _chat_released(entries: list[dict], idxs: list[int], command: object) -> boo
     typed reply to a turn that asked to merge the PR (`merge`, `머지 승인`), the
     user's own message naming the PR and merging (`#999 머지해`), or an
     AskUserQuestion pick. The answer names a number, never a repo, so the
-    repo is bound by the window instead: the merge names exactly one repo,
-    every repo-scoped `gh` call since the last merge that may have run names
-    that same repo (host included), and no `GH_HOST` was exported. The command
-    must be one numbered merge and nothing else.
+    repo is bound by what the user read: since the last merge that may have
+    run, the conversation names this PR with exactly one repo
+    (`owner/name#N` or a pull URL), the merge names that repo and no other,
+    and no `GH_HOST` was exported. The command must be one numbered merge and
+    nothing else.
     """
     if not isinstance(command, str) or not idxs:
         return False
@@ -2039,7 +1970,7 @@ def _chat_released(entries: list[dict], idxs: list[int], command: object) -> boo
         return False
     executed = _executed_merges(entries, include_skippable=True)
     last_merge = executed[-1][0] if executed else -1
-    if not _window_names_only(entries, last_merge + 1, next(iter(repos))):
+    if _seen_pr_repos(entries, idxs, last_merge + 1, pr) != repos:
         return False
     return _answered_after(entries, idxs, last_merge, pr)
 

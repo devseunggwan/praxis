@@ -1,0 +1,2 @@
+{"type": "user", "message": {"role": "user", "content": "#999 머지해"}}
+{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": "Merge briefing\n\n## https://github.com/o/r/pull/999\n- What changed: one rule row\n- Verified: CI pass, tests pass\n- NOT verified: live routing\n- Risk: docs only\n- Open items: none\n"}]}}

@@ -160,11 +160,13 @@ A later message about the PR or merging that is not an approval (`#999 머지
 보류`) withdraws it. It reads the transcript, never the command, and fails
 closed: the command must be one `gh pr merge <N>` and nothing else (no chain,
 loop, env prefix or numberless merge). The answer names a number, never a
-repo, so the repo is bound by the window: the merge names exactly one repo
-(`_merge_repos`, host included), every repo-scoped `gh` call since the last
-merge that may have run names that same repo and nothing else, at least one
-does, and no `GH_HOST` was exported. A probe naming no repo or another repo,
-a second `--repo`, or the same `owner/name` on another host keeps the prompt.
+repo, so the repo is bound by what the user read: since the last merge that
+may have run, the conversation (the assistant's prose, its merge question for
+the PR, and the user's messages) names this PR with exactly one repo, as
+`owner/name#N` (github.com) or a pull URL (host kept), and the merge names
+that repo and no other (`_merge_repos`, host included). No `GH_HOST` export
+may precede it. A PR named without its repo, named in two repos, a second
+`--repo`, or the same `owner/name` on another host keeps the prompt.
 An injected message (`isMeta`, a non-human `origin`) is not a human message.
 Any error keeps the prompt.
 
