@@ -322,6 +322,20 @@ run_case "chat: numberless merge (ask)" \
   "ask" "no-delegate" "$(bulk_payload momentum-merge-chat-answered.jsonl 'gh pr merge --repo o/r --squash')"
 run_case "chat: looped merge (ask)" \
   "ask" "no-delegate" "$(bulk_payload momentum-merge-chat-answered.jsonl "for i in 1; do $M999; done")"
+run_case "chat: gh api repos/o/r probe names the repo (silent)" \
+  "silent" "no-delegate" "$(bulk_payload momentum-merge-chat-api-probe.jsonl "$M999")"
+run_case "chat: two --repo selectors (ask)" \
+  "ask" "no-delegate" "$(bulk_payload momentum-merge-chat-answered.jsonl 'gh pr merge 999 --repo o/r --repo x/y --squash')"
+run_case "chat: same owner/name on another host (ask)" \
+  "ask" "no-delegate" "$(bulk_payload momentum-merge-chat-answered.jsonl 'gh pr merge 999 --repo ghe.example.com/o/r --squash')"
+run_case "chat: later probe of another repo (ask)" \
+  "ask" "no-delegate" "$(bulk_payload momentum-merge-chat-later-probe.jsonl "$M999")"
+run_case "chat: later probe moves to another repo, merge follows it (ask)" \
+  "ask" "no-delegate" "$(bulk_payload momentum-merge-chat-later-probe.jsonl 'gh pr merge 999 --repo x/y --squash')"
+run_case "chat: later probe naming no repo (ask)" \
+  "ask" "no-delegate" "$(bulk_payload momentum-merge-chat-unnamed-probe.jsonl "$M999")"
+run_case "chat: no probe binds the repo (ask)" \
+  "ask" "no-delegate" "$(bulk_payload momentum-merge-chat-no-probe.jsonl "$M999")"
 
 
 echo ""

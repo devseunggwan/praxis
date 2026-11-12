@@ -215,6 +215,16 @@ CASES = {
                  _failed_result("m1", "blocked by another gate")],
     "momentum-merge-chat-cd.jsonl":
         lambda: [*_chat_answered(), bash("cd1", "cd ../elsewhere && ls"), result("cd1", "")],
+    # The window binds the repo the answer approved.
+    "momentum-merge-chat-later-probe.jsonl":
+        lambda: [*_chat_answered(), bash("c2", "gh pr checks 999 --repo x/y"), result("c2", "pass")],
+    "momentum-merge-chat-unnamed-probe.jsonl":
+        lambda: [*_chat_answered(), bash("c2", "gh pr checks 999"), result("c2", "pass")],
+    "momentum-merge-chat-api-probe.jsonl":
+        lambda: [*_chat_answered(), bash("c2", "gh api repos/o/r/pulls/999/comments --paginate"),
+                 result("c2", "[]")],
+    "momentum-merge-chat-no-probe.jsonl":
+        lambda: [user("#999 머지해"), prose("Merge briefing\n\n" + section("PR #999"))],
     "momentum-merge-chat-ask-answer.jsonl":
         lambda: [user("prepare PR #999 for merge"),
                  bash("c1", "gh pr checks 999 --repo o/r"), result("c1", "all checks passing"),
