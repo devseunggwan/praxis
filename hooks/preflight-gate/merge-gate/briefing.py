@@ -1320,11 +1320,15 @@ def _held_after(entries: list[dict], idxs: list[int], index: int, pr: str) -> bo
         asked = _assistant_text(entries, idxs[k - 1] + 1 if k else 0, j)
         # A numbered answer to a numbered merge ask is about this merge even
         # when it names neither the PR nor merging (`1. hold`); so is a letter
-        # picking a choice line of a turn about the PR (`B` for `B: 보류`).
+        # picking a choice line of a turn about the PR (`B` for `B: 보류`),
+        # including an unnamed merge re-ask in a turn naming no other PR.
         about = (_mentions_pr(text, pr) or _MERGE_WORD_RE.search(text)
                  or (_numbered_items(text.strip().lower()) != []
                      and bool(_merge_question_numbers(asked, pr)))
-                 or (_picked_option(text, asked) is not None and _mentions_pr(asked, pr)))
+                 or (_picked_option(text, asked) is not None
+                     and (_mentions_pr(asked, pr)
+                          or (set(_PR_REF_RE.findall(asked)) <= {pr}
+                              and bool(_MERGE_WORD_RE.search(asked))))))
         if about and not _is_typed_approval(content, pr, asked):
             return True
     return False

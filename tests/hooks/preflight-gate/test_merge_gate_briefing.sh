@@ -1065,6 +1065,7 @@ run_merge_escalation_case "merge_escalation_numbered_trailing_condition_denies" 
 #   serial          #999 merged, #1001 menu with no merge ask, `A` → allow
 #   serial-hold     same, reply `B` (보류)                          → deny
 #   serial-rehold   `A`, then `B` to a re-asked menu, new briefing → deny
+#   …-unnamed       same, the re-ask names no PR (`Approve merge?`)   → deny
 run_merge_escalation_case "merge_escalation_letter_merge_ko_passes" \
   "no" "" "momentum-merge-letter-merge-ko.jsonl" "gh pr merge 999 --squash"
 run_merge_escalation_case "merge_escalation_letter_merge_lower_passes" \
@@ -1083,6 +1084,8 @@ run_merge_escalation_case "merge_escalation_letter_serial_hold_denies" \
   "yes" "" "momentum-merge-letter-serial-hold.jsonl" "gh pr merge 1001 --squash"
 run_merge_escalation_case "merge_escalation_letter_serial_rehold_denies" \
   "yes" "" "momentum-merge-letter-serial-rehold.jsonl" "gh pr merge 1001 --squash"
+run_merge_escalation_case "merge_escalation_letter_serial_rehold_unnamed_denies" \
+  "yes" "" "momentum-merge-letter-serial-rehold-unnamed.jsonl" "gh pr merge 1001 --squash"
 # Same approving letter, different target: #999's menu does not release #1001.
 run_merge_escalation_case "merge_escalation_letter_other_pr_denies" \
   "yes" "" "momentum-merge-letter-merge-ko.jsonl" "gh pr merge 1001 --squash"

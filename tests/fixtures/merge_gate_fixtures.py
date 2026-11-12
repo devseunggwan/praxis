@@ -246,6 +246,12 @@ CASES = {
                  prose("One more check before I merge #1001.\n" + _MENU_MERGE_KO),
                  user("B"),
                  prose("Merge briefing\n\n" + section("PR #1001") + "\nApprove merge of #1001?")],
+    # Review: the re-ask names no PR; `B` (hold) still withdraws the `A`.
+    "momentum-merge-letter-serial-rehold-unnamed.jsonl":
+        lambda: [*_lettered_serial("A"),
+                 prose("One more check.\nApprove merge?\nA: merge\nB: hold"),
+                 user("B"),
+                 prose("Merge briefing\n\n" + section("PR #1001") + "\nApprove merge of #1001?")],
 }
 
 

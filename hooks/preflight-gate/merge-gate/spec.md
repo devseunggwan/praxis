@@ -561,8 +561,9 @@ before approving). Safety gates on the extension:
   `_answered_after` also counts a picked line that names merging as the reply
   naming the merge, so a serial merge's menu needs no separate `Approve
   merge?` sentence. `_held_after` counts a letter picking a line of a later
-  turn that mentions the PR as being about the merge, so `B` for `B: 보류` to
-  a re-asked menu withdraws an earlier `A`. Target correlation, the briefing
+  turn that mentions the PR, or that names merging and no other PR (an
+  unnamed `Approve merge?` re-ask), as being about the merge, so `B` for
+  `B: 보류` to a re-asked menu withdraws an earlier `A`. Target correlation, the briefing
   item count, the serial-merge cut and bulk approval are unchanged. Only a
   one-letter reply reads differently: before this change none was an
   approval, so the change can only release a letter that picks an approving
