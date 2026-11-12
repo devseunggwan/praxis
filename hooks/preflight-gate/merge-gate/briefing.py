@@ -1972,7 +1972,8 @@ _ASK_LABEL_RE = re.compile(
     r"^\s*(?:[-*+•]\s+)?(?:[\u2460-\u2473]\s*)?(?:\*\*)?(?:승인 요청|질문|요청|question|ask)\s*:\s*(?:\*\*)?\s*",
     re.IGNORECASE)
 _ASK_BULLET_RE = re.compile(r"^\s*(?:[-*+•]\s+|[\u2460-\u2473]\s*|\d+\.\s+)")
-_URL_RE_FULL = re.compile(r"https?://\S+")
+# A URL ends before question or closing punctuation (`.../pull/999?`).
+_URL_RE_FULL = re.compile(r"https?://[^\s?？<>`\"')]*[^\s?？<>`\"').,!]")
 # `name#N` (a repo named without its owner) and `owner/name#N`.
 _SLUG_REF_RE = re.compile(r"(?<![A-Za-z0-9._/-])(?:[A-Za-z0-9._-]+/)?[A-Za-z0-9._-]+#(\d+)(?![A-Za-z0-9_])")
 _PLAIN_ASK_NOISE_RE = re.compile(r"[?？.!,:;()\[\]*`~·]")
@@ -2057,6 +2058,21 @@ def _trailer_line(line: str) -> bool:
         return False
 
 
+def _pr_numbers(text: str) -> set[str]:
+    """Every PR number `text` names (`#N`, `PR N`, `name#N`, pull URLs)."""
+    refs = set(_PR_REF_RE.findall(text)) | set(_SLUG_REF_RE.findall(text))
+    return refs | {m.group(3) or m.group(5) for m in _TEXT_PR_REF_RE.finditer(text)}
+
+
+def _ask_targets_pr(text: str, pr: str) -> bool:
+    """True when the last question of `text` is about `pr`: it names `pr`, or
+    it names no PR and `text` names `pr` and no other. `Ready to merge o/r#999
+    or x/y#1001. Approve merge?` targets neither."""
+    if _mentions_pr(_last_ask_sentence(text), pr):
+        return True
+    return _pr_numbers(text) == {pr}
+
+
 def _ends_with_plain_ask(text: str, pr: str) -> bool:
     """True when `text` ends with a plain merge ask for `pr`: its last question
     is one (`_plain_merge_ask`), and only choice lines, reply-instruction
@@ -2116,7 +2132,7 @@ def _ask_result_approves(content: object, pr: str) -> bool:
     same result (`"Merge #999 now?"="hold"`) refuses it."""
     pairs = [(q, a) for q, a in _ASK_ANSWER_RE.findall(_user_message_text(content))
              if _mentions_pr(q, pr) or _MERGE_WORD_RE.search(q)]
-    return bool(pairs) and all(_mentions_pr(q, pr) and _ends_with_plain_ask(q, pr)
+    return bool(pairs) and all(_ask_targets_pr(q, pr) and _ends_with_plain_ask(q, pr)
                                and _plain_approval(a, pr) for q, a in pairs)
 
 
@@ -2137,12 +2153,12 @@ def _chat_reply_approves(content: object, asked: str, pr: str) -> bool:
     if picked is not None:
         label, note = picked
         return (not note.strip() and _plain_approval(label, pr)
-                and _ends_with_plain_ask(asked, pr) and _mentions_pr(asked, pr))
+                and _ends_with_plain_ask(asked, pr) and _ask_targets_pr(asked, pr))
     if _numbered_items(raw) or not _plain_approval(raw, pr):
         return False
     if _mentions_pr(raw, pr) and _MERGE_WORD_RE.search(raw):
         return True
-    return _ends_with_plain_ask(asked, pr) and _mentions_pr(asked, pr)
+    return _ends_with_plain_ask(asked, pr) and _ask_targets_pr(asked, pr)
 
 
 def _chat_approval_index(entries: list[dict], idxs: list[int], lo: int, pr: str) -> int | None:

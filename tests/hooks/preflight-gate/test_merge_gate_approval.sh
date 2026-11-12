@@ -384,6 +384,10 @@ run_case "chat: trailer after the question with no trailer configured (ask)" \
   "ask" "no-delegate" "$(bulk_payload momentum-merge-chat-reply-line-after-ask.jsonl "$M999")"
 PRAXIS_MERGE_ASK_TRAILER_REGEX='Status: .*' run_case "chat: condition inside the reply line (ask)" \
   "ask" "no-delegate" "$(bulk_payload momentum-merge-chat-reply-line-condition.jsonl "$M999")"
+run_case "chat: question mark right after the pull URL (silent)" \
+  "silent" "no-delegate" "$(bulk_payload momentum-merge-chat-url-question-mark.jsonl "$M999")"
+run_case "chat: unnamed merge question after two PRs (ask)" \
+  "ask" "no-delegate" "$(bulk_payload momentum-merge-chat-unnamed-ask-two-prs.jsonl "$M999")"
 run_case "chat: injected AskUserQuestion answer (ask)" \
   "ask" "no-delegate" "$(bulk_payload momentum-merge-chat-injected-ask-answer.jsonl "$M999")"
 

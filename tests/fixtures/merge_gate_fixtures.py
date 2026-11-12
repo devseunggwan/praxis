@@ -341,6 +341,17 @@ CASES = {
                  prose("Merge briefing\n\n" + section("o/r#999")
                        + "\nApprove merge of #999?\nReply `merge` only after CI passes."),
                  user("merge")],
+    # CodeRabbit round 3: a `?` right after a pull URL ends the question; an
+    # unnamed question after two PRs targets neither.
+    "momentum-merge-chat-url-question-mark.jsonl":
+        lambda: [user("prepare PR #999 for merge"),
+                 prose("Merge briefing\n\n" + section("o/r#999")
+                       + "\nApprove merge of https://github.com/o/r/pull/999?"),
+                 user("merge")],
+    "momentum-merge-chat-unnamed-ask-two-prs.jsonl":
+        lambda: [user("prepare the merges"),
+                 prose("Merge briefing\n\n" + section("o/r#999") + "\nReady to merge o/r#999 or x/y#1001. Approve merge?"),
+                 user("yes")],
     "momentum-merge-chat-ask-answer.jsonl":
         lambda: [user("prepare PR #999 for merge"),
                  bash("c1", "gh pr checks 999 --repo o/r"), result("c1", "all checks passing"),
