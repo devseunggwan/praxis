@@ -168,8 +168,195 @@ def _failed_result(tid: str, text: str) -> dict:
         {"type": "tool_result", "tool_use_id": tid, "content": text, "is_error": True}]}}
 
 
+def _chat_answered(reply: str = "merge") -> list[dict]:
+    """Prior-turn briefing of o/r#999, answered in chat with ``reply``."""
+    return [
+        user("prepare PR #999 for merge"),
+        bash("c1", "gh pr checks 999 --repo o/r"), result("c1", "all checks passing"),
+        prose("Merge briefing\n\n" + section("o/r#999") + "\nApprove merge of #999?"),
+        user(reply),
+    ]
+
+
+def _chat_ordered(order: str = "#999 머지해") -> list[dict]:
+    """The agent reported o/r#999 earlier; the user orders the merge by number,
+    and the agent briefs it in the same turn and merges with no further
+    answer."""
+    return [
+        user("open a PR for the fix"),
+        prose("Opened https://github.com/o/r/pull/999 ."),
+        user(order),
+        bash("c1", "gh pr checks 999 --repo o/r"), result("c1", "all checks passing"),
+        prose("Merge briefing\n\n" + section("o/r#999")),
+    ]
+
+
 CASES = {
     "momentum-merge-example.jsonl": _example,
+    # Issue #1654: a merge the user approved in chat skips the host prompt.
+    "momentum-merge-chat-answered.jsonl": _chat_answered,
+    "momentum-merge-chat-answered-ko.jsonl": lambda: _chat_answered("머지 승인"),
+    "momentum-merge-chat-ordered.jsonl": _chat_ordered,
+    "momentum-merge-chat-unanswered.jsonl":
+        lambda: _chat_answered("prepare PR #999 for merge")[:-1],
+    "momentum-merge-chat-unrelated-ok.jsonl":
+        lambda: [user("prepare PR #999 for merge"),
+                 bash("c1", "gh pr checks 999 --repo o/r"), result("c1", "all checks passing"),
+                 prose("CI is green. Shall I post the summary comment?"),
+                 user("ok")],
+    "momentum-merge-chat-held.jsonl":
+        lambda: [*_chat_ordered(), user("잠깐, #999 머지 보류")],
+    "momentum-merge-chat-injected.jsonl":
+        lambda: [user("prepare PR #999 for merge"),
+                 {**user("#999 머지해"), "isMeta": True},
+                 prose("Merge briefing\n\n" + section("o/r#999"))],
+    "momentum-merge-chat-spent.jsonl":
+        lambda: [*_chat_answered(), bash("m1", "gh pr merge 999 --repo o/r --squash"),
+                 result("m1", "merged")],
+    "momentum-merge-chat-failed-merge.jsonl":
+        lambda: [*_chat_answered(), bash("m1", "gh pr merge 999 --repo o/r --squash"),
+                 _failed_result("m1", "blocked by another gate")],
+    "momentum-merge-chat-cd.jsonl":
+        lambda: [*_chat_answered(), bash("cd1", "cd ../elsewhere && ls"), result("cd1", "")],
+    # Review: the window binds the repo, an injected answer and a hold that
+    # ends in `ok` approve nothing.
+    "momentum-merge-chat-later-probe.jsonl":
+        lambda: [*_chat_answered(), bash("c2", "gh pr checks 999 --repo x/y"), result("c2", "pass")],
+    "momentum-merge-chat-unnamed-probe.jsonl":
+        lambda: [*_chat_answered(), bash("c2", "gh pr checks 999"), result("c2", "pass")],
+    "momentum-merge-chat-api-probe.jsonl":
+        lambda: [*_chat_answered(), bash("c2", "gh api repos/o/r/pulls/999/comments --paginate"),
+                 result("c2", "[]")],
+    "momentum-merge-chat-no-repo-named.jsonl":
+        lambda: [user("#999 머지해"), bash("c1", "gh pr checks 999 --repo o/r"),
+                 result("c1", "all checks passing"), prose("Merge briefing\n\n" + section("PR #999"))],
+    "momentum-merge-chat-two-repos-named.jsonl":
+        lambda: [*_chat_answered()[:-1], prose("Also open: x/y#999, unrelated."), user("merge")],
+    "momentum-merge-chat-url-named.jsonl":
+        lambda: [user("open a PR for the fix"), prose("Opened https://github.com/o/r/pull/999 ."),
+                 user("#999 머지해"), prose("Merge briefing\n\n" + section("PR #999"))],
+    "momentum-merge-chat-hold-ok.jsonl": lambda: _chat_answered("#999 머지 보류. ok"),
+    "momentum-merge-chat-order-then-hold-ok.jsonl":
+        lambda: [*_chat_ordered(), user("#999 머지 보류. ok")],
+    "momentum-merge-chat-injected-ask-answer.jsonl":
+        lambda: (lambda rows: [*rows[:-1], {**rows[-1], "isMeta": True}])(
+            [user("prepare PR #999 for merge"),
+             bash("c1", "gh pr checks 999 --repo o/r"), result("c1", "all checks passing"),
+             *ask("q1", "Merge briefing\n\n" + section("o/r#999") + "\nApprove merge of #999?",
+                  "머지 승인", "보류")]),
+    # Review: only a whole, unconditional answer to the merge releases, and
+    # the repo is read from what came before the answer.
+    "momentum-merge-chat-ok-to-other-ask.jsonl":
+        lambda: [user("prepare PR #999 for merge"),
+                 bash("c1", "gh pr checks 999 --repo o/r"), result("c1", "all checks passing"),
+                 prose("Merge briefing\n\n" + section("o/r#999") + "\nShall I post the summary for #999?"),
+                 user("For #999, ok")],
+    "momentum-merge-chat-conditional.jsonl":
+        lambda: _chat_answered("After I approve the release for #999, merge"),
+    "momentum-merge-chat-repo-after-answer.jsonl":
+        lambda: [user("prepare PR #999 for merge"),
+                 prose("Merge briefing\n\n" + section("PR #999") + "\nApprove merge of #999?"),
+                 user("merge"), prose("Merging x/y#999 now.")],
+    "momentum-merge-chat-numbered-other-hold.jsonl":
+        lambda: [user("prepare PR #999 for merge"),
+                 bash("c1", "gh pr checks 999 --repo o/r"), result("c1", "all checks passing"),
+                 prose("Merge briefing\n\n" + section("o/r#999")
+                       + "\n1. Approve merge of #999?\n2. Post the summary?"),
+                 user("1. approve\n2. hold")],
+    "momentum-merge-numbered-serial-other-hold.jsonl":
+        lambda: _numbered_serial("1. approve\n2. hold"),
+    # Review: a conditional merge question, a letter picked for another PR's
+    # question, and a hold in the same AskUserQuestion result approve nothing.
+    "momentum-merge-chat-conditional-ask.jsonl":
+        lambda: [user("prepare PR #999 for merge"),
+                 prose("Merge briefing\n\n" + section("o/r#999") + "\nApprove merge of o/r#999 after CI passes?"),
+                 user("ok")],
+    "momentum-merge-chat-letter-other-pr.jsonl":
+        lambda: [user("prepare the merges"),
+                 prose("Merge briefing\n\n" + section("o/r#999") + "\n" + section("o/r#1001")
+                       + "\nA: merge\nB: hold\nApprove merge of #1001?"),
+                 user("A")],
+    "momentum-merge-chat-letter-plain.jsonl":
+        lambda: [user("prepare PR #999 for merge"),
+                 prose("Merge briefing\n\n" + section("o/r#999") + "\nApprove merge of #999?\nA: merge\nB: hold"),
+                 user("A")],
+    "momentum-merge-chat-ask-answer-held-same-result.jsonl":
+        lambda: [user("prepare PR #999 for merge"), prose("Opened https://github.com/o/r/pull/999 ."),
+                 {"type": "assistant", "message": {"role": "assistant", "content": [
+                     {"type": "tool_use", "id": "q1", "name": "AskUserQuestion", "input": {"questions": [
+                         {"question": "Merge briefing\n\n" + section("o/r#999") + "\nApprove merge of #999?",
+                          "header": "Merge", "multiSelect": False,
+                          "options": [{"label": "Approve", "description": ""}, {"label": "hold", "description": ""}]},
+                         {"question": "Merge #999 now?", "header": "Now", "multiSelect": False,
+                          "options": [{"label": "now", "description": ""}, {"label": "hold", "description": ""}]}]}}]}},
+                 result("q1", 'User has answered your questions: "Merge briefing ... Approve merge of #999?"="Approve", '
+                              '"Merge #999 now?"="hold". You can now continue with the user\'s answers in mind.')],
+    "momentum-merge-chat-labelled-ask.jsonl":
+        lambda: [user("prepare PR #999 for merge"),
+                 prose("Merge briefing\n\n" + section("o/r#999") + "\n- **승인 요청:** r#999 를 머지할까요?"),
+                 user("merge")],
+    "momentum-merge-chat-url-ask.jsonl":
+        lambda: [user("prepare PR #999 for merge"),
+                 prose("Merge briefing\n\n" + section("o/r#999")
+                       + "\nhttps://github.com/o/r/pull/999 을 머지할까요?"),
+                 user("merge")],
+    "momentum-merge-chat-second-action-ask.jsonl":
+        lambda: [user("prepare PR #999 for merge"),
+                 prose("Merge briefing\n\n" + section("o/r#999") + "\nPR #999 를 머지하고 배포까지 진행할까요?"),
+                 user("merge")],
+    # Codex round 2: a condition after the question, a conditional pick, and
+    # a short hold to a second merge ask approve nothing.
+    "momentum-merge-chat-condition-after-ask.jsonl":
+        lambda: [user("prepare PR #999 for merge"),
+                 prose("Merge briefing\n\n" + section("o/r#999")
+                       + "\nApprove merge of #999? Only after I confirm the release."),
+                 user("ok")],
+    "momentum-merge-chat-conditional-pick.jsonl":
+        lambda: [user("prepare PR #999 for merge"),
+                 prose("Merge briefing\n\n" + section("o/r#999")
+                       + "\nApprove merge of #999?\nA: Approve, only after CI passes\nB: hold"),
+                 user("A")],
+    "momentum-merge-chat-conditional-ask-pick.jsonl":
+        lambda: [user("prepare PR #999 for merge"), prose("Opened https://github.com/o/r/pull/999 ."),
+                 {"type": "assistant", "message": {"role": "assistant", "content": [
+                     {"type": "tool_use", "id": "q1", "name": "AskUserQuestion", "input": {"questions": [
+                         {"question": "Merge briefing\n\n" + section("o/r#999") + "\nApprove merge of #999?",
+                          "header": "Merge", "multiSelect": False,
+                          "options": [{"label": "After CI passes, approve", "description": ""},
+                                      {"label": "hold", "description": ""}]}]}}]}},
+                 result("q1", 'User has answered your questions: "Merge briefing ... Approve merge of #999?"='
+                              '"After CI passes, approve". You can now continue with the user\'s answers in mind.')],
+    "momentum-merge-chat-short-hold-later.jsonl":
+        lambda: [*_chat_answered(), prose("CI restarted. Merge #999 now?"), user("hold"),
+                 prose("Merge briefing\n\n" + section("o/r#999"))],
+    # pm A: a reply-instruction line and a host trailer may follow the
+    # question; a condition riding on either keeps the prompt.
+    "momentum-merge-chat-reply-line-after-ask.jsonl":
+        lambda: [user("prepare PR #999 for merge"),
+                 prose("Merge briefing\n\n" + section("o/r#999")
+                       + "\nApprove merge of #999?\n머지하려면 `merge` 한 단어로 답해 주세요.\n\nStatus: waiting"),
+                 user("merge")],
+    "momentum-merge-chat-reply-line-condition.jsonl":
+        lambda: [user("prepare PR #999 for merge"),
+                 prose("Merge briefing\n\n" + section("o/r#999")
+                       + "\nApprove merge of #999?\nReply `merge` only after CI passes."),
+                 user("merge")],
+    # CodeRabbit round 3: a `?` right after a pull URL ends the question; an
+    # unnamed question after two PRs targets neither.
+    "momentum-merge-chat-url-question-mark.jsonl":
+        lambda: [user("prepare PR #999 for merge"),
+                 prose("Merge briefing\n\n" + section("o/r#999")
+                       + "\nApprove merge of https://github.com/o/r/pull/999?"),
+                 user("merge")],
+    "momentum-merge-chat-unnamed-ask-two-prs.jsonl":
+        lambda: [user("prepare the merges"),
+                 prose("Merge briefing\n\n" + section("o/r#999") + "\nReady to merge o/r#999 or x/y#1001. Approve merge?"),
+                 user("yes")],
+    "momentum-merge-chat-ask-answer.jsonl":
+        lambda: [user("prepare PR #999 for merge"),
+                 bash("c1", "gh pr checks 999 --repo o/r"), result("c1", "all checks passing"),
+                 *ask("q1", "Merge briefing\n\n" + section("o/r#999") + "\nApprove merge of #999?",
+                      "머지 승인", "보류")],
     # Issue #1639: an answer relayed by the host, for the approval provider.
     "momentum-merge-host-relayed.jsonl": _host_relayed,
     "momentum-merge-host-relayed-failed-merge.jsonl":

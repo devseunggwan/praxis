@@ -1,0 +1,3 @@
+{"type": "user", "message": {"role": "user", "content": "prepare the merges"}}
+{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": "Merge briefing\n\n## o/r#999\n- What changed: one rule row\n- Verified: CI pass, tests pass\n- NOT verified: live routing\n- Risk: docs only\n- Open items: none\n\n## o/r#1001\n- What changed: one rule row\n- Verified: CI pass, tests pass\n- NOT verified: live routing\n- Risk: docs only\n- Open items: none\n\nA: merge\nB: hold\nApprove merge of #1001?"}]}}
+{"type": "user", "message": {"role": "user", "content": "A"}}

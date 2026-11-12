@@ -1,0 +1,4 @@
+{"type": "user", "message": {"role": "user", "content": "open a PR for the fix"}}
+{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": "Opened https://github.com/o/r/pull/999 ."}]}}
+{"type": "user", "message": {"role": "user", "content": "#999 머지해"}}
+{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": "Merge briefing\n\n## PR #999\n- What changed: one rule row\n- Verified: CI pass, tests pass\n- NOT verified: live routing\n- Risk: docs only\n- Open items: none\n"}]}}

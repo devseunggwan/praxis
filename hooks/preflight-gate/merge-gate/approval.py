@@ -12,9 +12,12 @@ permissionDecision "ask" so Claude Code surfaces a confirmation dialog before
 executing the merge.
 
 No opt-out marker and no environment bypass are provided. Issue #180's contract
-is that a merge ALWAYS surfaces a per-PR approval prompt — an agent-attachable
-comment marker would let the agent silently self-bypass the same gate it is
-meant to enforce. The background-agent exemption that #180 originally carved out
+is that a merge the user has not approved ALWAYS surfaces a per-PR approval
+prompt — an agent-attachable comment marker would let the agent silently
+self-bypass the same gate it is meant to enforce. A merge the user already
+approved in chat (a bulk set, #1583, or this one PR, #1654) is not prompted
+again: the release reads the user's own message from the transcript, never
+the command. The background-agent exemption that #180 originally carved out
 was removed in #1055: a delegated worker now runs as an ordinary session with a
 live stdin, so the human at the pane answers the prompt just as in a direct
 session.
@@ -141,6 +144,16 @@ def bulk_approved(payload: dict) -> bool:
         return False
 
 
+def chat_approved(payload: dict) -> bool:
+    """True when the user already approved this one merge in chat (the
+    briefing check's `chat_merge_approved` decides, as for bulk). Any failure
+    returns False, so a broken lookup keeps the prompt."""
+    try:
+        return bool(_briefing().chat_merge_approved(payload))
+    except Exception:
+        return False
+
+
 def host_approval(payload: dict) -> tuple[bool, str]:
     """(released, note) from the host approval provider, decided by the same
     function the briefing check uses, so the provider is asked and the
@@ -169,10 +182,10 @@ def main() -> int:
     found = any(is_gh_pr_merge(argv) for argv in iter_command_starts(tokens))
     if not found:
         return 0
-    # The chat answer to a bulk briefing is the per-PR consent this prompt
-    # stands in for; asking again per merge only invites the blind click the
-    # briefing gate was built against.
-    if bulk_approved(payload):
+    # The user's chat answer is the per-PR consent this prompt stands in for,
+    # whether it approved a bulk set or this one PR; asking again only invites
+    # the blind click the briefing gate was built against.
+    if bulk_approved(payload) or chat_approved(payload):
         return 0
     # A host that collects the human's merge answer in its own channel names
     # a provider in the hook environment; unset, this block never runs.

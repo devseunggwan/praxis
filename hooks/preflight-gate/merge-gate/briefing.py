@@ -512,6 +512,15 @@ def _load_turn_entries(transcript_path: str) -> list[dict] | None:
     return entries
 
 
+def _is_injected(ev: dict) -> bool:
+    """True when a user-role entry was injected by the host, not written by the
+    human: `isMeta`, or an `origin.kind` other than human (see below)."""
+    if ev.get("isMeta"):
+        return True
+    origin = ev.get("origin")
+    return isinstance(origin, dict) and origin.get("kind") not in (None, "human")
+
+
 def _human_user_indices(entries: list[dict]) -> list[int]:
     """Indices of human-authored user messages (skip tool_result-only bridges).
 
@@ -540,10 +549,7 @@ def _human_user_indices(entries: list[dict]) -> list[int]:
         msg = ev.get("message")
         if not isinstance(msg, dict) or msg.get("role") != "user" or ev.get("isSidechain"):
             continue
-        if ev.get("isMeta"):
-            continue
-        origin = ev.get("origin")
-        if isinstance(origin, dict) and origin.get("kind") not in (None, "human"):
+        if _is_injected(ev):
             continue
         content = msg.get("content", [])
         if _is_interrupt_only(content):
@@ -1294,6 +1300,14 @@ def _merge_target_pr(entries: list[dict], command: object, floor: int) -> str | 
 
 def _is_typed_approval(content: object, pr: str, asked: str | None = None) -> bool:
     reply = _user_message_text(content)
+    # A hold or refusal anywhere outweighs a trailing token: `#999 머지 보류. ok`
+    # neither approves nor leaves an earlier approval standing. A numbered
+    # reply to a numbered merge ask is read per item instead, so `2. hold` on
+    # another question does not hold the merge.
+    per_item = (asked is not None and bool(_numbered_items(reply.strip().lower()))
+                and _merge_question_numbers(asked, pr) is not None)
+    if not per_item and _LABEL_NEGATION_RE.search(reply):
+        return False
     if _is_approval_reply(content, asked, pr):
         return True
     # A numbered reply paired with a numbered turn sets its PR references aside
@@ -1380,6 +1394,7 @@ def _answered_after(entries: list[dict], idxs: list[int], index: int,
                     asks.add(b["id"])
             elif (i > index and b.get("type") == "tool_result"
                   and b.get("tool_use_id") in asks and not b.get("is_error")
+                  and not _is_injected(ev)
                   and _ask_answer_approves(b.get("content"), pr)
                   and not _held_after(entries, idxs, i, pr)):
                 return True
@@ -1913,6 +1928,312 @@ def bulk_merge_approved(payload: dict) -> bool:
         if entries is None:
             return False
         return _bulk_released(entries, _human_user_indices(entries), code)
+    except Exception:
+        return False
+
+
+# A PR named with its repo in text: `owner/name#N`, or a pull URL (host kept).
+_TEXT_PR_REF_RE = re.compile(
+    r"(?:https?://([A-Za-z0-9.-]+))?/([A-Za-z0-9._-]+/[A-Za-z0-9._-]+)/pull/(\d+)(?![A-Za-z0-9_])"
+    r"|(?<![A-Za-z0-9._/-])([A-Za-z0-9._-]+/[A-Za-z0-9._-]+)#(\d+)(?![A-Za-z0-9_])")
+
+
+def _seen_pr_repos(entries: list[dict], idxs: list[int], lo: int, hi: int,
+                   pr: str) -> set[tuple[str, str]]:
+    """`(host, owner/name)` of every repo `entries[lo:hi]` names PR `pr` with:
+    the assistant's prose and its merge question for `pr`, and the human's
+    messages. A bare `owner/name#N` is on github.com."""
+    text = _assistant_text(entries, lo, hi, pr) + "\n" + "\n".join(
+        _user_message_text(entries[i].get("message", {}).get("content"))
+        for i in idxs if lo <= i < hi)
+    found: set[tuple[str, str]] = set()
+    for m in _TEXT_PR_REF_RE.finditer(text):
+        host, url_repo, url_pr, slug_repo, slug_pr = m.groups()
+        if (url_pr or slug_pr) == pr:
+            found.add(((host or _GITHUB_HOST).lower(), (url_repo or slug_repo).lower()))
+    return found
+
+
+# Words a plain merge question may hold besides references to the PR. Any
+# other word (a condition such as `after CI passes`, a second action, `bypass`)
+# makes it a question this release does not read: a missed release costs one
+# dialog, a misread one merges unasked.
+_PLAIN_ASK_WORDS = frozenset({
+    "approve", "merge", "merging", "of", "the", "this", "pr", "it", "now",
+    "squash", "rebase", "and", "can", "i", "we", "shall", "should",
+    "머지", "머지를", "머지할까요", "merge할까요", "머지해도", "될까요", "할까요",
+    "진행할까요", "승인", "승인할까요", "승인하실까요", "을", "를", "이", "가", "은",
+    "는", "로", "으로", "스쿼시", "하시겠어요", "하시겠습니까", "바로", "지금", "건",
+    "이번",
+})
+# A label written before the question (`**승인 요청:** #67을 머지할까요?`), a list
+# bullet or a circled step number carries no condition.
+_ASK_LABEL_RE = re.compile(
+    r"^\s*(?:[-*+•]\s+)?(?:[\u2460-\u2473]\s*)?(?:\*\*)?(?:승인 요청|질문|요청|question|ask)\s*:\s*(?:\*\*)?\s*",
+    re.IGNORECASE)
+_ASK_BULLET_RE = re.compile(r"^\s*(?:[-*+•]\s+|[\u2460-\u2473]\s*|\d+\.\s+)")
+# A URL ends before question or closing punctuation (`.../pull/999?`).
+_URL_RE_FULL = re.compile(r"https?://[^\s?？<>`\"')]*[^\s?？<>`\"').,!]")
+# `name#N` (a repo named without its owner) and `owner/name#N`.
+_SLUG_REF_RE = re.compile(r"(?<![A-Za-z0-9._/-])(?:[A-Za-z0-9._-]+/)?[A-Za-z0-9._-]+#(\d+)(?![A-Za-z0-9_])")
+_PLAIN_ASK_NOISE_RE = re.compile(r"[?？.!,:;()\[\]*`~·]")
+
+
+def _last_ask_sentence(text: str) -> str:
+    """The last question in `text`, read on its own line, with URLs kept whole
+    (a `.` inside one is not a sentence end) and an escaped `\\n` from an
+    answer row read as a line break."""
+    urls: list[str] = []
+
+    def keep(m: re.Match[str]) -> str:
+        urls.append(m.group(0))
+        return f"\x00{len(urls) - 1}\x00"
+
+    masked = _URL_RE_FULL.sub(keep, text.replace("\\n", "\n"))
+    asks = _ASK_SENTENCE_RE.findall(masked)
+    if not asks:
+        return ""
+    return re.sub(r"\x00(\d+)\x00", lambda m: urls[int(m.group(1))], asks[-1].strip())
+
+
+def _plain_merge_ask(sentence: str, pr: str) -> bool:
+    """True when `sentence` asks to merge `pr` and nothing else: it names no
+    other PR, and once a leading label or bullet and its PR references are set
+    aside every word is in `_PLAIN_ASK_WORDS` (`Approve merge of o/r#999?`,
+    `PR #999 을 squash 머지할까요?`, `**승인 요청:** web#999 를 머지할까요?`)."""
+    sentence = _ASK_BULLET_RE.sub("", _ASK_LABEL_RE.sub("", sentence))
+    # A pull URL reads as its number: `.` inside it is not a sentence end.
+    sentence = _URL_RE_FULL.sub(
+        lambda m: f" #{u.group(1)} " if (u := re.search(r"/pull/(\d+)", m.group(0))) else " ", sentence)
+    if not _is_merge_ask(sentence, pr):
+        return False
+    refs = set(_PR_REF_RE.findall(sentence)) | set(_SLUG_REF_RE.findall(sentence))
+    refs |= {m.group(3) or m.group(5) for m in _TEXT_PR_REF_RE.finditer(sentence)}
+    if refs - {pr}:
+        return False
+    rest = _URL_RE_FULL.sub(" ", sentence.lower())
+    rest = _strip_pr_ref(_SLUG_REF_RE.sub(" ", rest), pr)
+    words = _PLAIN_ASK_NOISE_RE.sub(" ", rest).split()
+    return bool(words) and all(w in _PLAIN_ASK_WORDS for w in words)
+
+
+# Words a reply-instruction line after the merge question may hold besides
+# the quoted reply words (`merge` 또는 `보류` 로 답해 주세요; reply `merge`).
+# A condition (`only after`, `뒤에`) is in no list, so it keeps the prompt.
+_REPLY_LINE_WORDS = frozenset({
+    "reply", "answer", "type", "with", "or", "please", "to", "approve", "merge",
+    "the", "word", "one", "a", "single", "in", "this", "chat", "session", "just",
+    "이", "세션에서", "세션", "채팅에", "채팅에서", "머지하려면", "머지하시려면",
+    "승인하려면", "승인하시려면", "진행하시려면", "또는", "로", "으로", "한",
+    "단어로", "단어만", "답해", "주세요", "입력해", "다른", "말", "없이", "만",
+    "라고", "이라고", "추천",
+})
+_REPLY_QUOTED_RE = re.compile(r"[`\"“”']([^`\"“”']+)[`\"“”']")
+_REPLY_TOKENS = frozenset({"merge", "보류", "hold"})
+
+
+def _reply_line(line: str) -> bool:
+    """True when `line` only tells the user how to answer: its quoted words
+    are reply words (`merge`, `보류`), one of them `merge`, and every other
+    word is in `_REPLY_LINE_WORDS`."""
+    low = line.strip().lower()
+    quoted = _REPLY_QUOTED_RE.findall(low)
+    if any(q.strip() not in _REPLY_TOKENS for q in quoted):
+        return False
+    rest = _REPLY_QUOTED_RE.sub(" ", low)
+    words = _PLAIN_ASK_NOISE_RE.sub(" ", rest.replace("/", " ")).split()
+    return ("merge" in {q.strip() for q in quoted} or "merge" in words) \
+        and all(w in _REPLY_LINE_WORDS for w in words)
+
+
+def _trailer_line(line: str) -> bool:
+    """True when `line` fully matches `PRAXIS_MERGE_ASK_TRAILER_REGEX`, a
+    status line a host appends to every turn (unset: none)."""
+    raw = os.environ.get("PRAXIS_MERGE_ASK_TRAILER_REGEX", "").strip()
+    if not raw:
+        return False
+    try:
+        return re.fullmatch(raw, line.strip()) is not None
+    except re.error:
+        return False
+
+
+def _pr_numbers(text: str) -> set[str]:
+    """Every PR number `text` names (`#N`, `PR N`, `name#N`, pull URLs)."""
+    refs = set(_PR_REF_RE.findall(text)) | set(_SLUG_REF_RE.findall(text))
+    return refs | {m.group(3) or m.group(5) for m in _TEXT_PR_REF_RE.finditer(text)}
+
+
+def _ask_targets_pr(text: str, pr: str) -> bool:
+    """True when the last question of `text` is about `pr`: it names `pr`, or
+    it names no PR and `text` names `pr` and no other. `Ready to merge o/r#999
+    or x/y#1001. Approve merge?` targets neither."""
+    if _mentions_pr(_last_ask_sentence(text), pr):
+        return True
+    return _pr_numbers(text) == {pr}
+
+
+def _ends_with_plain_ask(text: str, pr: str) -> bool:
+    """True when `text` ends with a plain merge ask for `pr`: its last question
+    is one (`_plain_merge_ask`), and only choice lines, reply-instruction
+    lines (`_reply_line`) and host trailer lines (`_trailer_line`) follow it.
+    A condition written after the question (`Approve merge of #999? Only
+    after I confirm the release.`) keeps the prompt."""
+    urls: list[str] = []
+
+    def keep(m: re.Match[str]) -> str:
+        urls.append(m.group(0))
+        return f"\x00{len(urls) - 1}\x00"
+
+    masked = _URL_RE_FULL.sub(keep, text.replace("\\n", "\n"))
+    asks = list(_ASK_SENTENCE_RE.finditer(masked))
+    if not asks:
+        return False
+    tail = masked[asks[-1].end():]
+    for line in tail.splitlines():
+        if (line.strip(" \t*_`>.?？)") and not _OPTION_LINE_RE.match(line)
+                and not _reply_line(line) and not _trailer_line(line)):
+            return False
+    return _plain_merge_ask(_last_ask_sentence(text), pr)
+
+
+# Words a whole answer may hold when it approves a plain merge ask (`머지 승인 -
+# PR #999 squash 머지`). A condition (`after CI passes`), a flag (`--admin`) or
+# any other word keeps the prompt.
+_PLAIN_ANSWER_WORDS = frozenset({
+    "approve", "approved", "merge", "머지", "승인", "squash", "rebase", "pr",
+    "now", "지금", "바로", "진행", "it", "this", "-",
+})
+_PLAIN_ANSWER_LEADS = frozenset({"approve", "approved", "merge", "머지", "승인"})
+
+
+def _plain_approval(text: str, pr: str) -> bool:
+    """True when `text`, PR references set aside, is an approval as a whole:
+    an approval token, or only `_PLAIN_ANSWER_WORDS` with at least one of
+    `_PLAIN_ANSWER_LEADS`. Never reads a final clause."""
+    raw = text.strip().lower()
+    if not raw or raw.endswith(("?", "？")) or _LABEL_NEGATION_RE.search(raw):
+        return False
+    if (set(_PR_REF_RE.findall(raw)) | set(_SLUG_REF_RE.findall(raw))) - {pr}:
+        return False
+    rest = _strip_pr_ref(_SLUG_REF_RE.sub(" ", _URL_RE_FULL.sub(" ", raw)), pr)
+    whole = re.sub(r"\s+", " ", rest).strip(" .!~,·")
+    if whole in _APPROVAL_TOKENS:
+        return True
+    words = _PLAIN_ASK_NOISE_RE.sub(" ", rest).split()
+    return bool(words) and all(w in _PLAIN_ANSWER_WORDS for w in words) \
+        and any(w in _PLAIN_ANSWER_LEADS for w in words)
+
+
+def _ask_result_approves(content: object, pr: str) -> bool:
+    """True when an AskUserQuestion result approves merging `pr`: every pair
+    in it about the PR or merging is a plain merge ask for `pr` answered with
+    an approval, and at least one is. A second pair holding the merge in the
+    same result (`"Merge #999 now?"="hold"`) refuses it."""
+    pairs = [(q, a) for q, a in _ASK_ANSWER_RE.findall(_user_message_text(content))
+             if _mentions_pr(q, pr) or _MERGE_WORD_RE.search(q)]
+    return bool(pairs) and all(_ask_targets_pr(q, pr) and _ends_with_plain_ask(q, pr)
+                               and _plain_approval(a, pr) for q, a in pairs)
+
+
+def _chat_reply_approves(content: object, asked: str, pr: str) -> bool:
+    """True when a typed message is, as a whole, an unconditional approval of
+    merging `pr`. Stricter than `_is_typed_approval`, which reads the final
+    clause: here the whole message, PR references set aside, is an approval
+    token, and either it names the PR and merging (`#999 머지해`) or the turn
+    it answers ends with a plain merge ask for the PR (`merge` to `Approve
+    merge of #999?`; `_ends_with_plain_ask` refuses a condition before or
+    after the question). A picked choice line must answer such an ask and be
+    a whole approval itself (`_plain_approval`); a numbered reply is not
+    read."""
+    raw = _user_message_text(content).strip().lower()
+    if not raw or raw.endswith(("?", "？")):
+        return False
+    picked = _picked_option(raw, asked)
+    if picked is not None:
+        label, note = picked
+        return (not note.strip() and _plain_approval(label, pr)
+                and _ends_with_plain_ask(asked, pr) and _ask_targets_pr(asked, pr))
+    if _numbered_items(raw) or not _plain_approval(raw, pr):
+        return False
+    if _mentions_pr(raw, pr) and _MERGE_WORD_RE.search(raw):
+        return True
+    return _ends_with_plain_ask(asked, pr) and _ask_targets_pr(asked, pr)
+
+
+def _chat_approval_index(entries: list[dict], idxs: list[int], lo: int, pr: str) -> int | None:
+    """Entry index of the latest human approval of merging `pr` from entry
+    `lo` on that nothing later withdrew, else None: a typed message read by
+    `_chat_reply_approves`, or an AskUserQuestion answer on a human row whose
+    question asks to merge `pr`."""
+    found: int | None = None
+    for k, i in enumerate(idxs):
+        if i < lo:
+            continue
+        asked = _assistant_text(entries, max(lo, idxs[k - 1] + 1 if k else 0), i, pr)
+        if _chat_reply_approves(entries[i].get("message", {}).get("content"), asked, pr):
+            found = i
+    asks: set[str] = set()
+    for i, ev in enumerate(entries):
+        msg = ev.get("message")
+        if not isinstance(msg, dict) or ev.get("isSidechain") or not isinstance(msg.get("content"), list):
+            continue
+        for b in msg["content"]:
+            if not isinstance(b, dict):
+                continue
+            if b.get("type") == "tool_use" and b.get("name") == "AskUserQuestion" and isinstance(b.get("id"), str):
+                asks.add(b["id"])
+            elif (i >= lo and b.get("type") == "tool_result" and b.get("tool_use_id") in asks
+                  and not b.get("is_error") and not _is_injected(ev)
+                  and _ask_result_approves(b.get("content"), pr)
+                  and (found is None or i > found)):
+                found = i
+    # Any later human message keeps the prompt: a short `hold` to a second
+    # merge ask names neither the PR nor merging, so no reader can tell it
+    # from an unrelated message.
+    if found is None or any(i > found for i in idxs) or _held_after(entries, idxs, found, pr):
+        return None
+    return found
+
+
+def _chat_released(entries: list[dict], idxs: list[int], command: object) -> bool:
+    """True when the user approved this one merge in chat since the last merge.
+
+    The approval is read by `_chat_approval_index`: a whole, unconditional
+    typed approval of merging the PR (`merge` to the merge ask, `#999 머지해`),
+    a picked choice answering the merge ask, or an AskUserQuestion pick on a
+    merge question, and no human message after it. The answer names a number, never
+    a repo, so the repo is bound by what the user had read when answering:
+    from the last merge that may have run up to the answer, the conversation
+    names this PR with exactly one repo (`owner/name#N` or a pull URL), the
+    merge names that repo and no other, and no `GH_HOST` was exported. The
+    command must be one numbered merge and nothing else.
+    """
+    if not isinstance(command, str) or not idxs:
+        return False
+    pr = _merge_pr_number(command)
+    repos = _merge_repos(command)
+    if pr is None or not repos or len(repos) != 1 or _exported_gh_host(entries):
+        return False
+    executed = _executed_merges(entries, include_skippable=True)
+    lo = executed[-1][0] + 1 if executed else 0
+    answer = _chat_approval_index(entries, idxs, lo, pr)
+    return answer is not None and _seen_pr_repos(entries, idxs, lo, answer + 1, pr) == repos
+
+
+def chat_merge_approved(payload: dict) -> bool:
+    """Public entry for the approval check: True when the user already
+    approved the merge in `payload` in chat, so the host prompt would ask a
+    second time. Fails closed (False) on any unreadable input."""
+    try:
+        command = (payload.get("tool_input") or {}).get("command")
+        if not isinstance(command, str):
+            return False
+        code = _split_shell_comment(command)[0]
+        entries = _load_turn_entries(payload.get("transcript_path", "") or "")
+        if entries is None:
+            return False
+        return _chat_released(entries, _human_user_indices(entries), code)
     except Exception:
         return False
 

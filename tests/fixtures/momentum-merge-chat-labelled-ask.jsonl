@@ -1,0 +1,3 @@
+{"type": "user", "message": {"role": "user", "content": "prepare PR #999 for merge"}}
+{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": "Merge briefing\n\n## o/r#999\n- What changed: one rule row\n- Verified: CI pass, tests pass\n- NOT verified: live routing\n- Risk: docs only\n- Open items: none\n\n- **승인 요청:** r#999 를 머지할까요?"}]}}
+{"type": "user", "message": {"role": "user", "content": "merge"}}

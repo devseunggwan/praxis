@@ -101,6 +101,7 @@ is not retrieved.
 | ---------- | -------- |
 | Any session, any `gh pr merge` | `permissionDecision: "ask"` |
 | A single numbered merge the user approved in a bulk answer (see below) | silent pass-through |
+| A single numbered merge the user approved for that PR in chat (see below) | silent pass-through |
 | Any env-var prefix (`env FOO=1 gh pr merge`) | `ask` — no environment variable exempts a merge |
 | `# merge-approval:ack` marker (or any comment text) | `ask` — no agent-attachable bypass exists by design |
 | Non-merge gh commands (`gh pr view`, `gh pr list`, etc.) | silent pass-through |
@@ -138,6 +139,71 @@ transcript leaves the `ask` in place. A chained or looped merge, a numberless
 merge, a PR outside the approved set, or a second merge of the same PR still
 asks.
 
+### Chat-approved merges (issue #1654)
+
+The same reasoning covers one PR. When the user has already approved this
+merge in chat, the prompt asks a second time for the consent the user just
+gave: on Hermes it is a desktop dialog after a typed `merge`. The hook calls
+`chat_merge_approved(payload)` in
+`hooks/preflight-gate/merge-gate/briefing.py`. A false release merges unasked
+while a missed one costs a dialog, so it reads approvals more strictly than
+the briefing check does (`_chat_approval_index`). A merge is released when a
+human message since the last merge that may have run (a chained one
+included) is one of:
+
+- a message that, PR references set aside, is an approval token as a whole,
+  and either names the PR and merging (`#999 머지해`) or answers a turn whose
+  last question is a plain merge ask for the PR (`merge`, `머지 승인`, `ok` to
+  `Approve merge of #999?`). The final-clause reading the briefing check uses
+  is not enough here: `For #999, ok` to a question about posting a summary,
+  or `After I approve the release for #999, merge`, keeps the prompt;
+- a picked choice line (`A`) answering such a question whose label is
+  itself a whole approval (`_plain_approval`: `A: merge` releases, `A:
+  Approve, only after CI passes` does not);
+- an `AskUserQuestion` result in which every pair about the PR or merging is
+  such a question answered with a whole approval (`머지 승인 - PR #999 squash
+  머지` releases; `After CI passes, approve` or a `--admin` flag does not).
+
+A numbered reply is not read. The approving message must be the last human
+message before the merge: any later one, a short `hold` to a second merge
+question included, keeps the prompt.
+
+A plain merge ask (`_plain_merge_ask`) asks to merge the PR, names no other
+PR, and once its PR references are set aside holds no word outside
+`_PLAIN_ASK_WORDS` (`Approve merge of o/r#999?`, `PR #999 을 squash
+머지할까요?`). A condition (`after CI passes`) or a second action makes the
+question one this release does not read, and the prompt stays. The question
+must also end the turn's text (`_ends_with_plain_ask`). Only these lines may
+follow it:
+
+- choice lines (`A: merge`);
+- reply-instruction lines (`_reply_line`): quoted reply words (`merge`,
+  `보류`, `hold`), one of them `merge`, and otherwise only words in
+  `_REPLY_LINE_WORDS` (`머지하려면 \`merge\` 한 단어로 답해 주세요.`);
+- host trailer lines that fully match `PRAXIS_MERGE_ASK_TRAILER_REGEX` (a
+  status line the host appends to every turn; unset, none is allowed).
+
+Any other line, such as `Only after I confirm the release.` or a results
+section written after the question, keeps the prompt.
+
+A later message about the PR or merging that is not an approval (`#999 머지
+보류`) withdraws it. It reads the transcript, never the command, and fails
+closed: the command must be one `gh pr merge <N>` and nothing else (no chain,
+loop, env prefix or numberless merge). The answer names a number, never a
+repo, so the repo is bound by what the user had read when answering: from
+the last merge that may have run up to the approving message, the
+conversation (the assistant's prose, its merge question for the PR, and the
+user's messages) names this PR with exactly one repo, as `owner/name#N`
+(github.com) or a pull URL (host kept), and the merge names that repo and no
+other (`_merge_repos`, host included). Text written after the answer does not
+count. No `GH_HOST` export may precede it. A PR named without its repo, named
+in two repos, a second `--repo`, or the same `owner/name` on another host
+keeps the prompt. An injected message or answer row (`isMeta`, a non-human
+`origin`) is not a human message. Any error keeps the prompt.
+
+This releases the prompt only. The briefing check still runs on the same
+call: a merge with no briefing is denied whatever the user said.
+
 ### Host-approved merges (issue #1639)
 
 When the host sets `PRAXIS_MERGE_APPROVAL_PROVIDER` in the hook process
@@ -158,7 +224,8 @@ error or exception keeps the `ask`. Unset, this step does not run.
 
 Unlike `side-effect-scan` (`# side-effect:ack`), this hook has **no
 agent-attachable bypass** and, since #1055, no environment bypass either. The
-contract is that a merge ALWAYS surfaces a per-PR approval prompt — a
+contract is that a merge the user has not approved ALWAYS surfaces a per-PR
+approval prompt — a
 comment-style marker would let the agent silently self-bypass the same gate it
 is meant to enforce. The host approval provider above is not one: the agent
 cannot set the hook process environment, and the provider only answers whether

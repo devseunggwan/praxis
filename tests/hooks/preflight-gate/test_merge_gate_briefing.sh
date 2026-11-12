@@ -1034,6 +1034,8 @@ run_merge_escalation_case "merge_escalation_numbered_serial_passes" \
   "no" "" "momentum-merge-numbered-serial.jsonl" "gh pr merge 1001 --squash"
 run_merge_escalation_case "merge_escalation_numbered_serial_hold_denies" \
   "yes" "" "momentum-merge-numbered-serial-hold.jsonl" "gh pr merge 1001 --squash"
+run_merge_escalation_case "merge_escalation_numbered_serial_other_hold_passes" \
+  "no" "" "momentum-merge-numbered-serial-other-hold.jsonl" "gh pr merge 1001 --squash"
 # Same approving reply, different target: the answer to #999's question does
 # not release #1001.
 run_merge_escalation_case "merge_escalation_numbered_other_pr_denies" \
