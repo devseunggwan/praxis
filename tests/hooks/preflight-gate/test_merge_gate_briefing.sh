@@ -1053,6 +1053,113 @@ run_merge_escalation_case "merge_escalation_numbered_url_ask_passes" \
 run_merge_escalation_case "merge_escalation_numbered_trailing_condition_denies" \
   "yes" "" "momentum-merge-numbered-trailing-condition.jsonl" "gh pr merge 999 --squash"
 
+# A one-letter reply is read as the choice line it picks in the turn it answers
+# (issue #1652). Fixtures: tests/fixtures/merge_gate_fixtures.py.
+#
+#   merge-ko        `A: 머지합니다` / `B: 보류`, reply `A`           → allow
+#   merge-lower     same menu, reply `a.`                          → allow
+#   negated         `A: 머지하지 않기` / `B: 머지`, reply `A`         → deny
+#   no-menu         `Approve merge of #999?`, reply `A`            → deny
+#   hold            `A: 보류` / `B: 머지`, reply `A`                 → deny
+#   b-not-merge     `A: 머지합니다` / `B: 리뷰를 한 번 더…`, reply `B` → deny
+#   serial          #999 merged, #1001 menu with no merge ask, `A` → allow
+#   serial-hold     same, reply `B` (보류)                          → deny
+#   serial-rehold   `A`, then `B` to a re-asked menu, new briefing → deny
+#   …-unnamed       same, the re-ask names no PR (`Approve merge?`)   → deny
+run_merge_escalation_case "merge_escalation_letter_merge_ko_passes" \
+  "no" "" "momentum-merge-letter-merge-ko.jsonl" "gh pr merge 999 --squash"
+run_merge_escalation_case "merge_escalation_letter_merge_lower_passes" \
+  "no" "" "momentum-merge-letter-merge-lower.jsonl" "gh pr merge 999 --squash"
+run_merge_escalation_case "merge_escalation_letter_negated_denies" \
+  "yes" "" "momentum-merge-letter-negated.jsonl" "gh pr merge 999 --squash"
+run_merge_escalation_case "merge_escalation_letter_no_menu_denies" \
+  "yes" "" "momentum-merge-letter-no-menu.jsonl" "gh pr merge 999 --squash"
+run_merge_escalation_case "merge_escalation_letter_hold_denies" \
+  "yes" "" "momentum-merge-letter-hold.jsonl" "gh pr merge 999 --squash"
+run_merge_escalation_case "merge_escalation_letter_b_not_merge_denies" \
+  "yes" "" "momentum-merge-letter-b-not-merge.jsonl" "gh pr merge 999 --squash"
+run_merge_escalation_case "merge_escalation_letter_serial_passes" \
+  "no" "" "momentum-merge-letter-serial.jsonl" "gh pr merge 1001 --squash"
+run_merge_escalation_case "merge_escalation_letter_serial_hold_denies" \
+  "yes" "" "momentum-merge-letter-serial-hold.jsonl" "gh pr merge 1001 --squash"
+run_merge_escalation_case "merge_escalation_letter_serial_rehold_denies" \
+  "yes" "" "momentum-merge-letter-serial-rehold.jsonl" "gh pr merge 1001 --squash"
+run_merge_escalation_case "merge_escalation_letter_serial_rehold_unnamed_denies" \
+  "yes" "" "momentum-merge-letter-serial-rehold-unnamed.jsonl" "gh pr merge 1001 --squash"
+# Same approving letter, different target: #999's menu does not release #1001.
+run_merge_escalation_case "merge_escalation_letter_other_pr_denies" \
+  "yes" "" "momentum-merge-letter-merge-ko.jsonl" "gh pr merge 1001 --squash"
+
+# The letter reader's own surface (issue #1652): reply and choice-line
+# spellings, the lead rule, and the shapes that keep failing.
+letter_probe=$(python3 - "$ROOT_DIR" <<'PY_L'
+import importlib.util as u, sys
+spec = u.spec_from_file_location(
+    "m", f"{sys.argv[1]}/hooks/preflight-gate/merge-gate/briefing.py")
+m = u.module_from_spec(spec); spec.loader.exec_module(m)
+b = "Briefing for PR #999.\n\n"
+cases = [
+    (True, "A", b + "A: 머지합니다\nB: 보류"),
+    (True, "a", b + "A: 머지합니다\nB: 보류"),
+    (True, "A.", b + "A: 머지합니다\nB: 보류"),
+    (True, " a ", b + "A: merge\nB: hold"),
+    (True, "A", b + "- A: merge it\n- B: hold"),
+    (True, "A", b + "A (추천): 머지\nB: 보류"),
+    (True, "A", b + "**A**: 머지\n**B**: 보류"),
+    (True, "A", b + "**A:** merge #999\n**B:** hold"),
+    (True, "A", b + "A: 승인, 머지\nB: 보류"),
+    (True, "A", b + "A: merge: squash merge, closes the issue\nB: hold"),
+    (True, "A", b + "A: 머지합니다. 머지 뒤 정리까지 합니다.\nB: 보류"),
+    (True, "A", b + "A: Merge PR #999\nB: hold"),
+    (True, "A", b + "A: 스쿼시 머지\nB: 보류"),
+    (True, "A", b + "A: 머지 진행 (squash)\nB: 보류"),
+    (True, "B", b + "A: 보류\nB: 머지"),
+    # A negation anywhere in the line, its note included, refuses.
+    (False, "A", b + "A: 머지하지 않기\nB: 머지"),
+    (False, "A", b + "A: 보류\nB: 머지"),
+    (False, "A", b + "A (not recommended): merge\nB: hold"),
+    # The lead is a closed set: a step, state or request around the merge refuses.
+    (False, "B", b + "A: 머지\nB: 리뷰 한 번 더"),
+    (False, "A", b + "A: 머지 전에 리베이스\nB: 그대로"),
+    (False, "A", b + "A: 머지 상태만 확인\nB: x"),
+    (False, "A", b + "A: 머지 진행 상황 알려줘\nB: 보류"),
+    (False, "A", b + "A: 머지 후 브랜치 삭제\nB: 보류"),
+    (False, "A", b + "A: merged already\nB: hold"),
+    (False, "A", b + "A: mergeability check\nB: 보류"),
+    # Another PR in the line, no line, two lines, or a fenced one.
+    (False, "A", b + "A: merge #1001\nB: hold"),
+    # Review: a PR in the note, and a label whose final clause approves while
+    # its lead asks for something else.
+    (False, "A", b + "A (#1001): merge\nB: hold"),
+    (False, "A", b + "A: Check merge status, ok\nB: hold"),
+    (False, "A", b + "Approve merge of #999?"),
+    (False, "A", b + "A: 머지\nB: 보류\n\nA: 다른 메뉴"),
+    (False, "A", b + "```\nA: 머지\n```"),
+    # Not a choice line or not a one-letter reply.
+    (False, "A", b + "a: merge\nb: hold"),
+    (False, "E", b + "E: merge"),
+    (False, "AB", b + "A: 머지\nB: 보류"),
+    (False, "A?", b + "A: 머지\nB: 보류"),
+    # Unchanged: a word reply, and a letter with no turn to read.
+    (True, "merge", b + "A: 보류\nB: 머지"),
+    (False, "A", None),
+]
+for want, reply, asked in cases:
+    got = m._is_approval_reply(reply, asked, "999" if asked else None)
+    print(("ok  " if got == want else "BAD ") + repr(reply) + " asked=" + repr((asked or "-")[-30:]))
+PY_L
+)
+if printf '%s\n' "$letter_probe" | grep -q '^BAD '; then
+  echo "FAIL  [approval_reply_letter_surface]"
+  printf '%s\n' "$letter_probe" | grep '^BAD ' | sed 's/^/        /'
+  FAIL=$((FAIL + 1)); FAILED_NAMES+=("approval_reply_letter_surface")
+elif [ "$(printf '%s\n' "$letter_probe" | grep -c '^ok  ')" -eq 37 ]; then
+  echo "PASS  [approval_reply_letter_surface]"; PASS=$((PASS + 1))
+else
+  echo "FAIL  [approval_reply_letter_surface] probe=<$letter_probe>"
+  FAIL=$((FAIL + 1)); FAILED_NAMES+=("approval_reply_letter_surface")
+fi
+
 # The parser's own surface (issue #1630): marker spellings, item-level rules
 # kept from the final-clause reader, and the fallbacks. One line per case:
 # expected, reply, asked turn (`-` = none).

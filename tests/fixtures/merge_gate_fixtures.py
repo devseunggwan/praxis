@@ -126,6 +126,26 @@ def _numbered_serial(reply: str) -> list[dict]:
     ]
 
 
+# A prose menu of lettered choice lines, answered with the letter alone
+# (issue #1652).
+_MENU_MERGE_KO = "어떻게 할까요?\nA: 머지합니다\nB: 보류"
+_MENU_NEGATED_KO = "어떻게 할까요?\nA: 머지하지 않기\nB: 머지"
+_MENU_HOLD_FIRST_KO = "어떻게 할까요?\nA: 보류\nB: 머지"
+_MENU_B_REVIEW_KO = "어떻게 할까요?\nA: 머지합니다\nB: 리뷰를 한 번 더 돌립니다"
+
+
+def _lettered_serial(reply: str) -> list[dict]:
+    """#999 merged on a typed approval, then a briefing of #1001 ending in a
+    lettered menu with no merge question, answered with ``reply``."""
+    return [
+        *_numbered("approve", "Approve merge of #999?"),
+        bash("m1", "gh pr merge 999 --squash"), result("m1", "merged"),
+        bash("c2", "gh pr checks 1001"), result("c2", "all checks passing"),
+        prose("Merge briefing\n\n" + section("PR #1001") + "\n" + _MENU_MERGE_KO),
+        user(reply),
+    ]
+
+
 def _host_relayed(merge_result: dict | None = None) -> list[dict]:
     """Prior-turn briefing of o/r#999, then the host's own row relaying an
     answer given in another channel; the transcript path never reads it as an
@@ -210,6 +230,28 @@ CASES = {
         lambda: _numbered("1. yes\n2. B",
                           "1. Approve merge of #999? Only after the release.\n"
                           "2. Follow-up: option A or option B?"),
+    # Issue #1652: a one-letter reply is the choice line it picks.
+    "momentum-merge-letter-merge-ko.jsonl": lambda: _numbered("A", _MENU_MERGE_KO),
+    "momentum-merge-letter-merge-lower.jsonl": lambda: _numbered("a.", _MENU_MERGE_KO),
+    "momentum-merge-letter-negated.jsonl": lambda: _numbered("A", _MENU_NEGATED_KO),
+    "momentum-merge-letter-no-menu.jsonl":
+        lambda: _numbered("A", "Approve merge of #999?"),
+    "momentum-merge-letter-hold.jsonl": lambda: _numbered("A", _MENU_HOLD_FIRST_KO),
+    "momentum-merge-letter-b-not-merge.jsonl": lambda: _numbered("B", _MENU_B_REVIEW_KO),
+    "momentum-merge-letter-serial.jsonl": lambda: _lettered_serial("A"),
+    "momentum-merge-letter-serial-hold.jsonl": lambda: _lettered_serial("B"),
+    # A later `B` (hold) to a re-asked menu withdraws the earlier `A`.
+    "momentum-merge-letter-serial-rehold.jsonl":
+        lambda: [*_lettered_serial("A"),
+                 prose("One more check before I merge #1001.\n" + _MENU_MERGE_KO),
+                 user("B"),
+                 prose("Merge briefing\n\n" + section("PR #1001") + "\nApprove merge of #1001?")],
+    # Review: the re-ask names no PR; `B` (hold) still withdraws the `A`.
+    "momentum-merge-letter-serial-rehold-unnamed.jsonl":
+        lambda: [*_lettered_serial("A"),
+                 prose("One more check.\nApprove merge?\nA: merge\nB: hold"),
+                 user("B"),
+                 prose("Merge briefing\n\n" + section("PR #1001") + "\nApprove merge of #1001?")],
 }
 
 
