@@ -145,30 +145,36 @@ The same reasoning covers one PR. When the user has already approved this
 merge in chat, the prompt asks a second time for the consent the user just
 gave: on Hermes it is a desktop dialog after a typed `merge`. The hook calls
 `chat_merge_approved(payload)` in
-`hooks/preflight-gate/merge-gate/briefing.py`, which reads the approval with
-`_answered_after`, the function the briefing check scores answers with. A
-merge is released when a human message since the last merge that may have
-run (a chained one included) is one of:
+`hooks/preflight-gate/merge-gate/briefing.py`. A false release merges unasked
+while a missed one costs a dialog, so it reads approvals more strictly than
+the briefing check does (`_chat_approval_index`). A merge is released when a
+human message since the last merge that may have run (a chained one
+included) is one of:
 
-- a typed approval of a turn that asked to merge the PR (`merge`, `머지 승인`,
-  `ok` to `Approve merge of #999?`), or one naming the PR (`#999 머지 진행`);
-- the user's own order naming the PR (`#999 머지해`), whether or not a
-  briefing asked first;
-- an `AskUserQuestion` pick that approves a question naming the PR.
+- a message that, PR references set aside, is an approval token as a whole,
+  and either names the PR and merging (`#999 머지해`) or answers a turn whose
+  last question asks to merge the PR (`merge`, `머지 승인`, `ok` to `Approve
+  merge of #999?`). The final-clause reading the briefing check uses is not
+  enough here: `For #999, ok` to a question about posting a summary, or
+  `After I approve the release for #999, merge`, keeps the prompt;
+- a picked choice line (`A`) or numbered item (`1. approve`) answering the
+  merge ask, read as the briefing check reads it;
+- an `AskUserQuestion` pick that approves a question asking to merge the PR.
 
 A later message about the PR or merging that is not an approval (`#999 머지
 보류`) withdraws it. It reads the transcript, never the command, and fails
 closed: the command must be one `gh pr merge <N>` and nothing else (no chain,
 loop, env prefix or numberless merge). The answer names a number, never a
-repo, so the repo is bound by what the user read: since the last merge that
-may have run, the conversation (the assistant's prose, its merge question for
-the PR, and the user's messages) names this PR with exactly one repo, as
-`owner/name#N` (github.com) or a pull URL (host kept), and the merge names
-that repo and no other (`_merge_repos`, host included). No `GH_HOST` export
-may precede it. A PR named without its repo, named in two repos, a second
-`--repo`, or the same `owner/name` on another host keeps the prompt.
-An injected message (`isMeta`, a non-human `origin`) is not a human message.
-Any error keeps the prompt.
+repo, so the repo is bound by what the user had read when answering: from
+the last merge that may have run up to the approving message, the
+conversation (the assistant's prose, its merge question for the PR, and the
+user's messages) names this PR with exactly one repo, as `owner/name#N`
+(github.com) or a pull URL (host kept), and the merge names that repo and no
+other (`_merge_repos`, host included). Text written after the answer does not
+count. No `GH_HOST` export may precede it. A PR named without its repo, named
+in two repos, a second `--repo`, or the same `owner/name` on another host
+keeps the prompt. An injected message or answer row (`isMeta`, a non-human
+`origin`) is not a human message. Any error keeps the prompt.
 
 This releases the prompt only. The briefing check still runs on the same
 call: a merge with no briefing is denied whatever the user said.

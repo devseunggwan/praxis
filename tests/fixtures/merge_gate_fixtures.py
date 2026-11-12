@@ -179,9 +179,12 @@ def _chat_answered(reply: str = "merge") -> list[dict]:
 
 
 def _chat_ordered(order: str = "#999 머지해") -> list[dict]:
-    """The user orders the merge of #999 by number; the agent briefs it in the
-    same turn and merges with no further answer."""
+    """The agent reported o/r#999 earlier; the user orders the merge by number,
+    and the agent briefs it in the same turn and merges with no further
+    answer."""
     return [
+        user("open a PR for the fix"),
+        prose("Opened https://github.com/o/r/pull/999 ."),
         user(order),
         bash("c1", "gh pr checks 999 --repo o/r"), result("c1", "all checks passing"),
         prose("Merge briefing\n\n" + section("o/r#999")),
@@ -228,10 +231,10 @@ CASES = {
         lambda: [user("#999 머지해"), bash("c1", "gh pr checks 999 --repo o/r"),
                  result("c1", "all checks passing"), prose("Merge briefing\n\n" + section("PR #999"))],
     "momentum-merge-chat-two-repos-named.jsonl":
-        lambda: [*_chat_answered(), prose("Also open: x/y#999, unrelated.")],
+        lambda: [*_chat_answered()[:-1], prose("Also open: x/y#999, unrelated."), user("merge")],
     "momentum-merge-chat-url-named.jsonl":
-        lambda: [user("#999 머지해"),
-                 prose("Merge briefing\n\n" + section("https://github.com/o/r/pull/999"))],
+        lambda: [user("open a PR for the fix"), prose("Opened https://github.com/o/r/pull/999 ."),
+                 user("#999 머지해"), prose("Merge briefing\n\n" + section("PR #999"))],
     "momentum-merge-chat-hold-ok.jsonl": lambda: _chat_answered("#999 머지 보류. ok"),
     "momentum-merge-chat-order-then-hold-ok.jsonl":
         lambda: [*_chat_ordered(), user("#999 머지 보류. ok")],
@@ -241,6 +244,27 @@ CASES = {
              bash("c1", "gh pr checks 999 --repo o/r"), result("c1", "all checks passing"),
              *ask("q1", "Merge briefing\n\n" + section("o/r#999") + "\nApprove merge of #999?",
                   "머지 승인", "보류")]),
+    # Review: only a whole, unconditional answer to the merge releases, and
+    # the repo is read from what came before the answer.
+    "momentum-merge-chat-ok-to-other-ask.jsonl":
+        lambda: [user("prepare PR #999 for merge"),
+                 bash("c1", "gh pr checks 999 --repo o/r"), result("c1", "all checks passing"),
+                 prose("Merge briefing\n\n" + section("o/r#999") + "\nShall I post the summary for #999?"),
+                 user("For #999, ok")],
+    "momentum-merge-chat-conditional.jsonl":
+        lambda: _chat_answered("After I approve the release for #999, merge"),
+    "momentum-merge-chat-repo-after-answer.jsonl":
+        lambda: [user("prepare PR #999 for merge"),
+                 prose("Merge briefing\n\n" + section("PR #999") + "\nApprove merge of #999?"),
+                 user("merge"), prose("Merging x/y#999 now.")],
+    "momentum-merge-chat-numbered-other-hold.jsonl":
+        lambda: [user("prepare PR #999 for merge"),
+                 bash("c1", "gh pr checks 999 --repo o/r"), result("c1", "all checks passing"),
+                 prose("Merge briefing\n\n" + section("o/r#999")
+                       + "\n1. Approve merge of #999?\n2. Post the summary?"),
+                 user("1. approve\n2. hold")],
+    "momentum-merge-numbered-serial-other-hold.jsonl":
+        lambda: _numbered_serial("1. approve\n2. hold"),
     "momentum-merge-chat-ask-answer.jsonl":
         lambda: [user("prepare PR #999 for merge"),
                  bash("c1", "gh pr checks 999 --repo o/r"), result("c1", "all checks passing"),

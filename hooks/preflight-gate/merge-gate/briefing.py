@@ -1301,8 +1301,12 @@ def _merge_target_pr(entries: list[dict], command: object, floor: int) -> str | 
 def _is_typed_approval(content: object, pr: str, asked: str | None = None) -> bool:
     reply = _user_message_text(content)
     # A hold or refusal anywhere outweighs a trailing token: `#999 머지 보류. ok`
-    # neither approves nor leaves an earlier approval standing.
-    if _LABEL_NEGATION_RE.search(reply):
+    # neither approves nor leaves an earlier approval standing. A numbered
+    # reply to a numbered merge ask is read per item instead, so `2. hold` on
+    # another question does not hold the merge.
+    per_item = (asked is not None and bool(_numbered_items(reply.strip().lower()))
+                and _merge_question_numbers(asked, pr) is not None)
+    if not per_item and _LABEL_NEGATION_RE.search(reply):
         return False
     if _is_approval_reply(content, asked, pr):
         return True
@@ -1934,13 +1938,14 @@ _TEXT_PR_REF_RE = re.compile(
     r"|(?<![A-Za-z0-9._/-])([A-Za-z0-9._-]+/[A-Za-z0-9._-]+)#(\d+)(?![A-Za-z0-9_])")
 
 
-def _seen_pr_repos(entries: list[dict], idxs: list[int], lo: int, pr: str) -> set[tuple[str, str]]:
-    """`(host, owner/name)` of every repo the conversation from entry `lo` on
-    names PR `pr` with: the assistant's prose and its merge question for
-    `pr`, and the human's messages. A bare `owner/name#N` is on github.com."""
-    text = _assistant_text(entries, lo, len(entries), pr) + "\n" + "\n".join(
+def _seen_pr_repos(entries: list[dict], idxs: list[int], lo: int, hi: int,
+                   pr: str) -> set[tuple[str, str]]:
+    """`(host, owner/name)` of every repo `entries[lo:hi]` names PR `pr` with:
+    the assistant's prose and its merge question for `pr`, and the human's
+    messages. A bare `owner/name#N` is on github.com."""
+    text = _assistant_text(entries, lo, hi, pr) + "\n" + "\n".join(
         _user_message_text(entries[i].get("message", {}).get("content"))
-        for i in idxs if i >= lo)
+        for i in idxs if lo <= i < hi)
     found: set[tuple[str, str]] = set()
     for m in _TEXT_PR_REF_RE.finditer(text):
         host, url_repo, url_pr, slug_repo, slug_pr = m.groups()
@@ -1949,18 +1954,84 @@ def _seen_pr_repos(entries: list[dict], idxs: list[int], lo: int, pr: str) -> se
     return found
 
 
+def _last_ask_merges(asked: str, pr: str) -> bool:
+    """True when the last question of the answered turn asks to merge `pr`."""
+    asks = _ASK_SENTENCE_RE.findall(asked)
+    return bool(asks) and _is_merge_ask(asks[-1], pr)
+
+
+def _chat_reply_approves(content: object, asked: str, pr: str) -> bool:
+    """True when a typed message is, as a whole, an unconditional approval of
+    merging `pr`. Stricter than `_is_typed_approval`, which reads the final
+    clause: here the whole message, PR references set aside, is an approval
+    token, and either it names the PR and merging (`#999 머지해`) or the turn
+    it answers ends by asking to merge the PR (`merge`). A picked choice line
+    or a numbered item is read as the briefing check reads it, and must
+    answer a merge ask."""
+    raw = _user_message_text(content).strip().lower()
+    if not raw or raw.endswith(("?", "？")):
+        return False
+    picked = _picked_option(raw, asked)
+    if picked is not None:
+        return (_option_label_approves(*picked, pr)
+                and (bool(_MERGE_WORD_RE.search(picked[0])) or _last_ask_merges(asked, pr)))
+    if _numbered_items(raw):
+        return _merge_question_numbers(asked, pr) is not None and _is_approval_reply(content, asked, pr)
+    if _LABEL_NEGATION_RE.search(raw):
+        return False
+    whole = re.sub(r"\s+", " ", _strip_pr_ref(raw, pr)).strip(" .!~,·")
+    if whole not in _APPROVAL_TOKENS:
+        return False
+    if _mentions_pr(raw, pr) and _MERGE_WORD_RE.search(raw):
+        return True
+    return _last_ask_merges(asked, pr) and _mentions_pr(asked, pr)
+
+
+def _chat_approval_index(entries: list[dict], idxs: list[int], lo: int, pr: str) -> int | None:
+    """Entry index of the latest human approval of merging `pr` from entry
+    `lo` on that nothing later withdrew, else None: a typed message read by
+    `_chat_reply_approves`, or an AskUserQuestion answer on a human row whose
+    question asks to merge `pr`."""
+    found: int | None = None
+    for k, i in enumerate(idxs):
+        if i < lo:
+            continue
+        asked = _assistant_text(entries, max(lo, idxs[k - 1] + 1 if k else 0), i, pr)
+        if _chat_reply_approves(entries[i].get("message", {}).get("content"), asked, pr):
+            found = i
+    asks: set[str] = set()
+    for i, ev in enumerate(entries):
+        msg = ev.get("message")
+        if not isinstance(msg, dict) or ev.get("isSidechain") or not isinstance(msg.get("content"), list):
+            continue
+        for b in msg["content"]:
+            if not isinstance(b, dict):
+                continue
+            if b.get("type") == "tool_use" and b.get("name") == "AskUserQuestion" and isinstance(b.get("id"), str):
+                asks.add(b["id"])
+            elif (i >= lo and b.get("type") == "tool_result" and b.get("tool_use_id") in asks
+                  and not b.get("is_error") and not _is_injected(ev)
+                  and any(_mentions_pr(q, pr) and _is_merge_ask(q, pr) and _ask_label_approves(a, pr)
+                          for q, a in _ASK_ANSWER_RE.findall(_user_message_text(b.get("content"))))
+                  and (found is None or i > found)):
+                found = i
+    if found is None or _held_after(entries, idxs, found, pr):
+        return None
+    return found
+
+
 def _chat_released(entries: list[dict], idxs: list[int], command: object) -> bool:
     """True when the user approved this one merge in chat since the last merge.
 
-    The approval is the one `_answered_after` reads for the briefing check: a
-    typed reply to a turn that asked to merge the PR (`merge`, `머지 승인`), the
-    user's own message naming the PR and merging (`#999 머지해`), or an
-    AskUserQuestion pick. The answer names a number, never a repo, so the
-    repo is bound by what the user read: since the last merge that may have
-    run, the conversation names this PR with exactly one repo
-    (`owner/name#N` or a pull URL), the merge names that repo and no other,
-    and no `GH_HOST` was exported. The command must be one numbered merge and
-    nothing else.
+    The approval is read by `_chat_approval_index`: a whole, unconditional
+    typed approval of merging the PR (`merge` to the merge ask, `#999 머지해`),
+    a picked choice or numbered item answering the merge ask, or an
+    AskUserQuestion pick on a merge question. The answer names a number, never
+    a repo, so the repo is bound by what the user had read when answering:
+    from the last merge that may have run up to the answer, the conversation
+    names this PR with exactly one repo (`owner/name#N` or a pull URL), the
+    merge names that repo and no other, and no `GH_HOST` was exported. The
+    command must be one numbered merge and nothing else.
     """
     if not isinstance(command, str) or not idxs:
         return False
@@ -1969,10 +2040,9 @@ def _chat_released(entries: list[dict], idxs: list[int], command: object) -> boo
     if pr is None or not repos or len(repos) != 1 or _exported_gh_host(entries):
         return False
     executed = _executed_merges(entries, include_skippable=True)
-    last_merge = executed[-1][0] if executed else -1
-    if _seen_pr_repos(entries, idxs, last_merge + 1, pr) != repos:
-        return False
-    return _answered_after(entries, idxs, last_merge, pr)
+    lo = executed[-1][0] + 1 if executed else 0
+    answer = _chat_approval_index(entries, idxs, lo, pr)
+    return answer is not None and _seen_pr_repos(entries, idxs, lo, answer + 1, pr) == repos
 
 
 def chat_merge_approved(payload: dict) -> bool:

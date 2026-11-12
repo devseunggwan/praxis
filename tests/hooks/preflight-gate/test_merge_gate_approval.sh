@@ -334,7 +334,7 @@ run_case "chat: later probe naming no repo, text names o/r#999 (silent)" \
   "silent" "no-delegate" "$(bulk_payload momentum-merge-chat-unnamed-probe.jsonl "$M999")"
 run_case "chat: later probe of another repo, merge stays on o/r (silent)" \
   "silent" "no-delegate" "$(bulk_payload momentum-merge-chat-later-probe.jsonl "$M999")"
-run_case "chat: pull URL in the briefing names the repo (silent)" \
+run_case "chat: pull URL reported before the order names the repo (silent)" \
   "silent" "no-delegate" "$(bulk_payload momentum-merge-chat-url-named.jsonl "$M999")"
 run_case "chat: pull URL repo differs from the merge (ask)" \
   "ask" "no-delegate" "$(bulk_payload momentum-merge-chat-url-named.jsonl 'gh pr merge 999 --repo x/y --squash')"
@@ -346,6 +346,14 @@ run_case "chat: '#999 머지 보류. ok' (ask)" \
   "ask" "no-delegate" "$(bulk_payload momentum-merge-chat-hold-ok.jsonl "$M999")"
 run_case "chat: order then '#999 머지 보류. ok' (ask)" \
   "ask" "no-delegate" "$(bulk_payload momentum-merge-chat-order-then-hold-ok.jsonl "$M999")"
+run_case "chat: 'For #999, ok' to a non-merge question (ask)" \
+  "ask" "no-delegate" "$(bulk_payload momentum-merge-chat-ok-to-other-ask.jsonl "$M999")"
+run_case "chat: conditional 'After I approve the release for #999, merge' (ask)" \
+  "ask" "no-delegate" "$(bulk_payload momentum-merge-chat-conditional.jsonl "$M999")"
+run_case "chat: repo named only after the answer (ask)" \
+  "ask" "no-delegate" "$(bulk_payload momentum-merge-chat-repo-after-answer.jsonl 'gh pr merge 999 --repo x/y --squash')"
+run_case "chat: '1. approve / 2. hold' holds only the other item (silent)" \
+  "silent" "no-delegate" "$(bulk_payload momentum-merge-chat-numbered-other-hold.jsonl "$M999")"
 run_case "chat: injected AskUserQuestion answer (ask)" \
   "ask" "no-delegate" "$(bulk_payload momentum-merge-chat-injected-ask-answer.jsonl "$M999")"
 
