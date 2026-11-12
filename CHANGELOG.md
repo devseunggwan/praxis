@@ -5,6 +5,26 @@ All notable changes to praxis are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.24.0](https://github.com/devseunggwan/praxis/compare/v7.23.0...v7.24.0) (2026-11-12)
+
+
+### Added
+
+* **hooks:** skip merge prompt after chat approval ([#1655](https://github.com/devseunggwan/praxis/issues/1655)) ([1017d35](https://github.com/devseunggwan/praxis/commit/1017d3542a57784fc2e88d68ceefba4feb7215fb)), closes [#1654](https://github.com/devseunggwan/praxis/issues/1654)
+
+
+### Fixed
+
+* **hooks:** read a one-letter reply as its choice ([#1653](https://github.com/devseunggwan/praxis/issues/1653)) ([827754d](https://github.com/devseunggwan/praxis/commit/827754d40c0368449007dc2a69615666f4f5ddac)), closes [#1652](https://github.com/devseunggwan/praxis/issues/1652)
+
+
+### Changed
+
+* bump reviewdog/action-actionlint from 1.80.8 to 1.81.1 ([#1641](https://github.com/devseunggwan/praxis/issues/1641)) ([5b84ec2](https://github.com/devseunggwan/praxis/commit/5b84ec2f83804b55a9a3fbe9c6826b8904cff8e7))
+* bump the codeql-action group with 2 updates ([#1640](https://github.com/devseunggwan/praxis/issues/1640)) ([5634e39](https://github.com/devseunggwan/praxis/commit/5634e391032696d6d8418d97999d5da5776e37b7))
+* **hooks:** consolidate merge-lifecycle hooks into merge-gate ([#1651](https://github.com/devseunggwan/praxis/issues/1651)) ([e8b2c4b](https://github.com/devseunggwan/praxis/commit/e8b2c4bedc40a7e59784b2112f5a3e79d1c358dc)), closes [#1650](https://github.com/devseunggwan/praxis/issues/1650)
+* **skills:** sync accumulated live skill edits ([#1648](https://github.com/devseunggwan/praxis/issues/1648)) ([7169ab9](https://github.com/devseunggwan/praxis/commit/7169ab9ca97bc3239d23d2e3e1ec39e534f330cd)), closes [#1647](https://github.com/devseunggwan/praxis/issues/1647)
+
 ## [7.23.0](https://github.com/devseunggwan/praxis/compare/v7.22.1...v7.23.0) (2026-11-09)
 
 
