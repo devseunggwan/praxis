@@ -157,17 +157,25 @@ included) is one of:
   `Approve merge of #999?`). The final-clause reading the briefing check uses
   is not enough here: `For #999, ok` to a question about posting a summary,
   or `After I approve the release for #999, merge`, keeps the prompt;
-- a picked choice line (`A`) answering such a question, or a numbered item
-  (`1. approve`) answering the merge item, read as the briefing check reads
-  it;
+- a picked choice line (`A`) answering such a question whose label is
+  itself a whole approval (`_plain_approval`: `A: merge` releases, `A:
+  Approve, only after CI passes` does not);
 - an `AskUserQuestion` result in which every pair about the PR or merging is
-  such a question answered with an approval.
+  such a question answered with a whole approval (`머지 승인 - PR #999 squash
+  머지` releases; `After CI passes, approve` or a `--admin` flag does not).
+
+A numbered reply is not read. The approving message must be the last human
+message before the merge: any later one, a short `hold` to a second merge
+question included, keeps the prompt.
 
 A plain merge ask (`_plain_merge_ask`) asks to merge the PR, names no other
 PR, and once its PR references are set aside holds no word outside
 `_PLAIN_ASK_WORDS` (`Approve merge of o/r#999?`, `PR #999 을 squash
 머지할까요?`). A condition (`after CI passes`) or a second action makes the
-question one this release does not read, and the prompt stays.
+question one this release does not read, and the prompt stays. The question
+must also end the turn's text (`_ends_with_plain_ask`): only choice lines may
+follow it, so `Approve merge of #999? Only after I confirm the release.`
+keeps the prompt.
 
 A later message about the PR or merging that is not an approval (`#999 머지
 보류`) withdraws it. It reads the transcript, never the command, and fails

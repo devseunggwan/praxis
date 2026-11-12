@@ -2016,9 +2016,54 @@ def _plain_merge_ask(sentence: str, pr: str) -> bool:
     return bool(words) and all(w in _PLAIN_ASK_WORDS for w in words)
 
 
-def _last_ask_plain(asked: str, pr: str) -> bool:
-    """True when the last question of `asked` is a plain merge ask for `pr`."""
-    return _plain_merge_ask(_last_ask_sentence(asked), pr)
+def _ends_with_plain_ask(text: str, pr: str) -> bool:
+    """True when `text` ends with a plain merge ask for `pr`: its last question
+    is one (`_plain_merge_ask`) and only choice lines (`A: merge`) follow it.
+    A condition written after the question (`Approve merge of #999? Only after
+    I confirm the release.`) keeps the prompt."""
+    urls: list[str] = []
+
+    def keep(m: re.Match[str]) -> str:
+        urls.append(m.group(0))
+        return f"\x00{len(urls) - 1}\x00"
+
+    masked = _URL_RE_FULL.sub(keep, text.replace("\\n", "\n"))
+    asks = list(_ASK_SENTENCE_RE.finditer(masked))
+    if not asks:
+        return False
+    tail = masked[asks[-1].end():]
+    for line in tail.splitlines():
+        if line.strip(" \t*_`>.?？)") and not _OPTION_LINE_RE.match(line):
+            return False
+    return _plain_merge_ask(_last_ask_sentence(text), pr)
+
+
+# Words a whole answer may hold when it approves a plain merge ask (`머지 승인 -
+# PR #999 squash 머지`). A condition (`after CI passes`), a flag (`--admin`) or
+# any other word keeps the prompt.
+_PLAIN_ANSWER_WORDS = frozenset({
+    "approve", "approved", "merge", "머지", "승인", "squash", "rebase", "pr",
+    "now", "지금", "바로", "진행", "it", "this", "-",
+})
+_PLAIN_ANSWER_LEADS = frozenset({"approve", "approved", "merge", "머지", "승인"})
+
+
+def _plain_approval(text: str, pr: str) -> bool:
+    """True when `text`, PR references set aside, is an approval as a whole:
+    an approval token, or only `_PLAIN_ANSWER_WORDS` with at least one of
+    `_PLAIN_ANSWER_LEADS`. Never reads a final clause."""
+    raw = text.strip().lower()
+    if not raw or raw.endswith(("?", "？")) or _LABEL_NEGATION_RE.search(raw):
+        return False
+    if (set(_PR_REF_RE.findall(raw)) | set(_SLUG_REF_RE.findall(raw))) - {pr}:
+        return False
+    rest = _strip_pr_ref(_SLUG_REF_RE.sub(" ", _URL_RE_FULL.sub(" ", raw)), pr)
+    whole = re.sub(r"\s+", " ", rest).strip(" .!~,·")
+    if whole in _APPROVAL_TOKENS:
+        return True
+    words = _PLAIN_ASK_NOISE_RE.sub(" ", rest).split()
+    return bool(words) and all(w in _PLAIN_ANSWER_WORDS for w in words) \
+        and any(w in _PLAIN_ANSWER_LEADS for w in words)
 
 
 def _ask_result_approves(content: object, pr: str) -> bool:
@@ -2028,8 +2073,8 @@ def _ask_result_approves(content: object, pr: str) -> bool:
     same result (`"Merge #999 now?"="hold"`) refuses it."""
     pairs = [(q, a) for q, a in _ASK_ANSWER_RE.findall(_user_message_text(content))
              if _mentions_pr(q, pr) or _MERGE_WORD_RE.search(q)]
-    return bool(pairs) and all(_mentions_pr(q, pr) and _last_ask_plain(q, pr)
-                               and _ask_label_approves(a, pr) for q, a in pairs)
+    return bool(pairs) and all(_mentions_pr(q, pr) and _ends_with_plain_ask(q, pr)
+                               and _plain_approval(a, pr) for q, a in pairs)
 
 
 def _chat_reply_approves(content: object, asked: str, pr: str) -> bool:
@@ -2038,25 +2083,23 @@ def _chat_reply_approves(content: object, asked: str, pr: str) -> bool:
     clause: here the whole message, PR references set aside, is an approval
     token, and either it names the PR and merging (`#999 머지해`) or the turn
     it answers ends with a plain merge ask for the PR (`merge` to `Approve
-    merge of #999?`; `_plain_merge_ask` refuses a condition). A picked choice
-    line must answer such an ask; a numbered item is read as the briefing
-    check reads it, which already refuses a qualified item."""
+    merge of #999?`; `_ends_with_plain_ask` refuses a condition before or
+    after the question). A picked choice line must answer such an ask and be
+    a whole approval itself (`_plain_approval`); a numbered reply is not
+    read."""
     raw = _user_message_text(content).strip().lower()
     if not raw or raw.endswith(("?", "？")):
         return False
     picked = _picked_option(raw, asked)
     if picked is not None:
-        return _option_label_approves(*picked, pr) and _last_ask_plain(asked, pr)
-    if _numbered_items(raw):
-        return _merge_question_numbers(asked, pr) is not None and _is_approval_reply(content, asked, pr)
-    if _LABEL_NEGATION_RE.search(raw):
-        return False
-    whole = re.sub(r"\s+", " ", _strip_pr_ref(raw, pr)).strip(" .!~,·")
-    if whole not in _APPROVAL_TOKENS:
+        label, note = picked
+        return (not note.strip() and _plain_approval(label, pr)
+                and _ends_with_plain_ask(asked, pr) and _mentions_pr(asked, pr))
+    if _numbered_items(raw) or not _plain_approval(raw, pr):
         return False
     if _mentions_pr(raw, pr) and _MERGE_WORD_RE.search(raw):
         return True
-    return _last_ask_plain(asked, pr) and _mentions_pr(asked, pr)
+    return _ends_with_plain_ask(asked, pr) and _mentions_pr(asked, pr)
 
 
 def _chat_approval_index(entries: list[dict], idxs: list[int], lo: int, pr: str) -> int | None:
@@ -2086,7 +2129,10 @@ def _chat_approval_index(entries: list[dict], idxs: list[int], lo: int, pr: str)
                   and _ask_result_approves(b.get("content"), pr)
                   and (found is None or i > found)):
                 found = i
-    if found is None or _held_after(entries, idxs, found, pr):
+    # Any later human message keeps the prompt: a short `hold` to a second
+    # merge ask names neither the PR nor merging, so no reader can tell it
+    # from an unrelated message.
+    if found is None or any(i > found for i in idxs) or _held_after(entries, idxs, found, pr):
         return None
     return found
 
@@ -2096,8 +2142,8 @@ def _chat_released(entries: list[dict], idxs: list[int], command: object) -> boo
 
     The approval is read by `_chat_approval_index`: a whole, unconditional
     typed approval of merging the PR (`merge` to the merge ask, `#999 머지해`),
-    a picked choice or numbered item answering the merge ask, or an
-    AskUserQuestion pick on a merge question. The answer names a number, never
+    a picked choice answering the merge ask, or an AskUserQuestion pick on a
+    merge question, and no human message after it. The answer names a number, never
     a repo, so the repo is bound by what the user had read when answering:
     from the last merge that may have run up to the answer, the conversation
     names this PR with exactly one repo (`owner/name#N` or a pull URL), the

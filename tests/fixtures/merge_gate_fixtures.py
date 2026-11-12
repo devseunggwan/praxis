@@ -304,6 +304,31 @@ CASES = {
         lambda: [user("prepare PR #999 for merge"),
                  prose("Merge briefing\n\n" + section("o/r#999") + "\nPR #999 를 머지하고 배포까지 진행할까요?"),
                  user("merge")],
+    # Codex round 2: a condition after the question, a conditional pick, and
+    # a short hold to a second merge ask approve nothing.
+    "momentum-merge-chat-condition-after-ask.jsonl":
+        lambda: [user("prepare PR #999 for merge"),
+                 prose("Merge briefing\n\n" + section("o/r#999")
+                       + "\nApprove merge of #999? Only after I confirm the release."),
+                 user("ok")],
+    "momentum-merge-chat-conditional-pick.jsonl":
+        lambda: [user("prepare PR #999 for merge"),
+                 prose("Merge briefing\n\n" + section("o/r#999")
+                       + "\nApprove merge of #999?\nA: Approve, only after CI passes\nB: hold"),
+                 user("A")],
+    "momentum-merge-chat-conditional-ask-pick.jsonl":
+        lambda: [user("prepare PR #999 for merge"), prose("Opened https://github.com/o/r/pull/999 ."),
+                 {"type": "assistant", "message": {"role": "assistant", "content": [
+                     {"type": "tool_use", "id": "q1", "name": "AskUserQuestion", "input": {"questions": [
+                         {"question": "Merge briefing\n\n" + section("o/r#999") + "\nApprove merge of #999?",
+                          "header": "Merge", "multiSelect": False,
+                          "options": [{"label": "After CI passes, approve", "description": ""},
+                                      {"label": "hold", "description": ""}]}]}}]}},
+                 result("q1", 'User has answered your questions: "Merge briefing ... Approve merge of #999?"='
+                              '"After CI passes, approve". You can now continue with the user\'s answers in mind.')],
+    "momentum-merge-chat-short-hold-later.jsonl":
+        lambda: [*_chat_answered(), prose("CI restarted. Merge #999 now?"), user("hold"),
+                 prose("Merge briefing\n\n" + section("o/r#999"))],
     "momentum-merge-chat-ask-answer.jsonl":
         lambda: [user("prepare PR #999 for merge"),
                  bash("c1", "gh pr checks 999 --repo o/r"), result("c1", "all checks passing"),

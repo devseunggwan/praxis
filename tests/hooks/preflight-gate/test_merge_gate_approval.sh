@@ -352,8 +352,8 @@ run_case "chat: conditional 'After I approve the release for #999, merge' (ask)"
   "ask" "no-delegate" "$(bulk_payload momentum-merge-chat-conditional.jsonl "$M999")"
 run_case "chat: repo named only after the answer (ask)" \
   "ask" "no-delegate" "$(bulk_payload momentum-merge-chat-repo-after-answer.jsonl 'gh pr merge 999 --repo x/y --squash')"
-run_case "chat: '1. approve / 2. hold' holds only the other item (silent)" \
-  "silent" "no-delegate" "$(bulk_payload momentum-merge-chat-numbered-other-hold.jsonl "$M999")"
+run_case "chat: numbered reply '1. approve / 2. hold' is not read (ask)" \
+  "ask" "no-delegate" "$(bulk_payload momentum-merge-chat-numbered-other-hold.jsonl "$M999")"
 run_case "chat: 'ok' to a conditional merge question (ask)" \
   "ask" "no-delegate" "$(bulk_payload momentum-merge-chat-conditional-ask.jsonl "$M999")"
 run_case "chat: 'A' picked under another PR's merge question (ask)" \
@@ -368,6 +368,14 @@ run_case "chat: plain merge question naming the PR by URL (silent)" \
   "silent" "no-delegate" "$(bulk_payload momentum-merge-chat-url-ask.jsonl "$M999")"
 run_case "chat: merge question with a second action (ask)" \
   "ask" "no-delegate" "$(bulk_payload momentum-merge-chat-second-action-ask.jsonl "$M999")"
+run_case "chat: condition written after the merge question (ask)" \
+  "ask" "no-delegate" "$(bulk_payload momentum-merge-chat-condition-after-ask.jsonl "$M999")"
+run_case "chat: picked choice is a conditional approval (ask)" \
+  "ask" "no-delegate" "$(bulk_payload momentum-merge-chat-conditional-pick.jsonl "$M999")"
+run_case "chat: AskUserQuestion pick is a conditional approval (ask)" \
+  "ask" "no-delegate" "$(bulk_payload momentum-merge-chat-conditional-ask-pick.jsonl "$M999")"
+run_case "chat: short 'hold' to a later merge question (ask)" \
+  "ask" "no-delegate" "$(bulk_payload momentum-merge-chat-short-hold-later.jsonl "$M999")"
 run_case "chat: injected AskUserQuestion answer (ask)" \
   "ask" "no-delegate" "$(bulk_payload momentum-merge-chat-injected-ask-answer.jsonl "$M999")"
 
