@@ -18,11 +18,19 @@ files would be overwritten by merge`, or the same for untracked files), and `gh 
 fails its local sync. Those edits are not yours to stash, discard, or commit.
 
 1. Run the merge remotely only: `cd` somewhere outside the repository and call
-   `gh pr merge <N> --repo <owner>/<repo> --squash`. Outside a repository gh
+   `gh pr merge <N> --repo <owner>/<repo> --squash --match-head-commit <sha>`,
+   with the head your pre-merge probe verified. Outside a repository gh
    has no local checkout to sync, so it only merges. After it reads
    `MERGED`, remove the head worktree as above, and delete the remote head
    branch when `delete_branch_on_merge` is off (`git push origin --delete
    <branch>`, after its remote tip equals `headRefOid`).
+   When no worktree holds the base, stop after this step: there is no
+   `<base-worktree>` for steps 2-4, and a checkout on another branch is not a
+   stand-in (`reset --keep` there would move that branch). Delete the local
+   head branch from any worktree that does not hold it
+   (`git -C <any worktree> branch -D <branch>`, after its tip equals
+   `headRefOid`), leave the local `<base>` ref behind `origin/<base>`, and say
+   so in the report: the next checkout of `<base>` brings it up to date.
 2. Confirm the local base has no commits of its own:
    `git -C <base-worktree> fetch origin --prune`, then
    `git -C <base-worktree> merge-base --is-ancestor HEAD origin/<base>`
