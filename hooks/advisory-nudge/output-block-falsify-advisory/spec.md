@@ -418,7 +418,8 @@ was chosen.
 Three scoping decisions are load-bearing, not stylistic:
 
 - **Same-segment co-occurrence.** Detection walks `safe_tokenize` →
-  `iter_command_starts` (the DESIGN.md structural-tokenization pipeline), so
+  `_segments_with_pipes` (segments split at the shell separators and `|&`,
+  each marked when a pipe feeds it onward), so
   `rm foo.txt && grep -r bar prod_notes.md` does **not** fire — both factors
   are in the command string, but nothing irreversible touches anything shared.
   A whole-string scan would ask on it.

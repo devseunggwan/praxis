@@ -870,13 +870,14 @@ _SHARED_SURFACE_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
 
 
 def _segments_with_pipes(tokens: list[str]) -> list[tuple[list[str], bool]]:
-    """Each command segment, and whether a `|` feeds it into the next one."""
+    """Each command segment, and whether a `|` or `|&` feeds it into the
+    next one."""
     out: list[tuple[list[str], bool]] = []
     start = 0
     for i, tok in enumerate(tokens):
-        if tok in SHELL_SEPARATORS:
+        if tok in SHELL_SEPARATORS or tok == "|&":
             if start < i:
-                out.append((tokens[start:i], tok == "|"))
+                out.append((tokens[start:i], tok in ("|", "|&")))
             start = i + 1
     if start < len(tokens):
         out.append((tokens[start:], False))
