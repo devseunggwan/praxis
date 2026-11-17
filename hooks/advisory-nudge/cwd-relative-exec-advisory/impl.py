@@ -44,6 +44,7 @@ Fail-open contract:
 """
 from __future__ import annotations
 
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -80,6 +81,14 @@ _PATH_FLAG_SPEC: dict[str, set[str]] = {
 
 _CD_LIKE = ("cd", "pushd")
 
+# A token in command position that is a redirection (`2>/dev/null)` closing a
+# substitution) or an assignment (`S=/abs/dir`) is not a program being run.
+_REDIRECT_RE = re.compile(r"\d*[<>]|&>")
+_ASSIGNMENT_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\+?=")
+# `gh api -F key=value` sends a field; only `key=@path` reads a file, and the
+# path is what follows the `@` (`-F body=@/abs/b.md` is absolute).
+_FIELD_RE = re.compile(r"[A-Za-z0-9_\[\]]+=")
+
 
 def _is_unresolvable_or_absolute(target: str) -> bool:
     """True for targets this hook makes no ambiguity claim about."""
@@ -107,19 +116,52 @@ def _segment_is_cd(seg: list[Token]) -> bool:
 
 
 def _relative_command_target(seg: list[Token]) -> str | None:
-    """Return the relative script path if this segment's COMMAND token is one."""
+    """Return the relative script path if this segment's COMMAND token is one.
+
+    A redirection the tokenizer placed in command position (`2>/dev/null
+    ./x.sh`) hands the position to the word after it, and after its target
+    when the operator stands alone (`2> /dev/null ./x.sh`).
+    """
+    skip = 0
+    after_redirect = False
     for tok in seg:
-        if tok.role != TokenRole.COMMAND:
+        if skip:
+            skip -= 1
+            continue
+        if tok.role != TokenRole.COMMAND and not after_redirect:
             continue
         text = tok.text
         if text.startswith("("):
             text = text[1:]
+        redirect = _REDIRECT_RE.match(text)
+        if redirect:
+            after_redirect = True
+            skip = 1 if redirect.end() == len(text.rstrip(")")) else 0
+            continue
+        if _ASSIGNMENT_RE.match(text):
+            continue  # an assignment, not a program
         if "/" not in text:
             return None  # bare command name (PATH-searched), not a path
         if _is_unresolvable_or_absolute(text):
             return None
         return text
     return None
+
+
+def _flag_path(flag_name: str, value: str) -> str | None:
+    """The path a registered path-flag value names, or None for none.
+
+    `-F` is `--body-file` on `gh issue|pr create` (a bare path) and `--field`
+    on `gh api` (`key=value`, a file only as `key=@path`). A `key=` value
+    without the `@` is a literal field, and `@-` is stdin.
+    """
+    field = _FIELD_RE.match(value)
+    if flag_name == "-F" and field:
+        rest = value[field.end():]
+        if not rest.startswith("@") or rest == "@-":
+            return None
+        return rest[1:]
+    return value
 
 
 def _relative_flag_target(seg: list[Token]) -> str | None:
@@ -134,7 +176,8 @@ def _relative_flag_target(seg: list[Token]) -> str | None:
         matched = any(flag_name in flags for flags in _PATH_FLAG_SPEC.values())
         if not matched:
             continue
-        if _is_unresolvable_or_absolute(tok.text):
+        path = _flag_path(flag_name, tok.text)
+        if path is None or _is_unresolvable_or_absolute(path):
             continue
         return tok.text
     return None

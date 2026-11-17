@@ -66,7 +66,22 @@ Both conditions must hold:
      and bare `dir/file.sh` all count — bash treats any command-name
      containing `/` as a path, not a `PATH` search).
    - A `--body-file`/`-F` `FLAG_VALUE` under the `gh` command whose value is
-     relative (the issue's concrete `--body-file rel/path` example).
+     relative (the issue's concrete `--body-file rel/path` example). `-F` is
+     also `gh api --field`, whose value is `key=value`: such a value names a
+     file only as `key=@path`, and then the path after the `@` is what is
+     judged (issue #1659). A `key=` value without `@`, and `key=@-` (stdin),
+     name no file.
+
+A token the tokenizer puts in command position is not always a program: a
+redirection (`2>/dev/null)` closing a substitution) passes the position to
+the next word, and after the redirect target when the operator stands alone
+(`2> /dev/null ./x.sh` still asks about `./x.sh`); an assignment (`S=a/b`)
+is skipped (issue #1659).
+
+On one install, 12 of the 13 distinct calls this hook asked about over 8 days
+were these shapes (`-F body=@<absolute or $VAR path>` 9, a literal `-F n=$2`, a
+`2>/dev/null)` twice); the 13th, `../repo/.venv/bin/python` with no `cd`, still
+asks (local replay, not committed).
 
 ## Silent cases (enumerated input surface)
 
