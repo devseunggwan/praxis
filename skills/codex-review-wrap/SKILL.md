@@ -420,6 +420,24 @@ Two traps seen under Hermes:
   review text says so in its summary line. Report a no-findings round as
   "diff read, no defect found; tests not run by the reviewer", and point at
   your own test run or CI for test evidence.
+- **Redirect the companion's stdout to a scratch file and read the review
+  from it.** `cd <worktree> && node <companion> review --base origin/<base>
+  > <scratch>/codex-<pr>-r<N>.out 2>&1; echo "exit=$?" >> <file>` in a
+  background terminal; the completion notification carries only shell noise
+  (e.g. `can't change option: zle`), and the findings start at the
+  `# Codex Review` line of the file (`sed -n '/^# Codex Review/,$p'`).
+- **When the session's questions go through a decision queue** (the user
+  answers on an external decision board rather than in a `clarify` popup), 5i is one
+  queued decision per round: list every surviving finding with its premise
+  probe result and the planned fix, offer apply-all / a named subset with
+  the rest recorded on the open issue / none, recommend one, and end the
+  turn waiting. A finding the user already deferred in an earlier round is
+  named as "already decided" in the next round's ask, not asked again.
+- **Count the round ceiling across the PR, not per finding** (default 3
+  rounds unless the user set one). When the last round still produced
+  findings, ask whether to fix them without another round, and carry the
+  SHAs of those fix commits into the anchor's `Unverified` list and the
+  merge ask as "not reviewed by codex".
 
 ## Error Handling and Limitations
 
