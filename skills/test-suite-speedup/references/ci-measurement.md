@@ -253,16 +253,19 @@ Before blaming tests or the shard planner for an unbalanced run, pair every
 leg with its instance type and its pytest summary seconds:
 
 ```bash
-for j in $(gh api "repos/<o>/<r>/actions/runs/<id>/jobs?per_page=50" -q '.jobs[]|select(.name|startswith("test ("))|.id'); do
+P='test ('   # the workflow's test-job name prefix, e.g. 'pytest (' for a matrix
+for j in $(gh api --paginate "repos/<o>/<r>/actions/runs/<id>/jobs?per_page=100" -q ".jobs[]|select(.name|startswith(\"$P\"))|.id"); do
   gh run view --repo <o>/<r> --job $j --log > leg.log
-  printf '%s %s %s\n' "$(grep -m1 -oE 'test \([0-9]+\)' leg.log)" \
-    "$(grep -m1 -oE 'Instance type: [a-z0-9.-]+' leg.log)" "$(grep -oE ' in [0-9.]+s \(' leg.log | tail -1)"
+  printf '%s %s %s\n' "$j" \
+    "$(grep -m1 -oE 'Instance type: [a-z0-9.-]+' leg.log)" "$(grep -oE ' in [0-9.]+s' leg.log | tail -1)"
 done
 ```
 
 Do it on 2-3 runs (one all-new-type run is the positive control). Also compare
-the per-file timing artifacts of two runs with the same file set: a uniform
-ratio across every file means runner speed, not test changes. A timing artifact
+the per-file timing artifacts of two runs on the same commit and
+configuration but different instance types: a uniform ratio across every file
+is then evidence of runner speed. Across different commits it is only a hint,
+until test changes (a slower shared fixture) are ruled out. A timing artifact
 recorded on a mixed pool carries the slow type's seconds into the next plan.
 The fix lever is the pool's instance mix (drop the old generation), which
 beats any per-test change on wall time. When the expected gain is below that noise, also
