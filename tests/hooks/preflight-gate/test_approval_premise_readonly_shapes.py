@@ -96,10 +96,23 @@ STILL_ASKS = {
     "flag value spelled like the subcommand": _bash("kubectl --context auth auth reconcile -f r.yaml --profile prod"),
     "mcp gitbook_git_import": ("mcp__gitbook__gitbook_git_import", {"phase": "prod"}),
     "mcp verb after the phrase": ("mcp__airflow__airflow_import_errors_clear", {"phase": "prod"}),
+    # --help reaches a script that may not read it.
+    "interpreter running a script with --help": _bash("kubectl --context prod-x get pods && bash deploy.sh --help"),
+    "script with --help": _bash("kubectl --context prod-x get pods && ~/bin/deploy.sh --help"),
+    "python script with --help": _bash("kubectl --context prod-x get pods && python3 deploy.py --help"),
+    # A SELECT can still act on the server through a function.
+    "select calling a session function": _bash(_wrapper('{"phase":"prod","query":"SELECT pg_terminate_backend(12345)"}')),
+    "select calling a vendor system function": _bash(_wrapper('{"phase":"prod","query":"SELECT SYSTEM$CANCEL_QUERY(1)"}')),
+    "select moving a sequence": _bash(_wrapper('{"phase":"prod","query":"SELECT setval(1, 5)"}')),
+    # The read is quiet, what its output feeds is not.
+    "prod read piped into kubectl apply": _bash(_wrapper('{"phase":"prod","query":"SELECT manifest FROM plans"}') + " | kubectl apply -f -"),
+    "prod read piped with |& into kubectl apply": _bash(_wrapper('{"phase":"prod","query":"SELECT manifest FROM plans"}') + " |& kubectl apply -f -"),
 }
 
 # A payload whose literal holds a write word is still a read: the literal is
 # removed before the keyword scan.
+QUIET_SQL_FUNCTION = _bash(_wrapper('{"phase":"prod","query":"SELECT count(*), max(ts) FROM t"}'))
+
 LITERAL_WRITE_WORD = _bash(
     _wrapper('{"phase":"prod","query":"SELECT id FROM t WHERE note = ' + "'\\''drop'\\''" + ' -- delete"}'))
 
@@ -112,6 +125,10 @@ def test_real_read_only_calls_are_quiet(name: str, tmp_path: Path) -> None:
 @pytest.mark.parametrize("name", sorted(STILL_ASKS))
 def test_nearest_production_shapes_still_ask(name: str, tmp_path: Path) -> None:
     assert _verdict(*STILL_ASKS[name], tmp_path) == "ask"
+
+
+def test_plain_sql_function_is_a_read(tmp_path: Path) -> None:
+    assert _verdict(*QUIET_SQL_FUNCTION, tmp_path) == "quiet"
 
 
 def test_write_word_inside_a_literal_is_a_read(tmp_path: Path) -> None:

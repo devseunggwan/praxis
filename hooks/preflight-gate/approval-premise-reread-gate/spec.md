@@ -457,16 +457,29 @@ above did not cover:
   `VALUES`, has no `;`-separated second statement, and contains no write or
   session word (`INSERT`, `UPDATE`, `DELETE`, `MERGE`, `DROP`, `CREATE`,
   `INTO`, `ANALYZE`, `SET`, `CALL`, ...; the full list is
-  `_SQL_WRITE_WORD_RE`). An unterminated literal keeps the token. The payload
+  `_SQL_WRITE_WORD_RE`), and calls no function that acts on the server
+  (`pg_*` such as `pg_terminate_backend`, `set_config`, `nextval`, `setval`,
+  `lo_*`, `dblink*`, `SYSTEM$*`, `dbms_*`, `xp_*`, `sp_*`, `sleep`, ...; the
+  full list is `_SQL_ACTING_CALL_RE`, denied by name family, so `count(*)`
+  still reads). An unterminated literal keeps the token. The payload
   is kept when another word of the segment carries a write verb from the MCP
   verb set (`lh.py lakehouse_delete '{"query": "SELECT 1"}'`).
 - **`--help`.** `<cli> [word ...] --help`, with `--help` last and only bare
   words before it, is local: no flag can take `--help` as its value and no
-  other option rides along.
+  other option rides along. The program must be a CLI: a shell, interpreter or
+  launcher (`bash`, `python3`, `node`, `env`, `npx`, `make`, ...; the list is
+  `_RUNNER_BINARIES`) or a file with a script suffix (`.sh`, `.py`, ...) hands
+  `--help` to code that may ignore it, so `kubectl --context prod-x get pods
+  && bash deploy.sh --help` asks. A compiled CLI that ignores `--help` and acts
+  is the case this still trusts.
 
 The dropped tokens only stop *naming* production. A segment whose remaining
 tokens still carry the marker asks as before, and a command whose marker sits
-only in dropped tokens is quiet. The fallbacks above (substitution, heredoc,
+only in dropped tokens is quiet, unless a pipe (`|` or `|&`) feeds a segment
+that carries the marker into a later member that is neither read-only nor
+local: `lh.py lakehouse_query '{"phase":"prod",...}' | kubectl apply -f -`
+applies production data and asks, while `| tee out.txt` saves it here and
+stays quiet. The fallbacks above (substitution, heredoc,
 loop, background) still run first. One consequence is accepted: a git call
 the closed git-local rule calls remote (`HOME=/tmp/h git commit ...`, a
 `--git-dir`, a `GIT_CONFIG_*` program) whose only marker is a prose commit

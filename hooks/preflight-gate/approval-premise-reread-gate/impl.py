@@ -303,6 +303,15 @@ def _segment_is_local(argv: list[str], git_reconfigured: bool = False) -> bool:
 
 
 _BARE_WORD_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]*")
+# Programs that run another program or a script: `bash deploy-prod.sh --help`
+# runs the script and hands it `--help`, which the script may ignore.
+_RUNNER_BINARIES = frozenset((
+    "sh", "bash", "zsh", "dash", "ksh", "fish", "python", "python3", "node",
+    "deno", "bun", "ruby", "perl", "php", "env", "sudo", "doas", "xargs",
+    "exec", "nohup", "time", "timeout", "nice", "make", "npx", "uvx", "uv",
+    "pnpm", "npm", "yarn", "poetry", "pipx", "go", "cargo", "java", "dotnet",
+))
+_SCRIPT_SUFFIX_RE = re.compile(r"\.(?:sh|bash|zsh|py|js|mjs|cjs|ts|rb|pl|php)$")
 
 
 def _help_only(argv: list[str]) -> bool:
@@ -310,8 +319,15 @@ def _help_only(argv: list[str]) -> bool:
 
     Closed shape: `--help` is the last token and every token before it is a
     bare word, so no flag can take `--help` as its value (`--message --help`)
-    and no other option rides along.
+    and no other option rides along. The program must be a CLI, not a
+    runner or a script: either of those passes `--help` on to code that may
+    not read it. A compiled CLI that ignores `--help` is the shape this
+    still trusts (spec: Prose, read-only query payloads and `--help`).
     """
+    binary = argv[0].rsplit("/", 1)[-1] if argv else ""
+    if binary in _RUNNER_BINARIES or binary.startswith("python") \
+            or _SCRIPT_SUFFIX_RE.search(binary):
+        return False
     return (len(argv) >= 2 and argv[-1] == "--help"
             and all(_BARE_WORD_RE.fullmatch(tok) for tok in argv[1:-1]))
 
@@ -342,6 +358,16 @@ _SQL_WRITE_WORD_RE = re.compile(
     r"|pragma)(?![A-Za-z0-9_])", re.I)
 
 
+# Functions a SELECT can call to act on the server: end or cancel sessions,
+# change settings, take locks, move sequences, read or write server files,
+# reach another database, or run a vendor system procedure. Denied by name
+# family; any other function call (`count(*)`, `date_trunc(...)`) reads.
+_SQL_ACTING_CALL_RE = re.compile(
+    r"(?<![A-Za-z0-9_$])(?:pg_\w+|set_config|nextval|setval|lo_\w+|dblink\w*"
+    r"|system\$\w+|sys_\w+|xp_\w+|sp_\w+|dbms_\w+|utl_\w+|sleep|benchmark"
+    r"|load_file|query_to_xml)\s*\(", re.I)
+
+
 def _sql_is_readonly(sql: str) -> bool:
     text = _SQL_NOISE_RE.sub(" ", sql)
     if "'" in text or '"' in text or "`" in text or "/*" in text:
@@ -349,7 +375,8 @@ def _sql_is_readonly(sql: str) -> bool:
     statements = [s for s in text.split(";") if s.strip()]
     return (len(statements) == 1
             and _SQL_READ_START_RE.match(statements[0]) is not None
-            and _SQL_WRITE_WORD_RE.search(statements[0]) is None)
+            and _SQL_WRITE_WORD_RE.search(statements[0]) is None
+            and _SQL_ACTING_CALL_RE.search(statements[0]) is None)
 
 
 def _is_readonly_query_payload(tok: str) -> bool:
@@ -401,17 +428,41 @@ def _segment_names_prod(argv: list[str]) -> bool:
 
 
 def _segments_with_pipes(tokens: list[str]) -> list[tuple[list[str], bool]]:
-    """Each command segment, and whether a `|` feeds it into the next one."""
+    """Each command segment, and whether a `|` or `|&` feeds it into the
+    next one."""
     out: list[tuple[list[str], bool]] = []
     start = 0
     for i, tok in enumerate(tokens):
-        if tok in SHELL_SEPARATORS:
+        if tok in SHELL_SEPARATORS or tok == "|&":
             if start < i:
-                out.append((tokens[start:i], tok == "|"))
+                out.append((tokens[start:i], tok in ("|", "|&")))
             start = i + 1
     if start < len(tokens):
         out.append((tokens[start:], False))
     return out
+
+
+def _prod_output_reaches_remote(
+        segments: list[tuple[list[str], bool]], git_reconfigured: bool) -> bool:
+    """A production read piped into a later member that is not local.
+
+    Dropping the read's payload clears the read itself, not what its output
+    feeds: `lh.py query '{"phase":"prod",...}' | kubectl apply -f -` applies
+    production data. A local consumer (`| tee out.txt`) stays quiet.
+    """
+    for i, (seg, piped) in enumerate(segments):
+        if not piped or not _segment_names_prod(seg):
+            continue
+        j = i + 1
+        while j < len(segments):
+            consumer = segments[j][0]
+            sink = strip_prefix(consumer)[:1] == ["tee"]  # saves the output here
+            if not sink and not _segment_is_local(consumer, git_reconfigured):
+                return True
+            if not segments[j][1]:
+                break
+            j += 1
+    return False
 
 
 def _bash_reaches_prod(command: str) -> bool:
@@ -454,9 +505,11 @@ def _bash_reaches_prod(command: str) -> bool:
     # payload: nothing the call acts on is named production.
     named = [i for i, (seg, _p) in enumerate(segments)
              if _segment_names_prod(_target_tokens(seg))]
+    git_reconfigured = _git_reconfigured([seg for seg, _p in segments])
+    if _prod_output_reaches_remote(segments, git_reconfigured):
+        return True
     if not named:
         return False
-    git_reconfigured = _git_reconfigured([seg for seg, _p in segments])
     remote = [i for i, (seg, _p) in enumerate(segments)
               if not _segment_is_local(seg, git_reconfigured)]
     if not remote:
