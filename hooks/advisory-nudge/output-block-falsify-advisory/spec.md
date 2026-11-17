@@ -444,9 +444,12 @@ than widened.
 **No satisfaction path, by decision.** Unlike the `AskUserQuestion` legs (a
 `Falsified:` line silent-passes) and unlike `side-effect-scan` (a
 `# side-effect:ack` comment short-circuits it), this leg has **no in-command
-marker that silences it**. Approving the permission prompt *is* the
-acknowledgement; a second, cheaper bypass would make the ask decorative. The
-message says so explicitly under the `[no-satisfaction-path]` marker.
+marker that silences it**. Answering the ask *is* the acknowledgement: on a
+host where it is a permission prompt, approving it; on a host where it is a
+self-check (Hermes), re-issuing the call after the scope check. A second,
+cheaper bypass would make the ask decorative. The message says so explicitly
+under the `[no-satisfaction-path]` marker, in both host forms (issue #1659:
+it named only the permission prompt, which a self-check host has none of).
 
 **Precedence over the bulk-action advisory.** When a command matches both this
 predicate and `_is_bulk_action_command`, only the `ask` is emitted. They are
@@ -482,17 +485,33 @@ shipped `impl.py`; all exit 0 with empty stdout and empty stderr:
   is only reachable through a variable (`rm -rf "$PROD_DIR"`) is invisible to
   any text-level predicate.
 
-**Known false positives (probed).** Both factors only need to share a
-segment, so text that merely names them asks:
+**Read-only segments and prose are out of scope (issue #1659).** Both
+factors only needed to share a segment, so text that merely named them asked:
+a read-only search for a verb in a production ref (`git grep -n delete
+origin/prod -- src`), `kubectl auth can-i delete jobs` against a production
+context, an `echo` appending a log line that quoted the plan, and a commit
+message or tracker note with a verb next to a production word. On one install
+9 of the 15 distinct calls this leg asked about over 8 days were these shapes
+(local replay, not committed); the 6 that still ask delete Kubernetes jobs or
+rewrite a production load script.
 
-- A read-only search for a verb in a production ref:
-  `git grep -n delete origin/prod -- src` asks. Write the verb as a character
-  class (`git grep -E "[d]elete_objects" origin/prod -- src` passes): the
-  pattern matches the same text and the command no longer holds the word.
-- A commit or PR title with such a verb next to a production word
-  (`git commit -m 'fix: drop stale checklist for prod'`) asks, and other
-  gates' markers do not change that. Pick another verb (`retire`, `align`)
-  or keep the production word out of that command.
+Two exclusions now apply before the factors are read:
+
+- A segment the shared read-only classifier (`_segment_is_readonly` in
+  `_lib/_mutating_call.py`, which now admits `kubectl auth can-i|whoami` and
+  `kubectl config view|get-contexts|...`) proves read-only is skipped, but only
+  when no `|` feeds its output onward and the command runs no substitution:
+  `echo "DROP TABLE prod.x" | psql` and `echo "$(kubectl delete pod x -n
+  prod-a)"` still ask. A script that an `echo` writes and a later segment runs
+  is out of reach, the same as any file the predicate cannot read.
+- The value of a prose option (`drop_prose_values`, the same closed set the
+  approval-premise gate uses: `-m`, `--message`, `--body`, `--title`,
+  `--reason`, `--evidence`, `--note`, ...) is removed when it holds
+  whitespace. A program value (`psql -c "DROP TABLE prod.users"`) is not on
+  the list and still asks.
+
+`2>&1` and `>/dev/null` are removed before splitting, so the `&` inside
+`2>&1` no longer hides the `|` that follows it.
 
 **Deliberate scope boundary — no new `AskUserQuestion` tier.** Blast radius is
 added to the `Bash` leg **only**. `menu-mutation-tier-advisory` already asks on
@@ -854,7 +873,7 @@ segment, so the reason names *which* two factors tripped it:
   "hookSpecificOutput": {
     "hookEventName": "PreToolUse",
     "permissionDecision": "ask",
-    "permissionDecisionReason": "[blast-radius] This command pairs an irreversible verb (rm -r) with a shared-surface token (prod, object-store URI) in one command segment — the two-factor blast-radius predicate (issue #1010). Run the output-block falsification gate on the plan that produced this command BEFORE running it: is its objective already addressed by in-flight work, a merged PR, or a parallel proposal in this session? If yes — STOP and cite the invalidating link instead of running the command. If the premise survives, confirm the exact target scope (bucket/prefix, namespace, schema-qualified table, path) is the one you intend — an irreversible verb on a surface someone else reads has no undo. [no-satisfaction-path] No in-command marker silences this gate; approving the permission prompt is the acknowledgement."
+    "permissionDecisionReason": "[blast-radius] This command pairs an irreversible verb (rm -r) with a shared-surface token (prod, object-store URI) in one command segment — the two-factor blast-radius predicate (issue #1010). Run the output-block falsification gate on the plan that produced this command BEFORE running it: is its objective already addressed by in-flight work, a merged PR, or a parallel proposal in this session? If yes — STOP and cite the invalidating link instead of running the command. If the premise survives, confirm the exact target scope (bucket/prefix, namespace, schema-qualified table, path) is the one you intend — an irreversible verb on a surface someone else reads has no undo. [no-satisfaction-path] No in-command marker silences this gate. Where this ask is a permission prompt, approving it is the acknowledgement; where it is a self-check, re-issue the call only once the target scope above is confirmed."
   }
 }
 ```

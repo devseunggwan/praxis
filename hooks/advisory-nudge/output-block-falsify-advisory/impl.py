@@ -71,7 +71,13 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "_lib"))
 from _hook_runtime import fail_open  # type: ignore[import-not-found]  # noqa: E402
 from _hook_io import emit_decision  # type: ignore[import-not-found]  # noqa: E402
-from _hook_utils import safe_tokenize, iter_command_starts  # type: ignore[import-not-found]  # noqa: E402
+from _hook_utils import SHELL_SEPARATORS, safe_tokenize  # type: ignore[import-not-found]  # noqa: E402
+from _mutating_call import (  # type: ignore[import-not-found]  # noqa: E402
+    _NONWRITING_REDIRECT_RE,
+    _SUBSTITUTION_RE,
+    _segment_is_readonly,
+    drop_prose_values,
+)
 from _payload import read_payload  # type: ignore[import-not-found]  # noqa: E402
 from ask_option_text import collect_option_texts  # type: ignore[import-not-found]  # noqa: E402
 import _fire_ledger  # type: ignore[import-not-found]  # noqa: E402
@@ -141,10 +147,14 @@ BLAST_RADIUS_ASK_MSG = (
     "irreversible verb on a surface someone else reads has no undo. "
     # Issue #1010: deliberately no in-command escape marker. The sibling
     # `side-effect-scan` offers `# side-effect:ack`; this gate does not,
-    # because approving the permission prompt already IS the acknowledgement
-    # and a second, cheaper bypass would make the ask decorative.
-    "[no-satisfaction-path] No in-command marker silences this gate; "
-    "approving the permission prompt is the acknowledgement."
+    # because answering the ask already IS the acknowledgement and a second,
+    # cheaper bypass would make the ask decorative. How the ask is answered
+    # depends on the host (issue #1659): a permission prompt on Claude Code,
+    # a self-check the agent clears by re-issuing the call on Hermes.
+    "[no-satisfaction-path] No in-command marker silences this gate. Where "
+    "this ask is a permission prompt, approving it is the acknowledgement; "
+    "where it is a self-check, re-issue the call only once the target scope "
+    "above is confirmed."
 )
 
 ANCHORING_ASK_MSG = (
@@ -763,7 +773,7 @@ def _is_bulk_action_command(command: str) -> bool:
 #   factor 1 — an IRREVERSIBLE VERB, and
 #   factor 2 — a SHARED-SURFACE TOKEN,
 #
-# within the SAME command segment (`iter_command_starts`). Segment scoping is
+# within the SAME command segment (split on the shell separators). Segment scoping is
 # load-bearing, not stylistic: `rm foo.txt && grep -r bar prod` has both
 # factors in the whole command string but in different segments, and nothing
 # irreversible touches anything shared. A whole-string scan would ask on it.
@@ -859,6 +869,20 @@ _SHARED_SURFACE_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
 )
 
 
+def _segments_with_pipes(tokens: list[str]) -> list[tuple[list[str], bool]]:
+    """Each command segment, and whether a `|` feeds it into the next one."""
+    out: list[tuple[list[str], bool]] = []
+    start = 0
+    for i, tok in enumerate(tokens):
+        if tok in SHELL_SEPARATORS:
+            if start < i:
+                out.append((tokens[start:i], tok == "|"))
+            start = i + 1
+    if start < len(tokens):
+        out.append((tokens[start:], False))
+    return out
+
+
 def _blast_radius_findings(command: str) -> tuple[list[str], list[str]] | None:
     """Return `(verbs, surfaces)` for the first segment satisfying both
     factors, else None.
@@ -870,17 +894,31 @@ def _blast_radius_findings(command: str) -> tuple[list[str], list[str]] | None:
     re-joined by a single space, because the schema-qualified pattern spans a
     keyword and its operand, which may or may not be one token depending on
     quoting.
+
+    A segment the shared classifier proves read-only is skipped unless a `|`
+    feeds its output onward (issue #1659): `kubectl auth can-i delete jobs`
+    asks a question, and `echo "... delete ... prod" >> notes` writes a log
+    line, but `echo "DROP TABLE prod.x" | psql` hands the text to a program.
     """
     if not command or not command.strip():
         return None
 
-    tokens = safe_tokenize(command)
+    # `2>&1` would split at its `&` and hide the `|` after it.
+    tokens = safe_tokenize(_NONWRITING_REDIRECT_RE.sub(" ", command))
     if not tokens:
         return None
+    substitutes = _SUBSTITUTION_RE.search(command) is not None
 
-    for argv in iter_command_starts(tokens):
+    for argv, piped in _segments_with_pipes(tokens):
         if not argv:
             continue
+        # A substitution runs a command inside a read-only one's argument
+        # (`echo "$(kubectl delete ...)"`), so nothing is skipped then.
+        if not piped and not substitutes and _segment_is_readonly(argv):
+            continue
+        # A prose option value (`--note "... delete ... prod ..."`) is a
+        # sentence for a person, not an argument the call acts on.
+        argv = drop_prose_values(argv)
 
         verbs: list[str] = []
         if _segment_has_recursive_rm(argv):

@@ -508,6 +508,60 @@ run_case "Blast radius control: verb and surface in different segments → silen
   pass \
   "$(make_bash_payload 'rm foo.txt && grep -r bar prod_notes.md')"
 
+# --- Read-only segments carry no blast radius (issue #1659) ---------------
+# Shapes from real asks on one install: `kubectl auth can-i delete` asks a
+# question, and an `echo` writing a log line quotes the plan in prose. A
+# read-only segment is skipped only when nothing is piped out of it and the
+# command runs no substitution.
+run_case "Read-only: kubectl auth can-i delete on a prod context → silent pass" \
+  pass \
+  "$(make_bash_payload 'kubectl --context prod-apne2 -n jobs auth can-i create jobs; kubectl --context prod-apne2 -n jobs auth can-i delete jobs; kubectl --context prod-apne2 auth whoami 2>&1 | grep -i -E "username|arn" | head -2')"
+
+run_case "Read-only: echo log line quoting delete + prod, then a script → silent pass" \
+  pass \
+  "$(make_bash_payload 'echo "S3 prod load resume: delete failed Job objects and re-apply" >> ~/scratch/runlog.txt; MODE=apply bash ~/scratch/prod_reload.sh 2>&1 | grep -E "deleted|created"')"
+
+run_case "Read-only: grep for delete under a prod path → silent pass" \
+  pass \
+  "$(make_bash_payload 'grep -rn "delete" deploy/prod/')"
+
+run_case "Still asks: echo piped into psql" \
+  "ask:blast-radius" \
+  "$(make_bash_payload 'echo "DROP TABLE prod.users" | psql')"
+
+run_case "Still asks: delete inside a substitution in echo" \
+  "ask:blast-radius" \
+  "$(make_bash_payload 'echo "$(kubectl delete pod x -n prod-apne2)"')"
+
+run_case "Still asks: kubectl delete job on a prod context" \
+  "ask:blast-radius" \
+  "$(make_bash_payload 'kubectl --context prod-apne2 -n jobs delete job copy-0 copy-1 2>&1 | tail -2')"
+
+run_case "Still asks: find -delete under a prod path" \
+  "ask:blast-radius" \
+  "$(make_bash_payload 'find /srv/prod/tmp -name x -delete')"
+
+run_case "Message: the self-check host is told how to answer" \
+  "ask:where it is a self-check, re-issue the call" \
+  "$(make_bash_payload 'kubectl delete namespace production')"
+
+# Prose option values: a tracker note quoting the plan, a commit message.
+run_case "Prose: tracker --reason naming delete + prod → silent pass" \
+  pass \
+  "$(make_bash_payload 'tracker drop 1553 --reason "base prod moved 12 commits; delete the old question" 2>&1 | tail -1')"
+
+run_case "Prose: notify --note naming delete + prod → silent pass" \
+  pass \
+  "$(make_bash_payload 'notify --to "title:epic" --note "dev table regenerated: smartstore.commerce_order_log0 delete done, prod next"')"
+
+run_case "Prose: git commit -m naming drop + prod → silent pass" \
+  pass \
+  "$(make_bash_payload 'git commit -m "drop the prod-only flag"')"
+
+run_case "Still asks: psql -c program is not prose" \
+  "ask:blast-radius" \
+  "$(make_bash_payload 'psql -c "DROP TABLE prod.users" --note "x y"')"
+
 # Word-boundary regressions on the `prod` surface token.
 run_case "Blast radius control: 'products' is not the prod token → silent pass" \
   pass \
