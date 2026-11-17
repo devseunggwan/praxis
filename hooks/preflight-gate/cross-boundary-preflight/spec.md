@@ -197,6 +197,16 @@ observe visibility from the command line, so it asks in every case; a repo
 confirmed own-org-and-private is what the `# cross-boundary:ack` marker is
 for.
 
+Item ① used to leave that last sentence out, so a session writing to its own
+org's private repo read "general 'proceed' does NOT count" and went back to the
+user for every comment. Item ① now ends with that exception and the probe that
+confirms it (`gh repo view <repo> --json visibility`), and items ① and ④ name
+the rule sections that exist (`Cross-boundary repo writes`, `Personal repo
+content isolation`) instead of `§External-repo write` and `§External-repo
+content isolation`, which no rule file carries. Item ③ and the heredoc block
+message name a file in the caller's scratch directory rather than `/tmp`,
+which some hosts forbid (issue #1659).
+
 #### IMPLICIT_REPO_WRITE — ask (permissionDecision: "ask")
 
 Same subcommand set as `CROSS_REPO_WRITE`, no `--repo`/`-R` flag. The target
