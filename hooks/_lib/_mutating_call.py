@@ -30,13 +30,15 @@ FILE_EDIT_TOOLS = frozenset({"Edit", "Write", "NotebookEdit"})
 # token matching removed all eight while losing no true positive.
 #
 # Read-only calls are out of scope entirely: a gate that fires on a query
-# becomes the noise it is meant to replace. Three known false positives
-# survive, all preferred over the miss that silencing them would buy:
-# `airflow_import_errors` reads import errors rather than importing, but
-# dropping "import" loses `gitbook_git_import`; `mysql_resolve_user_connectors`
-# is a query, but dropping "resolve" loses a review-thread resolve; and the
-# `merge_readiness_*` state tools are local, but dropping "merge" loses
-# `merge_pull_request`, which is irreversible.
+# becomes the noise it is meant to replace. Two known false positives
+# survive, both preferred over the miss that silencing them would buy:
+# `mysql_resolve_user_connectors` is a query, but dropping "resolve" loses a
+# review-thread resolve; and the `merge_readiness_*` state tools are local, but
+# dropping "merge" loses `merge_pull_request`, which is irreversible.
+# `airflow_import_errors` was the third (issue #1659: it asked on every prod
+# read). It is now matched as the noun phrase `import_errors` in
+# `_READONLY_LEAF_PHRASES`, so the verb "import" stays and `gitbook_git_import`
+# still reads as a write.
 #
 # The second row is this repository's own write vocabulary rather than a fresh
 # reading of the tool surface: `pr-claim-mutation-gate/spec.md` classifies
@@ -99,7 +101,8 @@ READONLY_SUBCOMMANDS = {
                       "describe", "blame", "shortlog", "ls-files", "ls-remote",
                       "cat-file", "grep", "branch"}),
     "gh": frozenset({"view", "list", "status", "checks", "diff", "search", "api"}),
-    "kubectl": frozenset({"get", "describe", "logs", "top", "explain", "api-resources"}),
+    "kubectl": frozenset({"get", "describe", "logs", "top", "explain", "api-resources",
+                          "config", "auth"}),
     "aws": frozenset({"sts"}),
     "docker": frozenset({"ps", "images", "inspect", "logs"}),
 }
@@ -465,6 +468,27 @@ def _git_options_are_readonly(argv: list[str], sub: str) -> bool:
     return True
 
 
+# `kubectl config` and `kubectl auth` each have write forms (`config
+# set-context`, `config use-context`, `auth reconcile`), so they are read-only
+# only under these second words, and only when that word directly follows.
+_KUBECTL_READ_VERBS = {
+    "config": frozenset({"view", "get-contexts", "get-clusters", "get-users",
+                         "current-context"}),
+    "auth": frozenset({"can-i", "whoami"}),
+}
+
+
+def _kubectl_verb_is_readonly(argv: list[str], sub: str) -> bool:
+    # `_subcommand` already placed `sub`; the first token equal to it that is
+    # followed by a bare word is read as the verb pair. A flag value spelled
+    # like the subcommand (`--context auth auth can-i`) only makes the check
+    # stricter: the pair read is then `auth auth`, which is not a read.
+    for i, tok in enumerate(argv[:-1]):
+        if tok == sub and not argv[i + 1].startswith("-"):
+            return argv[i + 1] in _KUBECTL_READ_VERBS[sub]
+    return False
+
+
 _ASSIGNMENT_RE = re.compile(r"[A-Za-z_]\w*=")
 _LOOP_VAR_RE = re.compile(r"[A-Za-z_]\w*")
 
@@ -507,7 +531,40 @@ def _segment_is_readonly(argv: list[str]) -> bool:
     if binary == "aws":
         # `aws sts get-caller-identity` and its siblings only.
         return any(a.startswith(_AWS_READ_PREFIXES) for a in argv[2:])
+    if binary == "kubectl" and sub in _KUBECTL_READ_VERBS:
+        return _kubectl_verb_is_readonly(argv, sub)
     return True
+
+
+# Options whose value is prose for a person to read: a commit message, a PR
+# body, the reason, note or evidence line a local tracker stores. A word such
+# as `prod-x` or `delete` inside such a sentence names nothing the call acts
+# on (issue #1659: tracker notes quoting a production name asked as
+# production calls and as irreversible ones). The set is closed on purpose. A
+# value that is a program -- `-c`, `-e`, `--command`, `--exec` -- or a target
+# -- `--context`, `--profile`, `--env` -- is absent, and only a value that
+# holds whitespace counts, because a target identifier never does.
+PROSE_FLAGS = frozenset((
+    "-m", "--message", "--body", "--title", "--reason", "--evidence", "--note",
+    "--notes", "--description", "--comment", "--summary", "--text",
+    "--question", "--recommend", "--choice",
+))
+_WHITESPACE_RE = re.compile(r"\s")
+
+
+def _is_prose_value(argv: list[str], i: int) -> bool:
+    tok = argv[i]
+    if not _WHITESPACE_RE.search(tok):
+        return False
+    if i > 0 and argv[i - 1] in PROSE_FLAGS:
+        return True
+    name, eq, _value = tok.partition("=")
+    return bool(eq) and name.startswith("--") and name in PROSE_FLAGS
+
+
+def drop_prose_values(argv: list[str]) -> list[str]:
+    """argv without the values of prose options (see `PROSE_FLAGS`)."""
+    return [tok for i, tok in enumerate(argv) if not _is_prose_value(argv, i)]
 
 
 # A substitution runs a command the outer binary's name says nothing about:
@@ -541,11 +598,19 @@ def bash_is_readonly(command: str) -> bool:
     return bool(segments) and all(_segment_is_readonly(s) for s in segments)
 
 
+# Verb-then-noun phrases that name a thing to read, removed from the leaf before
+# its tokens are matched. Closed: a phrase is added only for a tool whose
+# documented behaviour is a read.
+_READONLY_LEAF_PHRASES = ("import_errors",)
+
+
 def mcp_is_mutating(tool_name: str) -> bool:
     if not tool_name.startswith("mcp__"):
         return False
-    leaf = tool_name.rsplit("__", 1)[-1]
-    return bool(set(re.split(r"[_\-]", leaf.lower())) & MUTATING_MCP_VERBS)
+    leaf = tool_name.rsplit("__", 1)[-1].lower()
+    for phrase in _READONLY_LEAF_PHRASES:
+        leaf = re.sub(rf"(?:^|[_\-]){phrase}(?=$|[_\-])", "_", leaf)
+    return bool(set(re.split(r"[_\-]", leaf)) & MUTATING_MCP_VERBS)
 
 
 def is_mutating_call(tool_name: str, tool_input: dict) -> bool:

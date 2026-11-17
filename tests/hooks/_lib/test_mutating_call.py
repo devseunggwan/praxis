@@ -13,6 +13,7 @@ if str(LIB) not in sys.path:
 
 from _mutating_call import (  # noqa: E402
     bash_is_readonly,
+    drop_prose_values,
     is_mutating_call,
     mcp_is_mutating,
 )
@@ -175,6 +176,11 @@ def test_file_edit_tools_are_mutating(tool):
     ("mcp__github__list_labels", False),
     ("mcp__trino__trino_query", False),
     ("mcp__s3__s3_count_records", False),
+    # issue #1659: `import_errors` is a noun phrase, not the import verb
+    ("mcp__airflow__airflow_import_errors", False),
+    ("mcp__gitbook__gitbook_git_import", True),
+    ("mcp__airflow__airflow_import_errors_clear", True),
+    ("mcp__x__reimport_errors", False),
 ])
 def test_mcp_by_write_verb(tool, expected):
     assert mcp_is_mutating(tool) is expected
@@ -184,3 +190,35 @@ def test_mcp_by_write_verb(tool, expected):
 @pytest.mark.parametrize("tool", ["Read", "Grep", "Glob", "WebFetch"])
 def test_non_mcp_read_tools_are_not_mutating(tool):
     assert not is_mutating_call(tool, {})
+
+
+# issue #1659: kubectl `config` and `auth` are read-only only under their
+# read verbs, and only when that verb directly follows the subcommand.
+@pytest.mark.parametrize("command", [
+    "kubectl config view --minify",
+    "kubectl --context prod-x config get-contexts",
+    "kubectl config current-context",
+    "kubectl --context prod-x -n jobs auth can-i delete jobs",
+    "kubectl auth whoami",
+])
+def test_kubectl_config_and_auth_reads(command):
+    assert bash_is_readonly(command)
+
+
+@pytest.mark.parametrize("command", [
+    "kubectl config use-context prod-x",
+    "kubectl config set-context --current --namespace a",
+    "kubectl config",
+    "kubectl auth reconcile -f rbac.yaml",
+    "kubectl --context auth auth reconcile -f r.yaml",
+    "kubectl config -h view",
+])
+def test_kubectl_config_and_auth_writes(command):
+    assert not bash_is_readonly(command)
+
+
+def test_prose_values_are_dropped_only_after_prose_flags():
+    argv = ["tool", "--reason", "a prod-x b", "--context", "prod x", "--note=c d", "-m", "nospace",
+            "-c", "rm -rf /"]
+    assert drop_prose_values(argv) == ["tool", "--reason", "--context", "prod x", "-m", "nospace",
+                                       "-c", "rm -rf /"]
