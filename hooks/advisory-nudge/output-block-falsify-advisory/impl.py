@@ -847,7 +847,7 @@ def _segment_has_recursive_rm(argv: list[str]) -> bool:
 # `s3://` / `gs://`: object-store URIs are shared by construction.
 #
 # `namespace`: the kubectl surface `side-effect-scan`'s reason string already
-# tells the caller to re-confirm ("cluster/namespace 재확인").
+# tells the caller to re-confirm ("re-confirm the cluster/namespace").
 #
 # schema-qualified object name: a DDL object keyword followed by a DOTTED
 # identifier (`TABLE prod.users`, `TABLE analytics.events`). Qualification is
