@@ -44,7 +44,10 @@ PreToolUse hook (see [Relationship to enforcement](#relationship-to-enforcement)
 **Default order:** merge without `--delete-branch`, confirm `MERGED`, then
 remove the head worktree and branches. Removing the worktree first (which
 `--delete-branch` requires) loses it when the merge is then blocked or
-interrupted, and cuts off any other session working in it.
+interrupted, and cuts off any other session working in it. Run `gh pr merge` as
+its own command, with nothing chained before or after it: a merge gate scores
+the whole command line, so a `git worktree remove ... && gh pr merge` chain gets
+blocked as a unit and neither half runs.
 
 **Core principle:** run the post-merge cleanup steps as *separate* Bash calls,
 never collapsed into one `&&`-chain — a git hard error mid-sequence
@@ -103,7 +106,7 @@ fatal: 'main' is already used by worktree at /Users/.../<main-worktree>
    worktree, because the failing branch is the *head*, not the base. After
    removal, re-run `git worktree list` to confirm.
    - ⚠️ **The worktree is the agent session's own working folder** (Hermes desktop freezes a chat's cwd at creation; check the runtime `Current working directory` / the turn's workdir): removing it kills the session — every later message fails with "working folder no longer exists" before any model call. Still remove it if the cleanup is approved, but say in the same report that this chat must be moved (desktop **Move to project**) to a live folder before the next message, and name the folder (base worktree or the next issue's worktree).
-   - ⚠️ **Something live may still run from the worktree**: before removing it, check that no symlink points into it (an agent's plugin or skills directory linked to the worktree loads from it: `ls -la <load dir>`) and that no process has its cwd there (`lsof -d cwd 2>/dev/null | grep -F "<worktree path>"`, which also catches a subdirectory without the recursive walk of `+D`; `pgrep -fl <worktree path>` matches command lines only and misses a process that merely `cd`'d there). Stop or repoint those first and name them in the report.
+   - ⚠️ **Something live may still run from the worktree**: before removing it, check that no symlink points into it (an agent's plugin or skills directory linked to the worktree loads from it: `ls -la <load dir>`; a sibling worktree of the same repo whose `node_modules` or `.venv` is a symlink to this one breaks on removal, so run `find <worktrees parent> -maxdepth 2 -lname '*<worktree dir name>*'` and give each hit its own install first) and that no process has its cwd there (`lsof -d cwd 2>/dev/null | grep -F "<worktree path>"`, which also catches a subdirectory without the recursive walk of `+D`; `pgrep -fl <worktree path>` matches command lines only and misses a process that merely `cd`'d there). Stop or repoint those first and name them in the report.
    - ⚠️ **The `codex-review-wrap` companion leaves its app-server broker running with the reviewed worktree as cwd.** Find it (`lsof -a -p <pid> -d cwd` on the `app-server-broker.mjs serve --cwd <worktree>` process) and stop only that pid before removing the worktree — never a broad `pkill`.
    - ⚠️ **Submodule-containing worktree**: plain `git worktree remove` is
      rejected with `fatal: working trees containing submodules cannot be moved
@@ -251,7 +254,14 @@ Confirm before touching anything:
    steps 1–2 passed and the remote tip equals `headRefOid`
    (`git ls-remote origin refs/heads/<branch>`). Never delete any other ref,
    and stop on a tip mismatch. Run it with `-C <repo>` — the session cwd may
-   be the worktree you just removed.
+   be the worktree you just removed. Re-read `ls-remote` and `git branch
+   --list <branch>` right before each delete, even when you read them a
+   minute earlier: a sibling cleanup session or repo automation often deletes
+   both within a minute of `MERGED` despite `delete_branch_on_merge: false`,
+   and the delete then fails with `branch not found` / `remote ref does not
+   exist`. An empty read means already gone: skip the delete, find who removed
+   it (`gh api repos/<o>/<r>/issues/<N>/events --jq '.[]|select(.event=="head_ref_deleted")'`)
+   and report it as done-by-other, not as a failed step.
 5. Delete the scratch files you wrote for that PR (body drafts, anchor drafts).
 6. Run the repository's issue close-out convention if it has one (a tracker
    overlay skill may define it, e.g. a release comment on the parent issue),
@@ -260,7 +270,17 @@ Confirm before touching anything:
    path, `git branch --list <branch>` is empty, and — when step 4 ran —
    `git ls-remote origin refs/heads/<branch>` is empty.
 
-## When the base worktree has uncommitted edits
+## When the base worktree has uncommitted edits, or no worktree holds the base
+
+The same remote-only path below applies when `git worktree list` shows no
+worktree on the base branch (the main checkout sits on a detached HEAD or
+another branch): do not switch a shared checkout just to merge. Run the merge
+from a directory outside any repository and pin it to the head you verified:
+`gh pr merge <N> --repo <owner>/<repo> --squash --match-head-commit <sha>`
+(add `--admin` only when the merge briefing named it under Risk and the
+user approved that). The pin makes the merge
+refuse when a bot or another session pushed after your pre-merge probe,
+instead of merging an unverified head.
 
 A base worktree shared with other sessions can hold their uncommitted edits.
 Then `git pull origin <base>` refuses (`Your local changes to the following
