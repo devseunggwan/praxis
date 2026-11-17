@@ -119,8 +119,10 @@ from an empty diff says nothing about the reviewer.
 This step needs the `Agent` tool. Under Hermes Agent the equivalent is
 `delegate_task` with a goal that names the brief's path and the two resolved
 paths and tells the child to read the brief and return only its envelope; the
-child returned a bare (unfenced) envelope that the validator accepted, and its
-result arrives as a later message, so end the turn after dispatching. The
+child returned a bare (unfenced) envelope that the validator accepted. When
+the call runs in the background (it returns at once and the result arrives as
+a later message), end the turn after dispatching; when it returns the result
+in the same call, continue in this turn. The
 reviewer reads the working tree, so do not start anything that rewrites the
 repo's source files (a mutation matrix, a formatter) until its envelope is
 back; otherwise it may review a mutant instead of the change. On a
@@ -143,6 +145,9 @@ Agent(
          + "\n\n--diff <resolved diff path>\n--repo <resolved repo root>\n"
 )
 ```
+
+Under Hermes Agent, the `delegate_task` call of Step 2 is this delegation:
+make no `Agent` call, and take its envelope to the next step.
 
 One delegation per diff. The brief, not this file, is the source of truth for
 what the reviewer is told — the class definitions, the read budget, the tool
@@ -190,7 +195,7 @@ candidate gets proven by execution is the reader's decision.
 |------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `--diff` absent, or its path missing or empty                                      | Abort and report it. There is no fallback: this skill cannot create a diff file (Step 1)                                                                                                               |
 | `--repo` is not a directory                                                        | Abort with the path                                                                                                                                                                                    |
-| `Agent` tool unavailable on this host                                              | Stop with the unverified-host message (Step 2); never review inline                                                                                                                                    |
+| Neither `Agent` nor Hermes `delegate_task` available on this host                  | Stop with the unverified-host message (Step 2); never review inline. With `delegate_task`, take the Hermes path of Step 2                                                                              |
 | Reviewer wrapped the envelope in a ```` ```json ```` fence, or put prose around it | Strip the fence and extract the single JSON object; if there is not exactly one, report the raw output and stop. Observed on a third of live envelopes, so treat it as normal rather than as a failure |
 | Validator exits 1                                                                  | Report its violation lines verbatim; do not repair the envelope                                                                                                                                        |
 | Reviewer reports a class outside C1..C5                                            | The validator rejects it — report it as an out-of-list finding, which is a false positive                                                                                                              |
