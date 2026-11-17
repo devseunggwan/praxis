@@ -6,9 +6,13 @@ Check that the new base already contains everything the old one does:
 
 ```bash
 git diff --quiet <base-remote>/<new> <base-remote>/<old>; echo $?     # 0 = trees equal
+gh pr view <N> --json baseRefName,files,additions,deletions > <scratch>/before.json
 gh pr edit <N> --base <new>
-gh pr view <N> --json files,additions,deletions          # must be unchanged
+gh pr view <N> --json files,additions,deletions          # must equal before.json
 ```
+
+If any count moved, put the base back (`gh pr edit <N> --base <old>`, the
+`baseRefName` recorded before) and take the port path below.
 
 If the trees differ, retargeting drags unreleased base commits into the PR.
 When the user asked for the new base anyway (and force-push is off the table),
@@ -33,8 +37,11 @@ git -C ../<repo>-<slug>-<new> apply --3way --index <scratch>/net.patch
 - Prove the port is the same code before reusing any live proof:
   `git diff --cached --quiet <old-head> -- <PR paths>` (index vs old head) and
   `git diff --quiet $OLD <base-remote>/<new> -- <PR paths>` (the code the PR
-  sits on is the same on both bases). Both 0 lets the old head's live rows
-  carry over, cited as such; otherwise re-measure.
+  sits on is the same on both bases). Both 0 shows the PR's own code is the
+  same, not that the port behaves the same: a dependency or a neighbouring file
+  outside those paths can differ between the bases. So re-run the live
+  scenarios on the ported head; until then, cite the old head's live rows as
+  measured on the old head and grade the port's live claims `BLOCKED`.
 - Re-run red/green and the type gate on the new tree, commit once with a
   `Co-authored-by:` for the original author, push, open the new PR to
   `<new>` with `--assignee @me`, and state in its body that the repo's own

@@ -12,8 +12,12 @@ review nit.
   CAUGHT or SURVIVED, and restores the source in `finally`. Run the unmutated
   baseline under the same env so you know a CAUGHT is a test failure and not
   an import error. If the mutant still survives, look for a later line that
-  repeats the same filter. When one does, the mutant is equivalent: leave the
-  fixture out and answer the thread `Not fixed —` with the probe output.
+  repeats the same filter. A repeat alone does not make the mutant
+  equivalent: compare the original and the mutant across every observable
+  step between the two lines (a call, a write, a log line, an exception). Only
+  when none differs is it equivalent: leave the fixture out and answer the
+  thread `Not fixed —` with the probe output. When one differs, write the test
+  against that intermediate effect instead.
   A test that kills no mutant only adds noise for later readers.
 
 - Stage only the files you resolved. An in-progress merge commits only the
@@ -38,7 +42,9 @@ review nit.
   content into the index, not by hand-picking hunks.** Build the
   intermediate version in scratch (base plus only this commit's change, from
   `git show HEAD:<path>`), then `git update-index --cacheinfo
-  100644,$(git hash-object -w <scratch file>),<path>`. `git add -p` needs a
+  <mode>,$(git hash-object -w <scratch file>),<path>` with the mode the index
+  already holds (`git ls-files -s <path>`: `100755` for an executable hook
+  or script, which a hard-coded `100644` would strip). `git add -p` needs a
   TTY, and `git apply --cached --unidiff-zero` of a `-U0` diff with some
   hunks dropped places later pure insertions at shifted lines. Before each
   commit, prove the index builds: `git checkout-index -a -f

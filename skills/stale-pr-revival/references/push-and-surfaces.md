@@ -49,7 +49,11 @@ A live-proof worker that writes to a shared dev database snapshots every row
 it will touch to a file first, restores them at the end (status through the
 API, timestamps by SQL to the snapshot values) only where a row still holds
 the value the worker wrote (a row that differs was changed by someone else:
-leave it and report it), and proves the restore with a snapshot diff of 0
+leave it and report it). A snapshotted row that is gone after the run
+(deleted by the endpoint, or a cascaded child) is re-inserted from the
+snapshot only after checking its primary key is still free; when another
+writer has created a row under that key, leave that row and report the
+conflict. It proves the restore with a snapshot diff of 0
 over the restored rows plus an independent read; it deletes the preview and
 confirms the namespace is gone. Scope the snapshot from the write path, not
 from the tables the PR touches: read which rows the exercised endpoint can
