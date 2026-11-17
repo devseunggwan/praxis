@@ -422,19 +422,25 @@ Two traps seen under Hermes:
   your own test run or CI for test evidence.
 - **Redirect the companion's stdout to a scratch file and read the review
   from it.** `cd <worktree> && node <companion> review --base origin/<base>
-  > <scratch>/codex-<pr>-r<N>.out 2>&1; echo "exit=$?" >> <file>` in a
-  background terminal; the completion notification carries only shell noise
-  (e.g. `can't change option: zle`), and the findings start at the
-  `# Codex Review` line of the file (`sed -n '/^# Codex Review/,$p'`).
+  <forwarded arguments> > <scratch>/codex-<pr>-r<N>.out 2>&1; echo
+  "exit=$?" >> <file>` in a background terminal, where the forwarded arguments are the
+  ones Step 4b passes on (`--model`, a scope). The completion notification
+  carries only shell noise (e.g. `can't change option: zle`) and reports
+  success whatever `node` returned, so read the file's `exit=` line first: on
+  a nonzero status, report that status and the file's error text and stop.
+  Only after `exit=0` extract the findings, which start at the
+  `# Codex Review` line (`sed -n '/^# Codex Review/,$p'`).
 - **When the session's questions go through a decision queue** (the user
-  answers on an external decision board rather than in a `clarify` popup), 5i is one
+  answers on an external decision board rather than in a `clarify` popup), the
+  run has a recipient, so step 0 treats it as interactive, and 5i is one
   queued decision per round: list every surviving finding with its premise
   probe result and the planned fix, offer apply-all / a named subset with
   the rest recorded on the open issue / none, recommend one, and end the
   turn waiting. A finding the user already deferred in an earlier round is
   named as "already decided" in the next round's ask, not asked again.
-- **Count the round ceiling across the PR, not per finding** (default 3
-  rounds unless the user set one). When the last round still produced
+- **Count a round ceiling across the PR, not per finding.** 5j sets no cap
+  of its own (*No round cap* in the Step 5 reference); this applies when the
+  user set one. When the last round under that ceiling still produced
   findings, ask whether to fix them without another round, and carry the
   SHAs of those fix commits into the anchor's `Unverified` list and the
   merge ask as "not reviewed by codex".
