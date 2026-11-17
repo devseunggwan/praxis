@@ -116,8 +116,16 @@ from an empty diff says nothing about the reviewer.
 
 ### Step 2: Check the host can delegate
 
-This step needs the `Agent` tool. On a host that does not provide it — the Codex
-host is **UNKNOWN** here, never verified — **stop** and report
+This step needs the `Agent` tool. Under Hermes Agent the equivalent is
+`delegate_task` with a goal that names the brief's path and the two resolved
+paths and tells the child to read the brief and return only its envelope; the
+child returned a bare (unfenced) envelope that the validator accepted, and its
+result arrives as a later message, so end the turn after dispatching. The
+reviewer reads the working tree, so do not start anything that rewrites the
+repo's source files (a mutation matrix, a formatter) until its envelope is
+back; otherwise it may review a mutant instead of the change. On a
+host with neither — the Codex host is **UNKNOWN** here, never verified —
+**stop** and report
 `perf-leak-review: this host cannot delegate a read-only reviewer — unverified
 here`. Do not review the diff inline instead: the session that wrote the diff is
 the one context that cannot read it independently (CLAUDE.md, *the author-exempt
@@ -203,5 +211,11 @@ candidate gets proven by execution is the reader's decision.
   the PR verification anchor.
 - **Five classes only.** Algorithmic complexity, concurrency, and security are
   out of scope by construction.
-- **Claude host only.** The `Agent` delegation is verified on the Claude host;
-  the Codex host is UNKNOWN and the skill stops there rather than guessing.
+- **The diff bounds what is read.** A leak in unchanged code the diff calls
+  into (a loader that re-executes modules on every call, say) is not reported.
+  When the user asked for a leak check rather than a diff review, pair this
+  report with a measurement on both base and branch, so a pre-existing growth
+  is not missed and is not blamed on the change.
+- **Claude and Hermes hosts only.** The `Agent` delegation is verified on the
+  Claude host and its `delegate_task` equivalent on Hermes (Step 2); the Codex
+  host is UNKNOWN and the skill stops there rather than guessing.
