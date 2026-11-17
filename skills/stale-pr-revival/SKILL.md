@@ -105,8 +105,16 @@ one whose URL is the head repository (add it with `git remote add` when none
 is), `<base-remote>` the one for `<owner>/<repo>`; for a same-repository PR
 both are usually `origin`.
 
+Check the PR's `baseRefName` against the user's base-branch rule (their rule
+set may say "base is the production branch by default" even where the repo's
+own docs or default branch say `dev`) **before** Step 4. Merging the wrong
+base in first makes a later retarget impossible without dragging that base's
+unreleased commits along (Step 9), so a mismatch is a one-line question now,
+not a rebuild later.
+
 Done when: every review body and every thread is listed as a finding with its
-decoration, the head/base branch names are known, and the head repository,
+decoration, the head/base branch names are known and checked against the
+user's base rule, and the head repository,
 its write access, and `<head-remote>` / `<base-remote>` are recorded — or the
 revival stopped because the head is not writable.
 
@@ -411,9 +419,21 @@ API, timestamps by SQL to the snapshot values) only where a row still holds
 the value the worker wrote (a row that differs was changed by someone else:
 leave it and report it), and proves the restore with a snapshot diff of 0
 over the restored rows plus an independent read; it deletes the preview and
-confirms the namespace is gone. Ask it for a per-scenario table
+confirms the namespace is gone. Scope the snapshot from the write path, not
+from the tables the PR touches: read which rows the exercised endpoint can
+delete and list every table that cascades from them (`information_schema`
+foreign keys with `ON DELETE CASCADE`), because a re-insert by primary key
+restores the parent but not cascaded children outside the snapshot. Any job
+the scenario triggers (a dev DAG run that stays queued because the DAG is
+paused) is reported with its run id, then marked failed or left as the user
+decides, so it cannot fire later against restored rows. Ask it for a per-scenario table
 (PASS(live)/FAIL/BLOCKED, evidence line, head sha) so the anchor rows come
 straight from it.
+
+When the user's writing rules ban the em dash, the anchor needs none: the
+anchor gate reads `### Verification - `<sha>` (rev N)` and `Evidence N - `
+with a hyphen as well as with `—` (`anchor-comment-gate/impl.py`, the
+`[—-]` in its heading and evidence patterns).
 
 Done when: the push landed, the body no longer states a fact the new head
 contradicts, the change comment is posted, and CI on the new head has a final
@@ -429,11 +449,49 @@ gh pr edit <N> --base <new>
 gh pr view <N> --json files,additions,deletions          # must be unchanged
 ```
 
-If the trees differ, retargeting drags unreleased base commits into the PR —
-stop and report instead.
+If the trees differ, retargeting drags unreleased base commits into the PR.
+When the user asked for the new base anyway (and force-push is off the table),
+port the PR's **net change** onto a fresh branch instead:
+
+```bash
+# net change = diff from the base commit the head last merged in (its 2nd parent) to the head
+OLD=$(git -C <wt> show -s --format=%P <merge-commit> | cut -d' ' -f2)
+git -C <wt> diff --binary $OLD <head> > <scratch>/net.patch
+git worktree add ../<repo>-<slug>-<new> -b <head>-<new> <base-remote>/<new>
+git -C ../<repo>-<slug>-<new> apply --3way --index <scratch>/net.patch
+```
+
+- Generated files that conflict (test-duration maps, lockfiles) are rebuilt,
+  not hand-merged: load the new base's file, insert only the PR's keys, and
+  write it back in the base's exact formatting (key order, indent). Sorting
+  or re-serialising differently turns a 20-line change into a whole-file diff.
+  Check `git diff --cached --stat <base-remote>/<new>` matches the old PR's
+  net stat file by file. The same file conflicts again when `<new>` moves
+  before the merge: merge `<new>` in and rebuild it the same way in the
+  merge commit.
+- Prove the port is the same code before reusing any live proof:
+  `git diff --cached --quiet <old-head> -- <PR paths>` (index vs old head) and
+  `git diff --quiet $OLD <base-remote>/<new> -- <PR paths>` (the code the PR
+  sits on is the same on both bases). Both 0 lets the old head's live rows
+  carry over, cited as such; otherwise re-measure.
+- Re-run red/green and the type gate on the new tree, commit once with a
+  `Co-authored-by:` for the original author, push, open the new PR to
+  `<new>` with `--assignee @me`, and state in its body that the repo's own
+  docs name a different base and what back-merge that implies.
+- Comment on the old PR with the new URL and why (commits it would drag), and
+  update sibling PRs' bodies that reference it. Closing the old PR is the
+  user's call: ask, recommending close (two open PRs for one fix split the
+  review); never delete its branch. When closing, close with a reason
+  comment (`gh pr close <N> --comment "$(cat <scratch>/close.md)"`; `close`
+  has no `--body-file`): the replacing PR URL,
+  how many unreleased commits a plain retarget would drag, the net-change
+  range ported and the equality probe result, the back-merge that realigns
+  the old base, and that the branch is kept for its author. A bare close
+  leaves reviewers and the author guessing why and gets sent back.
 
 Done when: either the PR is on `<new>` with unchanged `files` / `additions` /
-`deletions`, or the tree difference is reported and nothing was edited.
+`deletions`, or a port PR on `<new>` exists with the equality probes recorded
+and the old PR carries a pointer comment.
 
 ### Step 10: Brief the merge
 
@@ -500,6 +558,31 @@ briefing afterwards means asking twice.
   it runs the image the deploy job wrote for the merge commit (tag or digest,
   read from the config repo's commit) with all replicas updated (a background script
   with a time ceiling) before any post-merge live check.
+- "Is the fix actually applied?" after deploy is three separate claims; grade
+  each: (1) running artifact = merge commit (image tag/replicas, the FE
+  host's production deployment for the merge sha); (2) the new read surface
+  answers on prod for a target known to hit it (e.g. a GET that now returns
+  the new field non-empty for the affected tenant and empty for a control);
+  (3) the changed write path ran. For (3), count organic prod requests to
+  the endpoint since rollout, then check whether any of them met the fix's
+  precondition (query the state the fix acts on for exactly those
+  targets), not just whether the fix's log line appeared. Zero qualifying
+  requests means UNVERIFIED, not PASS; say so and offer a controlled trigger
+  on the affected target as a decision (it is a prod write), with the
+  one-line recovery if it fails. Once approved, fire it through the product
+  UI in the user's logged-in browser (it exercises FE and BE in one pass)
+  and grade it with three readings that must agree: the fix's own log line
+  naming the target ids, the target row's `updated_at` equal to that log
+  timestamp with the preserved value, and sibling rows of the same object
+  unchanged. Then re-read the row after the job the trigger started
+  finishes: the job may write the same column again, so the request-time
+  PASS is not the final one.
+- When the production base requires approvals your account cannot bypass
+  (`viewerCanMergeAsAdmin` false), look for the repo's own merge slash
+  command workflow (`.github/workflows/*merge*`, e.g. a `/merge force`
+  comment) before declaring the merge blocked; using it on the user's
+  explicit merge instruction is the merge, so it still needs the briefing
+  and per-PR approval, and the report says the required review was skipped.
 - A post-merge live check "on <named internal account>" needs two probes
   before planning: that your login can act on that tenant (membership/owner
   rows, not just that it exists), and that the target object is in the
@@ -517,6 +600,37 @@ briefing afterwards means asking twice.
   judging. Compare the merged `headRefOid` with the head you verified — the
   user or a review pipeline may have pushed after your report — and list any
   extra commits (`git log <verified>..<merged-head>`) in the post-merge note.
+- Re-read unresolved review threads right before each merge command, even
+  with every check green: a review bot posts a new round on the head your
+  last base merge produced, and `mergeStateStatus` stays `BLOCKED` on it.
+  Fix it on the branch (red/green the new test), reply `Fixed — <sha>`,
+  resolve, and wait for both CI and the bot's verdict on that head (its
+  approval reaction or completed summary for the new sha) before merging:
+  the bot reviews every push, so the fix commit itself can draw the next
+  finding, and a green-CI merge lands it unread.
+- A blanket instruction covering several PRs ("close the old one and merge
+  now") approves the intent, not each merge command. The merge gate still
+  wants the six-part briefing in the reply and a per-PR approval answer, so
+  for every PR after the first, write its briefing in the same reply that
+  reports the previous merge and ask for that PR alone. Issuing the merge
+  command without the briefing gets blocked and costs a round trip.
+- When the PR fixes a defect that reverts a manual data correction (a
+  toggle, a flag, a disabled row), re-read the corrected rows once the fix
+  runs in production. Any user action that hit the old code between the
+  correction and the rollout has reverted it silently. When a row flipped,
+  find the request in the logs by its `updated_at` window (endpoint, actor,
+  run id), report it at the top, and ask before re-applying the correction:
+  that is a production write, and sibling rows the same request flipped may
+  have no recorded prior value.
+- When one required job fails right before the merge, read its assertion
+  from the check-run annotations
+  (`gh api repos/<o>/<r>/check-runs/<job id>/annotations`): they are there
+  the moment the job fails, while `gh run view --log-failed` refuses until
+  the whole run finishes and the raw job-log API stops on escape sequences.
+  Call it unrelated only with two probes: the failing test's path is absent
+  from `git diff --name-only <base-remote>/<base>...HEAD`, and the base's
+  recent CI runs are green. Then `gh run rerun <run id> --failed` and merge
+  on a green rerun; a second failure is treated as the PR's to fix.
 - Re-read each revived PR's `state` before listing it as "awaiting approval"
   in a later status: the user often closes revived PRs as no longer needed
   (a migration made them moot) without telling this session, and a stale
@@ -533,7 +647,7 @@ run is reported.
 | `git stash` fails with `could not write index` mid-merge | Do not retry and do not `stash pop`; stage the resolved files and commit the merge |
 | Push rejected as non-fast-forward | Someone pushed meanwhile: fetch and merge `<head-remote>/<head>` in; never force |
 | `git push` exits non-zero for another reason (timeout, hook output) | Compare `git ls-remote <head-remote> refs/heads/<head>` with `git rev-parse HEAD` before retrying or reporting a failure — the push often landed |
-| Retarget trees differ | Stop (Step 9); report which commits would be dragged in |
+| Retarget trees differ | Report which commits would be dragged in; if the user still wants the new base, port the net change to a fresh branch (Step 9) |
 | Required check fails only on a body/issue-link rule | Read that workflow for its documented bypass ([`references/bot-dependency-prs.md`](references/bot-dependency-prs.md), Step 4) |
 | `gh` not authenticated for the repo | Abort with `gh auth status` output |
 
