@@ -1122,6 +1122,14 @@ run_case_detail "own-org private repo proceeds with the ack marker" \
   'gh pr comment 1 --repo other/target --body-file /tmp/a.md' \
   "private or internal repo, with the"
 
+run_case_detail "visibility probe names the write's host" \
+  'gh pr comment 1 --repo other/target --body-file /tmp/a.md' \
+  "since a bare \`<owner>/<repo>\` reads"
+
+run_case_detail "the ack is taken with one write per call" \
+  'gh pr comment 1 --repo other/target --body-file /tmp/a.md' \
+  "with that write alone in its own call"
+
 run_case "gh api POST issue comments (method implied by a field)" ask \
   'gh api repos/owner/repo/issues/42/comments -f body=hi'
 

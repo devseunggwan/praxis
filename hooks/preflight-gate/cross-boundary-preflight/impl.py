@@ -917,7 +917,11 @@ def _build_checklist(
         "     visibility confirmed (`gh repo view <repo> --json visibility`),",
         "     needs no per-action approval; the task's go-ahead covers it, so",
         "     re-run with `# cross-boundary:ack`. This hook cannot see",
-        "     visibility, which is why it asks there too.",
+        "     visibility, which is why it asks there too. Probe the host the",
+        "     write goes to: with GH_HOST or a host-qualified GH_REPO, pass",
+        "     `<host>/<owner>/<repo>`, since a bare `<owner>/<repo>` reads",
+        "     github.com. The ack clears every write in the call, so take the",
+        "     exception with that write alone in its own call.",
         "",
     ]
     if show_caller_evidence:

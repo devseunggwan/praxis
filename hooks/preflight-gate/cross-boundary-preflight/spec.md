@@ -207,6 +207,14 @@ content isolation`, which no rule file carries. Item ③ and the heredoc block
 message name a file in the caller's scratch directory rather than `/tmp`,
 which some hosts forbid (issue #1659).
 
+Two limits of that exception are stated in item ① too. The probe must read
+the host the write goes to: the target line drops the host of a host-qualified
+`GH_REPO`, and a bare `gh repo view <owner>/<repo>` reads github.com, so a
+github.com result could otherwise clear a write to an enterprise host. And the
+marker clears every write in the call, not only the one the checklist names,
+so a private-repo write takes the exception alone in its own call. Scoping the
+marker per write would need the hook to verify each target, which it cannot.
+
 #### IMPLICIT_REPO_WRITE — ask (permissionDecision: "ask")
 
 Same subcommand set as `CROSS_REPO_WRITE`, no `--repo`/`-R` flag. The target
