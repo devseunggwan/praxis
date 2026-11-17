@@ -32,12 +32,16 @@ scope is the diff's added tests. Drop, in one `test(...)` commit, cases that:
 - (g) pin lines the PR's diff does not touch, even inside a changed file
   (a pre-existing global filter in a template whose gate the PR edits): the
   matrix row that kills it is a mutant of unchanged code, so it is out of the
-  PR's scope. Say in the drop table that the line was untested before the PR
-  too, rather than leaving it as a silent coverage loss;
+  PR's scope, provided no test you keep still guards that line: when the
+  test being dropped is its only guard, keep it. Say in the drop table that
+  the line was untested before the PR too, rather than leaving it as a
+  silent coverage loss;
 - (h) feed an input whose branch the code treats like another input (a
   `None` key next to an unregistered key when the lookup already defaults):
-  when the mutant that removes the special-case guard survives every test,
-  the case and the guard are both equivalent. Drop the case, simplify the
+  a surviving mutant that removes the special-case guard shows only that no
+  test tells them apart. Read the code path for both inputs first; when they
+  give the same observable result for every input the guard covers, the case
+  and the guard are equivalent. Drop the case, simplify the
   test helper that built it, and mention the redundant guard in the report
   instead of writing a test for it.
 
@@ -147,7 +151,11 @@ the owner decides with the coverage cost in view:
    the flaky assertion removed, under the timing probe, and (b) every other
    test in the file and its siblings with the whole test deselected. If (a)
    passes the probe and catches the mutant while (b) all pass, the test is
-   the sole guard of that behavior.
+   the sole guard of that behavior. Do the same for the flaky assertion
+   itself (it may be the test's only assertion): write a mutant that breaks
+   what it pins, run the rest of the suite with the test deselected under a
+   controlled clock (the timing probe, or a frozen time source), and record
+   whether anything else catches it.
 4. **Ask before narrowing or widening.** Keeping the test and dropping only
    the flaky assertion is a scope change from "delete": put both options
    (delete whole test / drop the flaky assertion) with the step-3 numbers to
