@@ -92,8 +92,10 @@ def delegate_tasks(args: dict) -> List[dict]:
     """One Claude `Agent` input per spawned Hermes task.
 
     `delegate_task` spawns a batch; Claude spawns each subagent with its own
-    `Agent` call. Fan-out gates count those calls, so a batch of N becomes N
-    inputs. Control actions (`list` / `steer` / `stop`) spawn nothing.
+    `Agent` call, so a batch of N becomes N inputs and every per-call gate sees
+    each task. Fan-out gates read the tasks of one call as one delegation (ids
+    from `tool_use_id`). Control actions (`list` / `steer` / `stop`) spawn
+    nothing.
 
     The batch is read as Hermes's `_normalize_task_list` reads it
     (`tools/delegate_tool_tasks.py`): `tasks` sent as a JSON string is parsed,
@@ -326,7 +328,8 @@ def tool_use_id(call_id: str, index: int) -> str:
     """Claude tool_use id for the `index`-th Claude call one Hermes call stands for.
 
     The transcript and the PreToolUse payload must agree on it: gates find the
-    gated call's own block in the rebuilt transcript by this id.
+    gated call's own block in the rebuilt transcript by this id, and
+    `fan-out-scope-gate` reads a `#<index>` suffix as "same Hermes call".
     """
     return call_id if index == 0 else f"{call_id}#{index}"
 

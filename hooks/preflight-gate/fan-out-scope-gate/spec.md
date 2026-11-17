@@ -41,6 +41,7 @@ to the person who wrote it rather than asking the agent to grade its own scope.
 | Marker comment (`# fan-out-mapped:`, any comment text) | `ask` — no agent-attachable bypass exists by design |
 | A prior target whose `tool_result` is `is_error` | not counted — no worker started |
 | The gated call's own `tool_use`, already in the transcript | not counted, nor anything after it in the turn |
+| Earlier tasks of the gated call's own host call (one multi-task `delegate_task`) | not counted — one batch is one delegation |
 | `--help` / `--dry-run` rehearsal | not counted, and not gated |
 | Command text inside `echo` / `printf` | not counted — `argv[0]` is the echo, not `cmux` |
 | Any other Bash command | silent pass-through |
@@ -112,11 +113,22 @@ it — later targets of the same message, such as the remaining tasks of one
 multi-task delegation — have not started a worker yet. Results are still read
 from the whole turn, because a host that runs one message's calls in sequence
 stores an earlier call's result after the message; a failed earlier sibling
-stays uncounted. Earlier blocks of the same message
-still count, so the second task of one delegation asks as target #2. A
-`PreToolUse` probe under Claude Code (`claude -p`, 2.1.312) found the gated
-call absent from the transcript at hook time, so there the turn is counted
-whole, as before.
+stays uncounted. Earlier blocks of the same message from a different call
+still count. A `PreToolUse` probe under Claude Code (`claude -p`, 2.1.312)
+found the gated call absent from the transcript at hook time, so there the
+turn is counted whole, as before.
+
+**One multi-task delegation is one target.** The Hermes adapter renders one
+`delegate_task` call with N tasks as N `Agent` blocks, ids `<id>`, `<id>#1`,
+… (`_hermes.tool_use_id`). The tasks of that call are not counted against
+each other: the model chose the whole batch at once, in one call. Counting
+them made every multi-task delegation an approval prompt from its second
+task, and in a session with no human attached, a turn opened by a host
+notification then waited the host's full approval timeout on that prompt. A
+later host call in the same turn still counts every task started before it,
+so a second delegation asks with the ordinal of the workers already running.
+Claude Code ids carry no `#<n>` suffix, so each `Agent` call stays its own
+host call there.
 
 ## Response
 
@@ -155,6 +167,9 @@ in the table. `merge-gate` (approval check) states the same contract for
   not a false positive: the gate cannot tell a justified third worker from an
   unjustified one, which is why it asks instead of blocking. The tuning lever
   is the threshold.
+- **One Hermes `delegate_task` batch passes whole.** Its tasks count as one
+  target, so a batch that by itself widens the request (three tasks for one
+  named item) is not asked. A second delegation in the same turn is.
 - Only `Bash` workspace creation and the `Agent` tool are counted. Worktree
   creation and other delegation-adjacent commands are out of scope — they are
   routinely multi-target in ordinary work, so counting them would spend the

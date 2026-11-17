@@ -131,6 +131,21 @@ def command_is_multi_target(command: str) -> bool:
     return bool(_LOOP_RE.search(command) or _FUNCDEF_RE.search(command))
 
 
+def _host_call(tool_use_id: str) -> str:
+    """The host call a tool_use id belongs to.
+
+    A host that renders one of its calls as several Claude calls (the Hermes
+    adapter's multi-task `delegate_task`) ids them `<id>`, `<id>#1`, `<id>#2`
+    (`_hermes.tool_use_id`). Claude Code ids carry no `#`, so each is its own
+    host call.
+    """
+    match = _BATCH_SUFFIX_RE.match(tool_use_id)
+    return match.group(1) if match else tool_use_id
+
+
+_BATCH_SUFFIX_RE = re.compile(r"(.+)#[1-9][0-9]*\Z")
+
+
 def count_targets_in_turn(turn: list[dict], current_id: str | None = None) -> int:
     """Number of SUCCESSFUL delegation-target creations already in this turn.
 
@@ -148,11 +163,17 @@ def count_targets_in_turn(turn: list[dict], current_id: str | None = None) -> in
     one message's calls in sequence stores an earlier call's result after the
     message. Under Claude Code the call was absent at hook time in a
     `claude -p` probe, so every tool_use in the turn stays a candidate.
+
+    Earlier blocks of the gated call's own host call (the tasks before it in
+    one multi-task delegation) are not candidates either: the batch is one
+    delegation the model wrote at once, so it counts as one target and only a
+    later host call adds to the count.
     """
     candidates: list[str] = []
     untracked = 0
     result_is_error: dict[str, bool] = {}
     reached_current = False
+    own_call = _host_call(current_id) if current_id else None
 
     for ev in turn:
         msg = ev.get("message", {})
@@ -190,6 +211,8 @@ def count_targets_in_turn(turn: list[dict], current_id: str | None = None) -> in
                 continue
             tid = block.get("id")
             if isinstance(tid, str):
+                if own_call is not None and _host_call(tid) == own_call:
+                    continue
                 candidates.append(tid)
             else:
                 untracked += 1
