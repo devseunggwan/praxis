@@ -244,8 +244,28 @@ candidate, marked unverified until the code is read.
 ## Runner-type noise
 
 On a self-hosted pool with mixed instance types, compare CI runs only on the
-same type. A suite can run ~20% slower on the previous instance generation,
-which swamps a 1% change. When the expected gain is below that noise, also
+same type. The same shard can run 1.2x to 1.9x slower on an older instance
+generation (m5 vs m8i measured), which swamps a 1% change and often is the
+whole answer to "why is CI slow today": the slowest leg sets wall time, and the
+slowest leg is usually whichever one drew the old type.
+
+Before blaming tests or the shard planner for an unbalanced run, pair every
+leg with its instance type and its pytest summary seconds:
+
+```bash
+for j in $(gh api "repos/<o>/<r>/actions/runs/<id>/jobs?per_page=50" -q '.jobs[]|select(.name|startswith("test ("))|.id'); do
+  gh run view --repo <o>/<r> --job $j --log > leg.log
+  printf '%s %s %s\n' "$(grep -m1 -oE 'test \([0-9]+\)' leg.log)" \
+    "$(grep -m1 -oE 'Instance type: [a-z0-9.-]+' leg.log)" "$(grep -oE ' in [0-9.]+s \(' leg.log | tail -1)"
+done
+```
+
+Do it on 2-3 runs (one all-new-type run is the positive control). Also compare
+the per-file timing artifacts of two runs with the same file set: a uniform
+ratio across every file means runner speed, not test changes. A timing artifact
+recorded on a mixed pool carries the slow type's seconds into the next plan.
+The fix lever is the pool's instance mix (drop the old generation), which
+beats any per-test change on wall time. When the expected gain is below that noise, also
 time the touched files alone, base vs branch alternating, 3 reps each, and
 state that the full-suite gain is below CI noise. Single local full-suite runs
 swing as much (the same tree measured 113 s and 196 s back to back) —
