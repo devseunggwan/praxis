@@ -1,12 +1,12 @@
 ---
 name: worktree-merge-cleanup
 description: >
-  On-demand home for the pre-merge worktree precondition and the unified
-  post-merge cleanup sequence — how to run `gh pr merge --squash` from the
-  base-branch worktree and remove the head worktree only after `MERGED`, the
-  submodule `--force` caveat (never
+  Merge a PR from the right worktree and clean up after it: run
+  `gh pr merge --squash` from the base-branch worktree, remove the head
+  worktree only after `MERGED`, use the submodule `--force` path (never
   `git submodule deinit` a linked worktree: it strips the shared submodule
-  url), the squash-ancestry stale-HEAD guard, and the no-`&&`-chain rule.
+  url), guard against the squash-ancestry stale HEAD, and keep each cleanup
+  step its own command.
 when_to_use: >
   Triggers on "merge cleanup", "post-merge cleanup", "worktree cleanup",
   "delete-branch merge", "squash-ancestry", "pre-merge worktree", "머지 후 정리",
@@ -154,7 +154,7 @@ fatal: 'main' is already used by worktree at /Users/.../<main-worktree>
    a **separate** Bash call, never chained (a failure in one step must not
    short-circuit the rest): `git worktree remove <path>`, then
    `git branch -D <branch>`, then `git worktree prune` (snapshot and dry-run
-   it first — see [prune is repository-wide](#prune-is-repository-wide--snapshot-before-running-it)),
+   it first — see [prune is repository-wide](references/prune.md)),
    then `git pull origin <base>`.
 5. **Squash-ancestry stale HEAD guard (post-merge sync mandatory)**: immediately
    after `gh pr merge --squash` (with or without `--delete-branch`), run
@@ -167,153 +167,25 @@ fatal: 'main' is already used by worktree at /Users/.../<main-worktree>
 
 ## When the user merged out-of-band
 
-A repository bot can also merge the PR once approval and checks are green, so your own `gh pr merge` prints `already merged` (exit 0). Treat that as an out-of-band merge: read `gh pr view <N> --json state,mergedAt,mergedBy,mergeCommit` and report who merged it. The user's approval to merge still covers the cleanup below.
-
-When the user reports "merged" after merging themselves (a `/merge` PR-comment
-slash command, the web UI), the cleanup below deletes things: the head
-worktree, the local branch, scratch files, the remote head branch, and it may
-post an issue close-out. A merge report is not an instruction to delete. Run
-the whole sequence without asking only when the user's own instructions
-(CLAUDE.md, AGENTS.md, or agent memory) record a standing approval for
-post-merge cleanup. Without one, run the read-only checks (steps 1–2), then
-ask once for the whole set, naming the worktree path, the branch, and the
-close-out action. Either way, stop and report when a precondition below fails.
-Confirm before touching anything:
-
-1. `gh pr view <N> --json state,mergedAt,mergeCommit,headRefOid,isCrossRepository`
-   — a slash-command merge
-   runs as a workflow, so the PR still reads `OPEN` for tens of seconds. If it
-   is `OPEN`, find that run (`gh run list --workflow <merge-workflow> --limit 3`)
-   and `gh run watch <id> --exit-status`, then re-read the state. Never start
-   cleanup on `OPEN`, and never tell the user "that PR is not merged" from a
-   single read taken within a minute of their report: wait ~30 s and re-read
-   first — when they merged several PRs back to back, the last merge can land
-   seconds after your first read, and a false "you didn't merge it" sends them
-   chasing a non-problem.
-2. Confirm the merge commit is on the base: `git fetch origin --prune` then
-   `git merge-base --is-ancestor <mergeCommit> origin/<base>`.
-3. Remove the head worktree and local branch as separate calls (checklist item 2),
-   deleting the local branch only when its tip (`git rev-parse <branch>`)
-   equals `headRefOid`, or is an ancestor of it
-   (`git fetch origin <branch>` then
-   `git merge-base --is-ancestor <branch> origin/<branch>` exit `0` with
-   `origin/<branch>` equal to `headRefOid`). The ancestor case is common when a
-   remote review bot or a "merge base into branch" pushed commits after your
-   last local commit: the local branch holds nothing the merged PR lacks, so
-   deleting it loses nothing — say so in the report.
-   A tip that is neither equal to nor an ancestor of `headRefOid` is often
-   only an unpushed `git merge origin/<base>` made locally while the PR's
-   remote branch got its own base merge (`gh pr update-branch`): check
-   `git log --no-merges <headRefOid>..<branch>` is empty and
-   `git cherry -v <headRefOid> <branch>` prints nothing, and merging the
-   local tip into `headRefOid` changes nothing
-   (`git merge-tree --write-tree <headRefOid> <branch>` prints the same tree
-   as `git rev-parse <headRefOid>^{tree}`; the first two checks skip merge
-   commits, and a conflict-resolution edit lives in one) — then the extra
-   commits carry no content of their own; report that evidence and ask once
-   rather than deleting under the standing approval.
-   A dirty worktree (`git -C <path> status --porcelain` non-empty) or a tip
-   with non-merge commits the PR never saw is the stop condition: report it
-   and leave it. Before calling a
-   dirty file stale, check whether another session is mid-run in that worktree
-   (`lsof -d cwd 2>/dev/null | grep -F "<path>"`, `pgrep -fl "<path>"` for a
-   script given the path as an argument): a pipeline verifier or mutation test
-   stages an old version of a file on purpose and restores it when it ends.
-   Never revert or stash it yourself; tell that session the PR merged, ask it
-   to restore and leave the worktree clean, and retry cleanup after it exits. `--porcelain`
-   alone does not list ignored files, and `git worktree remove` deletes them
-   with the directory (a `.env`, local config, a scratch dataset). Also run
-   `git -C <path> status --porcelain --ignored` and read its `!!` lines: when
-   any of them is not a regenerable dependency or build cache
-   (`node_modules/`, `.venv/`, `__pycache__/`, `.pytest_cache/`, `dist/`,
-   `build/` and the like), stop and report the list instead of removing.
-   Files a local test run wrote into the worktree (an Airflow `airflow.db`, an
-   empty `logs/`, a coverage file) count as regenerable only when every file
-   in them is newer than the worktree's creation (the worktree's `.git` file):
-   `find <artifact> -type f ! -newer <path>/.git` prints nothing — say so in
-   the report; anything it prints was there before you and stays a stop
-   condition. A `.env` byte-identical to the main checkout's
-   (`cmp <path>/.env <main checkout>/.env` exit `0`) is a copy, also
-   regenerable. When every `!!` line falls in these classes, remove with
-   `--force` under the standing approval without asking — users who run many
-   worktrees read a "may I delete the leftovers?" question as the cleanup
-   leaving debris behind, and it costs a round trip each time.
-   An ignored *source-looking* directory (`providers/<x>/`) that `!!` lists
-   whole is often a package whose sources the base merge deleted while its
-   `__pycache__/` stayed: `find <dir> -type f -not -path '*/__pycache__/*'`
-   printing nothing makes it a cache, not user data. When
-   `git worktree remove` succeeded,
-   skip `git worktree prune` — there is nothing of yours left to prune, and the
-   prune is repository-wide (see below).
-4. The remote head branch survives when the repo has
-   `delete_branch_on_merge: false` (`gh api repos/<o>/<r> --jq .delete_branch_on_merge`)
-   and nobody passed `--delete-branch`. When `isCrossRepository` is `true` the
-   head branch lives in a fork, not in `origin`: delete nothing and report the
-   fork branch as remaining. Otherwise, under a standing approval or the
-   user's answer, run `git -C <repo> push origin --delete <branch>` after
-   steps 1–2 passed and the remote tip equals `headRefOid`
-   (`git ls-remote origin refs/heads/<branch>`). Never delete any other ref,
-   and stop on a tip mismatch. Run it with `-C <repo>` — the session cwd may
-   be the worktree you just removed. Re-read `ls-remote` and `git branch
-   --list <branch>` right before each delete, even when you read them a
-   minute earlier: a sibling cleanup session or repo automation often deletes
-   both within a minute of `MERGED` despite `delete_branch_on_merge: false`,
-   and the delete then fails with `branch not found` / `remote ref does not
-   exist`. An empty read means already gone: skip the delete, find who removed
-   it (`gh api repos/<o>/<r>/issues/<N>/events --jq '.[]|select(.event=="head_ref_deleted")'`)
-   and report it as done-by-other, not as a failed step.
-5. Delete the scratch files you wrote for that PR (body drafts, anchor drafts).
-6. Run the repository's issue close-out convention if it has one (a tracker
-   overlay skill may define it, e.g. a release comment on the parent issue),
-   under the same approval rule as step 4.
-7. Verify and report in one status: `git worktree list` no longer shows the
-   path, `git branch --list <branch>` is empty, and — when step 4 ran —
-   `git ls-remote origin refs/heads/<branch>` is empty.
+When the user merged the PR themselves (a `/merge` comment, the web UI) or a
+repository bot merged it (your own `gh pr merge` prints `already merged`), a
+merge report is not an instruction to delete: run the read-only checks and ask
+once for the whole set, unless the user's own instructions record a standing
+approval for post-merge cleanup. Confirm `MERGED` and that the remote head tip
+equals the PR's `headRefOid`, re-read the branch right before each delete (an
+empty read means someone else already deleted it), and check sibling
+worktrees' symlinks into the worktree being removed. Full procedure: [references/out-of-band-merge.md](references/out-of-band-merge.md).
 
 ## When the base worktree has uncommitted edits, or no worktree holds the base
 
-The same remote-only path below applies when `git worktree list` shows no
-worktree on the base branch (the main checkout sits on a detached HEAD or
-another branch): do not switch a shared checkout just to merge. Run the merge
-from a directory outside any repository and pin it to the head you verified:
+When no worktree holds the base, or the base worktree holds other sessions'
+uncommitted edits (`git pull` refuses), do not switch, stash, discard or commit
+anything there: merge from a directory outside any repository with
 `gh pr merge <N> --repo <owner>/<repo> --squash --match-head-commit <sha>`
-(add `--admin` only when the merge briefing named it under Risk and the
-user approved that). The pin makes the merge
-refuse when a bot or another session pushed after your pre-merge probe,
-instead of merging an unverified head.
-
-A base worktree shared with other sessions can hold their uncommitted edits.
-Then `git pull origin <base>` refuses (`Your local changes to the following
-files would be overwritten by merge`, or the same for untracked files), and `gh pr merge` run from that worktree
-fails its local sync. Those edits are not yours to stash, discard, or commit.
-
-1. Run the merge remotely only: `cd` somewhere outside the repository and call
-   `gh pr merge <N> --repo <owner>/<repo> --squash`. Outside a repository gh
-   has no local checkout to sync, so it only merges. After it reads
-   `MERGED`, remove the head worktree as above, and delete the remote head
-   branch when `delete_branch_on_merge` is off (`git push origin --delete
-   <branch>`, after its remote tip equals `headRefOid`).
-2. Confirm the local base has no commits of its own:
-   `git -C <base-worktree> fetch origin --prune`, then
-   `git -C <base-worktree> merge-base --is-ancestor HEAD origin/<base>`
-   (exit `0`). On any other exit, stop and surface it.
-3. Move the ref and bring in the merged files, keeping their edits:
-   `git -C <base-worktree> reset --keep origin/<base>`. It updates every file
-   the merge changed and leaves every other uncommitted edit where it is; a
-   staged edit stays as an unstaged one. It refuses as a whole, changing
-   nothing, when a dirty file is one the merge changed or an untracked file
-   sits where the merge adds one (`error: Entry '<file>' not uptodate` /
-   `Untracked working tree file '<file>' would be overwritten`, exit 128).
-   On that refusal, stop: report the file it named and that the checkout
-   stays behind `origin/<base>` by N commits. When that checkout is also a
-   live load path (an agent's skills or plugin directory), whatever loads
-   from it keeps the pre-merge version until the owner of those edits syncs
-   it. Never fall back to `--mixed` (it moves the ref but leaves every merged
-   file at its pre-merge content, which then shows as an edit reverting the
-   merge) or to `--hard` (it discards their edits).
-4. Delete the local head branch (`git -C <base-worktree> branch -D <branch>`, after checking its
-   tip equals the PR's `headRefOid`) and read `git status` to report which
-   edits remain.
+(`--admin` only when the merge briefing named it under Risk and the user
+approved that). Then confirm the local base has no commits of its own and move
+it with `git reset --keep origin/<base>`, never `--mixed` or `--hard`; on a
+refusal, stop and report the file it named. Full procedure: [references/base-worktree-busy.md](references/base-worktree-busy.md).
 
 ## Unified post-merge cleanup sequence
 
@@ -358,134 +230,19 @@ belonged to someone else.
 
 ### `prune` is repository-wide — snapshot before running it
 
-`git worktree prune` takes no target. It drops the registration of **every**
-unlocked worktree whose directory is gone, including worktrees belonging to
-other issues that you never touched. Two bounds on that blast radius: it only
-removes registrations for directories that are already missing — it never
-deletes a live worktree — and a registration held by `git worktree lock`
-survives even when its directory is gone. Neither bound is visible after the
-fact unless you captured evidence first.
-
-- **Before**: `git worktree list --porcelain` records every registration and
-  marks the already-missing, unlocked ones `prunable` (a locked entry shows
-  `locked` instead and is not a prune target). Park it at
-  `$(git rev-parse --path-format=absolute --git-common-dir)/wt-before-<N>.txt`,
-  substituting the PR number you are cleaning up for `<N>`. Not a shell
-  variable and not a bare `wt-before.txt`: the steps run as separate Bash calls
-  so a `snap=$(mktemp)` variable is gone by the next call, while the common dir
-  recomputes to the same path every time — and the `<N>` suffix keeps two
-  concurrent cleanups in the same repository from overwriting each other's
-  baseline. `--path-format=absolute` is not optional: a bare
-  `git rev-parse --git-common-dir` answers `.git` in the main worktree and
-  `../.git` one directory down, so without it the snapshot and the diff can
-  resolve to different files. This snapshot is
-  the only thing that later answers "was that sibling worktree already gone, or
-  did I break it?" — without it the question is unanswerable, which is worse
-  than the removal itself. Write the **unfiltered** porcelain output: the
-  `prunable` and `locked` lines are precisely the forensic evidence, and a
-  snapshot filtered at write time cannot answer the question it exists for.
-- **Dry run**: `git worktree prune --dry-run -v` (`-n` / `-v`, confirmed via
-  `git worktree prune -h`) prints what it would remove without touching
-  anything. If anything other than your own worktree appears, stop and surface
-  it to the user before running the real prune.
-- **After**: diff `git worktree list --porcelain` against the snapshot — the
-  same format on both sides, or the comparison is meaningless. Filter both
-  through `grep '^worktree '` **at compare time**: the question is only which
-  *registrations* vanished, and an unfiltered diff also reports the `HEAD` /
-  `branch` lines that any parallel worktree changes by committing or switching,
-  which reads as a removal that never happened. The existing `git branch | grep` check only
-  proves *your* branch is gone; a sibling registration can disappear and still
-  pass it.
-
-Recovering a registration removed this way is out of scope here — see
-[Limitations](#limitations) (`git worktree add`, never `git clone`).
-
-⚠️ Do NOT collapse the sequence into a single `&&`-chain. A git hard error
-mid-sequence (submodule worktree missing `--force`, divergent pull)
-short-circuits `&&`, silently skips remaining steps, and trailing output from an
-earlier step is easily misread as "cleanup done". Run steps separately; after a
-fragile step (worktree remove / pull) fails, re-verify primitive state with
-`git worktree list` / `git branch | grep`.
+`git worktree prune` takes no target: it drops every unlocked registration
+whose directory is gone, not only yours. Capture `git worktree list
+--porcelain` before and after it, and report the entries it removed that were
+not yours. Full procedure: [references/prune.md](references/prune.md).
 
 ## Squash merge under bulk cleanup — the merged-ness oracle
 
-The unified sequence above cleans up **one** worktree right after its own PR
-merge, where `gh pr merge` itself is the merged-ness proof. Bulk cleanup of N
-already-merged local branches (no `gh pr merge` call in the loop) needs its
-own oracle, and under a squash-merge repo the obvious ones are wrong.
-
-- **`git branch --merged` is invalid.** It answers "is this branch's tip an
-  ancestor of `<base>`?" — true for a fast-forward or merge-commit, but a
-  squash merge creates a brand-new commit on `<base>` that is never an
-  ancestor of the original branch tip. A genuinely merged squash branch shows
-  up as **not** merged by this check.
-- **`git diff base...branch` (or `--stat`) is equally invalid**, for the
-  mirror reason: 3-dot diff shows the branch's unique commits relative to
-  their merge-base with `<base>`, and squash does not rewrite or remove those
-  commits from the branch ref — it only adds a new, unrelated commit to
-  `<base>`. A squash-merged branch still reports the same non-empty diff a
-  never-merged branch would, so an empty-diff check can never fire true and a
-  non-empty one can never rule the branch out.
-- **Valid oracle — tip SHA vs `headRefOid`, plus PR `state` and `baseRefName`.**
-  Compare the branch's local tip against the PR's recorded head SHA, then check
-  the PR closed as merged *into the base you are cleaning up*:
-
-  ```bash
-  git rev-parse <branch>
-  gh pr list --search "head:<branch>" --state merged \
-    --json number,headRefOid,state,mergedAt,baseRefName
-  ```
-
-  `--state merged` is **not optional**. `gh pr list` defaults to `--state open`
-  (`gh pr list --help`), so without it a squash-merged branch — the only kind
-  this procedure ever looks at — comes back as `[]` and the `state == MERGED`
-  check can never be reached. The failure is silent and looks exactly like "no
-  PR found", which routes every merged branch into the manual fallback path.
-
-  (`gh pr view <N> --json headRefOid,state,mergedAt,baseRefName` works the same
-  way when the PR number is already known, and needs no `--state` because it
-  addresses one PR directly.)
-
-  The branch is safe to delete only when **all three** hold:
-
-  1. the local tip SHA equals `headRefOid`;
-  2. `state` is `MERGED` (not `OPEN`/`CLOSED`);
-  3. `baseRefName` equals the `<base>` you are cleaning up.
-
-  `state` alone is insufficient — a PR can be merged and the local branch since
-  amended with unpushed commits, in which case the tip SHA no longer matches the
-  merged head and the extra commits would be lost by deleting it. `baseRefName`
-  matters because this skill covers `main`/`dev`/`prod` bases: a branch merged
-  into `dev` but not yet into `prod` satisfies conditions 1 and 2 while cleaning
-  up `prod`, and deleting it there discards work `prod` has never seen.
-- Do not write verdict language ("safe to delete", "confirmed merged") before
-  this two-step check has actually run against live `gh` output — a plausible
-  guess from branch name or commit message is not evidence.
-
-### Bulk branch-delete procedure
-
-1. **Enumerate candidates**: list local branches to review (e.g.
-   `git branch --format='%(refname:short)'`, excluding the base branch).
-2. **Look up each branch's PR** with
-   `gh pr list --search "head:<branch>" --state merged --json number,headRefOid,state,mergedAt,baseRefName`.
-   - `--state merged` is required; the default is `open`, which returns `[]`
-     for exactly the branches this procedure exists to clean up.
-   - **No PR found** (never pushed, or pushed to a fork/deleted remote): this
-     branch is not tracked by the oracle above — fall back to a separate,
-     manual path (inspect the branch's own commits / confirm with the user)
-     rather than assuming it is safe or unsafe. If *every* branch reports "no
-     PR found", suspect the query before suspecting the branches — a dropped
-     `--state merged` produces precisely that pattern.
-3. **Confirm `state == "MERGED"`.** `OPEN` or `CLOSED` (without `mergedAt`)
-   means do not delete.
-4. **Compare tip SHA**: `git rev-parse <branch>` must equal the PR's
-   `headRefOid`. A mismatch means the local branch has commits the merged PR
-   never saw — do not delete without inspecting the difference first.
-5. **Confirm `baseRefName == <base>`** — the branch must have merged into the
-   base you are cleaning up, not a sibling base.
-6. Only after all three checks pass, `git branch -D <branch>` (`-D` because the
-   squash commit is not an ancestor of the branch tip, so `-d` refuses with
-   "not fully merged" even though the PR is in fact merged).
+For N already-merged local branches in a squash-merge repo, `git branch
+--merged` and `git diff base...branch` both report a merged branch as not
+merged. Delete a branch (with `-D`) only when its local tip equals the PR's
+`headRefOid`, the PR `state` is `MERGED`, and `baseRefName` is the base you are
+cleaning up, read from `gh pr list --search "head:<branch>" --state merged`
+(without `--state merged` every branch comes back as no PR found). Full procedure: [references/bulk-squash-oracle.md](references/bulk-squash-oracle.md).
 
 ## Relationship to enforcement
 
