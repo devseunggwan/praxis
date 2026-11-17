@@ -115,6 +115,32 @@ $USER_MSG
 {"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"m","name":"Agent","input":{"prompt":"a"}},{"type":"tool_use","id":"m#1","name":"Agent","input":{"prompt":"b"}},{"type":"tool_use","id":"m#2","name":"Agent","input":{"prompt":"c"}}]}}
 EOF
 
+# A finished three-task delegation, then a second two-task delegation in flight.
+TX_BATCH_THEN_BATCH="$TMPDIR/tx-batch-then-batch.jsonl"
+cat > "$TX_BATCH_THEN_BATCH" <<EOF
+$USER_MSG
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"d1","name":"Agent","input":{"prompt":"a"}},{"type":"tool_use","id":"d1#1","name":"Agent","input":{"prompt":"b"}},{"type":"tool_use","id":"d1#2","name":"Agent","input":{"prompt":"c"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"d1","is_error":false}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"d2","name":"Agent","input":{"prompt":"d"}},{"type":"tool_use","id":"d2#1","name":"Agent","input":{"prompt":"e"}}]}}
+EOF
+
+# A finished one-task delegation, then a second one-task delegation in flight.
+TX_ONE_THEN_ONE="$TMPDIR/tx-one-then-one.jsonl"
+cat > "$TX_ONE_THEN_ONE" <<EOF
+$USER_MSG
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"d1","name":"Agent","input":{"prompt":"a"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"d1","is_error":false}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"d2","name":"Agent","input":{"prompt":"b"}}]}}
+EOF
+
+# Ids that only look like a batch: a call id that itself holds `#`, and an
+# id whose suffix is not a task index.
+TX_HASH_IDS="$TMPDIR/tx-hash-ids.jsonl"
+cat > "$TX_HASH_IDS" <<EOF
+$USER_MSG
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"x#a","name":"Agent","input":{"prompt":"a"}},{"type":"tool_use","id":"x#0","name":"Agent","input":{"prompt":"b"}},{"type":"tool_use","id":"x#b#1","name":"Agent","input":{"prompt":"c"}}]}}
+EOF
+
 # The gated workspace creation itself.
 TX_BASH_SELF_PENDING="$TMPDIR/tx-bash-self-pending.jsonl"
 cat > "$TX_BASH_SELF_PENDING" <<EOF
@@ -330,14 +356,26 @@ run_case "2nd Agent call with itself in the transcript (ask: target #2)" \
 run_case "retry after an is_error Agent call, itself in the transcript (silent)" \
   "silent" "$(agent_payload_id "$TX_FAILED_THEN_SELF" "c2")"
 
-run_case "multi-target message: 1st sibling (silent)" \
+run_case "multi-task delegation: 1st task (silent)" \
   "silent" "$(agent_payload_id "$TX_SIBLINGS" "m")"
 
-run_case "multi-target message: 2nd sibling (ask: target #2)" \
-  "ask:delegation target #2" "$(agent_payload_id "$TX_SIBLINGS" "m#1")"
+run_case "multi-task delegation: 2nd task, same host call (silent)" \
+  "silent" "$(agent_payload_id "$TX_SIBLINGS" "m#1")"
 
-run_case "multi-target message: 3rd sibling (ask: target #3)" \
-  "ask:delegation target #3" "$(agent_payload_id "$TX_SIBLINGS" "m#2")"
+run_case "multi-task delegation: 3rd task, same host call (silent)" \
+  "silent" "$(agent_payload_id "$TX_SIBLINGS" "m#2")"
+
+run_case "2nd host call after a 3-task one: its 1st task (ask: target #4)" \
+  "ask:delegation target #4" "$(agent_payload_id "$TX_BATCH_THEN_BATCH" "d2")"
+
+run_case "2nd host call after a 3-task one: its 2nd task (ask: target #4)" \
+  "ask:delegation target #4" "$(agent_payload_id "$TX_BATCH_THEN_BATCH" "d2#1")"
+
+run_case "2nd one-task host call in a turn (ask: target #2)" \
+  "ask:delegation target #2" "$(agent_payload_id "$TX_ONE_THEN_ONE" "d2")"
+
+run_case "'#' in an id that is not a task index is its own call (ask: target #3)" \
+  "ask:delegation target #3" "$(agent_payload_id "$TX_HASH_IDS" "x#b#1")"
 
 run_case "an id the transcript does not hold exempts nothing (ask)" \
   "ask:delegation target #2" "$(agent_payload_id "$TX_ONE_AGENT" "not-in-transcript")"

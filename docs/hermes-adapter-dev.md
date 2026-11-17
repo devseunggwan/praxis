@@ -269,6 +269,9 @@ counts earlier `tool_use` blocks in the turn must hold on both hosts:
 - One Hermes call rendered as N Claude calls (`delegate_task` tasks) has one
   result row. When it failed, every generated block gets the error result, as
   Claude Code writes one result per failed call; a success keeps one block.
+- Those N blocks are one delegation to `fan-out-scope-gate`: it reads ids
+  that differ only by a `#<index>` suffix as one host call and does not count
+  them against each other. Changing the id shape changes that count.
 - Test both orderings in the gate's shell test (own block present / absent,
   sibling result before / after the message), and end to end with the probe
   above, pending assistant row last.
