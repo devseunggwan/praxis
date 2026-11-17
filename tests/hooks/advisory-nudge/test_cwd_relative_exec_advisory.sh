@@ -180,6 +180,10 @@ run_case "assignment in command position is silent" \
   "silent" \
   "S=dir/sub; ls \$S"
 
+run_case "assignment before a relative exec still asks" \
+  "ask:scripts/foo.sh" \
+  "MODE=apply ./scripts/foo.sh"
+
 run_case "redirection before a relative exec still asks" \
   "ask:scripts/foo.sh" \
   "2>/dev/null ./scripts/foo.sh"
