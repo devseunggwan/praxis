@@ -537,6 +537,10 @@ run_case "Still asks: delete inside a substitution in a commit message" \
   "ask:blast-radius" \
   "$(make_bash_payload 'git commit -m "$(kubectl delete namespace production)"')"
 
+run_case "Still asks: a prose flag name after -- is a file" \
+  "ask:blast-radius" \
+  "$(make_bash_payload 'rm -rf -- --note "/srv/prod/old data"')"
+
 run_case "Still asks: delete inside a substitution in echo" \
   "ask:blast-radius" \
   "$(make_bash_payload 'echo "$(kubectl delete pod x -n prod-apne2)"')"

@@ -566,8 +566,14 @@ def _is_prose_value(argv: list[str], i: int) -> bool:
 
 
 def drop_prose_values(argv: list[str]) -> list[str]:
-    """argv without the values of prose options (see `PROSE_FLAGS`)."""
-    return [tok for i, tok in enumerate(argv) if not _is_prose_value(argv, i)]
+    """argv without the values of prose options (see `PROSE_FLAGS`).
+
+    Nothing after `--` is an option: `rm -rf -- --note "/srv/prod/x y"`
+    names a file called `--note` and a path.
+    """
+    end = argv.index("--") if "--" in argv else len(argv)
+    return [tok for i, tok in enumerate(argv)
+            if i > end or not _is_prose_value(argv, i)]
 
 
 # A substitution runs a command the outer binary's name says nothing about:

@@ -234,3 +234,10 @@ def test_a_prose_value_that_runs_a_command_is_kept(value):
 def test_stderr_pipe_is_not_read_only():
     # `|&` pipes into the next command; it is not split by the segment walk.
     assert not bash_is_readonly("kubectl get configmap plan -o yaml |& kubectl apply -f -")
+
+
+def test_prose_flags_stop_at_double_dash():
+    # After `--` every token is an operand: `--note` here is a file name.
+    argv = ["rm", "-rf", "--", "--note", "/srv/prod/old data"]
+    assert drop_prose_values(argv) == argv
+    assert drop_prose_values(["tool", "--note", "a b", "--", "x"]) == ["tool", "--note", "--", "x"]
