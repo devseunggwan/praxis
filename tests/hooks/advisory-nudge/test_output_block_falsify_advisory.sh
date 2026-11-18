@@ -533,6 +533,10 @@ run_case "Still asks: echo piped with |& into psql" \
   "ask:blast-radius" \
   "$(make_bash_payload 'echo "DROP TABLE prod.users" |& psql')"
 
+run_case "Still asks: delete inside a substitution in a commit message" \
+  "ask:blast-radius" \
+  "$(make_bash_payload 'git commit -m "$(kubectl delete namespace production)"')"
+
 run_case "Still asks: delete inside a substitution in echo" \
   "ask:blast-radius" \
   "$(make_bash_payload 'echo "$(kubectl delete pod x -n prod-apne2)"')"

@@ -222,3 +222,15 @@ def test_prose_values_are_dropped_only_after_prose_flags():
             "-c", "rm -rf /"]
     assert drop_prose_values(argv) == ["tool", "--reason", "--context", "prod x", "-m", "nospace",
                                        "-c", "rm -rf /"]
+
+
+@pytest.mark.parametrize("value", ["$(kubectl delete ns production)", "`kubectl delete ns x`"])
+def test_a_prose_value_that_runs_a_command_is_kept(value):
+    # The shell runs the substitution; only literal text is prose.
+    argv = ["git", "commit", "-m", value]
+    assert drop_prose_values(argv) == argv
+
+
+def test_stderr_pipe_is_not_read_only():
+    # `|&` pipes into the next command; it is not split by the segment walk.
+    assert not bash_is_readonly("kubectl get configmap plan -o yaml |& kubectl apply -f -")

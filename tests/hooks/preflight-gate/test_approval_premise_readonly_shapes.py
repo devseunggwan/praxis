@@ -107,6 +107,7 @@ STILL_ASKS = {
     # The read is quiet, what its output feeds is not.
     "prod read piped into kubectl apply": _bash(_wrapper('{"phase":"prod","query":"SELECT manifest FROM plans"}') + " | kubectl apply -f -"),
     "prod read piped with |& into kubectl apply": _bash(_wrapper('{"phase":"prod","query":"SELECT manifest FROM plans"}') + " |& kubectl apply -f -"),
+    "read-only kubectl piped with |& into kubectl apply": _bash("kubectl --context prod-x get configmap plan -o yaml |& kubectl apply -f -"),
 }
 
 # A payload whose literal holds a write word is still a read: the literal is

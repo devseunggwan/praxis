@@ -556,6 +556,9 @@ def _is_prose_value(argv: list[str], i: int) -> bool:
     tok = argv[i]
     if not _WHITESPACE_RE.search(tok):
         return False
+    # `-m "$(kubectl delete ...)"` runs the delete; only literal text is prose.
+    if _SUBSTITUTION_RE.search(tok):
+        return False
     if i > 0 and argv[i - 1] in PROSE_FLAGS:
         return True
     name, eq, _value = tok.partition("=")
@@ -593,6 +596,10 @@ def bash_is_readonly(command: str) -> bool:
         return False
     tokens = safe_tokenize(command)
     if not tokens:
+        return False
+    # `iter_command_starts` does not split at `|&`, so `get ... |& kubectl
+    # apply -f -` would be judged by its first command alone.
+    if "|&" in tokens:
         return False
     segments = list(iter_command_starts(tokens))
     return bool(segments) and all(_segment_is_readonly(s) for s in segments)
