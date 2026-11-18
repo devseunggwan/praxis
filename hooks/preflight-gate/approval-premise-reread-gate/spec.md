@@ -138,12 +138,15 @@ exposed in one session and an enumerated list of marker spellings.
 matching on that surface: it dropped eight read-only tools — `list_labels` via
 "label", `s3_count_records` via "record", `figma_get_component_sets` and
 `metrics_query_alert_preset` via "set", `shared_memory_read` via "share" — and
-lost no true positive. Three false positives survive on purpose, each because
-silencing it costs a real mutation: `airflow_import_errors` reads import errors
-rather than importing, but dropping "import" loses `gitbook_git_import`;
-`mysql_resolve_user_connectors` is a query, but dropping "resolve" loses a
-review-thread resolve; the `merge_readiness_*` tools are local session state,
-but dropping "merge" loses `merge_pull_request`.
+lost no true positive. Two false positives survive on purpose, each because
+silencing it costs a real mutation: `mysql_resolve_user_connectors` is a query,
+but dropping "resolve" loses a review-thread resolve; the `merge_readiness_*`
+tools are local session state, but dropping "merge" loses `merge_pull_request`.
+`airflow_import_errors` was a third until issue #1659: the leaf is now read
+after removing the noun phrase `import_errors` (`_READONLY_LEAF_PHRASES` in
+`_lib/_mutating_call.py`), so the verb "import" stays in the set,
+`gitbook_git_import` still reads as a write, and so does a leaf that adds a verb
+after the phrase (`airflow_import_errors_clear`).
 
 **The verb set is this repository's write vocabulary, not a fresh reading.**
 `pr-claim-mutation-gate/spec.md` already classifies `submit` / `resolve` /
@@ -426,6 +429,82 @@ Recognising `prod` at the end of a `--context` / `--cluster` value would close
 that, but on the same corpus it added several hundred asks on read-only
 `kubectl exec` and scripted reads, which is the noise this change removes, so
 it is left to a separate decision.
+
+## Prose, read-only query payloads and `--help` (issue #1659)
+
+Over 8 days on one install this gate asked 1,078 times, most of them on calls
+that act on nothing in production. A replay of the 24 distinct calls still
+stored in session history (local, not committed) found three shapes the split
+above did not cover:
+
+- **A prose option value.** A local tracker's `--reason '... prod-19129 ...'`
+  or `--evidence '... prod-53e5c54 ...'` quotes a production name in a
+  sentence. A token is prose when it holds whitespace and is the value of one
+  of a closed set of text options (`-m`, `--message`, `--body`, `--title`,
+  `--reason`, `--evidence`, `--note`, `--notes`, `--description`,
+  `--comment`, `--summary`, `--text`, `--question`, `--recommend`,
+  `--choice`), as the next token or after `=`. A program value (`-c`, `-e`,
+  `--command`, `ssh host '<cmd>'`) and a target value (`--context`,
+  `--profile`, `--env`) are not on the list, and a value without whitespace
+  still counts, because a target identifier holds none.
+- **A read-only query payload.** `lh.py lakehouse_query
+  '{"phase":"prod","query":"SELECT ..."}'` names production as where to read.
+  A JSON-object token is dropped when its keys are all in `query`, `sql`,
+  `statement`, `phase`, `limit`, `max_rows`, `catalog`, `schema`,
+  `database`, no value is nested, and every query field is one read-only SQL
+  statement: after removing literals, quoted identifiers and comments it
+  starts with `SELECT`, `WITH`, `SHOW`, `DESCRIBE`, `DESC`, `EXPLAIN` or
+  `VALUES`, has no `;`-separated second statement, and contains no write or
+  session word (`INSERT`, `UPDATE`, `DELETE`, `MERGE`, `DROP`, `CREATE`,
+  `INTO`, `ANALYZE`, `SET`, `CALL`, ...; the full list is
+  `_SQL_WRITE_WORD_RE`), and calls no function that acts on the server
+  (`pg_*` such as `pg_terminate_backend`, `set_config`, `nextval`, `setval`,
+  `lo_*`, `dblink*`, `SYSTEM$*`, `dbms_*`, `xp_*`, `sp_*`, `sleep`, ...; the
+  full list is `_SQL_ACTING_CALL_RE`, denied by name family, so `count(*)`
+  still reads). An unterminated literal keeps the token. The payload
+  is kept when another word of the segment carries a write verb from the MCP
+  verb set (`lh.py lakehouse_delete '{"query": "SELECT 1"}'`).
+- **`--help`.** `<cli> [word ...] --help`, with `--help` last and only bare
+  words before it, is local: no flag can take `--help` as its value and no
+  other option rides along. The program must be a CLI: a shell, interpreter or
+  launcher (`bash`, `python3`, `node`, `env`, `npx`, `make`, ...; the list is
+  `_RUNNER_BINARIES`) or a file with a script suffix (`.sh`, `.py`, ...) hands
+  `--help` to code that may ignore it, so `kubectl --context prod-x get pods
+  && bash deploy.sh --help` asks. A compiled CLI that ignores `--help` and acts
+  is the case this still trusts.
+
+The dropped tokens only stop *naming* production. A segment whose remaining
+tokens still carry the marker asks as before, and a command whose marker sits
+only in dropped tokens is quiet, unless a pipe (`|` or `|&`) feeds a segment
+that carries the marker into a later member that is neither read-only nor
+local: `lh.py lakehouse_query '{"phase":"prod",...}' | kubectl apply -f -`
+applies production data and asks, while `| tee out.txt` saves it here and
+stays quiet. The fallbacks above (substitution, heredoc,
+loop, background) still run first. One consequence is accepted: a git call
+the closed git-local rule calls remote (`HOME=/tmp/h git commit ...`, a
+`--git-dir`, a `GIT_CONFIG_*` program) whose only marker is a prose commit
+message (`-m 'fix prod-x'`) is now quiet. The message names no target; the
+git-local cases in the suite carry a one-word `-m fix-prod-x` instead.
+
+The shared read-only classifier also gained two kubectl forms:
+`kubectl config view|get-contexts|get-clusters|get-users|current-context` and
+`kubectl auth can-i|whoami`, each only when that word directly follows the
+subcommand. `config use-context`, `config set-*` and `auth reconcile` still
+fall through.
+
+Replay of those 24 calls, main vs this branch: 22 asked on main, 11 still ask.
+The 11 that stopped are the lakehouse SELECT payloads (3), tracker prose (5),
+`kubectl config view`, a `--help` call and `airflow_import_errors`. What still
+asks: `airflow_set_dag_paused` on prod, a preview deploy, an internal CLI run
+with `--env prod`, a `gh api -X PATCH`, an `aws ecr describe-images` (the
+shared classifier admits only `aws sts`), a loop over branch names holding
+`prod`, and positional prose (`<tracker> add "<question naming prod>"`).
+Positional prose is left asking on purpose: a positional sentence and a remote
+program (`ssh host '<cmd>'`) have the same shape.
+
+The message's first question now covers a call with no approval: such a call
+says why it needs none (for example, that it only reads) instead of restating
+an approval that was never given.
 
 ## Operator notes
 

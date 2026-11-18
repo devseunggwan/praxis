@@ -53,7 +53,9 @@ from _payload import read_payload  # type: ignore[import-not-found]  # noqa: E40
 from block_message import format_block  # type: ignore[import-not-found]  # noqa: E402
 from _mutating_call import (  # type: ignore[import-not-found]  # noqa: E402
     _NONWRITING_REDIRECT_RE,
+    MUTATING_MCP_VERBS,
     _SUBSTITUTION_RE,
+    drop_prose_values,
     _segment_is_readonly,
     _subcommand,
     bash_is_readonly,
@@ -295,9 +297,126 @@ def _segment_is_local(argv: list[str], git_reconfigured: bool = False) -> bool:
     if not argv:
         return False
     binary = argv[0].rsplit("/", 1)[-1]
-    if binary in _LOCAL_BINARIES:
+    if binary in _LOCAL_BINARIES or _help_only(argv):
         return True
     return binary == "git" and not git_reconfigured and _git_is_local(argv)
+
+
+_BARE_WORD_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]*")
+# Programs that run another program or a script: `bash deploy-prod.sh --help`
+# runs the script and hands it `--help`, which the script may ignore.
+_RUNNER_BINARIES = frozenset((
+    "sh", "bash", "zsh", "dash", "ksh", "fish", "python", "python3", "node",
+    "deno", "bun", "ruby", "perl", "php", "env", "sudo", "doas", "xargs",
+    "exec", "nohup", "time", "timeout", "nice", "make", "npx", "uvx", "uv",
+    "pnpm", "npm", "yarn", "poetry", "pipx", "go", "cargo", "java", "dotnet",
+))
+_SCRIPT_SUFFIX_RE = re.compile(r"\.(?:sh|bash|zsh|py|js|mjs|cjs|ts|rb|pl|php)$")
+
+
+def _help_only(argv: list[str]) -> bool:
+    """`<cli> [word ...] --help`: the call prints usage and acts on nothing.
+
+    Closed shape: `--help` is the last token and every token before it is a
+    bare word, so no flag can take `--help` as its value (`--message --help`)
+    and no other option rides along. The program must be a CLI, not a
+    runner or a script: either of those passes `--help` on to code that may
+    not read it. A compiled CLI that ignores `--help` is the shape this
+    still trusts (spec: Prose, read-only query payloads and `--help`).
+    """
+    binary = argv[0].rsplit("/", 1)[-1] if argv else ""
+    if binary in _RUNNER_BINARIES or binary.startswith("python") \
+            or _SCRIPT_SUFFIX_RE.search(binary):
+        return False
+    return (len(argv) >= 2 and argv[-1] == "--help"
+            and all(_BARE_WORD_RE.fullmatch(tok) for tok in argv[1:-1]))
+
+# A JSON argument that is nothing but a read-only SQL query and where to run
+# it -- `lh.py lakehouse_query '{"phase":"prod","query":"SELECT ..."}'`. Its
+# `phase` names production, but what it does there is read (issue #1659:
+# every such call on one install asked). Closed key set; any other key, a
+# nested value, or a query that is not one read-only statement keeps the
+# token in scope.
+_QUERY_FIELDS = ("query", "sql", "statement")
+_QUERY_PAYLOAD_KEYS = frozenset(_QUERY_FIELDS + (
+    "phase", "limit", "max_rows", "catalog", "schema", "database",
+))
+# Literals, quoted identifiers and comments, removed before the keyword scan
+# so `WHERE note = 'drop'` is not a write and `-- delete` is not either.
+_SQL_NOISE_RE = re.compile(
+    r"'(?:[^']|'')*'|\"(?:[^\"]|\"\")*\"|`[^`]*`|--[^\n]*|/\*.*?\*/", re.S)
+_SQL_READ_START_RE = re.compile(
+    r"\s*\(*\s*(?:select|with|show|describe|desc|explain|values)\b", re.I)
+# Any of these anywhere keeps the ask: a write statement, `SELECT ... INTO`,
+# `EXPLAIN ANALYZE` (which runs the statement), a session change, or a
+# `WITH ... DELETE`. A column with one of these names costs one question.
+_SQL_WRITE_WORD_RE = re.compile(
+    r"(?<![A-Za-z0-9_])(?:insert|update|delete|merge|upsert|replace|drop|create"
+    r"|alter|truncate|grant|revoke|deny|call|exec|execute|copy|unload|vacuum"
+    r"|optimize|refresh|analyze|set|reset|use|commit|rollback|lock|into"
+    r"|prepare|deallocate|load|comment|rename|kill|attach|detach|install"
+    r"|pragma)(?![A-Za-z0-9_])", re.I)
+
+
+# Functions a SELECT can call to act on the server: end or cancel sessions,
+# change settings, take locks, move sequences, read or write server files,
+# reach another database, or run a vendor system procedure. Denied by name
+# family; any other function call (`count(*)`, `date_trunc(...)`) reads.
+_SQL_ACTING_CALL_RE = re.compile(
+    r"(?<![A-Za-z0-9_$])(?:pg_\w+|set_config|nextval|setval|lo_\w+|dblink\w*"
+    r"|system\$\w+|sys_\w+|xp_\w+|sp_\w+|dbms_\w+|utl_\w+|sleep|benchmark"
+    r"|load_file|query_to_xml)\s*\(", re.I)
+
+
+def _sql_is_readonly(sql: str) -> bool:
+    text = _SQL_NOISE_RE.sub(" ", sql)
+    if "'" in text or '"' in text or "`" in text or "/*" in text:
+        return False  # an unterminated literal: the scan cannot place it
+    statements = [s for s in text.split(";") if s.strip()]
+    return (len(statements) == 1
+            and _SQL_READ_START_RE.match(statements[0]) is not None
+            and _SQL_WRITE_WORD_RE.search(statements[0]) is None
+            and _SQL_ACTING_CALL_RE.search(statements[0]) is None)
+
+
+def _is_readonly_query_payload(tok: str) -> bool:
+    if not tok.lstrip().startswith("{"):
+        return False
+    try:
+        payload = json.loads(tok)
+    except ValueError:
+        return False
+    if not isinstance(payload, dict) or not payload:
+        return False
+    if not set(payload) <= _QUERY_PAYLOAD_KEYS:
+        return False
+    if any(isinstance(v, (dict, list)) for v in payload.values()):
+        return False
+    queries = [payload[k] for k in _QUERY_FIELDS if k in payload]
+    return bool(queries) and all(isinstance(q, str) and _sql_is_readonly(q)
+                                 for q in queries)
+
+
+def _names_write_verb(tok: str) -> bool:
+    return bool(set(re.split(r"[_\-]", tok.lower())) & MUTATING_MCP_VERBS)
+
+
+def _target_tokens(argv: list[str]) -> list[str]:
+    """argv without the tokens that cannot name what the call acts on.
+
+    Dropped: a prose option value, and a read-only query payload -- the
+    latter only while no other word of the segment names a write verb, so
+    `lh.py lakehouse_delete '{"query": "SELECT 1", ...}'` keeps its payload.
+    """
+    keep = drop_prose_values(argv)
+    payloads = [tok for tok in keep if _is_readonly_query_payload(tok)]
+    if not payloads:
+        return keep
+    words = [tok for tok in keep
+             if tok not in payloads and not tok.startswith("-")]
+    if any(_names_write_verb(tok) for tok in words):
+        return keep
+    return [tok for tok in keep if tok not in payloads]
 
 
 def _segment_names_prod(argv: list[str]) -> bool:
@@ -309,17 +428,41 @@ def _segment_names_prod(argv: list[str]) -> bool:
 
 
 def _segments_with_pipes(tokens: list[str]) -> list[tuple[list[str], bool]]:
-    """Each command segment, and whether a `|` feeds it into the next one."""
+    """Each command segment, and whether a `|` or `|&` feeds it into the
+    next one."""
     out: list[tuple[list[str], bool]] = []
     start = 0
     for i, tok in enumerate(tokens):
-        if tok in SHELL_SEPARATORS:
+        if tok in SHELL_SEPARATORS or tok == "|&":
             if start < i:
-                out.append((tokens[start:i], tok == "|"))
+                out.append((tokens[start:i], tok in ("|", "|&")))
             start = i + 1
     if start < len(tokens):
         out.append((tokens[start:], False))
     return out
+
+
+def _prod_output_reaches_remote(
+        segments: list[tuple[list[str], bool]], git_reconfigured: bool) -> bool:
+    """A production read piped into a later member that is not local.
+
+    Dropping the read's payload clears the read itself, not what its output
+    feeds: `lh.py query '{"phase":"prod",...}' | kubectl apply -f -` applies
+    production data. A local consumer (`| tee out.txt`) stays quiet.
+    """
+    for i, (seg, piped) in enumerate(segments):
+        if not piped or not _segment_names_prod(seg):
+            continue
+        j = i + 1
+        while j < len(segments):
+            consumer = segments[j][0]
+            sink = strip_prefix(consumer)[:1] == ["tee"]  # saves the output here
+            if not sink and not _segment_is_local(consumer, git_reconfigured):
+                return True
+            if not segments[j][1]:
+                break
+            j += 1
+    return False
 
 
 def _bash_reaches_prod(command: str) -> bool:
@@ -356,10 +499,17 @@ def _bash_reaches_prod(command: str) -> bool:
         return True
     if _reorders([seg for seg, _pipe in segments]):
         return True
-    named = [i for i, (seg, _p) in enumerate(segments) if _segment_names_prod(seg)]
-    if not named:
+    if not any(_segment_names_prod(seg) for seg, _p in segments):
         return True
+    # The marker is in the tokens, but only inside prose or a read-only query
+    # payload: nothing the call acts on is named production.
+    named = [i for i, (seg, _p) in enumerate(segments)
+             if _segment_names_prod(_target_tokens(seg))]
     git_reconfigured = _git_reconfigured([seg for seg, _p in segments])
+    if _prod_output_reaches_remote(segments, git_reconfigured):
+        return True
+    if not named:
+        return False
     remote = [i for i, (seg, _p) in enumerate(segments)
               if not _segment_is_local(seg, git_reconfigured)]
     if not remote:
@@ -379,9 +529,11 @@ def _bash_reaches_prod(command: str) -> bool:
 # `correct_path` field the shared renderer prints under "Do this instead".
 _ANSWER_BOTH = (
     "answer both before this executes -- "
-    "(1) PREMISE: restate in one line the justification the approval was granted "
-    "on, and say whether anything observed SINCE has made it false; if it has, "
-    "this is not an approved action any more, so re-ask. "
+    "(1) PREMISE: if an approval covers this call, restate in one line the "
+    "justification it was granted on, and say whether anything observed SINCE "
+    "has made it false; if it has, this is not an approved action any more, so "
+    "re-ask. If no approval was given, say instead why the call needs none -- "
+    "for example that it only reads the production target. "
     "(2) TARGET: was the blast radius measured on THIS target, or inherited from "
     "another member of the same cohort? An enumeration measured on target A is "
     "not evidence about target B, and it covers the outward side-effect axis "

@@ -264,9 +264,9 @@ run_case "remote_git_upload_pack" \
 run_case "remote_git_upload_pack_abbrev" \
   "$(verdict "$(bash_payload 'git pull --upload="sh deploy.sh" origin prod-x')")" "ask"
 run_case "remote_git_config_program" \
-  "$(verdict "$(bash_payload 'git -c core.fsmonitor=./hook.sh commit -m "fix prod-x"')")" "ask"
+  "$(verdict "$(bash_payload 'git -c core.fsmonitor=./hook.sh commit -m fix-prod-x')")" "ask"
 run_case "remote_git_config_program_value_named_like_sub" \
-  "$(verdict "$(bash_payload 'git -C commit -c core.fsmonitor=./hook.sh commit -m "fix prod-x"')")" "ask"
+  "$(verdict "$(bash_payload 'git -C commit -c core.fsmonitor=./hook.sh commit -m fix-prod-x')")" "ask"
 # After the subcommand, `-c` is the subcommand's own flag.
 run_case "local_git_switch_create" \
   "$(verdict "$(bash_payload 'git switch -c issue-12-prod-flag && git add -A && git commit -m x')")" "quiet"
@@ -274,9 +274,9 @@ run_case "local_git_switch_create" \
 run_case "remote_git_env_ssh" \
   "$(verdict "$(bash_payload 'GIT_SSH_COMMAND="sh deploy.sh" git fetch origin prod-x')")" "ask"
 run_case "remote_git_env_config_count" \
-  "$(verdict "$(bash_payload 'GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.fsmonitor GIT_CONFIG_VALUE_0=./h.sh git commit -m "fix prod-x"')")" "ask"
+  "$(verdict "$(bash_payload 'GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.fsmonitor GIT_CONFIG_VALUE_0=./h.sh git commit -m fix-prod-x')")" "ask"
 run_case "remote_git_env_config_parameters" \
-  "$(verdict "$(bash_payload "GIT_CONFIG_PARAMETERS=\"'core.fsmonitor'='./h.sh'\" git commit -m 'fix prod-x'")")" "ask"
+  "$(verdict "$(bash_payload "GIT_CONFIG_PARAMETERS=\"'core.fsmonitor'='./h.sh'\" git commit -m fix-prod-x")")" "ask"
 run_case "remote_git_env_wrapper" \
   "$(verdict "$(bash_payload 'env GIT_SSH_COMMAND="sh deploy.sh" git pull origin prod-x')")" "ask"
 run_case "remote_git_env_exported" \
@@ -300,19 +300,25 @@ run_case "remote_builtin_trap" \
 run_case "remote_command_trap" \
   "$(verdict "$(bash_payload "command trap 'terraform apply' EXIT; cd /srv/prod-infra")")" "ask"
 run_case "remote_coproc"     "$(verdict "$(bash_payload 'coproc kubectl delete pod p; ls prod-x')")" "ask"
-run_case "remote_git_home"   "$(verdict "$(bash_payload "HOME=/tmp/h git commit -m 'fix prod-x'")")" "ask"
-run_case "remote_git_xdg"    "$(verdict "$(bash_payload "XDG_CONFIG_HOME=/tmp/x git commit -m 'fix prod-x'")")" "ask"
+run_case "remote_git_home"   "$(verdict "$(bash_payload "HOME=/tmp/h git commit -m fix-prod-x")")" "ask"
+run_case "remote_git_xdg"    "$(verdict "$(bash_payload "XDG_CONFIG_HOME=/tmp/x git commit -m fix-prod-x")")" "ask"
 run_case "remote_git_env_append" \
   "$(verdict "$(bash_payload "export GIT_SSH_COMMAND+=' sh d.sh'; git fetch origin prod-x")")" "ask"
 run_case "remote_git_config_hookspath" \
-  "$(verdict "$(bash_payload "git config core.hooksPath ./h; git commit -m 'fix prod-x'")")" "ask"
+  "$(verdict "$(bash_payload "git config core.hooksPath ./h; git commit -m fix-prod-x")")" "ask"
 run_case "remote_git_config_sshcommand" \
   "$(verdict "$(bash_payload "git config core.sshCommand 'sh d.sh'; git fetch origin prod-x")")" "ask"
 run_case "remote_git_exec_path" "$(verdict "$(bash_payload 'git --exec-path=/tmp/x pull origin prod-x')")" "ask"
 run_case "remote_git_git_dir" \
-  "$(verdict "$(bash_payload "git --git-dir=/tmp/r/.git commit -m 'fix prod-x'")")" "ask"
+  "$(verdict "$(bash_payload "git --git-dir=/tmp/r/.git commit -m fix-prod-x")")" "ask"
 run_case "remote_git_config_env_global" \
-  "$(verdict "$(bash_payload "git --config-env=core.fsmonitor=H commit -m 'fix prod-x'")")" "ask"
+  "$(verdict "$(bash_payload "git --config-env=core.fsmonitor=H commit -m fix-prod-x")")" "ask"
+# The cases above carry the marker in a one-word `-m fix-prod-x`. A message
+# with whitespace (`-m 'fix prod-x'`) is prose and names no target (issue
+# #1659), so that spelling is quiet whatever git runs; these cases test the
+# closed git-local rule, not the message.
+run_case "prose_message_is_no_target" \
+  "$(verdict "$(bash_payload "HOME=/tmp/h git commit -m 'fix prod-x'")")" "quiet"
 run_case "local_git_dash_C" \
   "$(verdict "$(bash_payload "git -C /tmp/wt-prod-ops commit -m 'fix prod-x'")")" "quiet"
 # Review round 4: a spaced `( )` function definition, a socket path, and

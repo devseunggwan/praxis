@@ -57,7 +57,6 @@ DONE_WHEN_BASELINE: frozenset[str] = frozenset({
 })
 SPLIT_BASELINE: frozenset[str] = frozenset({
     "cmux-delegate",
-    "merge-briefing",
     "upstream-bug-report",
 })
 SECTIONS_BASELINE: frozenset[str] = frozenset({

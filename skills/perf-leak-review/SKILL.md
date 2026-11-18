@@ -116,8 +116,18 @@ from an empty diff says nothing about the reviewer.
 
 ### Step 2: Check the host can delegate
 
-This step needs the `Agent` tool. On a host that does not provide it — the Codex
-host is **UNKNOWN** here, never verified — **stop** and report
+This step needs the `Agent` tool. Under Hermes Agent the equivalent is
+`delegate_task` with a goal that names the brief's path and the two resolved
+paths and tells the child to read the brief and return only its envelope; the
+child returned a bare (unfenced) envelope that the validator accepted. When
+the call runs in the background (it returns at once and the result arrives as
+a later message), end the turn after dispatching; when it returns the result
+in the same call, continue in this turn. The
+reviewer reads the working tree, so do not start anything that rewrites the
+repo's source files (a mutation matrix, a formatter) until its envelope is
+back; otherwise it may review a mutant instead of the change. On a
+host with neither — the Codex host is **UNKNOWN** here, never verified —
+**stop** and report
 `perf-leak-review: this host cannot delegate a read-only reviewer — unverified
 here`. Do not review the diff inline instead: the session that wrote the diff is
 the one context that cannot read it independently (CLAUDE.md, *the author-exempt
@@ -135,6 +145,9 @@ Agent(
          + "\n\n--diff <resolved diff path>\n--repo <resolved repo root>\n"
 )
 ```
+
+Under Hermes Agent, the `delegate_task` call of Step 2 is this delegation:
+make no `Agent` call, and take its envelope to the next step.
 
 One delegation per diff. The brief, not this file, is the source of truth for
 what the reviewer is told — the class definitions, the read budget, the tool
@@ -182,7 +195,7 @@ candidate gets proven by execution is the reader's decision.
 |------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `--diff` absent, or its path missing or empty                                      | Abort and report it. There is no fallback: this skill cannot create a diff file (Step 1)                                                                                                               |
 | `--repo` is not a directory                                                        | Abort with the path                                                                                                                                                                                    |
-| `Agent` tool unavailable on this host                                              | Stop with the unverified-host message (Step 2); never review inline                                                                                                                                    |
+| Neither `Agent` nor Hermes `delegate_task` available on this host                  | Stop with the unverified-host message (Step 2); never review inline. With `delegate_task`, take the Hermes path of Step 2                                                                              |
 | Reviewer wrapped the envelope in a ```` ```json ```` fence, or put prose around it | Strip the fence and extract the single JSON object; if there is not exactly one, report the raw output and stop. Observed on a third of live envelopes, so treat it as normal rather than as a failure |
 | Validator exits 1                                                                  | Report its violation lines verbatim; do not repair the envelope                                                                                                                                        |
 | Reviewer reports a class outside C1..C5                                            | The validator rejects it — report it as an out-of-list finding, which is a false positive                                                                                                              |
@@ -203,5 +216,11 @@ candidate gets proven by execution is the reader's decision.
   the PR verification anchor.
 - **Five classes only.** Algorithmic complexity, concurrency, and security are
   out of scope by construction.
-- **Claude host only.** The `Agent` delegation is verified on the Claude host;
-  the Codex host is UNKNOWN and the skill stops there rather than guessing.
+- **The diff bounds what is read.** A leak in unchanged code the diff calls
+  into (a loader that re-executes modules on every call, say) is not reported.
+  When the user asked for a leak check rather than a diff review, pair this
+  report with a measurement on both base and branch, so a pre-existing growth
+  is not missed and is not blamed on the change.
+- **Claude and Hermes hosts only.** The `Agent` delegation is verified on the
+  Claude host and its `delegate_task` equivalent on Hermes (Step 2); the Codex
+  host is UNKNOWN and the skill stops there rather than guessing.

@@ -372,12 +372,12 @@ tokenization does not read heredoc content, so the caller-chain evidence
 check and external-write falsify-check see an empty body.
 
 Correct pattern:
-  1. Write body to a temp file (Write tool):
-       /tmp/pr-body.md  or  /tmp/issue-body.md
+  1. Write body to a file in your scratch directory (Write tool):
+       <scratch>/pr-body.md  or  <scratch>/issue-body.md
 
   2. Pass via --body-file:
-       gh issue create --title "..." --body-file /tmp/issue-body.md
-       gh pr create    --title "..." --body-file /tmp/pr-body.md
+       gh issue create --title "..." --body-file <scratch>/issue-body.md
+       gh pr create    --title "..." --body-file <scratch>/pr-body.md
 
   3. If the Write-tool + --body-file path is itself blocked by another guard,
      use `# cross-boundary:ack` to bypass the ASK gate after manually
@@ -386,7 +386,7 @@ Correct pattern:
      never inside the heredoc body. The heredoc body becomes the published
      artifact; a marker inside it leaks verbatim into the issue/PR text on
      the remote surface.
-       gh pr create --title "..." --body-file /tmp/b.md  # cross-boundary:ack
+       gh pr create --title "..." --body-file <scratch>/b.md  # cross-boundary:ack
 """
 
 
@@ -905,7 +905,7 @@ def _build_checklist(
         "",
         "Confirm ALL contracts before proceeding:",
         "",
-        "  ① Per-action authorization gate (CLAUDE.md §External-repo write)",
+        "  ① Per-action authorization gate (rule: Cross-boundary repo writes)",
         "     Explicit approval required for THIS specific action.",
         "     General 'proceed' / 'ok' / 'continue' does NOT count.",
         "     Ownership does NOT exempt: a public repo owned by you or your",
@@ -913,6 +913,15 @@ def _build_checklist(
         "     prior approval as a third-party repo (praxis #993).",
         "     Flag style does NOT exempt either: omitting --repo does not make",
         "     the write local — it lands on the repo named above (praxis #1148).",
+        "     Exception: your own org's private or internal repo, with the",
+        "     visibility confirmed (`gh repo view <repo> --json visibility`),",
+        "     needs no per-action approval; the task's go-ahead covers it, so",
+        "     re-run with `# cross-boundary:ack`. This hook cannot see",
+        "     visibility, which is why it asks there too. Probe the host the",
+        "     write goes to: with GH_HOST or a host-qualified GH_REPO, pass",
+        "     `<host>/<owner>/<repo>`, since a bare `<owner>/<repo>` reads",
+        "     github.com. The ack clears every write in the call, so take the",
+        "     exception with that write alone in its own call.",
         "",
     ]
     if show_caller_evidence:
@@ -927,9 +936,9 @@ def _build_checklist(
             "     Keep --input: create the JSON payload file with the Write tool first."
         )
     elif is_api:
-        body_rule = "     Use -F body=@/tmp/<slug>.md (write body via Write tool first)."
+        body_rule = "     Use -F body=@<scratch>/<slug>.md (write body via Write tool first)."
     else:
-        body_rule = "     Use --body-file /tmp/<slug>.md (write body via Write tool first)."
+        body_rule = "     Use --body-file <scratch>/<slug>.md (write body via Write tool first)."
     parts += [
         "  ③ Body delivery format",
         body_rule,
@@ -942,10 +951,12 @@ def _build_checklist(
             else "     Heredoc (`<<EOF`) is blocked by the praxis hook chain."
         ),
         "",
-        "  ④ Language & content rules (CLAUDE.md §External-repo content isolation)",
-        "     English only. No internal identifiers (org/team prefixes,",
-        "     internal ticket refs, internal chat/wiki links, internal CLIs).",
-        "     No absolute local paths.",
+        "  ④ Language & content rules (rules: Cross-boundary repo writes,",
+        "     Personal repo content isolation)",
+        "     Public repo: English only. No internal identifiers (org/team",
+        "     prefixes, internal ticket refs, internal chat/wiki links,",
+        "     internal CLIs). No absolute local paths.",
+        "     Any repo: nothing from your personal repos or config.",
         "",
         "If all are satisfied, re-run with `# cross-boundary:ack` appended.",
     ]

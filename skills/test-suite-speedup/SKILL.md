@@ -49,6 +49,10 @@ Reference map — load only when the step runs:
 | [`scripts/ci_leg_series.sh`](scripts/ci_leg_series.sh) | Per-leg test-step seconds for every push run since a date (TSV) — the series for locating step changes; run in the background |
 | [`scripts/ci_durations_diff.py`](scripts/ci_durations_diff.py) | For before/after run pairs around each step change: collected counts, pytest summaries, new-or-grown `--durations` entries |
 | [`scripts/boto_call_counter.py`](scripts/boto_call_counter.py) | pytest plugin counting real botocore calls per test — run it when cProfile shows SSL/socket waits under botocore |
+| [`references/ci-verification.md`](references/ci-verification.md) | Step 6 in full: local-only failures, suite-wide stub safety, bot review waits, merge-run base, per-file metric when the suite grew |
+| [`references/report.md`](references/report.md) | Step 7 in full: the before/after table, post-merge confirmation on push runs, net position, revising published text |
+| [`references/next-bottleneck.md`](references/next-bottleneck.md) | Step 8 in full: accounting for a whole CI delta, the "keeps getting slower" answer order, equivalence-test premises |
+| [`references/troubleshooting.md`](references/troubleshooting.md) | Symptom / cause / fix table |
 
 ## When to Use
 
@@ -194,170 +198,44 @@ rename.
 
 ### Step 6: Verify on CI, not by sitting on local runs
 
-Hold changed test code to the repo's own coding guideline like product code —
-no pass-through wrappers, duplication extracted, a mutation proof for any new
-helper. Locally run only the touched files plus lint, push, and watch the PR's
-checks in the background instead of holding the turn. Read the PR's review
-threads before writing any verification note: bot reviewers post within
-minutes of a push.
-
-When a test fails only in a local environment (an optional-dependency venv, a
-local fake service), run that one test on the unmodified base in a throwaway
-detached worktree before touching the change: the same failure there is
-environment, not regression. Name it in the commit's `Not-tested:` trailer and
-the PR body, and close it from the CI job that installs that dependency (its
-raw log: the summary line plus `grep -c FAILED` = 0), not from the local run.
-
-A local full-suite base-vs-branch comparison supports "no new failures" only as
-far as it was reproduced: when the branch-only failures share one env error,
-say "N branch-only failures, all <error>; <file> reproduced on base" and let
-the CI run close the rest — "0 new failures" overstates it and has to be
-corrected on every surface it reached.
-
-Before calling a suite-wide stub merge-safe, enumerate how it could change results, each with a probe: (1) module-level binds that bypass it (`git grep -nE "from <mod> import <fn>"` — a name bound at import keeps the real function); (2) production callers that do not catch the stub's exception, and whether any test runs them unpatched (the per-test call counts from the before-run show it); (3) tests that assert the real path — they must patch it themselves, nested inside the session stub; (4) an in-flight library upgrade that moves the patched name (see the version-tolerant rule in `pytest-slow-test-causes.md`). Report each as checked or as an inference with what would confirm it.
-
-Bot reviewers can run longer than a short poll: the Codex connector marks a PR 👀 while reviewing and swaps it for 👍 when it finishes with no findings, sometimes past 20 minutes. Bound the wait, then re-read reactions and threads once before the merge briefing instead of extending the poll. To tell whether a standing 👍 belongs to the latest push, read its timestamp (`gh api graphql` → `pullRequest{reactions(first:20){nodes{content createdAt user{login}}}}`) against the push time — a 👍 older than the push is the previous round's verdict.
-
-A `pull_request` run tests the merge of the head into the base tip at that
-moment, not the PR's own base commit: read the base sha from the job log
-(`HEAD is now at <m> Merge <head> into <base>`) and compare with that base
-commit's push run.
-
-The per-file metric is the after-measure when the suite grew between the
-baseline and the PR run: whole-leg seconds then mix in other commits' tests
-(compare the `collected N items` counts first). Report the touched file's CI
-seconds from both runs as the result and the leg times as context. After
-merging the base into the PR, rebuild the comparison band from other PRs' runs
-in the same period, not the earlier band: the base's own suite keeps growing,
-so the old band can make a real gain look like a regression. Say in the report
-when the band itself moved.
+Hold changed test code to the repo's coding guideline, run only the touched
+files plus lint locally, push, and watch the PR's checks in the background.
+A failure seen only in a local environment is checked on the unmodified base
+first; a suite-wide stub is merge-safe only after its four bypass routes are
+probed; a `pull_request` run tests the merge into the base tip; and when the
+suite grew between runs, the touched file's CI seconds are the result. Full procedure: [references/ci-verification.md](references/ci-verification.md).
 
 Done when: a CI run of the branch on the same path as the baseline has
 finished, and every open review finding is answered.
 
 ### Step 7: Report the before/after
 
-A table with both run IDs: job wall time (now = the slowest leg), the formerly
-slow step, and the unchanged half, plus the per-leg test summary line. For a
-gain spread over several PRs, one table: baseline → each merged step → now,
-with the share each PR contributed. Name the CI path the PR did not exercise
-as unverified, say it is one run each (runner variance unmeasured), and say so
-when pruning tests contributed little. Format →
-[`references/ci-measurement.md`](references/ci-measurement.md#the-beforeafter-report).
+One table with both run IDs: job wall time (the slowest leg), the formerly slow
+step and the unchanged half, plus the per-leg summary line; for a gain spread
+over several PRs, baseline → each merged step → now. After the merge, confirm
+the gain on the base branch's own push runs (per-leg seconds and their sum in
+time order), lead with the net position against the pre-regression baseline,
+and revise a published comment or body from its live text. Full procedure: [references/report.md](references/report.md).
 
 Done when: the table carries both run IDs, the comparison is on the same
 runner instance type, and every unverified path is named.
 
-After the merge, confirm the gain on the base branch's own push runs, not the
-PR run: list every successful push run's per-leg test-step seconds **and their
-sum** in time order (a few days back) — the slowest leg swings with how the
-splitter balanced that run, the both-legs sum does not, so locate step changes
-on the sum, take the "before" window as the runs since the last
-level shift, and report the after-runs with their count (two runs is a hint, not
-a number). Lead that report with the net position against the pre-regression baseline
-— CI wall time and leg sum, baseline run → now, in minutes — and only then
-what this PR recovered and what is still unrecovered (each remaining step with
-its commit). A PR delta read alone ("−24 s") hides that the regression was not
-recovered, and the user has to work out the net themselves.
-Read the series for a step change that is not yours — a jump of tens
-of seconds at one commit is a new regression to name (commit, before/after band)
-as a finding with its cause marked "not yet split", and it is usually why the
-gain looks smaller than the PR run promised. Put the series and windows in the
-tracking issue first, then link that comment from any chat/Slack summary.
-
-When the base rewrites a file you sped up (moves its loop onto a shared helper, changes the return shape), resolve the conflict by merging the base (never rebasing a pushed branch), taking the base's version of the file whole, and re-applying only your speedup on its new API — hand-merging hunks keeps calls to helpers the base deleted. Check that a cached value is still plain data (a dataclass, not a live session object) before caching it again. Then re-run the base-vs-branch mutation with the *new* base copy as the "before" side: the old proof compared against a file that no longer exists. Re-take the CI baseline from the merged base commit's push run too.
-
-To revise a published verification comment or PR body after a re-measure, fetch
-its live text first (`gh api repos/<o>/<r>/issues/comments/<id> --jq .body`,
-`gh pr view <N> --json body --jq .body`) and edit that, never a scratch copy:
-scratch files get pruned, and a local copy can predate corrections already
-published, so editing it silently reverts them. Never issue the file write and
-the `gh pr edit --body-file` in the same parallel batch: a refused write leaves
-the old file, the edit publishes it anyway, and the title/body disagree. Write,
-confirm the write succeeded, edit, then grep the live body for a phrase the new
-text removed.
-
 ### Step 8: Next-bottleneck hunt (when asked what else is slow)
 
-When the question is "CI went from X to Y minutes — why?", the answer must
-account for the whole delta before any fix is proposed: a per-step table of
-both runs (setup steps, queue, the test step), then the test step split into
-*same tests got slower* vs *new tests* vs *collection* (recipe →
-[`references/ci-measurement.md`](references/ci-measurement.md#attributing-a-slowdown-between-two-dates)).
-A fix that covers part of it is reported as that part ("44 s of ~2.5 min"),
-never as the answer — the user reads a single fixed file as "done" and has to
-come back to ask about the rest.
-
-When the question is "we keep cutting but it doesn't go down", answer in this
-order: (1) net — leg sum and slowest leg, baseline run → now, with test-count
-growth % next to time growth %; (2) the daily p50 series of the both-legs sum,
-which shows the step changes and the creep between them; (3) one table row per
-step change — commit/PR, seconds added, the tests that caused it (from the
-`--durations` diff), and whether a later PR recovered it (with its drop in the
-series) or it is still there; (4) same-tests-slower and long-standing costs
-the earlier speedups never touched; (5) next levers ranked by recoverable
-seconds. Merged speedups that did land show up as drops in the series — name
-them so the user sees the cuts worked and were outpaced, not that they failed.
-Scripts: `scripts/ci_leg_series.sh`, `scripts/ci_durations_diff.py`.
-
-When the report ends in a choice, put the options in the `clarify` call, not as a lettered list under a numbered candidate table: a bare "1" reply then has two antecedents (candidate #1 or option 1) and costs a round to disambiguate. If a lever in the approved bundle measures well below its estimate during implementation, say its new size and ask before dropping it; record the drop with the numbers in the issue body. When the approval itself was conditional on that measurement ("include it if the hypothesis holds"), a failed CI check is the answer: revert the lever with a new commit on the branch (never force-push), retitle the PR and rewrite its body around what remains, post a correction on the tracking issue with both runs' per-test numbers, and lead the next report with the revert.
-
-Before a menu offers to delete or shrink an equivalence test (on/off switch
-pair, before/after transform comparison, "every task ends in the same state"),
-settle two premises with probes, not from the file name: (1) is the switch
-still partially rolled out — read its live value per tenant (prod Airflow
-Variable / flag store); `on:<a few ids>` or a rollback switch left `on` means
-the off path is live; (2) is the "before" side a reconstructed reference for a
-transform the code still applies unconditionally — then it is a differential
-oracle guarding that transform against future edits, not a dead path, and
-deleting it drops regression coverage. Only a comparison whose both premises
-fail is removable; otherwise the levers are semantics-free ones (dedupe
-identical simulations, fold re-reads into the parametrized case) or the
-owner's call on the case matrix. Offering removal first and retracting it
-after the user picks it costs two approval rounds.
-
-Re-rank from the post-change full-suite run with the same method, classify
-each top file, and reproduce the fixable ones locally (`--durations`,
-cProfile) before filing.
-
-When the remaining delta is "new tests" and the user asks whether they are
-worth it, run the window audit in `test-suite-consolidation` (its pruning
-reference, section "Auditing the tests added in a window"). Lead with
-cost concentration: a count in the thousands is usually mostly sub-50 ms tests.
-The CI-time answer then lives in a few files and the coverage-gap answer in
-the skipped ones. Report both, and say what a full cleanup can save in total
-next to what only more shards can. Put only reproduced causes in scope; list one-time
-setup costs, intended waits, and unexplained items under an explicit
-out-of-scope section with why, so the next session need not re-measure.
+Account for the whole delta before proposing a fix (per-step table of both
+runs, then same-tests-slower vs new tests vs collection), answer "we keep
+cutting but it does not go down" in the five-part order, settle two premises
+before offering to delete an equivalence test, re-rank from the post-change
+run, and keep unexplained items in an explicit out-of-scope list. Full procedure: [references/next-bottleneck.md](references/next-bottleneck.md).
 
 Done when: every top file is either in scope with a reproduction or in the
 out-of-scope list with a reason.
 
 ## Troubleshooting
 
-| Symptom | Cause | Fix |
-| --------- | ------- | ----- |
-| A background `gh run watch <id> --exit-status` loop reports a nonzero for one run after a merge | The run was `cancelled` by the workflow's concurrency group when a newer push to the same branch started it again — `--exit-status` treats cancelled as failure | Read `gh run view <id> --json conclusion` and the next run of that workflow on the branch before reporting a failure; report it as "cancelled, superseded by <run> (success)" |
-| A test that passes alone (and in its dedicated workflow) times out only on a PR that changes the test runner (nx/vitest projects, `maxWorkers`, `parallel`) | The PR moved the test from running alone into a shared concurrent job; "unrelated test, flaky" is half true — the code is unchanged but its execution context is new | `grep` the base branch's workflows for where that test ran before, read the failing job's `import`/`tests` totals, run it alone and in the shared job on the same commit, and only when it passes alone and times out shared report it as runner-induced load (concurrency can also expose a real race or shared-state defect); options are excluding it from the shared job (it already has a home), a per-test timeout, or cutting its input size |
-| A speedup the user approved hours ago turns out to be already merged when you start building it | Concurrent sessions ship the same levers (shard split, slow-test fix) between the analysis and the approval | Right before opening the issue/worktree, run `git log origin/<base> --since=<analysis date> -- .github/workflows <shard script> <slow test's product file>` and read the latest base CI run's leg times; if the lever landed, stop and report the merged PRs instead of building |
-| A background `gh pr checks <N> --watch` returns right after a push with every leg `pending` | The new run's checks were not registered yet, so watch saw nothing running and exited | Watch that one workflow's run itself: take its id from `gh run list --workflow <file> --commit <pushed sha>` once it lists a run (wait until it does), and `gh run watch <id>`; for every check of a PR, use `merge-briefing`'s pending-count loop |
-| Turn stalls for many minutes on a local run | Waiting on a long foreground or chained wait | Run it in the background and end the turn, or push and let CI run |
-| A background run of a shell script misbehaves | The script was edited while it ran — bash reads scripts incrementally | Never edit a script during its own run; edit other files meanwhile |
-| Before/after differs by less than run-to-run swing | Mixed runner instance types, or contended local runs | Compare only same-instance-type runs; for sub-noise changes, time the touched files alone, base vs branch alternating, 3 reps, and say the full-suite gain is below noise. Run the base side from the same worktree: `git show origin/<base>:<file> > <stem>_prodab.py` next to the branch file (same conftest, same venv), pass `--junitxml` per run, sum `testcase` times per file, delete the copies after. The copy's name must stay a plain module name ending in `.py` (`<stem>_prodab.py`, never `<file>.prodab.py`) — an extra dot makes pytest import it under a broken module name. Lead the user report with this per-file A/B and give the CI leg sums as context with their run count |
-| Matrix legs unbalanced after a speedup | A duration-based shard file still holds the old slow times | Refresh only the touched files' entries in the same PR → [`references/ci-measurement.md`](references/ci-measurement.md#refreshing-a-duration-shard-file) |
-| One leg of a timing-artifact sharded suite runs 2–3× the others on a new branch's first run | The artifact lookup searched only the branch and the release branch, found nothing, and fell back to a committed baseline that predates the newly enabled tests (they sit near 0 s there) | Grep each leg's log for the selected artifact id and its planned seconds/files line; an empty id is the cold start. Make the lookup fall back to the integration branch (where the workflow lands first) before the release branch, prove it with a read-only live `select` run as a new branch (empty before, an id after), and make a failed lookup a `::warning::` that plans from the baseline instead of a step failure that reds every leg and the deploy |
-| One leg stays long even though it received a timing artifact | A single indivisible test grew past the balanced leg size; no plan can go below the largest test | Read that leg's `slowest N durations`; compare the same test id across runs before and after the jump, then A/B it locally at the two commits in detached worktrees. A generator test that enumerates the Cartesian product of template `if` branches doubles per added condition — count variants at both commits before blaming anything else, and prune combinations no render can reach rather than trying to split the test (the generator merges every variant into one output, so there is nothing to split). A/B at commits on the branch where that per-template test id exists: a change merged into the release branch and backmerged has release-branch parents where the parametrized id may not exist, and the duration grep then prints nothing (check `--collect-only` for the id before timing). Prune only two `x == <literal>` branches on a name whose value cannot change between them, and decide that by where the name appears, not by listing ways it can change: walk the template AST and accept the name only when every appearance is an `if`/`elif` test, apart from at most one plain `set name = ..` outside every `for`/`macro`/`call`/`filter` body and before the first test reading it. Any other appearance (an alias `set a = name`, a call or filter argument, output, a loop target or iterable, a macro argument, `with`/`import`, `set ns.attr`) or a call/filter/test inside the `if` test itself disqualifies it. Enumerating mutation forms (second `set`, repeated scope, `x.update(..)`, aliases) leaks one case per review round; the appearance whitelist closes the class at once and is shorter. Read conditions and literal values with the template engine's own parser (`jinja2.Environment().parse(...)` gives `Compare`/`Const` nodes), not a regex: regex imitation leaks one equivalence at a time (quote style, escapes, numeric spellings), and each leak drops a reachable variant; every doubt must resolve toward keeping the combination. When bot reviewers find a second soundness hole in the same pruning heuristic, stop patching and ask the owner to keep it, replace it with the parser-based version, or drop it, with the measured saving beside each option. Record `uptime` load next to any local timing; above the core count it is not a measurement. Compare literal values, not spellings (`'A'` and `"A"` are equal); the regeneration test proves output and recorded folds unchanged, and the CI duration of that one test is the measurement, never a local run on a loaded machine |
-| Formatter rewrote dozens of unrelated files | A local formatter version differs from the pinned one, run on a directory | Format only touched paths with the pinned version; restore with `git checkout -- <path>` only the outside paths that `git status --porcelain` listed as clean before the formatter ran — on a path you had already edited, that checkout drops your edits too, so revert the formatter's hunks there with `git restore -p` instead |
-| Tests fail locally that pass on CI, or are fast locally but slow on CI | Newer local runtime major: globals and internals such as `AsyncLocalStorage` differ | Run on the CI's runtime major (`npx -y node@<major>`, the CI Python version). For timing, use a `node:<major>` Linux container with CI's vCPU cap |
-| One test case takes almost exactly its `spawnSync`/`execFileSync` `timeout` on Linux CI although the child exits with the expected code | The child launched grandchildren via `npx <bin>`; SIGTERM stops at npx, the orphans keep the parent's stdout/stderr pipes open, and the sync call waits until its timeout | Compare the CI per-test time with the spawn timeout; in a `node:<major>` container run the entrypoint and `ps` for orphans (ppid 1). Fix the spawn to start the bin with `process.execPath` + `require.resolve('<pkg>/cli')` instead of `npx` |
-| pytest dies importing a plugin from a foreign `site-packages` | Shell `PYTHONPATH` points at another tool's venv | Run with `env -u PYTHONPATH` in the same call |
-| A profiling/driver script dies at import with `module 'queue' has no attribute ...` (or similar for another stdlib name) | A scratch script in the same directory is named after a stdlib module (`queue.py`, `json.py`, `profile.py`); Python puts the running script's directory first on `sys.path` | Name scratch scripts after what they measure (`queue_times.py`), never after a stdlib module |
-| Tests move between CI steps after an edit | Change-selection steps (testmon, marker reruns, template-driven steps) key off file contents or fixture names | Read the comments around every test step before editing the workflow |
-
-Read another ref with `git show <ref>:<path>` or `git grep <pattern> <ref>`,
-never by checking it out in a checkout you are not working in — it may hold
-someone's branch or uncommitted state. To run tests at another ref, use a
-throwaway worktree.
+Symptoms seen while measuring or landing a speedup (a nonzero `gh run watch`
+after a merge, a timeout only on a runner change, a speedup already merged by
+another session, ...), each with its cause and fix, as a table. Full procedure: [references/troubleshooting.md](references/troubleshooting.md).
 
 ## Integration
 

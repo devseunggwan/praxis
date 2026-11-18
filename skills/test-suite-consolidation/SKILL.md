@@ -52,6 +52,9 @@ Reference map — load only when the step runs:
 - The user asks which tests are unnecessary, or asks to clean them up —
   including tests you wrote in your own open PR (→ the quick pass in
   [`references/pruning.md`](references/pruning.md#own-pr-quick-pass)).
+- The user asks to delete one flaky test: find the flaky assertion and its
+  trigger, and measure the coverage it takes with it, before the PR →
+  [`references/pruning.md`](references/pruning.md#deleting-a-flaky-test-on-request).
 - **Unasked, before opening any PR that adds tests.** Run the own-PR quick
   pass (mutation matrix via
   [`scripts/mutation_matrix.sh`](scripts/mutation_matrix.sh)) before

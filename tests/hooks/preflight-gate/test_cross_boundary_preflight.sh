@@ -1064,7 +1064,7 @@ run_case_detail "gh api ask renders the api form, not a --repo flag" \
 
 run_case_detail "gh api item 3 prescribes -F body=@, not --body-file" \
   'gh api --method PATCH repos/owner/repo/issues/comments/123 -F body=@/tmp/a.md' \
-  '-F body=@/tmp/<slug>.md'
+  '-F body=@<scratch>/<slug>.md'
 
 # Check 1's hard block exempts `gh api`, so the API checklist must not repeat
 # the `pr/issue create` wording — it would send the caller to rewrite a command
@@ -1085,7 +1085,7 @@ run_case_detail_absent "gh api --input item 3 drops the -F body=@ prescription" 
 
 run_case_detail "gh api -f body= write still prescribes -F body=@" \
   'gh api --method PATCH repos/owner/repo/issues/comments/123 -f body=hi' \
-  '-F body=@/tmp/<slug>.md'
+  '-F body=@<scratch>/<slug>.md'
 
 run_case_detail "gh api --input on a placeholder endpoint keeps --input" \
   'gh api --method PATCH repos/{owner}/{repo}/issues/comments/123 --input payload.json' \
@@ -1094,6 +1094,41 @@ run_case_detail "gh api --input on a placeholder endpoint keeps --input" \
 run_case_detail "non-api item 3 keeps the heredoc block wording" \
   'gh pr comment 1 --repo other/target --body-file /tmp/a.md' \
   'is blocked by the praxis hook chain'
+
+# --- Rule names, scratch path, own-org private repos (issue #1659) ---------
+# The checklist cited rule sections that do not exist and told the caller to
+# write under /tmp; a confirmed own-org private repo had no stated way through.
+run_case_detail "item 1 names the real rule section" \
+  'gh pr comment 1 --repo other/target --body-file /tmp/a.md' \
+  '(rule: Cross-boundary repo writes)'
+
+run_case_detail "item 4 names the real rule sections" \
+  'gh pr comment 1 --repo other/target --body-file /tmp/a.md' \
+  'Personal repo content isolation'
+
+run_case_detail_absent "no section that does not exist" \
+  'gh pr comment 1 --repo other/target --body-file /tmp/a.md' \
+  'External-repo'
+
+run_case_detail_absent "no /tmp body path prescribed" \
+  'gh pr comment 1 --repo other/target --body-file /tmp/a.md' \
+  '--body-file /tmp/<slug>.md'
+
+run_case_detail "body path is the scratch directory" \
+  'gh pr comment 1 --repo other/target --body-file /tmp/a.md' \
+  '--body-file <scratch>/<slug>.md'
+
+run_case_detail "own-org private repo proceeds with the ack marker" \
+  'gh pr comment 1 --repo other/target --body-file /tmp/a.md' \
+  "private or internal repo, with the"
+
+run_case_detail "visibility probe names the write's host" \
+  'gh pr comment 1 --repo other/target --body-file /tmp/a.md' \
+  "since a bare \`<owner>/<repo>\` reads"
+
+run_case_detail "the ack is taken with one write per call" \
+  'gh pr comment 1 --repo other/target --body-file /tmp/a.md' \
+  "with that write alone in its own call"
 
 run_case "gh api POST issue comments (method implied by a field)" ask \
   'gh api repos/owner/repo/issues/42/comments -f body=hi'

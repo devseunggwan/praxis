@@ -148,6 +148,50 @@ run_case "gh --body-file absolute value is silent" \
   "silent" \
   "gh pr create --body-file /tmp/body.md"
 
+# --- gh api -F key=value: only key=@path reads a file (issue #1659) --------
+# Shapes from real asks on one install: an absolute `key=@` value, a literal
+# field, and an assignment or a redirection the tokenizer placed in command
+# position. Each was read as a relative path before.
+run_case "gh api -F key=@absolute is silent" \
+  "silent" \
+  "gh api -X PATCH repos/o/r/issues/comments/1 -F body=@/abs/scratch/anchor.md --jq .html_url"
+
+run_case "gh api -F key=@relative still asks" \
+  "ask:body=@scratch/anchor.md" \
+  "gh api -X PATCH repos/o/r/issues/comments/1 -F body=@scratch/anchor.md"
+
+run_case "gh api -F key=@\$VAR path is silent" \
+  "silent" \
+  'gh api -X PATCH repos/o/r/issues/comments/1 -F body=@$S/anchor.md'
+
+run_case "gh api -F key=@- (stdin) is silent" \
+  "silent" \
+  "gh api -X PATCH repos/o/r/issues/comments/1 -F body=@-"
+
+run_case "gh api -F literal field is silent" \
+  "silent" \
+  'gh api graphql -F n=$2 -F owner=o/r -f query=x'
+
+run_case "redirection closing a substitution is silent" \
+  "silent" \
+  "S=/abs/dir; SEC=\$(python3 -c 'print(1)' 2>/dev/null); echo \$SEC"
+
+run_case "assignment in command position is silent" \
+  "silent" \
+  "S=dir/sub; ls \$S"
+
+run_case "assignment before a relative exec still asks" \
+  "ask:scripts/foo.sh" \
+  "MODE=apply ./scripts/foo.sh"
+
+run_case "redirection before a relative exec still asks" \
+  "ask:scripts/foo.sh" \
+  "2>/dev/null ./scripts/foo.sh"
+
+run_case "spaced redirection before a relative exec still asks" \
+  "ask:scripts/foo.sh" \
+  "2> /dev/null ./scripts/foo.sh"
+
 # ---------------------------------------------------------------------------
 # === SILENT: cd precedes the relative exec in the same command ===
 # ---------------------------------------------------------------------------

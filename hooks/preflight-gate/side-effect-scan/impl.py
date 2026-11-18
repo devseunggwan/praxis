@@ -105,7 +105,7 @@ CATEGORIES = {
         "patterns": [
             ("git", (1,), {"commit", "merge", "rebase", "cherry-pick", "revert"}),
         ],
-        "reason": "local git state mutation — 현재 브랜치/HEAD 확인 필요",
+        "reason": "local git state mutation — confirm the current branch/HEAD",
     },
     # Split out of `git-commit` by issue #874: these commit from *inside*
     # another process, so the seven sibling `git commit` argv gates never see
@@ -113,14 +113,14 @@ CATEGORIES = {
     "wrapper-commit": {
         "tier": TIER_ASK,
         "patterns": [],  # populated from PRAXIS_WRAPPER_COMMIT_CMDS below
-        "reason": "wrapper CLI commits internally — 대상 카탈로그/브랜치와 의도 재확인",
+        "reason": "wrapper CLI commits internally — re-confirm the target catalog/branch and intent",
     },
     "git-push": {
         "tier": TIER_ASK,
         "patterns": [
             ("git", (1,), {"push"}),
         ],
-        "reason": "remote trigger (git push) — 타겟 브랜치와 upstream 재확인",
+        "reason": "remote trigger (git push) — re-confirm the target branch and upstream",
     },
     "gh-merge": {
         "tier": TIER_ASK,
@@ -128,14 +128,14 @@ CATEGORIES = {
             ("gh", (1, 2), ("pr", {"merge", "create"})),
             ("gh", (1, 2), ("workflow", {"run"})),
         ],
-        "reason": "remote trigger via gh — PR/워크플로 타겟과 의도 재확인",
+        "reason": "remote trigger via gh — re-confirm the PR/workflow target and intent",
     },
     "kubectl-apply": {
         "tier": TIER_ASK,
         "patterns": [
             ("kubectl", (1,), {"apply", "delete", "replace", "patch"}),
         ],
-        "reason": "shared resource write (kubectl) — cluster/namespace 재확인",
+        "reason": "shared resource write (kubectl) — re-confirm the cluster/namespace",
     },
 }
 
@@ -460,12 +460,11 @@ def build_reason(categories: list[str], prod: bool, command: str) -> str:
     msg = " ".join(parts)
     if prod:
         msg = (
-            "[prod] ⚠️  PROD scope detected / PROD scope 감지 — " + msg
-            + " Re-confirm the deploy/ops impact. 배포/운영 영향 재확인 필수."
+            "[prod] ⚠️  PROD scope detected — " + msg
+            + " Re-confirm the deploy/ops impact."
         )
     msg += (
         " If this run is intended, re-invoke with a '# side-effect:ack' comment in the command."
-        " 의도한 실행이면 command 에 '# side-effect:ack' 주석을 포함해 재호출하세요."
     )
     msg += compound_cascade_hint(command)
     return msg
@@ -492,10 +491,9 @@ def build_advisory(categories: list[str], prod: bool) -> str:
     parts = [f"[{c}] {CATEGORIES[c]['reason']}." for c in categories]
     msg = "[side-effect-scan] " + " ".join(parts)
     if prod:
-        msg = "[side-effect-scan] ⚠️  PROD scope detected / PROD scope 감지 — " + " ".join(parts)
+        msg = "[side-effect-scan] ⚠️  PROD scope detected — " + " ".join(parts)
     msg += (
         " If this run is intended, re-invoke with a '# side-effect:ack' comment in the command."
-        " 의도한 실행이면 command 에 '# side-effect:ack' 주석을 포함해 재호출하세요."
     )
     return msg
 

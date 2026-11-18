@@ -308,9 +308,14 @@ command that also touches shared state.
 the whole command is a routine publish step on Hermes:
 
 ```text
-stderr: "[side-effect-scan] [git-commit] local git state mutation — … 의도한 실행이면 …"
+stderr: "[side-effect-scan] [git-commit] local git state mutation — confirm the current branch/HEAD. If this run is intended, …"
 exit 0, no stdout
 ```
+
+The reason is English only (issue #1659). It used to carry each instruction
+twice, once in English and once in Korean, and the category reasons ended in
+Korean; the duplicate doubled the text a self-check host puts in front of the
+model on every push and commit, and said nothing the English half did not.
 
 Two properties of that channel are load-bearing and must not be "simplified":
 

@@ -29,6 +29,21 @@ scope is the diff's added tests. Drop, in one `test(...)` commit, cases that:
   representative case per code branch in parametrize lists, and keep unit
   tests for branches the integration test does not drive (vendor response
   classification, error mapping).
+- (g) pin lines the PR's diff does not touch, even inside a changed file
+  (a pre-existing global filter in a template whose gate the PR edits): the
+  matrix row that kills it is a mutant of unchanged code, so it is out of the
+  PR's scope, provided no test you keep still guards that line: when the
+  test being dropped is its only guard, keep it. Say in the drop table that
+  the line was untested before the PR too, rather than leaving it as a
+  silent coverage loss;
+- (h) feed an input whose branch the code treats like another input (a
+  `None` key next to an unregistered key when the lookup already defaults):
+  a surviving mutant that removes the special-case guard shows only that no
+  test tells them apart. Read the code path for both inputs first; when they
+  give the same observable result for every input the guard covers, the case
+  and the guard are equivalent. Drop the case, simplify the
+  test helper that built it, and mention the redundant guard in the report
+  instead of writing a test for it.
 
 Also drop asserts that only re-test a library guarantee (a secret type's
 `repr`), and a case whose assertions another case's exact-equality assert
@@ -53,7 +68,11 @@ Build the mutants as whole replacement files of the changed source and run
 reverting to the old logic: each sibling wrong approach the PR rejected (e.g.
 three-dot vs two-dot vs commit-count), always-true / always-false, dropping the
 core comparison, comparing against the wrong side, and each fail-safe branch
-flipped (`set -e` added, error → the unsafe answer). Mutate config wiring too
+flipped (`set -e` added, error → the unsafe answer), and each scoping
+condition of a query dropped (`WHERE owner_user_id = :id` removed). The last
+one survives every test whenever the fixture holds only matching rows, so add
+one non-matching row (another owner, another tenant) to the fixture of the
+test that reads the result. Mutate config wiring too
 (revert the workflow/config that calls the code) so the wiring test earns its
 row. A mutant no test fails is an equivalent mutant when the observable result
 cannot change (say why in one line); otherwise it is a missing test. Generate
@@ -111,6 +130,41 @@ grep), then re-check every DROP / MERGE yourself (see
 [Re-verify](#re-verify-before-you-report-or-delete)). When the request spans
 several open PRs of one work stream, run the pass once per PR with the same
 criteria; a PR still being written gets it after its author finishes.
+
+## Deleting a flaky test on request
+
+When asked to delete one named intermittently failing test ("it's flaky,
+delete it"), the deletion stays the default, but run these before the PR so
+the owner decides with the coverage cost in view:
+
+1. **Locate the failing assertion** in the CI log of every failed run. When
+   it is always the same line, the flake is that assertion, not the test.
+2. **Look for a deterministic trigger before accepting "order-dependent".**
+   A file that passes alone N times does not prove order dependence. Try
+   the cheap timing probe first: insert `time.sleep(1.1)` (or the clock unit
+   in play) before the step under test in a scratch copy and run it 3x next
+   to an unmodified copy. 3/3 fail vs 3/3 pass means a time-boundary cause
+   (second-resolution `updated_at`/`now()` columns, minute buckets), which
+   is also a candidate production defect: record it on the work issue.
+3. **Measure what the deletion loses.** Write a mutant that breaks the
+   behavior the test's *other* assertions pin, and run (a) the test with only
+   the flaky assertion removed, under the timing probe, and (b) every other
+   test in the file and its siblings with the whole test deselected. If (a)
+   passes the probe and catches the mutant while (b) all pass, the test is
+   the sole guard of that behavior. Do the same for the flaky assertion
+   itself (it may be the test's only assertion): write a mutant that breaks
+   what it pins, run the rest of the suite with the test deselected under a
+   controlled clock (the timing probe, or a frozen time source), and record
+   whether anything else catches it.
+4. **Ask before narrowing or widening.** Keeping the test and dropping only
+   the flaky assertion is a scope change from "delete": put both options
+   (delete whole test / drop the flaky assertion) with the step-3 numbers to
+   the owner as one decision and recommend; never switch silently. A review
+   bot that flags the coverage loss gets a `Not fixed:` reply citing that
+   decision and the measured gap.
+5. In the PR body state the deleted id, what is kept (sibling tests in the
+   class), the cause, and the protection that is lost, with the grep scope
+   that shows no other test covers it.
 
 ## 1. Ask the criteria once
 
