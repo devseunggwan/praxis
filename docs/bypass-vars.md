@@ -156,6 +156,7 @@ per-hook `spec.md` before promoting any of them.
 | `PRAXIS_BRANCH_NAME_REGEX` | `branch-name-check` | Override the allowed branch-name regex |
 | `PRAXIS_BRANCH_NAME_WHITELIST` | `branch-name-check` | Allowlist of exempt branch names |
 | `PRAXIS_MERGE_ASK_TRAILER_REGEX` | `merge-gate` | Status line a host appends after the merge question that a chat approval still counts through (full match; unset: none) |
+| `PRAXIS_MERGE_ASK_TRACKER_LABELS` | `merge-gate` | Comma-separated words whose `<word> #N` in the merge question is a host tracker item, not a second PR (needs a space before `#`; `PR`/`pull` ignored; unset: none) |
 | `PRAXIS_COMMIT_TITLE_ALLOWED_TYPES` | `commit-title-format-check` | Allowed conventional-commit types |
 | `PRAXIS_HUB_MEDIATED_ORGS` | `block-child-repo-issue-create` | Orgs whose child-repo issues route through the hub |
 | `PRAXIS_WORKTREE_ENFORCED_REPOS` | `worktree-edit-gate` | Repos where the worktree workflow is enforced |

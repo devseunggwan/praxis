@@ -1996,12 +1996,31 @@ def _last_ask_sentence(text: str) -> str:
     return re.sub(r"\x00(\d+)\x00", lambda m: urls[int(m.group(1))], asks[-1].strip())
 
 
+# Words that name a pull request, so a host cannot declare them tracker labels.
+_PR_LABEL_WORDS = frozenset({"pr", "prs", "pull", "pulls"})
+
+
+def _strip_tracker_refs(sentence: str) -> str:
+    """`sentence` with each host tracker reference (`pm #123`) blanked out.
+
+    A label comes from `PRAXIS_MERGE_ASK_TRACKER_LABELS` (comma-separated
+    words; unset: none) and must be followed by whitespace before `#N`, so a
+    repo-named ref (`name#N`) is never read as one. A word naming a PR is
+    ignored as a label."""
+    labels = [w.strip() for w in os.environ.get("PRAXIS_MERGE_ASK_TRACKER_LABELS", "").split(",")]
+    labels = [w for w in labels if re.fullmatch(r"[^\W\d_][\w-]*", w) and w.lower() not in _PR_LABEL_WORDS]
+    if not labels:
+        return sentence
+    alt = "|".join(re.escape(w) for w in labels)
+    return re.sub(rf"(?<![\w/#.-])(?:{alt})\s+#\d+(?!\w)", " ", sentence, flags=re.IGNORECASE)
+
+
 def _plain_merge_ask(sentence: str, pr: str) -> bool:
     """True when `sentence` asks to merge `pr` and nothing else: it names no
     other PR, and once a leading label or bullet and its PR references are set
     aside every word is in `_PLAIN_ASK_WORDS` (`Approve merge of o/r#999?`,
     `PR #999 을 squash 머지할까요?`, `**승인 요청:** web#999 를 머지할까요?`)."""
-    sentence = _ASK_BULLET_RE.sub("", _ASK_LABEL_RE.sub("", sentence))
+    sentence = _strip_tracker_refs(_ASK_BULLET_RE.sub("", _ASK_LABEL_RE.sub("", sentence)))
     # A pull URL reads as its number: `.` inside it is not a sentence end.
     sentence = _URL_RE_FULL.sub(
         lambda m: f" #{u.group(1)} " if (u := re.search(r"/pull/(\d+)", m.group(0))) else " ", sentence)
@@ -2024,7 +2043,8 @@ _REPLY_LINE_WORDS = frozenset({
     "reply", "answer", "type", "with", "or", "please", "to", "approve", "merge",
     "the", "word", "one", "a", "single", "in", "this", "chat", "session", "just",
     "이", "세션에서", "세션", "채팅에", "채팅에서", "머지하려면", "머지하시려면",
-    "승인하려면", "승인하시려면", "진행하시려면", "또는", "로", "으로", "한",
+    "승인하려면", "승인하시려면", "진행하시려면", "승인하면", "승인하시면", "머지하면",
+    "머지하시면", "또는", "로", "으로", "한",
     "단어로", "단어만", "답해", "주세요", "입력해", "다른", "말", "없이", "만",
     "라고", "이라고", "추천",
 })
@@ -2068,7 +2088,7 @@ def _ask_targets_pr(text: str, pr: str) -> bool:
     """True when the last question of `text` is about `pr`: it names `pr`, or
     it names no PR and `text` names `pr` and no other. `Ready to merge o/r#999
     or x/y#1001. Approve merge?` targets neither."""
-    if _mentions_pr(_last_ask_sentence(text), pr):
+    if _mentions_pr(_strip_tracker_refs(_last_ask_sentence(text)), pr):
         return True
     return _pr_numbers(text) == {pr}
 

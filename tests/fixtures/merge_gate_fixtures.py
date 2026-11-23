@@ -341,6 +341,48 @@ CASES = {
                  prose("Merge briefing\n\n" + section("o/r#999")
                        + "\nApprove merge of #999?\nReply `merge` only after CI passes."),
                  user("merge")],
+    # Issue #1662: a host tracker ref (`pm #123`) declared by
+    # PRAXIS_MERGE_ASK_TRACKER_LABELS is not a second PR; a bare `#N`, a `PR #N`
+    # or a spaceless `pm#N` still is. A polite reply line (`승인하시면 ...`) is
+    # read like `머지하려면 ...`; a condition in it keeps the prompt.
+    "momentum-merge-chat-tracker-ref-ask.jsonl":
+        lambda: [user("prepare PR #999 for merge"),
+                 prose("Merge briefing\n\n" + section("https://github.com/o/r/pull/999")
+                       + "\npm #123: https://github.com/o/r/pull/999 을 머지할까요?"),
+                 user("merge")],
+    "momentum-merge-chat-tracker-ref-paren.jsonl":
+        lambda: [user("prepare PR #999 for merge"),
+                 prose("Merge briefing\n\n" + section("o/r#999") + "\nApprove merge of o/r#999 (pm #123)?"),
+                 user("merge")],
+    "momentum-merge-chat-tracker-ref-bare.jsonl":
+        lambda: [user("prepare PR #999 for merge"),
+                 prose("Merge briefing\n\n" + section("o/r#999") + "\nApprove merge of o/r#999 (#1001)?"),
+                 user("merge")],
+    "momentum-merge-chat-tracker-ref-pr-word.jsonl":
+        lambda: [user("prepare PR #999 for merge"),
+                 prose("Merge briefing\n\n" + section("o/r#999") + "\nApprove merge of o/r#999 (PR #1001)?"),
+                 user("merge")],
+    "momentum-merge-chat-tracker-ref-spaceless.jsonl":
+        lambda: [user("prepare PR #999 for merge"),
+                 prose("Merge briefing\n\n" + section("o/r#999") + "\nApprove merge of o/r#999 (pm#1001)?"),
+                 user("merge")],
+    "momentum-merge-chat-polite-reply-line.jsonl":
+        lambda: [user("prepare PR #999 for merge"),
+                 prose("Merge briefing\n\n" + section("o/r#999")
+                       + "\nApprove merge of o/r#999?\n승인하시면 `merge` 한 단어로 답해 주세요."),
+                 user("merge")],
+    "momentum-merge-chat-polite-reply-line-condition.jsonl":
+        lambda: [user("prepare PR #999 for merge"),
+                 prose("Merge briefing\n\n" + section("o/r#999")
+                       + "\nApprove merge of o/r#999?\n승인하시면 CI 통과 뒤 `merge` 로 답해 주세요."),
+                 user("merge")],
+    # Review: a tracker number equal to the PR number does not name the PR,
+    # so an unnamed ask after two PRs still targets neither.
+    "momentum-merge-chat-tracker-ref-same-number.jsonl":
+        lambda: [user("prepare o/r#999 and o/r#1001 for merge"),
+                 prose("Merge briefing\n\n" + section("o/r#999") + "\n" + section("o/r#1001")
+                       + "\nApprove merge (pm #999)?"),
+                 user("merge")],
     # CodeRabbit round 3: a `?` right after a pull URL ends the question; an
     # unnamed question after two PRs targets neither.
     "momentum-merge-chat-url-question-mark.jsonl":
