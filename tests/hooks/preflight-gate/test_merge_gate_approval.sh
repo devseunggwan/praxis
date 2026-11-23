@@ -32,6 +32,7 @@ FAILED_NAMES=()
 #                     exemption; the cases below assert it is inert.
 #     "no-delegate" — run with CMUX_DELEGATE unset
 unset PRAXIS_MERGE_ASK_TRAILER_REGEX
+unset PRAXIS_MERGE_ASK_TRACKER_LABELS
 
 run_case() {
   local name="$1" expectation="$2" delegate="$3" payload="$4"
