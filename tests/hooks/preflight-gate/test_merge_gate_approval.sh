@@ -390,6 +390,11 @@ run_case "chat: unnamed merge question after two PRs (ask)" \
   "ask" "no-delegate" "$(bulk_payload momentum-merge-chat-unnamed-ask-two-prs.jsonl "$M999")"
 run_case "chat: injected AskUserQuestion answer (ask)" \
   "ask" "no-delegate" "$(bulk_payload momentum-merge-chat-injected-ask-answer.jsonl "$M999")"
+# Issue #1662: polite reply lines.
+run_case "chat: polite reply line after the question (silent)" \
+  "silent" "no-delegate" "$(bulk_payload momentum-merge-chat-polite-reply-line.jsonl "$M999")"
+run_case "chat: condition inside a polite reply line (ask)" \
+  "ask" "no-delegate" "$(bulk_payload momentum-merge-chat-polite-reply-line-condition.jsonl "$M999")"
 
 
 echo ""

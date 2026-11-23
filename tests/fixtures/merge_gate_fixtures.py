@@ -341,6 +341,18 @@ CASES = {
                  prose("Merge briefing\n\n" + section("o/r#999")
                        + "\nApprove merge of #999?\nReply `merge` only after CI passes."),
                  user("merge")],
+    # Issue #1662: a polite reply line (`승인하시면 ...`) is read like
+    # `머지하려면 ...`; a condition in it keeps the prompt.
+    "momentum-merge-chat-polite-reply-line.jsonl":
+        lambda: [user("prepare PR #999 for merge"),
+                 prose("Merge briefing\n\n" + section("o/r#999")
+                       + "\nApprove merge of o/r#999?\n승인하시면 `merge` 한 단어로 답해 주세요."),
+                 user("merge")],
+    "momentum-merge-chat-polite-reply-line-condition.jsonl":
+        lambda: [user("prepare PR #999 for merge"),
+                 prose("Merge briefing\n\n" + section("o/r#999")
+                       + "\nApprove merge of o/r#999?\n승인하시면 CI 통과 뒤 `merge` 로 답해 주세요."),
+                 user("merge")],
     # CodeRabbit round 3: a `?` right after a pull URL ends the question; an
     # unnamed question after two PRs targets neither.
     "momentum-merge-chat-url-question-mark.jsonl":

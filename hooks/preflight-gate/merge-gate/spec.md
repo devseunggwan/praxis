@@ -179,7 +179,8 @@ follow it:
 - choice lines (`A: merge`);
 - reply-instruction lines (`_reply_line`): quoted reply words (`merge`,
   `보류`, `hold`), one of them `merge`, and otherwise only words in
-  `_REPLY_LINE_WORDS` (`머지하려면 \`merge\` 한 단어로 답해 주세요.`);
+  `_REPLY_LINE_WORDS` (`머지하려면 \`merge\` 한 단어로 답해 주세요.`,
+  `승인하시면 \`merge\` 한 단어로 답해 주세요.`);
 - host trailer lines that fully match `PRAXIS_MERGE_ASK_TRAILER_REGEX` (a
   status line the host appends to every turn; unset, none is allowed).
 
