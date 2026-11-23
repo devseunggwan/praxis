@@ -171,7 +171,11 @@ question included, keeps the prompt.
 A plain merge ask (`_plain_merge_ask`) asks to merge the PR, names no other
 PR, and once its PR references are set aside holds no word outside
 `_PLAIN_ASK_WORDS` (`Approve merge of o/r#999?`, `PR #999 을 squash
-머지할까요?`). A condition (`after CI passes`) or a second action makes the
+머지할까요?`). A host tracker reference whose label is listed in
+`PRAXIS_MERGE_ASK_TRACKER_LABELS` (`pm #123: o/r#999 을 머지할까요?`) is set
+aside too; the label needs a space before `#N`, so `pm#123` stays a repo ref,
+and `PR`/`pull` are never labels. A condition (`after CI passes`) or a
+second action makes the
 question one this release does not read, and the prompt stays. The question
 must also end the turn's text (`_ends_with_plain_ask`). Only these lines may
 follow it:

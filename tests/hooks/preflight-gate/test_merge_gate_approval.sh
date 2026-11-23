@@ -390,7 +390,19 @@ run_case "chat: unnamed merge question after two PRs (ask)" \
   "ask" "no-delegate" "$(bulk_payload momentum-merge-chat-unnamed-ask-two-prs.jsonl "$M999")"
 run_case "chat: injected AskUserQuestion answer (ask)" \
   "ask" "no-delegate" "$(bulk_payload momentum-merge-chat-injected-ask-answer.jsonl "$M999")"
-# Issue #1662: polite reply lines.
+# Issue #1662: declared tracker refs and polite reply lines.
+PRAXIS_MERGE_ASK_TRACKER_LABELS='pm' run_case "chat: declared tracker ref before the pull URL (silent)" \
+  "silent" "no-delegate" "$(bulk_payload momentum-merge-chat-tracker-ref-ask.jsonl "$M999")"
+run_case "chat: tracker ref with no label declared (ask)" \
+  "ask" "no-delegate" "$(bulk_payload momentum-merge-chat-tracker-ref-ask.jsonl "$M999")"
+PRAXIS_MERGE_ASK_TRACKER_LABELS='jira, pm' run_case "chat: declared tracker ref in parentheses (silent)" \
+  "silent" "no-delegate" "$(bulk_payload momentum-merge-chat-tracker-ref-paren.jsonl "$M999")"
+PRAXIS_MERGE_ASK_TRACKER_LABELS='pm' run_case "chat: bare #N beside the PR stays a second PR (ask)" \
+  "ask" "no-delegate" "$(bulk_payload momentum-merge-chat-tracker-ref-bare.jsonl "$M999")"
+PRAXIS_MERGE_ASK_TRACKER_LABELS='pm,PR' run_case "chat: 'PR' is never a tracker label (ask)" \
+  "ask" "no-delegate" "$(bulk_payload momentum-merge-chat-tracker-ref-pr-word.jsonl "$M999")"
+PRAXIS_MERGE_ASK_TRACKER_LABELS='pm' run_case "chat: spaceless label#N reads as a repo ref (ask)" \
+  "ask" "no-delegate" "$(bulk_payload momentum-merge-chat-tracker-ref-spaceless.jsonl "$M999")"
 run_case "chat: polite reply line after the question (silent)" \
   "silent" "no-delegate" "$(bulk_payload momentum-merge-chat-polite-reply-line.jsonl "$M999")"
 run_case "chat: condition inside a polite reply line (ask)" \

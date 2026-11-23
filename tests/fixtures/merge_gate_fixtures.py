@@ -341,8 +341,31 @@ CASES = {
                  prose("Merge briefing\n\n" + section("o/r#999")
                        + "\nApprove merge of #999?\nReply `merge` only after CI passes."),
                  user("merge")],
-    # Issue #1662: a polite reply line (`승인하시면 ...`) is read like
-    # `머지하려면 ...`; a condition in it keeps the prompt.
+    # Issue #1662: a host tracker ref (`pm #123`) declared by
+    # PRAXIS_MERGE_ASK_TRACKER_LABELS is not a second PR; a bare `#N`, a `PR #N`
+    # or a spaceless `pm#N` still is. A polite reply line (`승인하시면 ...`) is
+    # read like `머지하려면 ...`; a condition in it keeps the prompt.
+    "momentum-merge-chat-tracker-ref-ask.jsonl":
+        lambda: [user("prepare PR #999 for merge"),
+                 prose("Merge briefing\n\n" + section("https://github.com/o/r/pull/999")
+                       + "\npm #123: https://github.com/o/r/pull/999 을 머지할까요?"),
+                 user("merge")],
+    "momentum-merge-chat-tracker-ref-paren.jsonl":
+        lambda: [user("prepare PR #999 for merge"),
+                 prose("Merge briefing\n\n" + section("o/r#999") + "\nApprove merge of o/r#999 (pm #123)?"),
+                 user("merge")],
+    "momentum-merge-chat-tracker-ref-bare.jsonl":
+        lambda: [user("prepare PR #999 for merge"),
+                 prose("Merge briefing\n\n" + section("o/r#999") + "\nApprove merge of o/r#999 (#1001)?"),
+                 user("merge")],
+    "momentum-merge-chat-tracker-ref-pr-word.jsonl":
+        lambda: [user("prepare PR #999 for merge"),
+                 prose("Merge briefing\n\n" + section("o/r#999") + "\nApprove merge of o/r#999 (PR #1001)?"),
+                 user("merge")],
+    "momentum-merge-chat-tracker-ref-spaceless.jsonl":
+        lambda: [user("prepare PR #999 for merge"),
+                 prose("Merge briefing\n\n" + section("o/r#999") + "\nApprove merge of o/r#999 (pm#1001)?"),
+                 user("merge")],
     "momentum-merge-chat-polite-reply-line.jsonl":
         lambda: [user("prepare PR #999 for merge"),
                  prose("Merge briefing\n\n" + section("o/r#999")
