@@ -376,6 +376,13 @@ CASES = {
                  prose("Merge briefing\n\n" + section("o/r#999")
                        + "\nApprove merge of o/r#999?\n승인하시면 CI 통과 뒤 `merge` 로 답해 주세요."),
                  user("merge")],
+    # Review: a tracker number equal to the PR number does not name the PR,
+    # so an unnamed ask after two PRs still targets neither.
+    "momentum-merge-chat-tracker-ref-same-number.jsonl":
+        lambda: [user("prepare o/r#999 and o/r#1001 for merge"),
+                 prose("Merge briefing\n\n" + section("o/r#999") + "\n" + section("o/r#1001")
+                       + "\nApprove merge (pm #999)?"),
+                 user("merge")],
     # CodeRabbit round 3: a `?` right after a pull URL ends the question; an
     # unnamed question after two PRs targets neither.
     "momentum-merge-chat-url-question-mark.jsonl":

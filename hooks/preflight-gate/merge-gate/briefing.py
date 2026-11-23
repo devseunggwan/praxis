@@ -2088,7 +2088,7 @@ def _ask_targets_pr(text: str, pr: str) -> bool:
     """True when the last question of `text` is about `pr`: it names `pr`, or
     it names no PR and `text` names `pr` and no other. `Ready to merge o/r#999
     or x/y#1001. Approve merge?` targets neither."""
-    if _mentions_pr(_last_ask_sentence(text), pr):
+    if _mentions_pr(_strip_tracker_refs(_last_ask_sentence(text)), pr):
         return True
     return _pr_numbers(text) == {pr}
 

@@ -408,6 +408,8 @@ run_case "chat: polite reply line after the question (silent)" \
   "silent" "no-delegate" "$(bulk_payload momentum-merge-chat-polite-reply-line.jsonl "$M999")"
 run_case "chat: condition inside a polite reply line (ask)" \
   "ask" "no-delegate" "$(bulk_payload momentum-merge-chat-polite-reply-line-condition.jsonl "$M999")"
+PRAXIS_MERGE_ASK_TRACKER_LABELS='pm' run_case "chat: tracker number equal to the PR number after two PRs (ask)" \
+  "ask" "no-delegate" "$(bulk_payload momentum-merge-chat-tracker-ref-same-number.jsonl "$M999")"
 
 
 echo ""
