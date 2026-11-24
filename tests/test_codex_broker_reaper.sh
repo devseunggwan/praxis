@@ -32,6 +32,11 @@ if [ ! -f "$REAPER" ]; then
   exit 1
 fi
 
+# The reaper also reads ~/.hermes scratch roots. Point them at an empty sandbox
+# so no gate reads this host's real Hermes broker records; gate 5d sets its own.
+HERMES_SANDBOX="$(mktemp -d "${TMPDIR:-/tmp}/pxhermes.XXXXXX")" || { echo "FATAL: mktemp -d failed" >&2; exit 1; }
+export CODEX_REAPER_HERMES_ROOT="$HERMES_SANDBOX"
+
 PASS=0
 FAIL=0
 FAILED_NAMES=()
@@ -209,7 +214,7 @@ cleanup_fixtures() {
     for kid in $(pgrep -P "$p" 2>/dev/null); do kill -KILL "$kid" 2>/dev/null; done
     kill -KILL "$p" 2>/dev/null
   done
-  rm -rf "$TMPD"
+  rm -rf "$TMPD" "$HERMES_SANDBOX"
 }
 trap cleanup_fixtures EXIT INT TERM
 
@@ -880,6 +885,86 @@ fi   # jq gate (gate 5c)
 
 echo ""
 
+# --- Gate 5d: the companion fallback root inside a Hermes profile's scratch ----
+# A Hermes session's TMPDIR is <hermes home>/profiles/<p>/cache/scratch (or
+# <hermes home>/cache/scratch), so the 5c root lands there while the launchd
+# job's TMPDIR is elsewhere. Same fixture as 5c with the record moved under a
+# sandboxed Hermes home; the control run points the Hermes root at an empty dir
+# and must keep the broker as `owner unknown`.
+if ! command -v jq >/dev/null 2>&1; then
+  skip "gate 5d Hermes scratch root (needs jq)"
+else
+TMPROOT5D="${TMPDIR:-/tmp}"; TMPROOT5D="${TMPROOT5D%/}"
+TMPD5D="$(mktemp -d "$TMPROOT5D/pxhermesroot.XXXXXX")" || { echo "FATAL: mktemp -d failed" >&2; exit 1; }
+FIXTURE5D="$TMPD5D/broker-fixture.sh"
+REAPER5D="$TMPD5D/reaper-copy.sh"
+HERMES5D="$TMPD5D/hermes home"
+SD5D_REAP="$HERMES5D/profiles/implementer/cache/scratch/cxc-REAP5D"
+BROKER5D_PID=""
+cleanup_gate5d() {
+  local kid
+  if [ -n "$BROKER5D_PID" ]; then
+    for kid in $(pgrep -P "$BROKER5D_PID" 2>/dev/null); do kill -KILL "$kid" 2>/dev/null; done
+    kill -KILL "$BROKER5D_PID" 2>/dev/null
+  fi
+  rm -rf "$TMPD5D"
+  declare -F cleanup_gate5c >/dev/null && cleanup_gate5c
+  return 0
+}
+trap cleanup_gate5d EXIT INT TERM
+
+cat > "$FIXTURE5D" <<'FIX5D'
+#!/bin/bash
+exec 3<> "$PX5D_FIFO"
+read -r -u 3
+FIX5D
+sed "s|^BROKER_PATTERN=.*|BROKER_PATTERN='$FIXTURE5D'|" "$REAPER" > "$REAPER5D"
+mkdir -p "$SD5D_REAP" "$TMPD5D/config" "$TMPD5D/tmp" "$TMPD5D/empty-hermes"
+FIFO5D="$TMPD5D/broker5d.fifo"
+mkfifo "$FIFO5D"
+touch -t 202001010000 "$SD5D_REAP/broker.log"
+PX5D_FIFO="$FIFO5D" bash "$FIXTURE5D" serve --endpoint "unix:$SD5D_REAP/broker.sock" >/dev/null 2>&1 &
+BROKER5D_PID=$!
+SD5D_STATE="$HERMES5D/profiles/implementer/cache/scratch/codex-companion/issue-1-0123456789abcdef"
+mkdir -p "$SD5D_STATE/jobs"
+printf '{"sessionDir":"%s","pid":%s}\n' "$SD5D_REAP" "$BROKER5D_PID" > "$SD5D_STATE/broker.json"
+printf '{"workspaceRoot":"%s"}\n' "$TMPD5D/workspace-deleted" > "$SD5D_STATE/jobs/job.json"
+
+broker5d_ready=false
+for _ in $(seq 1 30); do
+  if kill -0 "$BROKER5D_PID" 2>/dev/null; then broker5d_ready=true; break; fi
+  sleep 0.1
+done
+if [ "$broker5d_ready" != true ]; then
+  fail "gate 5d fixture broker did not come up"
+elif [ "$MTIME_OK" != true ]; then
+  skip "gate 5d Hermes scratch root ($NO_MTIME_REASON)"
+else
+  # TMPDIR and CLAUDE_CONFIG_DIR are empty sandboxes: the Hermes root is the
+  # only place this record exists.
+  DRY5D_OUT="$(CODEX_REAPER_HERMES_ROOT="$HERMES5D" TMPDIR="$TMPD5D/tmp" CLAUDE_CONFIG_DIR="$TMPD5D/config" \
+    bash "$REAPER5D" --reap --max-age 5 --dry-run 2>&1)"
+  case "$DRY5D_OUT" in
+    *"WOULD REAP pid=$BROKER5D_PID"*)
+      pass "reap resolves a broker recorded under a Hermes profile's scratch/codex-companion" ;;
+    *)
+      fail "Hermes-scratch broker not resolved (output: $DRY5D_OUT)" ;;
+  esac
+  CTL5D_OUT="$(CODEX_REAPER_HERMES_ROOT="$TMPD5D/empty-hermes" TMPDIR="$TMPD5D/tmp" CLAUDE_CONFIG_DIR="$TMPD5D/config" \
+    bash "$REAPER5D" --reap --max-age 5 --dry-run 2>&1)"
+  case "$CTL5D_OUT" in
+    *"SKIP   pid=$BROKER5D_PID (owner unknown"*)
+      pass "control: without the Hermes root the same broker stays owner unknown" ;;
+    *)
+      fail "gate 5d control did not read owner unknown (output: $CTL5D_OUT)" ;;
+  esac
+  [ -d "$SD5D_REAP" ] && pass "dry run leaves the Hermes sessionDir in place" \
+    || fail "dry run removed $SD5D_REAP"
+fi
+fi   # jq gate (gate 5d)
+
+echo ""
+
 # --- Gate 6: an unusable broker index must not read as an empty sweep --------
 # The GC pass iterates the per-pass index rather than re-parsing every
 # broker.json (two jq spawns per record was the script's whole runtime). That
@@ -898,7 +983,7 @@ TMPD6="$(mktemp -d "$TMPROOT6/px1056g6.XXXXXX")" || { echo "FATAL: mktemp -d fai
 # about $TMPD5.
 cleanup_gate6() {
   rm -rf "$TMPD6"
-  declare -F cleanup_gate5c >/dev/null && cleanup_gate5c
+  declare -F cleanup_gate5d >/dev/null && cleanup_gate5d
   return 0
 }
 trap cleanup_gate6 EXIT INT TERM

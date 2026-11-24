@@ -49,6 +49,10 @@ set -euo pipefail
 CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 STATE_DIR="$CONFIG_DIR/plugins/data/codex-openai-codex/state"
 STATE_SUFFIX="plugins/data/codex-openai-codex/state"
+# Hermes points each session's TMPDIR at a scratch dir under its home, so the
+# companion's os.tmpdir() fallback root lands there, not in the launchd job's
+# TMPDIR. Overridable so the suite can sandbox it.
+HERMES_ROOT="${CODEX_REAPER_HERMES_ROOT:-$HOME/.hermes}"
 
 # Every state root this host may hold, not just our own (#1056).
 #
@@ -95,6 +99,13 @@ state_roots() {
     if [[ -d "${tmp_root%/}/codex-companion" ]]; then
       printf '%s\n' "${tmp_root%/}/codex-companion"
     fi
+    # The same fallback root as seen from a Hermes session: its TMPDIR is the
+    # default home's or a profile's cache/scratch, never the job's TMPDIR, so
+    # without these its brokers read as `owner unknown` forever.
+    for d in "$HERMES_ROOT/cache/scratch/codex-companion" \
+             "$HERMES_ROOT"/profiles/*/cache/scratch/codex-companion; do
+      if [[ -d "$d" ]]; then printf '%s\n' "$d"; fi
+    done
   } | while IFS= read -r d; do
         # Physical paths: a symlinked config dir must not be swept twice.
         (cd "$d" 2>/dev/null && pwd -P) || printf '%s\n' "$d"
