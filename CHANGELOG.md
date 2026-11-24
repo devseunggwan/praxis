@@ -5,6 +5,13 @@ All notable changes to praxis are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.24.1](https://github.com/devseunggwan/praxis/compare/v7.24.0...v7.24.1) (2026-11-24)
+
+
+### Fixed
+
+* **codex-review-wrap:** read Hermes scratch roots ([#1665](https://github.com/devseunggwan/praxis/issues/1665)) ([d4dd8c5](https://github.com/devseunggwan/praxis/commit/d4dd8c54fcc5d844191cd19003158ad6e567d8d3)), closes [#1664](https://github.com/devseunggwan/praxis/issues/1664)
+
 ## [7.24.0](https://github.com/devseunggwan/praxis/compare/v7.23.0...v7.24.0) (2026-11-23)
 
 
