@@ -32,6 +32,18 @@ briefing afterwards means asking twice.
   touches a class the team reserves for human review (authorization rules,
   billing, deletion). When a human approval is still required, the question
   is "request a reviewer, then ask merge", not "merge now" — and ask who.
+  Read the ruleset's parameters (`gh api repos/<o>/<r>/rules/branches/<base>`:
+  `required_approving_review_count`, `require_last_push_approval`,
+  `require_extra_approval_for_unattributed_changes`) but do not predict from
+  their names whose approval counts: offer "the user approves from their own
+  account" as one option, and after it is submitted re-read `reviewDecision`
+  and `mergeStateStatus` — that reading, not the rule name, decides whether
+  a second reviewer is needed.
+- Re-read `mergeable` right after any approval or overnight wait: the base
+  keeps moving while the PR waits for a reviewer, and an approved PR is often
+  `CONFLICTING` by the time it can merge. Merge the base in again (Steps 4–6,
+  including the semantic-conflict hunt), push, and confirm the approval
+  still stands on the new head before the merge ask.
 - Name the staleness of the approval under "not verified": it was given on an
   older commit, and if you pushed from the approver's account, nobody
   independent has reviewed your resolution.
@@ -134,10 +146,22 @@ briefing afterwards means asking twice.
   (`gh api repos/<o>/<r>/check-runs/<job id>/annotations`): they are there
   the moment the job fails, while `gh run view --log-failed` refuses until
   the whole run finishes and the raw job-log API stops on escape sequences.
-  Call it unrelated only with two probes: the failing test's path is absent
-  from `git diff --name-only <base-remote>/<base>...HEAD`, and the base's
-  recent CI runs are green. Then `gh run rerun <run id> --failed` and merge
-  on a green rerun; a second failure is treated as the PR's to fix.
+  Call it unrelated only after reproducing it without the PR: add a detached
+  worktree at the exact base sha the CI merge ref used (`HEAD is now at
+  <sha> Merge <head> into <base sha>` in the checkout step), run the failing
+  test there with the PR worktree's interpreter (`<pr-wt>/.venv/bin/python -m
+  pytest … -k <test name>`), and remove the worktree. Fails there too = a base
+  defect: record it as a PR comment with that probe and the commit that
+  introduced it, tell the owner of the work, and do not rerun again. Passes
+  there = the PR's to fix. Weaker probes mislead: the failing path being
+  absent from the diff says nothing about order- or shard-dependent tests;
+  the base branch may have no test workflow at all, so "base CI green" can
+  be a deploy run; a local "pass" counts only when the output lists the exact
+  parametrized id (a `::Class` node id or a wrong `-k` can silently run other
+  cases); and `grep -q <test name>` over job logs also matches its `PASSED`
+  lines, so grep `FAILED <test id>`. A single `gh run rerun --failed` is fine
+  while you run that probe; a second failure on the same head is never
+  flakiness.
 - Re-read each revived PR's `state` before listing it as "awaiting approval"
   in a later status: the user often closes revived PRs as no longer needed
   (a migration made them moot) without telling this session, and a stale

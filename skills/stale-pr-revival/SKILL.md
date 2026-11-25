@@ -155,6 +155,16 @@ docs, the PR template, new `.github/workflows` (new required checks), and
 framework or API migrations. A clean text merge does not surface any of them;
 apply them in the same revival (a missing PR-body link line, a migrated API).
 
+Also check whether the **deploy topology** split while the PR waited: a
+second long-lived branch that now serves part of the users (a legacy-UI
+branch behind a cookie or routing rule, a release line). A user-visible
+change merged only to the PR's base then reaches only some users, and that
+surfaces after the merge as a held issue close and an out-of-scope follow-up
+PR. Grep the other branch for the changed key or string; when it serves the
+same screen without the change, open the port PR (cherry-pick of the base's
+squash commit onto that branch) in the same revival and brief both merges
+together.
+
 From here on, address the worktree explicitly in every git call
 (`git -C <worktree> merge …`, or `cd <worktree> && …` in the same command):
 shell cwd resets between calls, and a `cd` that fails silently runs the merge
@@ -193,7 +203,11 @@ hits.
 ### Step 6: Prove the core change red/green
 
 Revert only the core line (for example the base-class swap), run the touched
-tests, and show they fail. Restore it, then run the touched test directories
+tests, and show they fail. A line you re-homed during conflict resolution
+gets the same treatment: when no existing test asserts it, write a temporary
+spec (copy the nearest real-render spec, assert the observable effect such as
+`a[href=<url>]`), run it at the merged head and again with only that line
+removed, then delete the spec and confirm `git status` is clean. Restore it, then run the touched test directories
 plus the repository's import / smoke tests.
 
 - Sync submodules first (`git submodule update --init <path>`): the base merge

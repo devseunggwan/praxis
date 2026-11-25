@@ -122,6 +122,11 @@ fatal: 'main' is already used by worktree at /Users/.../<main-worktree>
      straight to the clean-check + `--force`. If a deinit already ran, restore
      the entry from the main checkout with `git submodule init <path>` and
      confirm with `git config --get submodule.<name>.url`.
+     When the dispatch or user forbids `--force` ("remove without `--force`,
+     stop if refused"), the refusal is the stop point: run the clean-check,
+     report the worktree path, the branch it holds and its `!!` list, and touch
+     nothing else — a `deinit` there is the same shared-config damage, not a
+     softer alternative.
      Moving the directory aside and running `git worktree prune` is not a
      workaround either: it skips the clean-check `--force` relies on and runs a
      repository-wide prune; the clean-check + `--force` is the only path.

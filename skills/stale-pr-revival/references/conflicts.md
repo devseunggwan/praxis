@@ -38,6 +38,13 @@ Full procedure for the matching step of [`SKILL.md`](../SKILL.md).
   those tests in the merge commit and drop the matching row from the PR body
   and anchor; when the base moved it to another implementation, rewire the
   tests to that implementation instead.
+- **Replace hard-coded members with the base's set.** When the PR special-cases
+  one enum member (a destination, provider, or plan type) and the base grew a
+  shared set for that concept meanwhile (`SUPPORTED_TYPES`, `*_KINDS`), the
+  merge is clean but every new member hits the PR's "else" branch. Diff the
+  base's constants/kinds modules since the merge-base and grep the PR's diff
+  for `is <Enum>.<MEMBER>` / `== "<MEMBER>"`; judge by set membership and add
+  a test parametrized over every member.
 - **Carry the base's new guards onto the PR's parallel paths.** When the PR
   adds a bulk/alternate entry point beside an existing single-item one
   (bulk pause next to a single PUT, a batch trigger next to a single trigger),
@@ -48,6 +55,20 @@ Full procedure for the matching step of [`SKILL.md`](../SKILL.md).
   the text merge is clean because the PR's file never had the call, and only a
   reviewer catches it after push. Grepping for status/enum literals alone does
   not find these.
+- **When the PR moved code the base also changed** (the PR split a component
+  or extracted a panel, and the base added a prop/line to the old spot), the
+  conflict hunk belongs to the PR side, but the base's addition must land
+  where that concern now lives (e.g. a header prop goes to the component that
+  still renders the header). Read the base's commits on the file
+  (`git log <merge-base>..<base-remote>/<base> -- <file>`, `git show` each)
+  and re-home every added line, not only the hunk that conflicted.
+- **Prove the merge dropped none of the PR's lines.** Compare, per file, the
+  sorted unique `+` lines of the old PR diff (`<old merge-base>..<old head>`)
+  with those of the new PR diff (`<base-remote>/<base>..HEAD`): the file sets
+  must match and only files you intentionally edited may differ, by exactly
+  the re-homed lines. Script it (bash loop, `md5` of each set) and paste the
+  output into the anchor; a clean `git merge` with a passing typecheck does
+  not show a silently lost hunk.
 - For a read-only conflict preview while only reporting status (no worktree
   needed): `git merge-tree --write-tree --name-only <base-remote>/<base>
   <head-sha>` lists the conflicted files.
