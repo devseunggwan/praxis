@@ -118,10 +118,10 @@ while the registration outlives it.
 ### C6 — Unbounded LLM context
 
 Content is appended to a prompt, message list, or history that is sent to a
-language model, with no reachable bound on that container: no truncation, no
-token or size ceiling, no sliding window, no summarisation. The container can
-live on an object or a session, not only at module level, and every call sends
-all of it again.
+language model, and some model call sends that container with no bound applied
+on its path: no truncation, no token or size ceiling, no sliding window, no
+summarisation. The container can live on an object or a session, not only at
+module level.
 
 ```text
 conversation.append(tool_output)        # whole output, every turn
@@ -129,10 +129,13 @@ llm.generate(conversation)              # nothing ever trims conversation
 ```
 
 Signal: an append or concatenation into something passed to a model call
-(a full tool output, a whole file, the previous reply), with no bound on the
-container before the call. A bound in a file the diff does not touch still
-counts. A bound on the appended item alone (each output cut to N characters)
-does not stop the container from growing, so it does not clear the finding.
+(a full tool output, a whole file, the previous reply), and a model call that
+sends the container without a bound on the way. Check each call that sends it:
+a bound counts only for the calls whose path applies it, so a window behind a
+flag or on one call site leaves the others unbounded. A bound in a file the
+diff does not touch still counts for the paths that go through it. A bound on
+the appended item alone (each output cut to N characters) does not stop the
+container from growing, so it does not clear the finding.
 
 ## Output
 
