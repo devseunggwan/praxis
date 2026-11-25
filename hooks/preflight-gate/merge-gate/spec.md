@@ -85,16 +85,33 @@ every host that runs merge-gate.
 ### Detection
 
 The merge target is found with the worktree check's argv walker (`gh` global
-flags in any position, `-R/--repo` before or after `merge`, `--help` ignored,
-every segment of a compound command), then resolved with
-`gh pr view [<id>] [-R <repo>] --json url,headRefOid`. The record path is
+flags in any position, `-R/--repo` before or after `merge`, every segment of a
+compound command), then resolved with
+`gh pr view <id> -R <repo> --json url,headRefOid`. `--help` and
+`--disable-auto` (which turns auto-merge off and merges nothing) are skipped.
+The record path is
 `<state dir>/perf-leak-review/<host>__<owner>__<repo>__<N>__<head>.json`
-(`hooks/_lib/_perf_leak_record.py`, shared with the recorder).
+(`hooks/_lib/_perf_leak_record.py`, shared with the recorder); the file must
+parse and name that head.
+
+What is checked has to be what the merge takes:
+
+- **Repository.** The command names it: a PR URL or `-R/--repo`. The hook's
+  cwd, an earlier `cd` and a `GH_REPO` prefix can each point the lookup and the
+  merge at different repositories. `GH_HOST` anywhere in the command requires
+  a PR URL.
+- **Head.** A `--match-head-commit <sha>` value is the head checked, since gh
+  refuses any other. Without it the merge must be the only command: an earlier
+  step (`git push && gh pr merge …`) could move the head after this check. A
+  lone merge is checked against the current head; only a concurrent push from
+  elsewhere in the moment before gh runs is left uncovered.
 
 ### What is blocked
 
-- No record for the resolved head, including a record for an earlier head
-  only: a push moves the head and the review is asked for again.
+- No record for the head that would merge, including a record for an earlier
+  head only: a push moves the head and the review is asked for again.
+- A merge that names no repository, or a `GH_HOST` merge without a PR URL.
+- A merge chained after another command without `--match-head-commit`.
 - A target `gh pr view` cannot resolve while the check is enabled. The check
   exists to make the review structural; an unresolved head cannot show it ran.
 
@@ -108,7 +125,7 @@ lists unrefuted ones under Open items.
 pending file keyed by head. `commit --pr <URL> --envelope <file>` refuses when
 the head or the diff moved since `prepare` or the envelope fails
 `validate_findings.py` (a ```` ```json ```` fence is stripped first), then
-writes the record and prints one verification-anchor row graded `PASS(mock)`:
+writes the record (temp file, then `os.replace`) and prints one verification-anchor row graded `PASS(mock)`:
 a reading, not an execution.
 
 ### Limitations

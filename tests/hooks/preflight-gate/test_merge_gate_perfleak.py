@@ -126,7 +126,59 @@ def test_repo_flag_is_forwarded_and_non_merge_ignored(env):
 
 
 def test_chained_merge_is_checked(env):
-    assert _hook(env, f"git fetch && {MERGE}").returncode == 2
+    result = _hook(env, f"git fetch && {MERGE}")
+    assert result.returncode == 2
+    assert "runs after another command" in result.stderr
+
+
+def test_chained_merge_pinned_to_reviewed_head_passes(env):
+    assert _review(env).returncode == 0
+    assert _hook(env, f"cd /x && {MERGE} --match-head-commit {HEAD}").returncode == 0
+
+
+def test_pin_to_unreviewed_head_is_denied(env):
+    assert _review(env).returncode == 0
+    result = _hook(env, f"{MERGE} --match-head-commit {NEW_HEAD}")
+    assert result.returncode == 2
+    assert NEW_HEAD[:7] in result.stderr
+
+
+def test_merge_without_repo_is_denied(env):
+    assert _review(env).returncode == 0
+    for command in ("gh pr merge 7 --squash", "GH_REPO=acme/other gh pr merge 7 --squash"):
+        result = _hook(env, command)
+        assert result.returncode == 2, command
+        assert "names no repository" in result.stderr
+
+
+def test_pr_url_names_the_repo(env):
+    assert _review(env).returncode == 0
+    assert _hook(env, f"gh pr merge {URL} --squash").returncode == 0
+
+
+def test_gh_host_needs_a_pr_url(env):
+    assert _review(env).returncode == 0
+    result = _hook(env, f"GH_HOST=ghe.example {MERGE}")
+    assert result.returncode == 2
+    assert "GH_HOST" in result.stderr
+    assert _hook(env, f"GH_HOST=ghe.example gh pr merge {URL} --squash").returncode == 0
+
+
+def test_disable_auto_merges_nothing_and_passes(env):
+    assert _hook(env, "gh pr merge 7 --repo acme/widgets --disable-auto").returncode == 0
+    assert not (env["state"] / "calls").exists()
+
+
+def test_trailing_comment_keeps_the_merge_alone(env):
+    assert _review(env).returncode == 0
+    assert _hook(env, f"{MERGE} # side-effect:ack").returncode == 0
+
+
+def test_truncated_record_does_not_count(env):
+    assert _review(env).returncode == 0
+    record = next((env["tmp"] / "home" / "state" / "perf-leak-review").glob(f"*__{HEAD}.json"))
+    record.write_text('{"url": ')
+    assert _hook(env, MERGE).returncode == 2
 
 
 def test_impl_denies_before_approval(env):

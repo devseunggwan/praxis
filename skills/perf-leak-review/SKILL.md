@@ -107,6 +107,9 @@ envelope fails the validator, and prints one verification-anchor row. Put
 that row in the anchor before the merge question and list any candidate you
 could not refute under the briefing's Open items; a candidate never blocks
 the merge. A push moves the head, so run both steps again on the new head.
+Name the repository in the merge (`--repo` or the PR URL) and run it alone, or
+pin the reviewed head with `--match-head-commit <sha>`; otherwise the gate
+cannot tell which head the merge takes and denies it.
 
 ## Process
 
