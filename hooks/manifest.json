@@ -422,7 +422,8 @@
           "PRAXIS_MOMENTUM_STRICT",
           "PRAXIS_PR_STATE_REFETCH_STRICT",
           "PRAXIS_MERGE_MENU_REVIEW_STRICT",
-          "PRAXIS_MERGE_CLAIM_STRICT"
+          "PRAXIS_MERGE_CLAIM_STRICT",
+          "PRAXIS_MERGE_PERF_LEAK_REVIEW"
         ],
         "bypass_env": [
           "PRAXIS_HOOK_BYPASS_MERGE_WORKTREE_GATE",
@@ -433,6 +434,7 @@
         "state_paths": ["PRAXIS_MEMORY_DIR"],
         "external_commands": [
           "gh pr view <identifier> --json headRefName -q .headRefName",
+          "gh pr view <identifier> --json url,headRefOid",
           "git worktree list --porcelain",
           "gh pr view <N> --json state,mergeStateStatus,mergeable,isDraft"
         ]

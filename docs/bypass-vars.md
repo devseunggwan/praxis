@@ -97,6 +97,7 @@ in [`../SECURITY.md`](../SECURITY.md).
 | `PRAXIS_EXCLUSION_PROBE_STRICT` | `exclusion-probe-gate` | |
 | `PRAXIS_PHANTOM_PATH_STRICT` | `external-write-path-existence-check` | |
 | `PRAXIS_MERGE_CLAIM_STRICT` | `merge-gate` | |
+| `PRAXIS_MERGE_PERF_LEAK_REVIEW` | `merge-gate` | opt-in: `1` turns on the `perfleak` check, which denies `gh pr merge` until perf-leak-review is recorded for the PR head (issue #1667) |
 | `PRAXIS_DENIED_ACTION_STRICT` | `denied-action-report-gate` | Exact value `1` after stripping. The advisory tier reaches the user but not the model, so this is the tier that makes the finding actionable in-session (#1265) |
 | `PRAXIS_RUNTIME_CLAIM_STRICT` | `runtime-state-claim-gate` | |
 | `PRAXIS_PUSH_VERIFY_STRICT` | `push-remote-ref-verify` | |

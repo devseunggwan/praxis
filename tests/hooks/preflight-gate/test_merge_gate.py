@@ -87,7 +87,7 @@ def _worktree_conflict(gate, monkeypatch):
 
 
 @pytest.mark.parametrize("payload, checks", [
-    (_bash("ls"), ("approval", "worktree", "briefing")),
+    (_bash("ls"), ("perfleak", "approval", "worktree", "briefing")),
     ({"hook_event_name": "PreToolUse", "tool_name": "AskUserQuestion"}, ("refetch", "menu")),
     ({"hook_event_name": "Stop"}, ("claim",)),
     ({"hook_event_name": "SubagentStop"}, ("claim",)),
@@ -109,7 +109,7 @@ def test_briefing_runs_only_on_the_hosts_momentum_ran_on(gate, host, runs_briefi
     finally:
         _hook_runtime.set_member_host(None)
     assert ("briefing" in checks) is runs_briefing
-    assert checks[:2] == ("approval", "worktree")
+    assert checks[:3] == ("perfleak", "approval", "worktree")
 
 
 def test_claim_never_reads_a_tool_call(gate, monkeypatch, capsys):
