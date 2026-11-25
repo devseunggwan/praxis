@@ -27,8 +27,11 @@ FAKE_GH = """#!/usr/bin/env bash
 state="$FAKE_GH_STATE"
 echo "$*" >> "$state/calls"
 case "$1 $2" in
-  "pr view") [ -f "$state/fail" ] && exit 1; echo "$(cat "$state/url") $(cat "$state/head")" ;;
-  "pr diff") cat "$state/diff" ;;
+  "pr view") [ -f "$state/fail" ] && exit 1
+             case "$*" in *baseRefName*) base=" main" ;; *) base="" ;; esac
+             echo "$(cat "$state/url") $(cat "$state/head")$base" ;;
+  "pr diff") if [ -f "$state/diff_error" ]; then cat "$state/diff_error" >&2; exit 1; fi
+             cat "$state/diff" ;;
   *) exit 1 ;;
 esac
 """
@@ -236,3 +239,90 @@ def test_prepare_refuses_empty_diff_and_bad_url(env):
     (env["state"] / "diff").write_text("")
     assert _record(env, "prepare", "--pr", URL).returncode == 1
     assert _record(env, "prepare", "--pr", "7").returncode == 1
+
+
+TOO_LARGE = ("could not find pull request diff: HTTP 406: Sorry, the diff exceeded the maximum number "
+             "of files (300).\nPullRequest.diff too_large\n")
+
+
+def _git(env, cwd, *args: str) -> str:
+    return subprocess.run(["git", "-C", str(cwd), *args], capture_output=True, text=True, check=True,
+                          env=env["env"]).stdout.strip()
+
+
+@pytest.fixture
+def large(env):
+    """A PR GitHub will not diff, plus a remote the recorder can fetch it from instead.
+
+    `insteadOf` points the PR's https remote at a local bare repo, so the real `git fetch` runs.
+    """
+    tmp = env["tmp"]
+    origin, work, clone = tmp / "origin.git", tmp / "work", tmp / "clone"
+    git_cfg = tmp / "gitconfig"
+    git_cfg.write_text(f'[url "file://{origin}"]\n\tinsteadOf = https://github.com/acme/widgets.git\n'
+                       "[user]\n\tname = t\n\temail = t@example.com\n[init]\n\tdefaultBranch = main\n")
+    env["env"].update({"GIT_CONFIG_GLOBAL": str(git_cfg), "GIT_CONFIG_NOSYSTEM": "1"})
+
+    def run(*args: str, cwd: Path = work) -> str:
+        return subprocess.run(["git", *args], cwd=cwd, env=env["env"], check=True,
+                              capture_output=True, text=True).stdout.strip()
+
+    def commit_file(name: str, body: str, message: str) -> None:
+        (work / name).write_text(body)
+        run("add", ".")
+        run("commit", "-q", "-m", message)
+
+    subprocess.run(["git", "init", "--bare", "-q", str(origin)], env=env["env"], check=True)
+    work.mkdir()
+    run("init", "-q")
+    commit_file("base.py", "x = 1\n", "base")
+    run("push", "-q", str(origin), "HEAD:refs/heads/main")
+    run("checkout", "-q", "-b", "pr")
+    commit_file("pr.py", "for i in items:\n    fetch(i)\n", "pr")
+    head = run("rev-parse", "HEAD")
+    run("push", "-q", str(origin), "HEAD:refs/pull/7/head")
+    run("checkout", "-q", "main")
+    commit_file("later_on_base.py", "y = 2\n", "base moves on")
+    run("push", "-q", str(origin), "HEAD:refs/heads/main")
+    clone.mkdir()
+    run("init", "-q", cwd=clone)
+    (env["state"] / "head").write_text(head)
+    (env["state"] / "diff_error").write_text(TOO_LARGE)
+    env.update({"clone": clone, "head": head})
+    return env
+
+
+def test_too_large_diff_without_repo_says_how_to_continue(large):
+    result = _record(large, "prepare", "--pr", URL)
+    assert result.returncode == 1
+    assert "too_large" in result.stderr
+    assert "--repo <local clone" in result.stderr
+
+
+def test_too_large_diff_is_rebuilt_from_local_clone_and_recorded(large):
+    clone = str(large["clone"])
+    prepared = _record(large, "prepare", "--pr", URL, "--repo", clone)
+    assert prepared.returncode == 0, prepared.stderr
+    diff_path = prepared.stdout.split("diff ", 1)[1].strip()
+    diff = Path(diff_path).read_text()
+    assert "+++ b/pr.py" in diff and "+    fetch(i)" in diff
+    assert "later_on_base.py" not in diff  # three-dot: base commits after the branch point stay out
+    committed = _record(large, "commit", "--pr", URL, "--repo", clone, "--envelope",
+                        _envelope(large, json.dumps({"repo_root": "/r", "findings": []})))
+    assert committed.returncode == 0, committed.stderr
+    assert _hook(large, MERGE).returncode == 0
+    assert _git(large, clone, "for-each-ref") == ""  # only FETCH_HEAD was written
+
+
+def test_other_diff_errors_do_not_fall_back(large):
+    (large["state"] / "diff_error").write_text("HTTP 502: Bad Gateway\n")
+    result = _record(large, "prepare", "--pr", URL, "--repo", str(large["clone"]))
+    assert result.returncode == 1
+    assert "502" in result.stderr
+
+
+def test_local_rebuild_refuses_a_head_github_does_not_report(large):
+    (large["state"] / "head").write_text(NEW_HEAD)
+    result = _record(large, "prepare", "--pr", URL, "--repo", str(large["clone"]))
+    assert result.returncode == 1
+    assert "the fetch returned" in result.stderr

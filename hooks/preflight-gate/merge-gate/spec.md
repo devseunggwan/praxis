@@ -122,7 +122,10 @@ lists unrefuted ones under Open items.
 ### Recorder
 
 `record_review.py prepare --pr <URL>` writes the PR diff (`gh pr diff`) and a
-pending file keyed by head. `commit --pr <URL> --envelope <file>` refuses when
+pending file keyed by head. When GitHub refuses the diff as too large (over 300
+files), `--repo <local clone>` on both steps rebuilds it with `git diff
+<merge-base> <head>` after fetching the PR head and base into `FETCH_HEAD`;
+any other `gh pr diff` failure still stops the recorder. `commit --pr <URL> --envelope <file>` refuses when
 the head or the diff moved since `prepare` or the envelope fails
 `validate_findings.py` (a ```` ```json ```` fence is stripped first), then
 writes the record (temp file, then `os.replace`) and prints one verification-anchor row graded `PASS(mock)`:
