@@ -26,6 +26,17 @@ gh pr comment <N> --repo <owner>/<repo> --body-file <comment.md>
 
 Then wait for CI on the new head before any merge talk.
 
+When a review bot answers each fix push with a new finding in the code that
+fix touched, stop fixing one finding per round. Before the next push, audit
+the whole diff against the base for that finding's class (every caller of the
+changed helper, every input spelling it judges, every context it reads
+implicitly) and fix them in one commit, with RED/GREEN per case. Write
+`loop: ceiling <N> rounds, stop after 2 with nothing new` before the first
+re-push; when the ceiling round still finds something, report it and ask
+(fix-and-audit once more, or hand the review to the original author) instead
+of pushing again. Each push re-triggers the bot on the whole diff, so a
+per-finding fix costs a full CI-plus-review cycle per sibling.
+
 Re-read `gh pr view <N> --json headRefOid` before writing the verification
 anchor or the final report: an auto-review pipeline running on the same
 account often pushes a follow-up commit (a type annotation, a thread reply)
