@@ -66,12 +66,23 @@ def _paths(url: str, head: str) -> tuple[str, str, str]:
     return record, record_path(url, head, ".diff") or "", record_path(url, head, ".pending.json") or ""
 
 
+def _publish(path: str, text: str) -> None:
+    """Write `text` to `path` through a same-directory temp file, so a failed write leaves no record."""
+    tmp = f"{path}.{os.getpid()}.tmp"
+    try:
+        Path(tmp).write_text(text)
+        os.replace(tmp, path)
+    finally:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+
+
 def prepare(pr: str) -> str:
     url, head, diff = _live(pr)
     _, diff_path, pending_path = _paths(url, head)
     os.makedirs(record_dir(), exist_ok=True)
-    Path(diff_path).write_text(diff)
-    Path(pending_path).write_text(json.dumps({"url": url, "head": head, "diff_sha256": _sha256(diff)}))
+    _publish(diff_path, diff)
+    _publish(pending_path, json.dumps({"url": url, "head": head, "diff_sha256": _sha256(diff)}))
     return f"head {head}\ndiff {diff_path}\n"
 
 
@@ -102,7 +113,7 @@ def commit(pr: str, envelope_path: str) -> str:
     if pending.get("diff_sha256") != _sha256(diff):
         raise RecordError(f"the diff of {url} changed since prepare; run prepare again")
     envelope = _envelope(envelope_path)
-    Path(record).write_text(json.dumps({
+    _publish(record, json.dumps({
         "url": url, "head": head, "diff_sha256": pending["diff_sha256"],
         "recorded_at": int(time.time()), "envelope": envelope,
     }, indent=2))

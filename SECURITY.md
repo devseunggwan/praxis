@@ -61,7 +61,7 @@ drift.
 | `hooks/preflight-gate/internal-token-leak-gate/impl.py`       | `gh api repos/<owner>/<repo> --jq .visibility`                          | Decide whether the write target is public before blocking on an internal identifier                        |
 | `hooks/preflight-gate/merge-gate/refetch.py`                  | `gh pr view <N> --json state,mergeStateStatus,mergeable,isDraft`        | Re-fetch live PR state before a PR-state-contingent AskUserQuestion                                        |
 | `hooks/preflight-gate/merge-gate/worktree.py`                 | `gh pr view <identifier> --json headRefName -q .headRefName`            | Resolve a PR's live head branch before checking it against `git worktree list`                             |
-| `hooks/preflight-gate/merge-gate/perfleak.py`                 | `gh pr view <identifier> --json url,headRefOid`                         | Resolve the merge target's head sha to look up its perf-leak-review record (only with `PRAXIS_MERGE_PERF_LEAK_REVIEW=1`) |
+| `hooks/preflight-gate/merge-gate/perfleak.py`                 | `gh pr view <identifier> --json url,headRefOid`                         | Resolve the merge head for its review record; unresolved denies (opt-in)                                   |
 | `hooks/preflight-gate/anchor-comment-gate/impl.py`            | `gh api /repos/{owner}/{repo}/issues/comments/{id} --jq .body`          | Read back the verification anchor that was just published, from the comment URL the command itself printed |
 | `hooks/preflight-gate/anchor-comment-gate/impl.py`            | `gh api /repos/{owner}/{repo}/issues/comments/{id} --jq .issue_url`     | Resolve which PR a comment belongs to when the post printed no URL to follow                               |
 | `hooks/preflight-gate/anchor-comment-gate/impl.py`            | `gh pr view <number> --repo <r> --json headRefOid,baseRefName --jq ...` | Resolve the PR's live head SHA (stale-anchor check) and its base branch (coverage advisory) in one call    |
@@ -82,7 +82,7 @@ inspected input is ever executed. Both probes are bounded by a 2s per-call and
 3s total budget.
 
 All `git`, `gh`, and `zsh` invocations are **read-only**. No hook writes to
-remote state. Hooks fail-open (exit 0) when the binary is missing or times out.
+remote state. Hooks fail-open (exit 0) when the binary is missing or times out. One opt-in exception: with `PRAXIS_MERGE_PERF_LEAK_REVIEW=1`, merge-gate's `perfleak` check denies `gh pr merge` when its `gh pr view` lookup fails, because an unresolved head cannot show the review ran.
 
 ## Guard Parser Boundary
 
