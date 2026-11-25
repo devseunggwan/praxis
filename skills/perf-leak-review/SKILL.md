@@ -102,6 +102,11 @@ wraps this skill's run, so the skill itself still writes nothing:
 "${CLAUDE_SKILL_DIR}/record_review.py" commit --pr <PR URL> --envelope <envelope file>
 ```
 
+GitHub will not serve a diff past 300 files (`HTTP 406`, `too_large`), so
+`prepare` fails there and says so. Pass `--repo <local clone>` to both steps:
+the recorder fetches the PR head and base into `FETCH_HEAD` only, checks the
+fetched head is the one GitHub reports, and diffs from their merge base.
+
 `commit` refuses when the head or diff moved since `prepare`, or when the
 envelope fails the validator, and prints one verification-anchor row. Put
 that row in the anchor before the merge question and list any candidate you
