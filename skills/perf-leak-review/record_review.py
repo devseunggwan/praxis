@@ -32,7 +32,7 @@ from _perf_leak_record import parse_pr_url, record_dir, record_path  # type: ign
 
 _VALIDATOR = _SKILL_DIR / "validate_findings.py"
 _FENCE = re.compile(r"^\s*```(?:json)?\s*\n(?P<body>.*?)\n\s*```\s*$", re.S)
-_CLASSES = ("C1", "C2", "C3", "C4", "C5")
+_CLASSES = ("C1", "C2", "C3", "C4", "C5", "C6")
 
 
 class RecordError(Exception):

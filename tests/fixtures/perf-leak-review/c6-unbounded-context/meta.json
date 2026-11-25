@@ -1,0 +1,6 @@
+{
+  "expected_class": "C6",
+  "requires_repo_read": true,
+  "language": "python",
+  "note": "Pair with c6-trimmed-elsewhere: the same change.diff; here the helper the call goes through only reshapes the turn list, so the list sent to the model grows every call."
+}

@@ -31,9 +31,12 @@ EXPECTED_DIRS = {
     "c3-unbounded-cache",
     "c4-load-then-filter",
     "c5-leaked-listener",
+    "c6-unbounded-context",
+    "c6-trimmed-elsewhere",
     "clean",
 }
 PAIR = ("c2-unclosed-resource", "c2-closed-elsewhere")
+CONTEXT_PAIR = ("c6-unbounded-context", "c6-trimmed-elsewhere")
 
 
 def _meta(name: str) -> dict[str, Any]:
@@ -49,7 +52,7 @@ def _tree_text(root: Path) -> str:
     )
 
 
-def test_inventory_is_exactly_the_expected_seven() -> None:
+def test_inventory_is_exactly_the_expected_nine() -> None:
     found = {p.name for p in FIXTURES.iterdir() if p.is_dir()}
     assert found == EXPECTED_DIRS, f"unexpected fixture set: {sorted(found)}"
 
@@ -76,7 +79,7 @@ def test_each_defect_class_is_planted_once() -> None:
         for meta in (_meta(name)["expected_class"] for name in EXPECTED_DIRS)
         if meta is not None
     )
-    assert planted == ["C1", "C2", "C3", "C4", "C5"], planted
+    assert planted == ["C1", "C2", "C3", "C4", "C5", "C6"], planted
 
 
 def test_there_are_at_least_two_clean_controls() -> None:
@@ -123,6 +126,26 @@ def test_release_site_exists_in_the_clean_half_and_not_the_other() -> None:
     absent = _tree_text(FIXTURES / "c2-unclosed-resource" / "repo")
     assert site["symbol"] not in absent, (
         f"{site['symbol']} must not exist in the unreleased half — it is what "
+        "separates the two"
+    )
+
+
+def test_context_pair_shares_a_byte_identical_diff() -> None:
+    first, second = (
+        (FIXTURES / name / "change.diff").read_bytes() for name in CONTEXT_PAIR
+    )
+    assert first == second, "the C6 pair must share one diff, byte for byte"
+
+
+def test_bound_site_exists_in_the_trimmed_half_and_not_the_other() -> None:
+    """The two C6 trees differ only in the file that bounds the turn list."""
+    site = _meta(CONTEXT_PAIR[1])["bound_site"]
+    bounded = FIXTURES / CONTEXT_PAIR[1] / "repo" / site["file"]
+    assert bounded.is_file(), site["file"]
+    assert site["symbol"] in bounded.read_text(encoding="utf-8")
+    absent = _tree_text(FIXTURES / CONTEXT_PAIR[0] / "repo")
+    assert site["symbol"] not in absent, (
+        f"{site['symbol']} must not exist in the unbounded half — it is what "
         "separates the two"
     )
 

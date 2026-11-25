@@ -2,7 +2,7 @@
 
 The reviewer is an LLM, so the envelope is the only place the contract can be
 held. These cases pin the two properties the rest of the design rests on: a
-class outside C1..C5 is rejected rather than repaired (AC-2, AC-6), and an empty
+class outside C1..C6 is rejected rather than repaired (AC-2, AC-6), and an empty
 `findings` list is accepted, because that is what the clean controls produce
 (AC-5).
 """
@@ -71,8 +71,8 @@ def test_accepts_an_empty_findings_list() -> None:
 
 
 def test_rejects_a_class_outside_the_closed_list() -> None:
-    violations = _module().validate(_with(**{"class": "C6"}))
-    assert violations, "C6 must be rejected — the list is closed"
+    violations = _module().validate(_with(**{"class": "C7"}))
+    assert violations, "C7 must be rejected — the list is closed"
     assert any("outside the closed list" in v for v in violations)
 
 

@@ -190,7 +190,7 @@ def test_impl_denies_before_approval(env):
 def test_commit_prints_anchor_row(env):
     result = _review(env)
     assert result.returncode == 0, result.stderr
-    assert "| P | perf-leak-review on `aaaaaaa`: 0 candidate(s) (C1:0 C2:0 C3:0 C4:0 C5:0)" in result.stdout
+    assert "| P | perf-leak-review on `aaaaaaa`: 0 candidate(s) (C1:0 C2:0 C3:0 C4:0 C5:0 C6:0)" in result.stdout
     assert result.stdout.rstrip().endswith("| PASS(mock) |")
 
 
