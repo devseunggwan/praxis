@@ -1,6 +1,6 @@
 # Reviewer brief — perf/leak candidate review
 
-You are reviewing a unified diff for **candidates** in five defect classes. You
+You are reviewing a unified diff for **candidates** in six defect classes. You
 read; you never run. Nothing you report is proven, so every finding is graded
 `candidate`.
 
@@ -16,7 +16,9 @@ Start from the diff. Then open, outside the diff, **only** the **lifecycle
 sites** of the symbols the changed hunks touch: where an acquired handle is
 stored, where that stored slot is read or released, where a registered callback
 is unregistered, where a called function is defined, where a container's entries
-are removed and where its size or age is bounded. That is the whole read budget.
+are removed and where its size or age is bounded, and where a model-bound
+prompt or message list is truncated, windowed, or summarised. That is the whole
+read budget.
 Do not survey the repository, do not read its documentation, and do not open
 files unrelated to the hunks.
 
@@ -26,7 +28,9 @@ the release of a stored slot for C2 and C5, the batched sibling of a per-item
 call for C1, the storage layer's own filtering for C4, and — for C3 — every
 delete, eviction, capacity ceiling and expiry on that one container. Report a
 C3 only after opening those: a changed insertion tells you nothing while the
-code that bounds the container sits in a file the diff never touched.
+code that bounds the container sits in a file the diff never touched. C6 is the
+same check on a model-bound container: open every truncation, window, token
+budget, and summariser applied to it before calling it unbounded.
 
 This matters in both directions. A diff that acquires a resource and never
 releases it *in the diff* may be released in a file the diff does not touch —
@@ -37,7 +41,7 @@ Grepping for the word `close` is not a release check.
 
 ## The closed list
 
-Report a finding **only** when it falls in one of these five classes. A defect
+Report a finding **only** when it falls in one of these six classes. A defect
 outside the list — an algorithmic complexity problem, a race, a security issue,
 a style complaint — is not reported at all, not even as a note. Reporting
 outside the list counts as a false positive.
@@ -110,6 +114,28 @@ bus.subscribe("tick", self._on_tick)   # registered
 
 Signal: a registration whose owner can be destroyed, replaced, or re-created
 while the registration outlives it.
+
+### C6 — Unbounded LLM context
+
+Content is appended to a prompt, message list, or history that is sent to a
+language model, and some model call sends that container with no bound applied
+on its path: no truncation, no token or size ceiling, no sliding window, no
+summarisation. The container can live on an object or a session, not only at
+module level.
+
+```text
+conversation.append(tool_output)        # whole output, every turn
+llm.generate(conversation)              # nothing ever trims conversation
+```
+
+Signal: an append or concatenation into something passed to a model call
+(a full tool output, a whole file, the previous reply), and a model call that
+sends the container without a bound on the way. Check each call that sends it:
+a bound counts only for the calls whose path applies it, so a window behind a
+flag or on one call site leaves the others unbounded. A bound in a file the
+diff does not touch still counts for the paths that go through it. A bound on
+the appended item alone (each output cut to N characters) does not stop the
+container from growing, so it does not clear the finding.
 
 ## Output
 

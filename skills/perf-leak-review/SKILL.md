@@ -3,7 +3,7 @@ name: perf-leak-review
 description: >
   Point at performance-defect and memory-leak candidates in a diff — a
   read-only LLM reviewer reads the change plus the repository around it and
-  reports candidates in a closed list of five classes. Report-only: nothing is
+  reports candidates in a closed list of six classes. Report-only: nothing is
   executed, nothing is written, no finding is a proven defect.
 when_to_use: >
   Triggers on "perf review", "leak review", "performance defect", "memory
@@ -18,8 +18,8 @@ allowed-tools:
   - Bash(git ls-files *)
   - Bash(git status *)
 verified-against-runtime: true
-runtime-verified-at: 2026-10-16
-runtime-verified-note: "Claude Code Agent(general-purpose) — 7 read-only delegations over the fixture corpus returned schema-valid envelopes, 5/5 planted classes recalled, both clean controls empty, every prepared tree still porcelain-clean; a third of envelopes arrived inside a ```json fence; git 2.50.1 (2026-10-16) — the repo-wide sweep's sizing reads (`git ls-files | wc -l`, `git ls-files -z <area> | xargs -0 cat | wc -l`) and its `rev-parse` / `status --porcelain` snapshot ran on a scratch repo — forcing two-file batches, `xargs wc -l | tail -1` printed one batch's count while the `-0 cat | wc -l` form printed the full 50/60 lines, a path with a space included; the inside-the-repo scratch guard rejected `<repo>/sub` (exit 1) and accepted an outside path, with the repo reached through a symlink; the sweep's AskUserQuestion not round-tripped"
+runtime-verified-at: 2026-11-25
+runtime-verified-note: "Hermes delegate_task (2026-11-25) — 9 read-only delegations over the fixture corpus with C6 added returned schema-valid unfenced envelopes, 6/6 planted classes recalled, all three clean controls empty, every prepared tree porcelain-clean; Claude Code Agent(general-purpose) (2026-10-16) — 7 read-only delegations over the fixture corpus returned schema-valid envelopes, 5/5 planted classes recalled, both clean controls empty, every prepared tree still porcelain-clean; a third of envelopes arrived inside a ```json fence; git 2.50.1 (2026-10-16) — the repo-wide sweep's sizing reads (`git ls-files | wc -l`, `git ls-files -z <area> | xargs -0 cat | wc -l`) and its `rev-parse` / `status --porcelain` snapshot ran on a scratch repo — forcing two-file batches, `xargs wc -l | tail -1` printed one batch's count while the `-0 cat | wc -l` form printed the full 50/60 lines, a path with a space included; the inside-the-repo scratch guard rejected `<repo>/sub` (exit 1) and accepted an outside path, with the repo reached through a symlink; the sweep's AskUserQuestion not round-tripped"
 ---
 
 # perf-leak-review
@@ -35,7 +35,7 @@ slow code.
 
 This skill hands a unified diff and the repository around it to a **read-only
 LLM reviewer** and asks one question: does this change introduce a candidate in
-one of five defect classes? It is **report-only** — it runs none of the
+one of six defect classes? It is **report-only** — it runs none of the
 project's code, writes nothing into the repository, and grades every finding
 `candidate` rather than defect, the same read-oracle lineage
 [`codex-review-wrap`](../codex-review-wrap/SKILL.md) sits in.
@@ -51,8 +51,8 @@ proving a candidate by execution is outside it.
 
 ## When to Use
 
-- A change touches loops, I/O, handles, subscriptions, caches, or query paths
-  and you want the leak axis read before it merges.
+- A change touches loops, I/O, handles, subscriptions, caches, query paths, or
+  the prompt or message history sent to a language model, and you want the leak axis read before it merges.
 - You have a diff (any repository, any language) and want its perf/leak
   candidates listed with file and line.
 - Do **not** use it to measure anything. No profiler, no benchmark, no
@@ -67,7 +67,7 @@ proving a candidate by execution is outside it.
 
 ## The closed list
 
-Five classes, and nothing outside them is reported. The list is the spec:
+Six classes, and nothing outside them is reported. The list is the spec:
 widening it is a separate change to
 [`references/reviewer-brief.md`](references/reviewer-brief.md) and
 `validate_findings.py` together.
@@ -79,6 +79,7 @@ widening it is a separate change to
 | C3 | Unbounded global container or cache                        |
 | C4 | Load-everything-then-filter-in-memory                      |
 | C5 | Unreleased listener, callback, or timer                    |
+| C6 | Unbounded LLM context (prompt, message list, history)      |
 
 ## Caller-agnostic by contract
 
@@ -192,7 +193,7 @@ printf '%s' "$envelope" | "${CLAUDE_SKILL_DIR}/validate_findings.py"
 ```
 
 A rejected envelope is **not** repaired and re-emitted. Report the violations as
-they are: a class outside C1..C5 is a false positive that the count has to see,
+they are: a class outside C1..C6 is a false positive that the count has to see,
 and quietly rewriting it into a compliant finding is what the closed list exists
 to prevent.
 
@@ -201,7 +202,7 @@ to prevent.
 Print the validated envelope, then one summary line:
 
 ```text
-perf-leak-review: <n> candidate(s) — C1:<n> C2:<n> C3:<n> C4:<n> C5:<n> (candidates, not verified by execution)
+perf-leak-review: <n> candidate(s) — C1:<n> C2:<n> C3:<n> C4:<n> C5:<n> C6:<n> (candidates, not verified by execution)
 ```
 
 Zero findings is a result, not a failure — say `0 candidates` plainly. Every
@@ -221,7 +222,7 @@ candidate gets proven by execution is the reader's decision.
 | Neither `Agent` nor Hermes `delegate_task` available on this host                  | Stop with the unverified-host message (Step 2); never review inline. With `delegate_task`, take the Hermes path of Step 2                                                                              |
 | Reviewer wrapped the envelope in a ```` ```json ```` fence, or put prose around it | Strip the fence and extract the single JSON object; if there is not exactly one, report the raw output and stop. Observed on a third of live envelopes, so treat it as normal rather than as a failure |
 | Validator exits 1                                                                  | Report its violation lines verbatim; do not repair the envelope                                                                                                                                        |
-| Reviewer reports a class outside C1..C5                                            | The validator rejects it — report it as an out-of-list finding, which is a false positive                                                                                                              |
+| Reviewer reports a class outside C1..C6                                            | The validator rejects it — report it as an out-of-list finding, which is a false positive                                                                                                              |
 
 ## Limitations
 
@@ -237,7 +238,7 @@ candidate gets proven by execution is the reader's decision.
   never executes a skill, so CI gates the schema, the fixture inventory, and the
   scorer; recall and the clean controls are measured live and transcribed into
   the PR verification anchor.
-- **Five classes only.** Algorithmic complexity, concurrency, and security are
+- **Six classes only.** Algorithmic complexity, concurrency, and security are
   out of scope by construction.
 - **The diff bounds what is read.** A leak in unchanged code the diff calls
   into (a loader that re-executes modules on every call, say) is not reported.

@@ -12,7 +12,7 @@ Envelope:
   {"repo_root": "<the --repo argument, echoed>", "findings": [ ... ]}
 
 Finding (every key required, no others accepted):
-  class       one of C1..C5 — the closed list in DEFECT_CLASSES
+  class       one of C1..C6 — the closed list in DEFECT_CLASSES
   file        path relative to repo_root, and contained by it: absolute paths
               and `..` components are both rejected, so the envelope stays
               portable across the prepared/real tree boundary and cannot name a
@@ -34,7 +34,7 @@ import sys
 from pathlib import PurePosixPath
 from typing import Any
 
-# The closed list (spec `### Defect classes`). A sixth entry is a spec change,
+# The closed list (spec `### Defect classes`). A new entry is a spec change,
 # not a validator change — `tests/test_perf_leak_review_skill_shape.py` reads
 # this mapping and requires the reviewer brief to carry exactly these headings,
 # so the two cannot drift apart silently.
@@ -44,6 +44,7 @@ DEFECT_CLASSES: dict[str, str] = {
     "C3": "Unbounded global container or cache",
     "C4": "Load-everything-then-filter-in-memory",
     "C5": "Unreleased listener, callback, or timer",
+    "C6": "Unbounded LLM context",
 }
 
 CONFIDENCE_VALUES = ("low", "med", "high")
@@ -170,7 +171,7 @@ def main() -> int:
         return 1
 
     count = len(envelope["findings"])
-    print(f"perf-leak-review: envelope OK — {count} finding(s), all in C1..C5")
+    print(f"perf-leak-review: envelope OK — {count} finding(s), all in C1..C6")
     return 0
 
 

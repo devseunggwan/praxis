@@ -1,0 +1,10 @@
+{
+  "expected_class": null,
+  "requires_repo_read": true,
+  "language": "python",
+  "bound_site": {
+    "file": "agent/window.py",
+    "symbol": "KEEP_LAST"
+  },
+  "note": "Clean control for the C6 pair: the same change.diff, but a file the diff never touches drops older turns from the session's list before every model call."
+}

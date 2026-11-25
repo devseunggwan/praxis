@@ -1,0 +1,13 @@
+diff --git a/agent/session.py b/agent/session.py
+index 94a65bc..7f271a9 100644
+--- a/agent/session.py
++++ b/agent/session.py
+@@ -12,3 +12,8 @@ class Session:
+         reply = self.client.complete(fit(self.turns))
+         self.turns.append({"role": "assistant", "content": reply})
+         return reply
++
++    def run_tool(self, tool, arg):
++        output = tool(arg)
++        self.turns.append({"role": "tool", "content": output})
++        return self.client.complete(fit(self.turns))

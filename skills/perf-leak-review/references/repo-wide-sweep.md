@@ -56,10 +56,10 @@ Copy [`reviewer-brief.md`](reviewer-brief.md) verbatim into
 `<scratch>/<run>/brief_full.md`, then append an adaptation block:
 
 - There is no diff. Review **area X** (a directory list).
-- Grep the area for hotspot patterns of the five classes (loops around
+- Grep the area for hotspot patterns of the six classes (loops around
   remote calls, acquisitions stored on `self`, module-level containers,
   unfiltered `load_all`-style fetches, `subscribe` / `on` / `setInterval`
-  registrations).
+  registrations, appends to a message list or prompt passed to a model call).
 - Before reporting, open the lifecycle sites the brief already requires —
   release, evict, unregister, the batched sibling.
 - Name any **sibling container with a cap or TTL** in the same codebase: it is
@@ -128,7 +128,7 @@ each top candidate, and the no-write diff are all recorded.
 - **Top:** the scope ("area sampling, not exhaustive"), "candidates, not
   executed", and any dispatch slip (a missing or re-run area).
 - **The skill's summary line:**
-  `perf-leak-review: <n> candidate(s) — C1:<n> C2:<n> C3:<n> C4:<n> C5:<n> (candidates, not verified by execution)`.
+  `perf-leak-review: <n> candidate(s) — C1:<n> C2:<n> C3:<n> C4:<n> C5:<n> C6:<n> (candidates, not verified by execution)`.
 - **Priority table:** candidates on a long-lived process **and** whose absence
   of release you re-confirmed (state the grep scope).
 - **The rest**, grouped by class and marked reviewer-only.
