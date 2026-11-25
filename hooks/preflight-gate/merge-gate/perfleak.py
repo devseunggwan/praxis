@@ -38,7 +38,7 @@ from block_message import emit_block  # type: ignore[import-not-found]  # noqa: 
 
 _GH_TIMEOUT_SEC = 5
 _RULE = "merge-gate perf-leak-review"
-_RECORDER = "skills/perf-leak-review/record_review.py"
+_RECORDER = str(_HERE.parent.parent.parent / "skills" / "perf-leak-review" / "record_review.py")
 
 
 def _worktree() -> ModuleType:
