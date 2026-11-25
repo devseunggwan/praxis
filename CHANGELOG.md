@@ -5,6 +5,19 @@ All notable changes to praxis are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.25.0](https://github.com/devseunggwan/praxis/compare/v7.24.1...v7.25.0) (2026-11-25)
+
+
+### Added
+
+* **merge-gate:** gate merges on perf-leak-review ([#1668](https://github.com/devseunggwan/praxis/issues/1668)) ([8a3632a](https://github.com/devseunggwan/praxis/commit/8a3632a92ff094a70de4ebde2e41c4f6c71d0a8c)), closes [#1667](https://github.com/devseunggwan/praxis/issues/1667)
+* **perf-leak-review:** add C6 LLM context class ([#1675](https://github.com/devseunggwan/praxis/issues/1675)) ([5caacf0](https://github.com/devseunggwan/praxis/commit/5caacf08fb5cd6c3fd91b9c1c32a7e35e0ef6c0d))
+
+
+### Changed
+
+* **skills:** sync accumulated live skill edits again ([#1671](https://github.com/devseunggwan/praxis/issues/1671)) ([7d89e45](https://github.com/devseunggwan/praxis/commit/7d89e451b40d3ac0a5145e2da78f254782067612)), closes [#1669](https://github.com/devseunggwan/praxis/issues/1669)
+
 ## [7.24.1](https://github.com/devseunggwan/praxis/compare/v7.24.0...v7.24.1) (2026-11-24)
 
 
