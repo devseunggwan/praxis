@@ -5,7 +5,9 @@ The checks used to be six hooks. Each is now a module next to this file and
 keeps its own verdict and messages; this entry point picks the checks for the
 event and folds their results into one answer.
 
-  PreToolUse(Bash)            approval  ask before every `gh pr merge`
+  PreToolUse(Bash)            perfleak  opt-in: deny a merge whose head has no
+                                        perf-leak-review record
+                              approval  ask before every `gh pr merge`
                               worktree  block a `--delete-branch` merge whose
                                         head is checked out in a worktree
                               briefing  deny a merge with no Pre-Merge
@@ -42,7 +44,9 @@ from _hook_io import read_decision  # type: ignore[import-not-found]  # noqa: E4
 import _hook_runtime  # type: ignore[import-not-found]  # noqa: E402
 from _hook_runtime import fail_open, member_host  # type: ignore[import-not-found]  # noqa: E402
 
-BASH_CHECKS = ("approval", "worktree", "briefing")
+# perfleak runs first so its deny lands before the approval check spends a
+# host-provider approval on a merge that cannot go out yet.
+BASH_CHECKS = ("perfleak", "approval", "worktree", "briefing")
 ASK_CHECKS = ("refetch", "menu")
 STOP_CHECKS = ("claim",)
 STOP_EVENTS = frozenset({"Stop", "SubagentStop"})

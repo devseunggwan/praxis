@@ -9,6 +9,7 @@ section below is the spec it had as a hook.
 
 | Event | Check | Module | Was |
 | --- | --- | --- | --- |
+| PreToolUse(Bash) | perfleak: opt-in, deny a merge whose head has no perf-leak-review record | `hooks/preflight-gate/merge-gate/perfleak.py` | new (issue #1667) |
 | PreToolUse(Bash) | approval: ask before every `gh pr merge` | `hooks/preflight-gate/merge-gate/approval.py` | `pre-merge-approval-gate` |
 | PreToolUse(Bash) | worktree: block a `--delete-branch` merge whose head is checked out | `hooks/preflight-gate/merge-gate/worktree.py` | `gh-merge-worktree-precondition` |
 | PreToolUse(Bash) | briefing: deny a merge with no Pre-Merge Reporting briefing and answer | `hooks/preflight-gate/merge-gate/briefing.py` | `momentum-rule-retrieval-gate` (`merge` trigger) |
@@ -44,6 +45,7 @@ it has the detail.
 | `PRAXIS_MOMENTUM_BYPASS=1` | briefing (also silences momentum-rule-retrieval-gate) |
 | `PRAXIS_MOMENTUM_MERGE_ADVISORY=1` | briefing |
 | `PRAXIS_MOMENTUM_STRICT=1` / `PRAXIS_MOMENTUM_ACK=1` | briefing (also momentum-rule-retrieval-gate) |
+| `PRAXIS_MERGE_PERF_LEAK_REVIEW=1` | perfleak (off unless set) |
 | `PRAXIS_MERGE_APPROVAL_PROVIDER=<path>` | approval, briefing |
 | `PRAXIS_HOOK_BYPASS_MERGE_WORKTREE_GATE=1` | worktree |
 | `PRAXIS_PR_STATE_REFETCH_STRICT=1` | refetch |
@@ -60,10 +62,79 @@ bash tests/hooks/preflight-gate/test_merge_gate_refetch.sh
 bash tests/hooks/preflight-gate/test_merge_gate_menu.sh
 bash tests/hooks/preflight-gate/test_merge_gate_claim.sh
 python3 -m pytest tests/hooks/preflight-gate/test_merge_gate.py
+python3 -m pytest tests/hooks/preflight-gate/test_merge_gate_perfleak.py
 ```
 
 The first six run each module on its own; `test_merge_gate.py` covers the
 routing and folding in `impl.py`.
+
+## Check: perfleak (issue #1667)
+
+Opt-in: with `PRAXIS_MERGE_PERF_LEAK_REVIEW=1` in the hook environment, a
+`gh pr merge` is denied unless `skills/perf-leak-review/record_review.py commit`
+wrote a record for the PR's **current head sha**. Unset, the check returns
+before reading the payload and makes no `gh` call.
+
+### Why this exists
+
+`perf-leak-review` is report-only and decides nothing about when it runs, so a
+merge procedure that lists it as a step skips it as easily as any other step.
+This check makes the review a precondition of the merge command itself, on
+every host that runs merge-gate.
+
+### Detection
+
+The merge target is found with the worktree check's argv walker (`gh` global
+flags in any position, `-R/--repo` before or after `merge`, every segment of a
+compound command), then resolved with
+`gh pr view <id> -R <repo> --json url,headRefOid`. `--help` and
+`--disable-auto` (which turns auto-merge off and merges nothing) are skipped.
+The record path is
+`<state dir>/perf-leak-review/<host>__<owner>__<repo>__<N>__<head>.json`
+(`hooks/_lib/_perf_leak_record.py`, shared with the recorder); the file must
+parse and name that head.
+
+What is checked has to be what the merge takes:
+
+- **Repository.** The command names it: a PR URL or `-R/--repo`. The hook's
+  cwd, an earlier `cd` and a `GH_REPO` prefix can each point the lookup and the
+  merge at different repositories. `GH_HOST` anywhere in the command requires
+  a PR URL.
+- **Head.** A `--match-head-commit <sha>` value is the head checked, since gh
+  refuses any other. Without it the merge must be the only command: an earlier
+  step (`git push && gh pr merge …`) could move the head after this check. A
+  lone merge is checked against the current head; only a concurrent push from
+  elsewhere in the moment before gh runs is left uncovered.
+
+### What is blocked
+
+- No record for the head that would merge, including a record for an earlier
+  head only: a push moves the head and the review is asked for again.
+- A merge that names no repository, or a `GH_HOST` merge without a PR URL.
+- A merge chained after another command without `--match-head-commit`.
+- A target `gh pr view` cannot resolve while the check is enabled. The check
+  exists to make the review structural; an unresolved head cannot show it ran.
+
+The check does not read the findings. Every finding is a candidate from a
+reader that runs nothing, so a candidate never blocks a merge; the briefing
+lists unrefuted ones under Open items.
+
+### Recorder
+
+`record_review.py prepare --pr <URL>` writes the PR diff (`gh pr diff`) and a
+pending file keyed by head. `commit --pr <URL> --envelope <file>` refuses when
+the head or the diff moved since `prepare` or the envelope fails
+`validate_findings.py` (a ```` ```json ```` fence is stripped first), then
+writes the record (temp file, then `os.replace`) and prints one verification-anchor row graded `PASS(mock)`:
+a reading, not an execution.
+
+### Limitations
+
+- The record shows the recorder ran on a validated envelope for this head's
+  diff, not that a delegated reviewer produced the envelope. A session can
+  hand-write an empty envelope; the gate makes skipping the review a visible
+  act, not an impossible one.
+- No bypass variable: unset `PRAXIS_MERGE_PERF_LEAK_REVIEW` to turn it off.
 
 ## Check: approval (was `pre-merge-approval-gate`)
 

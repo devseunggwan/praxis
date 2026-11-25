@@ -88,6 +88,12 @@ cut, and re-probe live before answering "did you check?". The table of merge
 states, the semantic-overlap check and when to `update-branch` are in the same
 reference.
 
+Run perf-leak-review on the head you brief (its *Merge gate* commands) and put
+the row `record_review.py commit` prints in the anchor. With
+`PRAXIS_MERGE_PERF_LEAK_REVIEW=1` merge-gate denies a merge whose head has no
+record. Candidates do not block: refute each from the code or list it in part
+5. A moved head needs a new run.
+
 ### Step 2: Grade every finding on all three surfaces
 
 Grade each finding (inline thread, conversation comment, review body) by **the

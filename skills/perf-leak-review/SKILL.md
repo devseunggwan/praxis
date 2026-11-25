@@ -88,6 +88,29 @@ the caller's, and they are deliberately unsettled. So no step here reads a
 session transcript, posts a comment, opens an issue, or blocks anything; a
 trigger surface added later attaches by passing the two arguments.
 
+## Merge gate
+
+One such caller ships in praxis: the merge-gate `perfleak` check
+(`hooks/preflight-gate/merge-gate/spec.md` → *Check: perfleak*). With
+`PRAXIS_MERGE_PERF_LEAK_REVIEW=1` in the hook environment it denies
+`gh pr merge` until a record exists for the PR's current head. The recorder
+wraps this skill's run, so the skill itself still writes nothing:
+
+```bash
+"${CLAUDE_SKILL_DIR}/record_review.py" prepare --pr <PR URL>   # prints the diff path
+# Steps 1-4 with --diff <that path> --repo <a checkout of the PR head>
+"${CLAUDE_SKILL_DIR}/record_review.py" commit --pr <PR URL> --envelope <envelope file>
+```
+
+`commit` refuses when the head or diff moved since `prepare`, or when the
+envelope fails the validator, and prints one verification-anchor row. Put
+that row in the anchor before the merge question and list any candidate you
+could not refute under the briefing's Open items; a candidate never blocks
+the merge. A push moves the head, so run both steps again on the new head.
+Name the repository in the merge (`--repo` or the PR URL) and run it alone, or
+pin the reviewed head with `--match-head-commit <sha>`; otherwise the gate
+cannot tell which head the merge takes and denies it.
+
 ## Process
 
 ### Step 1: Resolve the two inputs
