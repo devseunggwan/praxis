@@ -47,6 +47,14 @@ merge, matching the repo the Step 1 probes named.
 Stop at the first failed merge and report; the rest of the set stays approved
 only until a merge outside the set runs.
 
+After each merge in a set, re-read `mergeable` on every still-open PR that
+touches a file the merged PR touched (in the set or outside it, e.g. a later
+rollout PR from the same work stream). A sibling's squash can flip one to
+`CONFLICTING` even when both were `MERGEABLE` a minute earlier; resolve it on
+its head branch with `git merge origin/<base>` (keep both sides' meaning when
+the conflict is comment-only), re-render or re-test, push, and let the
+registered auto-review re-run before that PR's own ask.
+
 Step 6 still applies to each PR: merge from the base worktree without
 `--delete-branch`, confirm `MERGED`, then remove that PR's head worktree, and
 report every PR with its URL.

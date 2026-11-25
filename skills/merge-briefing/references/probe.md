@@ -94,7 +94,7 @@ commit status. Every other value stops the ask and names itself in the briefing:
 | --- | --- | --- |
 | `CLEAN` | Mergeable and passing commit status | Yes |
 | `HAS_HOOKS` | Mergeable, passing, pre-receive hooks present | Yes |
-| `UNSTABLE` | Mergeable with a **non-passing** commit status | No — that is the failing CI above |
+| `UNSTABLE` | Mergeable with a **non-passing** commit status | No — that is the failing CI above, unless the only red check is non-required and its cause is shown to be base-side and already fixed (Failure Modes row "A non-required check is red") |
 | `BLOCKED` | Merge is blocked (protection rule, required review) | No |
 | `BEHIND` | Head ref is out of date | No — rebase first |
 | `DIRTY` | Merge commit cannot be cleanly created | No — conflict |
@@ -107,7 +107,10 @@ draft as not ready regardless of its merge state.
 **`CLEAN` says nothing about base commits that landed since the branch was
 cut.** Count them (`git fetch origin` then `git rev-list --count
 HEAD..origin/<base>`) and list the files they touched that the PR also
-touches (`git diff --name-only HEAD...origin/<base>`). For each shared file,
+touches (`git diff --name-only HEAD...origin/<base>`, three dots: the
+two-dot `git diff <head> origin/<base>` also lists the PR's own changes, so
+every PR file reads as "overlapping"; intersect with the PR's own list from
+`git diff --name-only origin/<base>...HEAD`). For each shared file,
 grep that base diff for the symbols this PR changes and run `git merge-tree
 --write-tree HEAD origin/<base>` — zero symbol hits and exit `0` is the
 evidence for "no semantic overlap", quoted in part 5. A local `merge-tree`
@@ -126,8 +129,14 @@ unresolved threads, comments since your last read) before answering — the
 base keeps moving under an open PR, and an answer from your last probe can be
 wrong by the time it is read. When the pre-merge
 rebase trigger fires (3+ base commits, a review round finished), bring the
-base in with `gh pr update-branch <N>` (a merge commit, never a rewrite),
-which restarts CI and the bot review: wait for both on the new head, re-rev
+base in with a merge commit, never a rewrite. Read the base's `pull_request`
+rule parameters first: when `require_extra_approval_for_unattributed_changes`
+is `true`, do **not** use `gh pr update-branch` — its merge commit is committed
+by `GitHub` (no user), which counts as an unattributed change and makes the
+merge need another person's approval (the author cannot give it, and no force-push
+can remove the commit). There, run `git fetch origin && git merge origin/<base>`
+in the head worktree and push, so the commit is attributed to you. Otherwise
+`gh pr update-branch <N>` is fine. Either way it restarts CI and the bot review: wait for both on the new head, re-rev
 the anchor with the head that moved (when only the base moved, prove it by
 equal patch-ids, `git diff $(git merge-base <old> origin/<base>) <old> | git
 patch-id --verbatim` vs `git diff origin/<base>...<new> | git patch-id --verbatim`
